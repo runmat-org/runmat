@@ -13,14 +13,16 @@ use super::HostState;
 
 #[path = "contextual_regions/calls.rs"]
 mod calls;
-#[path = "contextual_regions/subscripts.rs"]
-mod subscripts;
+#[path = "contextual_regions/captures.rs"]
+mod captures;
 #[path = "contextual_regions/identity.rs"]
 mod identity;
 #[path = "contextual_regions/ordered_cache.rs"]
 mod ordered_cache;
 #[path = "contextual_regions/references.rs"]
 mod references;
+#[path = "contextual_regions/subscripts.rs"]
+mod subscripts;
 
 pub(crate) use identity::EmbeddedOperationIdentity;
 use ordered_cache::{prepare_vector_push, OrderedCache};
@@ -49,6 +51,8 @@ struct ContinuationMetadata {
             NativeValueRef,
         ),
     >,
+    captured_sequences:
+        OrderedCache<runmat_mir::MirSequenceLocalId, captures::CapturedSequenceSlot>,
 }
 
 impl ContinuationMetadata {
@@ -58,7 +62,8 @@ impl ContinuationMetadata {
             operation_path: AllocatedVec::new_in(allocator.clone()),
             completed_operations: OrderedCache::new(allocator.clone()),
             operation_region_ends: OrderedCache::new(allocator.clone()),
-            prepared_subscript_receivers: OrderedCache::new(allocator),
+            prepared_subscript_receivers: OrderedCache::new(allocator.clone()),
+            captured_sequences: OrderedCache::new(allocator),
             gate,
         }
     }
@@ -497,7 +502,7 @@ impl HostState {
         sequences: impl Iterator<Item = runmat_mir::MirSequenceLocalId>,
     ) -> NativeExecutorResult<()> {
         for sequence in sequences {
-            self.captured_sequences.remove(&sequence);
+            self.discard_captured_sequence(sequence);
         }
         self.finish_contextual_site()
     }

@@ -13,7 +13,7 @@ pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinRe
     Ok(match named.identity {
         FitlmOption::Intercept => FitlmAction::Intercept(bool_scalar(value, "Intercept")?),
         FitlmOption::ResponseVar => FitlmAction::ResponseVar(
-            scalar_text(value)
+            scalar_text(value)?
                 .ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?
                 .into_owned(),
         ),
@@ -22,7 +22,7 @@ pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinRe
         }
         FitlmOption::VarNames => FitlmAction::VarNames(text_list(value, "VarNames")?),
         FitlmOption::Exclude => FitlmAction::Exclude(exclude_spec(value)?),
-        FitlmOption::Weights => FitlmAction::Weights(if let Some(name) = scalar_text(value) {
+        FitlmOption::Weights => FitlmAction::Weights(if let Some(name) = scalar_text(value)? {
             WeightSpec::Variable(name.into_owned())
         } else {
             WeightSpec::Values(numeric_vector(value, "Weights")?)
@@ -70,7 +70,7 @@ pub(super) fn parse_predict_options(
     let mut options = PredictOptions::default();
     let mut index = 0;
     while index < values.len() {
-        let name = scalar_text(&values[index])
+        let name = scalar_text(&values[index])?
             .ok_or_else(|| predict_invalid("predict: option name must be text"))?;
         let value = &values[index + 1];
         if name.eq_ignore_ascii_case("Alpha") {
@@ -81,7 +81,7 @@ pub(super) fn parse_predict_options(
             }
             options.alpha = alpha;
         } else if name.eq_ignore_ascii_case("Prediction") {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| predict_invalid("predict: Prediction must be text"))?;
             if text.eq_ignore_ascii_case("curve") {
                 options.prediction = PredictionKind::Curve;
@@ -118,7 +118,7 @@ pub(super) enum ModelSpec {
 }
 
 pub(super) fn parse_model_spec(value: &Value, predictors: usize) -> BuiltinResult<ModelSpec> {
-    if let Some(text) = scalar_text(value) {
+    if let Some(text) = scalar_text(value)? {
         parse_model_spec_text(&text, predictors)
     } else {
         Err(fitlm_invalid(

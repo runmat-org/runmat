@@ -85,6 +85,8 @@ impl GenericCompiler {
             assembly,
             executable,
             NativeExecutorOptions {
+                selected_clock_invocation: None,
+                selected_local_invocation: None,
                 program_capture,
                 interpreter_resume_points,
                 coverage_sites,

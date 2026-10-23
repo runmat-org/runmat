@@ -1,4 +1,4 @@
-//! Managed complete-call choice for at most two already-admitted physical
+//! Managed complete-call choice for at most three already-admitted physical
 //! routes. It shares the graph planner's exact single-route resource penalty
 //! and host-margin policy without allocating a portable graph or probe.
 
@@ -51,7 +51,7 @@ pub(super) fn select(
     admitted: &[Admitted<'_>],
     operation: PlacementOperationId,
 ) -> Result<SelectionDraft, PlacementPlanError> {
-    debug_assert!(!admitted.is_empty() && admitted.len() <= 2);
+    debug_assert!(!admitted.is_empty() && admitted.len() <= 3);
     let identity = request
         .signature
         .permit_identity()
@@ -129,11 +129,19 @@ pub(super) fn select(
         ));
     }
 
-    let host = route_choice(admitted, false).ok_or_else(no_legal_candidate)?;
+    let host = admitted
+        .iter()
+        .filter(|item| !item.candidate.kind.is_provider())
+        .filter_map(|item| measured_total(item, request).map(|total| (item, total)))
+        .min_by_key(|(item, total)| (*total, item.identity))
+        .map(|(item, _)| item)
+        .or_else(|| route_choice(admitted, false))
+        .ok_or_else(no_legal_candidate)?;
     let host_total = measured_total(host, request);
     let provider = route_choice(admitted, true);
     let provider_total = provider.and_then(|item| measured_total(item, request));
     let (item, kind, predicted_total_ns) = match (host_total, provider, provider_total) {
+        (Some(host_ns), None, _) => (host, WholeWorkDecisionKind::Compared, Some(host_ns)),
         (Some(host_ns), Some(provider), Some(provider_ns)) => {
             let required = PlacementPolicy::default()
                 .required_improvement_ns(host_ns)
@@ -277,6 +285,61 @@ mod tests {
                 selected.predicted_total_ns,
                 portable.decision.predicted_total_ns
             );
+        }
+    }
+
+    #[test]
+    fn managed_three_host_routes_compare_without_spilling_or_zeroing_unknown_demand() {
+        for winner in 0..3 {
+            let mut work = request(100_000, 20_000);
+            work.resources.providers.clear();
+            work.candidates = (0..3)
+                .map(|index| {
+                    let mut item = route(false, if index == winner { 1_000 } else { 100_000 });
+                    item.kind = match index {
+                        0 => ExecutionCandidateKind::SharedRuntime,
+                        1 => ExecutionCandidateKind::GenericNativeCpu,
+                        _ => ExecutionCandidateKind::SpecializedNativeCpu,
+                    };
+                    item.route_facts = Digest::sha256([index as u8]);
+                    item
+                })
+                .collect();
+            let expected = work.candidates[winner].selected(&work.signature.operation);
+            let ledger = ManagedHostEffectLedger::new(64 * 1024);
+            let managed = PlacementSession::new_with_managed_observations(
+                PlacementSessionConfig::default(),
+                &ledger,
+                super::super::super::ManagedPlacementCapacity {
+                    in_flight_slots: 1,
+                    feedback_series: 3,
+                    signature_bytes_per_series: 1024,
+                },
+            )
+            .expect("precharged three-route backing");
+            let selected = managed
+                .select_whole_work_borrowed_managed(work.as_ref())
+                .expect("three certified routes fit");
+            assert_eq!(selected.kind, WholeWorkDecisionKind::Compared);
+            assert_eq!(selected.selected.portable(), expected);
+            drop(selected);
+            for item in &mut work.candidates {
+                item.resources.scratch_bytes = runmat_execution::ResourceByteBound::Unavailable(
+                    runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+                );
+            }
+            assert_eq!(
+                managed
+                    .select_whole_work_borrowed_managed(work.as_ref())
+                    .err()
+                    .expect("unknown demand cannot masquerade as zero")
+                    .code,
+                "RunMat:Placement:InsufficientResourceEvidence"
+            );
+            assert!(managed
+                .try_select_whole_work_borrowed_managed(work.as_ref())
+                .expect("typed decline is not an execution error")
+                .is_none());
         }
     }
 }

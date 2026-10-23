@@ -105,7 +105,7 @@ impl<'a> Iterator for BorrowedElements<'a> {
                 array
                     .data()
                     .get(source)
-                    .map(|ch| WriteElement::Floating(*ch as u32 as f64))
+                    .map(|ch| WriteElement::Floating(ch.raw() as f64))
             }
             Self::String(chars) => chars
                 .next()

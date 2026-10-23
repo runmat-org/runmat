@@ -120,10 +120,13 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::CaptureMemberDynamicSequence { .. }
             | crate::bytecode::Instr::CaptureCellContentsSequence { .. }
             | crate::bytecode::Instr::CaptureReturnedOutputsSequence { .. }
+            | crate::bytecode::Instr::MoveCapturedSequence { .. }
             | crate::bytecode::Instr::LoadSubscriptEnd { .. }
             | crate::bytecode::Instr::FinishSubscriptEndReceiver { .. }
             | crate::bytecode::Instr::FinishDottedInvokeReceiver { .. }
             | crate::bytecode::Instr::BeginOutputAssignment { .. }
+            | crate::bytecode::Instr::BeginFixedAssignment { .. }
+            | crate::bytecode::Instr::CommitFixedAssignment { .. }
             | crate::bytecode::Instr::PrepareFixedOutputTarget
             | crate::bytecode::Instr::PrepareDiscardOutputTarget
             | crate::bytecode::Instr::PrepareMemberSequenceOutputTarget { .. }
@@ -132,8 +135,8 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
             | crate::bytecode::Instr::PrepareCellContentsSequenceOutputTarget { .. }
             | crate::bytecode::Instr::BeginSequenceOutputTarget { .. }
-            | crate::bytecode::Instr::PrepareMemberPathStep(..)
-            | crate::bytecode::Instr::PrepareDynamicMemberPathStep
+            | crate::bytecode::Instr::PrepareMemberPathStep { .. }
+            | crate::bytecode::Instr::PrepareDynamicMemberPathStep { .. }
             | crate::bytecode::Instr::BeginPreparedIndexSelectors { .. }
             | crate::bytecode::Instr::LoadPreparedIndexEnd { .. }
             | crate::bytecode::Instr::BeginContextualIndexSelectors { .. }
@@ -144,6 +147,7 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::FinishMemberSequenceOutputTarget(..)
             | crate::bytecode::Instr::FinishDynamicMemberSequenceOutputTarget
             | crate::bytecode::Instr::FinishCellContentsSequenceOutputTarget { .. }
+            | crate::bytecode::Instr::FinishFixedAssignmentTarget { .. }
             | crate::bytecode::Instr::LoadPreparedOutputCardinality
             | crate::bytecode::Instr::CommitPreparedOutputTargets { .. }
             | crate::bytecode::Instr::StoreMemberSequence(..)

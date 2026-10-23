@@ -133,11 +133,11 @@ async fn evaluate_bounds(
 #[path = "bounds/arguments.rs"]
 mod arguments;
 
-fn is_nanflag(value: &Value) -> bool {
-    matches!(
-        keyword_of(value).as_deref(),
+fn is_nanflag(value: &Value) -> BuiltinResult<bool> {
+    Ok(matches!(
+        keyword_of(value)?.as_deref(),
         Some("omitnan" | "includenan" | "omitmissing" | "includemissing")
-    )
+    ))
 }
 
 fn map_bounds_reduction_error(label: &str, err: RuntimeError) -> RuntimeError {

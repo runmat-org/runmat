@@ -76,7 +76,11 @@ mod tests {
     #[test]
     fn suptitle_accepts_explicit_figure_target() {
         let _guard = setup();
-        let fig = figure_builtin(vec![Value::Num(421.0)]).unwrap();
+        let fig = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(421.0)]),
+        )
+        .unwrap();
         suptitle_builtin(crate::builtins::common::test_support::builtin_arguments(
             vec![Value::Num(fig), Value::String("Target Figure".into())],
         ))
@@ -89,7 +93,11 @@ mod tests {
     #[test]
     fn suptitle_applies_text_style_pairs() {
         let _guard = setup();
-        let fig = figure_builtin(vec![Value::Num(422.0)]).unwrap();
+        let fig = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(422.0)]),
+        )
+        .unwrap();
         suptitle_builtin(crate::builtins::common::test_support::builtin_arguments(
             vec![
                 Value::Num(fig),

@@ -1,6 +1,6 @@
 //! Exact character publication preserves the scalar collector's column-major order.
 use super::*;
-use runmat_value::{CharArray, SharedShape};
+use runmat_value::{CharArray, SharedShape, Utf16CodeUnit};
 
 pub(super) fn character(
     source: &Managed<'_>,
@@ -25,7 +25,7 @@ pub(super) fn character(
     // CharArray's historical normalization stores two dimensions even when
     // the supplied shape has rank one. Fill final row-major backing directly.
     let shape = [rows, columns];
-    let bytes = ExactArrayStorage::<char>::requested_bytes(count).and_then(|bytes| {
+    let bytes = ExactArrayStorage::<Utf16CodeUnit>::requested_bytes(count).and_then(|bytes| {
         bytes
             .checked_add(SharedShape::requested_bytes_for_rank(2)?)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)

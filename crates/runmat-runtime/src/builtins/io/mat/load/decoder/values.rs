@@ -108,23 +108,11 @@ pub(in super::super) fn mat_array_to_value(array: MatArray) -> BuiltinResult<Val
             if data.len() != unit_count {
                 return Err(load_error("load: character data length mismatch"));
             }
-            let (chars, shape) = if array.dims.len() == 2 && array.dims[0] == 1 {
-                let chars: Vec<char> = String::from_utf16_lossy(&data).chars().collect();
-                let shape = vec![1, chars.len()];
-                (chars, shape)
-            } else {
-                let mut chars = Vec::with_capacity(data.len());
-                for code in data {
-                    let Some(ch) = char::from_u32(code as u32) else {
-                        return Err(load_error(
-                            "load: non-BMP multidimensional MAT character arrays cannot retain rectangular UTF-16 geometry",
-                        ));
-                    };
-                    chars.push(ch);
-                }
-                (chars, array.dims)
-            };
-            let char_array = CharArray::from_column_major(chars, shape)
+            let code_units = data
+                .into_iter()
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .collect();
+            let char_array = CharArray::from_column_major(code_units, array.dims)
                 .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::CharArray(char_array))
         }

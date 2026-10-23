@@ -95,7 +95,7 @@ async fn parse_reduce_options(
     let mut axes = Axes::Default;
     let mut nanflag = default_nanflag;
     for arg in rest.iter() {
-        if let Some(keyword) = keyword_of(arg) {
+        if let Some(keyword) = keyword_of(arg)? {
             match MomentControl::from_public_option(&keyword) {
                 Some(MomentControl::All) => axes = Axes::All,
                 Some(MomentControl::Missing(policy)) => nanflag = policy,
@@ -128,7 +128,7 @@ async fn parse_flagged_options(
             // An empty first argument explicitly requests the default flag,
             // leaving the following argument available as a dimension.
             start = 1;
-        } else if keyword_of(first).is_none() {
+        } else if keyword_of(first)?.is_none() {
             if let Some(parsed) = scalar_flag(name, first)? {
                 flag = parsed;
                 start = 1;
@@ -285,12 +285,16 @@ fn ensure_floating_stat_integer_extensions(
     Ok(())
 }
 
-fn rest_requests_multi_axis(rest: crate::call::FunctionArgumentView<'_>) -> bool {
-    rest.iter().any(|value| {
-        keyword_of(value).is_some_and(|keyword| keyword == "all")
+fn rest_requests_multi_axis(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
+    for value in rest.iter() {
+        if keyword_of(value)?.is_some_and(|keyword| keyword == "all")
             || matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) > 1)
             || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().any(|extent| *extent > 1))
-    })
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn ensure_gpu_multi_axis_extension(
@@ -299,7 +303,7 @@ fn ensure_gpu_multi_axis_extension(
     rest: crate::call::FunctionArgumentView<'_>,
     extension: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<()> {
-    if matches!(value, Value::GpuTensor(_)) && rest_requests_multi_axis(rest) {
+    if matches!(value, Value::GpuTensor(_)) && rest_requests_multi_axis(rest)? {
         crate::compatibility::ensure_builtin_extension_enabled(extension, name)?;
     }
     Ok(())

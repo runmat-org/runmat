@@ -388,9 +388,25 @@ impl JavaAdapter {
             let owner = Rc::clone(self);
             let context = invocation_context.clone();
             callbacks.push(Box::pin(async move {
-                let answer = owner
-                    .dispatch_java_callback(token, invocation, authority, context)
-                    .await;
+                // A Java callback can enter another VM which calls Java again.
+                // Keep its already-owned event on the active host supervisor,
+                // rather than polling that child on the suspended lane's stack.
+                let selected = context.clone();
+                let admitted = crate::context::run_selected_callback_continuation_with(
+                    &context,
+                    move || async move {
+                        Ok::<_, RuntimeError>(
+                            owner
+                                .dispatch_java_callback(token, invocation, authority, selected)
+                                .await,
+                        )
+                    },
+                )
+                .await;
+                let answer = match admitted {
+                    Ok(answer) => answer,
+                    Err(error) => Err(callback_error(error)),
+                };
                 completion.finish(answer);
             }));
         }

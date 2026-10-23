@@ -129,7 +129,10 @@ fn dimensional_growth_remaps_existing_column_major_coordinates() {
     )
     .unwrap();
     let plan = build_assignment_plan(
-        &[SliceSelector::Scalar(3), SliceSelector::Indices(vec![1, 2])],
+        &[
+            SliceSelector::Scalar(3),
+            SliceSelector::Indices(vec![1, 2].into()),
+        ],
         2,
         &[2, 2],
     )
@@ -165,7 +168,8 @@ fn linear_growth_preserves_element_order_when_plan_collapses_rank() {
         shape.to_vec(),
     )
     .unwrap();
-    let plan = build_assignment_plan(&[SliceSelector::Indices(vec![5, 6])], 1, &shape).unwrap();
+    let plan =
+        build_assignment_plan(&[SliceSelector::Indices(vec![5, 6].into())], 1, &shape).unwrap();
     assert_eq!(plan.base_shape, [1, 2, 3]);
     let rhs = ObjectArray::row("AssignmentFixture", vec![object(5), object(6)]).unwrap();
     let result = assign_with_plan(
@@ -221,7 +225,8 @@ fn dimensional_growth_uses_collapsed_trailing_dimensions() {
 
 #[test]
 fn duplicate_targets_use_last_replacement_without_requiring_gap_construction() {
-    let plan = build_assignment_plan(&[SliceSelector::Indices(vec![2, 2])], 1, &[1, 1]).unwrap();
+    let plan =
+        build_assignment_plan(&[SliceSelector::Indices(vec![2, 2].into())], 1, &[1, 1]).unwrap();
     let rhs = ObjectArray::row("AssignmentFixture", vec![object(2), object(3)]).unwrap();
     let result = assign_with_plan(object(1), &plan, Value::ObjectArray(rhs), false).unwrap();
     assert_eq!(ids(result, &[1, 2]), [1.0, 3.0]);

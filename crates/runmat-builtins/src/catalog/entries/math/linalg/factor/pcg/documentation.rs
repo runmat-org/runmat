@@ -8,15 +8,16 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "`A` can also be a function handle implementing the matrix-vector product. Each call receives an n-by-1 vector and must return an n-by-1 vector with the same single/double precision and real/complex domain as `b`. The solver invokes the callback asynchronously and keeps its input and result rooted across suspension.",
             "`tol`, `maxit`, and `x0` occupy the usual optional positions. Empty placeholders select the defaults. The default tolerance is 1e-6 for double and 1e-3 for single; default `maxit` is `min(size(A,1),20)`. The initial guess defaults to zero.",
             "Up to five outputs are `[x,flag,relres,iter,resvec]`. `resvec` starts with `norm(b-A*x0)`. A nonconverged result returns the iterate with the lowest computed residual norm.",
-            "`M1` and `M2` can be function handles implementing their respective inverse actions, or validated triangular dense/CSC factors. The solver applies M1 first and M2 second; an empty placeholder omits that action. A matrix factor is solved as a triangular system, not multiplied into the residual. General nontriangular matrix preconditioners remain unsupported.",
+            "`M1` and `M2` can be function handles implementing inverse actions, or matching dense/CSC matrix preconditioners. The solver applies M1 first and M2 second; empty placeholders omit either action. Triangular matrices remain borrowed; a general matrix is factored once and reused, not multiplied into the residual. General sparse preconditioners support finite managed allocation with individually admitted sparse fill growth and reusable solve workspace.",
         ],
     },
     BuiltinDocumentationSection {
         heading: "Current boundaries",
         paragraphs: &[
             "Matrix coefficients, vectors, and triangular factors must have matching native floating classes. Mixed coefficient/vector classes, gpuArray inputs, and distributed inputs are not silently converted or transferred. Callable outputs are checked on every application rather than inferred from the first result.",
-            "Matrix-only solves support finite managed host allocation for up to five outputs. Solver scratch and output backing are admitted before execution. Callable forms currently require unbounded host allocation and are rejected before invoking user code when a managed host policy is active.",
-            "The compatibility contract is incomplete. The implemented flags are 0 (converged), 1 (iteration limit), 3 (stagnation), and 4 (breakdown or nonpositive curvature). The complete MATLAB preconditioner-failure flag contract remains an implementation obligation; callback errors and invalid factors are not relabeled as successful solves.",
+            "Matrix and callable solves support finite managed host allocation for up to five outputs, subject to the selected callback's own admission. Solver scratch and output backing are admitted before iteration. Each callback receives an independently claimed vector, so retaining an input cannot alias or retain mutable recurrence scratch. Callback captures and source authority remain owned by the execution context.",
+            "Callback vector and result copies, solution publication and residual-history copies check execution authority in bounded chunks and use the context's CPU cooperation budget. A suspended output constructor owns its exact backing until completion or drop. A receipt-less solve or factor cannot continue if its allocation scope becomes finite; it must fail rather than publish unclaimed storage.",
+            "The implemented flags are 0 (converged), 1 (iteration limit), 2 (a numerical preconditioner failure or non-finite inverse-action result), 3 (stagnation), and 4 (breakdown or nonpositive curvature). Flag 2 retains the best iterate, its relative residual and the residual history computed before the failed action. Callback language errors, invalid classes/shapes, allocation denial, cancellation and authority changes remain errors; the solver does not retry a completed callback or turn those failures into a numerical flag.",
         ],
     },
 ];
@@ -52,7 +53,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("pcg"),
     slug: Some("pcg"),
     summary: "Solve a positive-definite linear system with conjugate gradients.",
-    description: "Solve dense, sparse CSC, or callable systems with a shared precision-preserving host recurrence, optionally using callable inverse actions or triangular preconditioners. General matrix preconditioners and the full compatibility contract remain incomplete.",
+    description: "Solve dense, sparse CSC, or callable systems with a shared precision-preserving host recurrence, optionally using reusable matrix or callable inverse-action preconditioners. The full compatibility contract remains incomplete.",
     keywords: &["pcg", "dense", "sparse", "conjugate gradients", "iterative solver"],
     related: &["sparse", "mldivide", "eigs"],
     sections: SECTIONS,

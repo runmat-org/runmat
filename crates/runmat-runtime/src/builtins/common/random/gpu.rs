@@ -88,6 +88,9 @@ fn with_stream<T>(
     operation: impl FnOnce(&mut GpuRandomStream) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
     if let Some(context) = crate::context::legacy::active() {
+        context
+            .service_ports()
+            .require_selected_local_effect(runmat_types::EffectKind::Randomness)?;
         let mut stream = context
             .state()
             .gpu_random

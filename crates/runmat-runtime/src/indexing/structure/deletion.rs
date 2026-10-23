@@ -1,15 +1,47 @@
 use super::mex;
 use crate::aggregate::structure::operations as struct_ops;
-use crate::indexing::plan::{effective_index_shape, IndexPlan};
-use crate::indexing::shape::column_major_strides;
+use crate::context::RuntimeContext;
+use crate::indexing::plan::{
+    admission::{self, Owner, Scratch},
+    effective_index_shape_in_context, IndexPlan,
+};
+use crate::indexing::shape::column_major_strides_in_context;
 use crate::RuntimeError;
 use runmat_value::Value;
-use std::collections::HashSet;
 
 pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
-    let shape = match &base {
-        Value::Struct(_) => vec![1, 1],
-        Value::StructArray(array) => array.shape().to_vec(),
+    let context = crate::context::legacy::active();
+    delete(context.as_ref(), base, plan)
+}
+
+pub fn delete_with_plan_in_context(
+    context: Option<&RuntimeContext>,
+    base: Value,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::Tensor(value) if value.is_empty())
+        && !matches!(rhs, Value::ComplexTensor(value) if value.is_empty())
+    {
+        return Err(mex(
+            "InvalidStructDeletionRhs",
+            "Structure-array deletion requires an empty right-hand side",
+        ));
+    }
+    delete(context, base, plan)
+}
+
+/// Legacy scalar selectors retain their original plan/error policy, but their
+/// actual selector and plan storage use the explicit invocation owner.
+pub fn delete_scalar_indices_in_context(
+    context: Option<&RuntimeContext>,
+    base: Value,
+    indices: &[usize],
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let shape: &[usize] = match &base {
+        Value::Struct(_) => &[1, 1],
+        Value::StructArray(array) => array.shape(),
         _ => {
             return Err(mex(
                 "StructAssignmentTypeMismatch",
@@ -17,109 +49,201 @@ pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, R
             ))
         }
     };
+    let owner = Owner::new(context)?;
+    let _roots = crate::execution::structure::replacement::lease(&base, context)?;
+    let selectors =
+        crate::context::host_allocation::initialize_host_array(context, indices.len(), |index| {
+            Ok(crate::indexing::selectors::SliceSelector::Scalar(
+                indices[index],
+            ))
+        })?;
+    let plan = match context {
+        Some(context) => crate::indexing::plan::build_index_plan_in_context(
+            context,
+            &selectors,
+            indices.len(),
+            shape,
+        )?,
+        None => crate::indexing::plan::build_index_plan(&selectors, indices.len(), shape)?,
+    };
+    owner.check()?;
+    let result = delete_with_plan_in_context(context, base, &plan, rhs)?;
+    owner.check()?;
+    Ok(result)
+}
+
+fn delete(
+    context: Option<&RuntimeContext>,
+    base: Value,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    let shape: &[usize] = match &base {
+        Value::Struct(_) => &[1, 1],
+        Value::StructArray(array) => array.shape(),
+        _ => {
+            return Err(mex(
+                "StructAssignmentTypeMismatch",
+                "Structure-array deletion requires a structure target",
+            ))
+        }
+    };
+    let owner = Owner::new(context)?;
     if plan.indices.is_empty() {
         return Ok(base);
     }
-    let removal = plan
-        .indices
-        .iter()
-        .map(|&index| index as usize)
-        .collect::<HashSet<_>>();
-    if plan.dims == 1 {
-        return delete_linear(base, shape, removal);
+    let _roots = crate::execution::structure::replacement::lease(&base, context)?;
+    let mut removal = Scratch::<usize>::new(context, plan.indices.len())?;
+    for (ordinal, (&index, slot)) in plan.indices.iter().zip(removal.as_mut_slice()).enumerate() {
+        if ordinal % 4096 == 0 {
+            owner.check()?;
+        }
+        *slot = index as usize;
     }
-
-    let effective_shape = effective_index_shape(&shape, plan.dims)?;
-    let coordinate_sets = selected_coordinates(&removal, &effective_shape)?;
-    let cartesian_count = coordinate_sets
-        .iter()
-        .try_fold(1usize, |total, coordinates| {
-            total
-                .checked_mul(coordinates.len())
-                .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
-        })?;
-    if cartesian_count != removal.len() {
+    owner.check()?;
+    removal.as_mut_slice().sort_unstable();
+    let unique = deduplicate(removal.as_mut_slice(), &owner)?;
+    let removed = &removal.as_slice()[..unique];
+    if plan.dims == 1 {
+        let vector = shape.first().copied().unwrap_or(1) == 1
+            || shape.iter().skip(1).all(|extent| *extent == 1);
+        if !vector {
+            return Err(unsupported(
+                "Linear structure-array deletion requires a vector",
+            ));
+        }
+        let original_len = checked_shape_len(shape)?;
+        validate_bounds(removed, original_len)?;
+        let retained = original_len - unique;
+        let output = if retained == 0 && original_len <= 1 {
+            [0, 0]
+        } else if shape.first().copied().unwrap_or(1) == 1 {
+            [1, retained]
+        } else {
+            [retained, 1]
+        };
+        let result = remove_from_base(context, &base, removed, &output)?;
+        owner.check()?;
+        return Ok(result);
+    }
+    let effective = effective_index_shape_in_context(context, shape, plan.dims)?;
+    if effective.contains(&0) {
+        return Err(mex(
+            "IndexOutOfBounds",
+            "Cannot remove elements from an empty structure array",
+        ));
+    }
+    let strides = column_major_strides_in_context(context, &effective)?;
+    let original_len = checked_shape_len(shape)?;
+    // Reuse one coordinate workspace; no HashSet forest or survivor copy.
+    let mut coordinates = Scratch::<usize>::new(context, unique)?;
+    let mut cartesian = 1usize;
+    let mut partial = 0usize;
+    let mut removed_dimension = 0;
+    let mut removed_extent = 0;
+    for (dimension, &extent) in effective.iter().enumerate() {
+        for (ordinal, (&linear, coordinate)) in
+            removed.iter().zip(coordinates.as_mut_slice()).enumerate()
+        {
+            if ordinal % 4096 == 0 {
+                owner.check()?;
+            }
+            *coordinate = linear / strides[dimension] % extent;
+        }
+        coordinates.as_mut_slice().sort_unstable();
+        let selected = deduplicate(coordinates.as_mut_slice(), &owner)?;
+        cartesian = cartesian
+            .checked_mul(selected)
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
+        if selected < extent {
+            partial += 1;
+            removed_dimension = dimension;
+            removed_extent = selected;
+        }
+    }
+    if cartesian != unique {
         return Err(unsupported(
             "Structure-array deletion requires a Cartesian subscript selection",
         ));
     }
-    let partial = coordinate_sets
-        .iter()
-        .enumerate()
-        .filter(|(dimension, selected)| selected.len() < effective_shape[*dimension])
-        .map(|(dimension, _)| dimension)
-        .collect::<Vec<_>>();
-    if partial.is_empty() {
-        return struct_ops::empty_like(&base, &[0, 0])
-            .map_err(|error| struct_ops::remap(error, |message| mex("StructDeletion", message)));
-    }
-    if partial.len() != 1
-        || coordinate_sets
-            .iter()
-            .enumerate()
-            .any(|(dimension, selected)| {
-                dimension != partial[0]
-                    && (selected.len() != effective_shape[dimension]
-                        || !(0..effective_shape[dimension]).all(|index| selected.contains(&index)))
-            })
-    {
+    if partial > 1 {
         return Err(unsupported(
             "Structure-array deletion requires one indexed dimension and colons in the others",
         ));
     }
-    let removed_dimension = partial[0];
-    let removed_coordinates = &coordinate_sets[removed_dimension];
-    let strides = column_major_strides(&effective_shape)?;
-    let removed_extent = effective_shape[removed_dimension];
-    let mut output_shape = effective_shape;
-    output_shape[removed_dimension] -= removed_coordinates.len();
-    output_shape.resize(output_shape.len().max(2), 1);
-    let linear_removal = (0..checked_shape_len(&shape)?)
-        .filter(|linear| {
-            let coordinate = linear / strides[removed_dimension] % removed_extent;
-            removed_coordinates.contains(&coordinate)
-        })
-        .collect::<HashSet<_>>();
-    remove_from_base(base, &linear_removal, output_shape)
+    validate_bounds(removed, original_len)?;
+    if partial == 0 {
+        let result = struct_ops::empty_like_in_context(context, &base, &[0, 0]).map_err(remap)?;
+        owner.check()?;
+        return Ok(result);
+    }
+    let output = admission::shape(context, effective.len().max(2), |dimension| {
+        let extent = effective.get(dimension).copied().unwrap_or(1);
+        if dimension == removed_dimension {
+            extent
+                .checked_sub(removed_extent)
+                .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
+        } else {
+            Ok(extent)
+        }
+    })?;
+    // A unique Cartesian selection with one partial axis and complete other
+    // axes is precisely the original linear removal set.
+    let result = remove_from_base(context, &base, removed, &output)?;
+    owner.check()?;
+    Ok(result)
 }
 
-fn delete_linear(
-    base: Value,
-    shape: Vec<usize>,
-    removal: HashSet<usize>,
-) -> Result<Value, RuntimeError> {
-    let vector =
-        shape.first().copied().unwrap_or(1) == 1 || shape.iter().skip(1).all(|extent| *extent == 1);
-    if !vector {
-        return Err(unsupported(
-            "Linear structure-array deletion requires a vector",
-        ));
+fn deduplicate(values: &mut [usize], owner: &Owner<'_>) -> Result<usize, RuntimeError> {
+    let mut unique = 0;
+    for index in 0..values.len() {
+        if index % 4096 == 0 {
+            owner.check()?;
+        }
+        if unique == 0 || values[index] != values[unique - 1] {
+            values[unique] = values[index];
+            unique += 1;
+        }
     }
-    let original_len = checked_shape_len(&shape)?;
-    let retained_len = original_len.saturating_sub(removal.len());
-    let output_shape = if retained_len == 0 && original_len <= 1 {
-        vec![0, 0]
-    } else if shape.first().copied().unwrap_or(1) == 1 {
-        vec![1, retained_len]
-    } else {
-        vec![retained_len, 1]
-    };
-    remove_from_base(base, &removal, output_shape)
+    owner.check()?;
+    Ok(unique)
 }
 
 fn remove_from_base(
-    base: Value,
-    removal: &HashSet<usize>,
-    output_shape: Vec<usize>,
+    context: Option<&RuntimeContext>,
+    base: &Value,
+    removed: &[usize],
+    shape: &[usize],
 ) -> Result<Value, RuntimeError> {
     match base {
-        value @ Value::Struct(_) => struct_ops::empty_like(&value, &output_shape),
-        Value::StructArray(array) => struct_ops::remove(&array, removal, &output_shape),
+        Value::Struct(_) => {
+            if removed != [0] {
+                return Err(mex(
+                    "IndexOutOfBounds",
+                    "Structure-array deletion index is out of bounds",
+                ));
+            }
+            struct_ops::empty_like_in_context(context, base, shape)
+        }
+        Value::StructArray(array) => {
+            struct_ops::remove_sorted_in_context(context, array, removed, shape)
+        }
         _ => unreachable!("deletion admission checked the structure target"),
     }
-    .map_err(|error| struct_ops::remap(error, |message| mex("StructDeletion", message)))
+    .map_err(remap)
 }
 
+fn remap(error: RuntimeError) -> RuntimeError {
+    struct_ops::remap(error, |message| mex("StructDeletion", message))
+}
+fn validate_bounds(removed: &[usize], original_len: usize) -> Result<(), RuntimeError> {
+    if removed.last().is_some_and(|&index| index >= original_len) {
+        return Err(mex(
+            "IndexOutOfBounds",
+            "Structure-array deletion index is out of bounds",
+        ));
+    }
+    Ok(())
+}
 fn checked_shape_len(shape: &[usize]) -> Result<usize, RuntimeError> {
     shape.iter().try_fold(1usize, |total, extent| {
         total
@@ -127,27 +251,6 @@ fn checked_shape_len(shape: &[usize]) -> Result<usize, RuntimeError> {
             .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
     })
 }
-
-fn selected_coordinates(
-    removal: &HashSet<usize>,
-    shape: &[usize],
-) -> Result<Vec<HashSet<usize>>, RuntimeError> {
-    if shape.contains(&0) && !removal.is_empty() {
-        return Err(mex(
-            "IndexOutOfBounds",
-            "Cannot remove elements from an empty structure array",
-        ));
-    }
-    let strides = column_major_strides(shape)?;
-    let mut selected = vec![HashSet::new(); shape.len()];
-    for &linear in removal {
-        for dimension in 0..shape.len() {
-            selected[dimension].insert(linear / strides[dimension] % shape[dimension]);
-        }
-    }
-    Ok(selected)
-}
-
 fn unsupported(message: &str) -> RuntimeError {
     mex("UnsupportedStructDeletion", message)
 }

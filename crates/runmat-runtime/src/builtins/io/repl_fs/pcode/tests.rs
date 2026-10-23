@@ -12,14 +12,16 @@ fn source_admission_precedes_resolution_and_provider_access() {
     let error = block_on(evaluate(&[Value::from("missing-source"), resident])).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:pcode:InvalidArgument"));
     let pages = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap(),
     );
     assert_eq!(
         block_on(evaluate(&[pages])).unwrap_err().identifier(),
         Some("RunMat:pcode:InvalidArgument")
     );
     let row = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1])
+            .unwrap(),
     );
     assert_eq!(
         parse_options(crate::call::FunctionArgumentView::from_slice(&[row]))

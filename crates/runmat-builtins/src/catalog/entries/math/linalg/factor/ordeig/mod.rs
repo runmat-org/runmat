@@ -18,3 +18,5 @@ pub const ORDEIG_CATALOG_ENTRY: BuiltinCatalogEntry =
         residency: BuiltinResidencyPolicy::Host,
         maturity: BuiltinContractMaturity::Incomplete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&ORDEIG_CATALOG_ENTRY];

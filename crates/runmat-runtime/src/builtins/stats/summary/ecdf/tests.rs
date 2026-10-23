@@ -24,14 +24,18 @@ fn canonical_entry(name: &str) -> &'static runmat_builtins::BuiltinCatalogEntry 
 #[test]
 fn numeric_ecdf_remains_available_without_presentation() {
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let result =
-        block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])])).expect("numeric ECDF output");
+    let result = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(vec![1.0, 2.0, 3.0])]),
+    ))
+    .expect("numeric ECDF output");
     assert!(matches!(result, Value::OutputList(values) if values.len() == 2));
     drop(_outputs);
 
     let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let error = block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
-        .expect_err("presentation unavailable");
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(vec![1.0, 2.0, 3.0])]),
+    ))
+    .expect_err("presentation unavailable");
     assert!(error
         .source
         .as_deref()
@@ -39,8 +43,10 @@ fn numeric_ecdf_remains_available_without_presentation() {
         .is_some());
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let logical = Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).unwrap());
-    let error = block_on(ecdf_builtin(vec![logical]))
-        .expect_err("valid logical statement still requires presentation");
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![logical]),
+    ))
+    .expect_err("valid logical statement still requires presentation");
     assert!(error
         .source
         .as_deref()
@@ -53,8 +59,10 @@ fn numeric_ecdf_remains_available_without_presentation() {
 fn cdfplot_valid_sample_reports_typed_missing_presentation_before_download() {
     use std::error::Error;
 
-    let error = block_on(cdfplot_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
-        .expect_err("presentation unavailable");
+    let error = block_on(cdfplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(vec![1.0, 2.0, 3.0])]),
+    ))
+    .expect_err("presentation unavailable");
     assert!(error
         .source()
         .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())

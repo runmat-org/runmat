@@ -19,6 +19,17 @@ pub struct StringArray {
 }
 
 impl StringArray {
+    /// Authenticate the cached two-dimensional view and every page against
+    /// the StringArray's canonical column-major shape and payload count.
+    pub fn validate_layout(&self) -> Result<(), String> {
+        let expected = string_element_count(&self.shape)
+            .ok_or_else(|| "StringArray shape exceeds platform limits".to_string())?;
+        if expected != self.data.len() || shape_rows_cols(&self.shape) != (self.rows, self.cols) {
+            return Err("StringArray shape, cache, and payload disagree".into());
+        }
+        Ok(())
+    }
+
     /// Ordinary construction moves each String's byte allocation into its
     /// immutable text owner. Only the outer owner vector is newly allocated.
     pub fn new(data: Vec<String>, shape: Vec<usize>) -> Result<Self, String> {

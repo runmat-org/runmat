@@ -14,11 +14,11 @@ use std::{
     },
 };
 
-mod rename;
-mod mapped;
-mod handle_commit;
-mod staged;
 mod bounded;
+mod handle_commit;
+mod mapped;
+mod rename;
+mod staged;
 
 #[derive(Clone, Debug)]
 pub struct MemoryFsProvider {
@@ -148,6 +148,30 @@ impl MemoryFsProvider {
             },
         );
         Ok(())
+    }
+
+    /// Frozen invocation-tree construction; ordinary writes still respect
+    /// the file's readonly bit after this initialization step.
+    pub fn set_readonly_project_path(
+        &self,
+        path: impl AsRef<Path>,
+        readonly: bool,
+    ) -> io::Result<()> {
+        let path = normalize_path(path.as_ref())?;
+        let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
+        match guard.entries.get_mut(&path) {
+            Some(MemoryEntry::File {
+                readonly: value, ..
+            }) => {
+                *value = readonly;
+                Ok(())
+            }
+            Some(MemoryEntry::Directory) => Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "selected readonly entry is a directory",
+            )),
+            None => Err(not_found(&path)),
+        }
     }
 
     pub fn list_project_path(&self, path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {

@@ -4,6 +4,13 @@ use runmat_execution::value::SparseValue;
 use runmat_value::SparseCscValidation;
 use std::num::NonZeroUsize;
 
+#[path = "sparse/managed.rs"]
+mod managed;
+use crate::context::host_allocation::{
+    HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
+};
+use managed::ManagedSparse;
+
 enum Phase {
     ColumnOffsets,
     RowIndices,
@@ -22,28 +29,64 @@ pub(in crate::execution::value_codec::decode::machine) struct SparseTask<'a> {
     validation: Option<SparseCscValidation>,
     phase: Phase,
     path: ControlPath<'a>,
+    managed: Option<ManagedSparse<'a>>,
+    runtime: Option<&'a crate::context::RuntimeContext>,
 }
 
 impl<'a> SparseTask<'a> {
     pub(super) fn new(
         source: &'a SparseValue,
         path: ControlPath<'a>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
     ) -> Result<Self, ValueCodecError> {
         let rows = usize::try_from(source.rows)
             .map_err(|_| ValueCodecError::invalid(&path, "row count exceeds platform limits"))?;
         let columns = usize::try_from(source.columns)
             .map_err(|_| ValueCodecError::invalid(&path, "column count exceeds platform limits"))?;
+        if is_complex_integer(source.element_type) {
+            return Err(ValueCodecError::unsupported(
+                &path,
+                "the runtime has no matching sparse value class",
+            ));
+        }
+        let pointers = columns.checked_add(1).ok_or_else(|| {
+            ValueCodecError::invalid(&path, "column count exceeds platform limits")
+        })?;
+        let bytes = source
+            .row_indices
+            .len()
+            .checked_mul(element_width(source.element_type))
+            .ok_or_else(|| {
+                ValueCodecError::invalid(&path, "sparse payload exceeds platform limits")
+            })?;
+        if source.column_offsets.len() != pointers || source.little_endian_data.len() != bytes {
+            return Err(ValueCodecError::invalid(
+                &path,
+                "sparse topology and payload lengths disagree",
+            ));
+        }
+        let managed = ManagedSparse::new(source, rows, columns, runtime, &path)?;
+        let (column_offsets, row_indices) = if managed.is_some() {
+            (Vec::new(), Vec::new())
+        } else {
+            (
+                Vec::with_capacity(source.column_offsets.len()),
+                Vec::with_capacity(source.row_indices.len()),
+            )
+        };
         Ok(Self {
             source,
             rows,
             columns,
-            column_offsets: Vec::with_capacity(source.column_offsets.len()),
-            row_indices: Vec::with_capacity(source.row_indices.len()),
+            column_offsets,
+            row_indices,
             byte_offset: 0,
             values: None,
             validation: None,
             phase: Phase::ColumnOffsets,
             path,
+            managed,
+            runtime,
         })
     }
 
@@ -51,6 +94,18 @@ impl<'a> SparseTask<'a> {
         &mut self,
         maximum_work: usize,
     ) -> Result<(usize, Option<Value>), ValueCodecError> {
+        if let Some(managed) = &mut self.managed {
+            return managed.advance(self.source, maximum_work, &self.path);
+        }
+        if HostAllocationReceipt::policy(self.runtime)
+            .map_err(|error| ValueCodecError::allocation(&self.path, error))?
+            != HostAllocationPolicy::Unbounded
+        {
+            return Err(ValueCodecError::allocation(
+                &self.path,
+                HostAllocationError::StaleAuthority,
+            ));
+        }
         match self.phase {
             Phase::ColumnOffsets => {
                 let completed = copy_indices(

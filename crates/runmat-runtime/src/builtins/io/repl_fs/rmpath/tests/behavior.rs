@@ -16,7 +16,8 @@ fn removes_entries_and_returns_the_previous_path() {
         "{target}{}{keep}",
         crate::builtins::common::path_state::PATH_LIST_SEPARATOR
     );
-    crate::builtins::common::path_state::set_path_string(&original);
+    crate::builtins::common::path_state::set_path_string(&original)
+        .expect("test search path update");
     let returned = super::run(vec![Value::String(target.into())]).expect("rmpath");
     assert_eq!(String::try_from(&returned).expect("text"), original);
     assert_eq!(
@@ -38,7 +39,8 @@ fn accepts_path_lists_string_arrays_character_rows_and_cells() {
     ];
     crate::builtins::common::path_state::set_path_string(&super::super::super::path_list::join(
         &paths,
-    ));
+    ))
+    .expect("test search path update");
     let list = format!(
         "{}{}{}",
         paths[0],
@@ -56,7 +58,7 @@ fn discarded_output_still_removes_path() {
     let _guard = super::super::super::path_mutation::test_support::PathGuard::new();
     let directory = tempfile::tempdir().unwrap();
     let path = super::super::super::path_mutation::test_support::canonical(directory.path());
-    crate::builtins::common::path_state::set_path_string(&path);
+    crate::builtins::common::path_state::set_path_string(&path).expect("test search path update");
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     super::run(vec![runmat_value::Value::String(path.into())]).unwrap();
     assert!(crate::builtins::common::path_state::current_path_string().is_empty());

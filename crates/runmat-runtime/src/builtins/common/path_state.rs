@@ -326,7 +326,7 @@ pub(crate) fn current_path_entries() -> Vec<PathEntry> {
         .collect()
 }
 
-pub(crate) fn set_path_entries(entries: Vec<PathEntry>) {
+pub(crate) fn set_path_entries(entries: Vec<PathEntry>) -> crate::BuiltinResult<()> {
     if let Some(search_path) = active_search_path() {
         search_path.replace_entries(entries);
     } else {
@@ -335,8 +335,9 @@ pub(crate) fn set_path_entries(entries: Vec<PathEntry>) {
                 .into_iter()
                 .map(|entry| entry.path)
                 .collect::<Vec<_>>(),
-        ));
+        ))?;
     }
+    Ok(())
 }
 
 pub fn append_to_path(segments: &[String]) {
@@ -358,21 +359,36 @@ pub fn append_to_path(segments: &[String]) {
 /// Replace the MATLAB path string for the active session. Without an active
 /// runtime context this updates the compatibility process state and mirrors it
 /// to `RUNMAT_PATH`.
-pub fn set_path_string(new_path: &str) {
+pub fn set_path_string(new_path: &str) -> crate::BuiltinResult<()> {
+    if new_path.contains('\0') {
+        return Err(crate::runtime_descriptor_error(
+            "path",
+            &runmat_builtins::PATH_ERROR_INVALID_INPUT,
+        ));
+    }
     if let Some(search_path) = active_search_path() {
         search_path.replace(new_path);
-        return;
+        return Ok(());
     }
-    if new_path.is_empty() {
-        runtime_env::remove_var("RUNMAT_PATH");
+    let mirrored = if new_path.is_empty() {
+        runtime_env::try_remove_var("RUNMAT_PATH")
     } else {
-        runtime_env::set_var("RUNMAT_PATH", new_path);
-    }
+        runtime_env::try_set_var("RUNMAT_PATH", new_path)
+    };
+    mirrored.map_err(|source| {
+        let mut error = crate::runtime_descriptor_error(
+            "path",
+            &runmat_builtins::PATH_ERROR_ENVIRONMENT_UPDATE_FAILED,
+        );
+        error.source = Some(Box::new(source));
+        error
+    })?;
 
     let mut guard = PATH_STATE
         .write()
         .unwrap_or_else(|poison| poison.into_inner());
     guard.current = new_path.to_string();
+    Ok(())
 }
 
 fn active_search_path() -> Option<Arc<SearchPath>> {

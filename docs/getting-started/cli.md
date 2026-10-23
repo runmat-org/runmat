@@ -157,7 +157,6 @@ Global options apply to the REPL, local scripts, and most commands.
 
 ```bash
 runmat --no-jit analysis.m
-runmat --jit-opt-level aggressive analysis.m
 runmat --gc-preset low-latency analysis.m
 runmat --plot-headless analysis.m
 ```
@@ -174,9 +173,9 @@ Common options:
 | `--offline` | Resolve packages only from locally available content. |
 | `--locked` | Require an existing, current `runmat.lock`. |
 | `--frozen` | Require the lock and prohibit network access or lock mutation. |
-| `--no-jit` | Use the interpreter only. |
-| `--jit-threshold N` | Set the execution count before JIT tiering. |
-| `--jit-opt-level LEVEL` | Set JIT optimization policy. |
+| `--no-jit` | Disable native JIT compilation. |
+| `--jit-threshold N` | Accepted but does not control native tiering. |
+| `--jit-opt-level LEVEL` | Accepted but does not select native compiler optimization. |
 | `--gc-preset PRESET` | Select a GC tuning preset. |
 | `--gc-young-size MB` | Override young generation size. |
 | `--gc-threads N` | Override GC worker count. |
@@ -186,6 +185,10 @@ Common options:
 | `--plot-backend BACKEND` | Select plotting backend (auto | wgpu | static | web). |
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
+
+`--jit-threshold N` and `--jit-opt-level LEVEL` are parsed and retained as configuration, but do not select compilation triggers or native compiler optimization. Native tiering tracks function and loop activity, profiles of runtime representations, and compilation budgets. Placement separately chooses among eligible implementations. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline). Enabling JIT permits native execution but does not force a particular tier or provider route.
+
+JIT and acceleration settings are independent. With `--no-jit`, the VM can still use supported GPU operations and fusion. Set `[runtime.accelerate].enabled = false` when measuring execution without acceleration.
 
 ## Clusters and Remote Jobs
 

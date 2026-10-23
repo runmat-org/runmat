@@ -96,6 +96,9 @@ mod tests {
     }
     #[test]
     fn string_shape_and_char_rows() {
+        let scalar = call(vec![ValueFact::scalar(ValueKindFact::String)]);
+        assert!(scalar.diagnostics.is_empty());
+        assert_eq!(scalar.outputs[0].kind, ValueKindFact::String);
         let strings = ValueFact::proven(
             ValueKindFact::String,
             ShapeFact::from(vec![Some(2), Some(3)]),

@@ -99,19 +99,30 @@ fn gmres_variants_and_bicgstab_solve_nonsymmetric() {
         ..Default::default()
     };
     for side in [PreconditionerSide::Left, PreconditionerSide::Right, PreconditionerSide::Flexible] {
-        let mut x = vec![0.0; n];
-        let report = gmres(
-            &a,
-            Some(&jacobi),
-            &b,
-            &mut x,
-            &options,
-            &GmresOptions { restart: 30, side },
-            SolveControl::NONE,
-        )
-        .unwrap();
-        assert!(report.converged(), "{side:?} {report:?}");
-        assert!(residual(&a, &x, &b) <= 1e-9, "{side:?}");
+        let mut applications = Vec::new();
+        for residual_check in [ResidualCheck::EveryStep, ResidualCheck::OnEstimate] {
+            let mut x = vec![0.0; n];
+            let report = gmres(
+                &a,
+                Some(&jacobi),
+                &b,
+                &mut x,
+                &options,
+                &GmresOptions { restart: 30, side, residual_check },
+                SolveControl::NONE,
+            )
+            .unwrap();
+            assert!(report.converged(), "{side:?} {residual_check:?} {report:?}");
+            assert!(residual(&a, &x, &b) <= 1e-9, "{side:?} {residual_check:?}");
+            if side != PreconditionerSide::Left {
+                // Right/flexible certify the true relative residual of the returned iterate.
+                assert!((residual(&a, &x, &b) - report.relative_residual).abs() <= 1e-12, "{side:?} {residual_check:?}");
+            }
+            applications.push((report.iterations, report.operator_applications));
+        }
+        // Checking only on the estimate saves the per-step residual product.
+        let (every, estimate) = (applications[0], applications[1]);
+        assert!(estimate.1 < every.1, "{side:?} {applications:?}");
     }
     let mut x = vec![0.0; n];
     let report = bicgstab(&a, Some(&jacobi), &b, &mut x, &options, SolveControl::NONE).unwrap();

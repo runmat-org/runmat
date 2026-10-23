@@ -130,7 +130,13 @@ fn collect_clear_targets(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<()
                     "clear: character array inputs must be a row vector or scalar text value",
                 ));
             }
-            out.push(chars.data().iter().collect::<String>().trim().to_string());
+            out.push(
+                super::text::decode_utf16_with_error(chars.data(), || {
+                    clear_error("clear: character input is not valid UTF-16 text")
+                })?
+                .trim()
+                .to_string(),
+            );
             Ok(())
         }
         Value::StringArray(array) => {
@@ -319,9 +325,9 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let observed = std::rc::Rc::clone(&requests);
-        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |_runtime, request| {
+        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |runtime, request| {
             let observed = std::rc::Rc::clone(&observed);
-            Box::pin(async move {
+            crate::execution::admit_domain_continuation_with(&runtime, move || async move {
                 observed.borrow_mut().push(request);
                 Ok(())
             })
@@ -346,9 +352,9 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let observed = std::rc::Rc::clone(&requests);
-        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |_runtime, request| {
+        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |runtime, request| {
             let observed = std::rc::Rc::clone(&observed);
-            Box::pin(async move {
+            crate::execution::admit_domain_continuation_with(&runtime, move || async move {
                 observed.borrow_mut().push(request);
                 Ok(())
             })

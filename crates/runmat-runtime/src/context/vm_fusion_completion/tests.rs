@@ -263,6 +263,20 @@ fn context(
 fn installed_right_is_exact_to_context_program_region_and_cancellation_generation() {
     let service = Rc::new(SessionWitness::default());
     let selected = context(Some(service.clone()), Some(program(b"one")));
+    let projected = selected.clone();
+    let unchanged = projected
+        .clone()
+        .with_program_revision(Some(program(b"one")));
+    let original_revision = selected.program_revision_owner().unwrap();
+    assert!(Arc::ptr_eq(
+        original_revision,
+        projected.program_revision_owner().unwrap()
+    ));
+    assert!(Arc::ptr_eq(
+        original_revision,
+        unchanged.program_revision_owner().unwrap()
+    ));
+    assert!(service.invalidations.borrow().is_empty());
     assert!(VmFusionInstalledRegion::install(&selected, semantic(b"same"), 7, 9, 8).is_none());
     let installed =
         VmFusionInstalledRegion::install(&selected, semantic(b"same"), 7, 8, 9).unwrap();
@@ -275,6 +289,13 @@ fn installed_right_is_exact_to_context_program_region_and_cancellation_generatio
     let right = installed.right(&selected).unwrap();
     let second = other_installation.right(&selected).unwrap();
     let decline = installed.decline_right(&selected).unwrap();
+    for retained in [
+        installed.program.as_ref(),
+        right.program.as_ref(),
+        decline.program.as_ref(),
+    ] {
+        assert!(Arc::ptr_eq(original_revision, retained.unwrap()));
+    }
     assert_eq!(
         decline.semantic_identity(&selected),
         Some(semantic(b"same"))

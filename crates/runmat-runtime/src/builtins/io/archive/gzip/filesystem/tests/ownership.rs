@@ -46,7 +46,7 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
     };
     assert!(matches!(
         outputs.data(),
-        [Value::CharArray(path)] if path.data().iter().collect::<String>() == "out/source.bin.gz"
+        [Value::CharArray(path)] if runmat_value::decode_utf16_code_units(path.data()).expect("valid UTF-16 fixture") == "out/source.bin.gz"
     ));
     assert!(selected
         .memory
@@ -102,7 +102,7 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
     };
     assert!(matches!(
         outputs.data(),
-        [Value::CharArray(path)] if path.data().iter().collect::<String>() == "out/archive.bin"
+        [Value::CharArray(path)] if runmat_value::decode_utf16_code_units(path.data()).expect("valid UTF-16 fixture") == "out/archive.bin"
     ));
     assert_eq!(sends.load(Ordering::SeqCst), 1);
     assert_eq!(

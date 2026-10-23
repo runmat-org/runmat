@@ -24,6 +24,9 @@ pub(super) fn from_native_executor_error(
             runmat_runtime::build_runtime_error("native execution was cancelled")
                 .with_identifier("RunMat:ExecutionCancelled")
                 .with_phase("native")
+                .with_failure_origin(
+                    runmat_runtime::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation,
+                )
                 .build()
         }
         runmat_native_executor::NativeExecutorError::Deadline => {

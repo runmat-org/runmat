@@ -2,10 +2,15 @@ use super::super::*;
 use super::text::{ShapeCopy, TextCopy};
 use crate::execution::value_codec::object_output::{ObjectOutput, ObjectText};
 use runmat_execution::value::{
-    DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
+    DurableDecompositionPayload, DurableDynamicProperty, DurableObjectArray, DurablePlainObject,
+    DurableStructArray, DurableStructuralDecomposition,
 };
 use runmat_value::{DynamicPropertyDef, StructArrayAdmission};
 use std::num::NonZeroUsize;
+
+#[path = "durable/numeric_factor.rs"]
+mod numeric_factor;
+use numeric_factor::NumericFactorDecode;
 
 pub(in crate::execution::value_codec::decode::machine) struct PlainObjectTask<'a> {
     source: &'a DurablePlainObject,
@@ -16,6 +21,7 @@ pub(in crate::execution::value_codec::decode::machine) struct PlainObjectTask<'a
     dynamic: usize,
     dynamic_text: usize,
     texts: [Option<runmat_value::Utf8Text>; 4],
+    numeric_factor: Option<NumericFactorDecode<'a>>,
     path: ControlPath<'a>,
 }
 
@@ -26,14 +32,34 @@ impl<'a> PlainObjectTask<'a> {
         path: ControlPath<'a>,
         runtime: Option<&'a crate::context::RuntimeContext>,
     ) -> Result<Self, ValueCodecError> {
-        let object = ObjectOutput::new(
-            source.class_identity.display_name(),
-            source.properties.iter().map(|f| f.name.as_str()),
-            &source.dynamic_properties,
-            crate::execution::value_codec::object_output::DynamicMetadataCopy::Incremental,
-            runtime,
-            &path,
-        )?;
+        let is_decomposition = source.class_identity == runmat_types::standard::DECOMPOSITION;
+        if source.decomposition.is_some() != is_decomposition {
+            return Err(ValueCodecError::invalid(
+                &path,
+                "decomposition class and closed payload differ",
+            ));
+        }
+        let object = if matches!(
+            source.decomposition.as_ref(),
+            Some(DurableDecompositionPayload::Data(_))
+        ) {
+            ObjectOutput::new_numeric_factor(
+                source.class_identity.display_name(),
+                source.properties.iter().map(|f| f.name.as_str()),
+                &source.dynamic_properties,
+                runtime,
+                &path,
+            )?
+        } else {
+            ObjectOutput::new(
+                source.class_identity.display_name(),
+                source.properties.iter().map(|f| f.name.as_str()),
+                &source.dynamic_properties,
+                crate::execution::value_codec::object_output::DynamicMetadataCopy::Incremental,
+                runtime,
+                &path,
+            )?
+        };
         Ok(Self {
             source,
             object: Some(object),
@@ -43,6 +69,12 @@ impl<'a> PlainObjectTask<'a> {
             dynamic: 0,
             dynamic_text: 0,
             texts: [None, None, None, None],
+            numeric_factor: match source.decomposition.as_ref() {
+                Some(DurableDecompositionPayload::Data(factor)) => {
+                    Some(NumericFactorDecode::new(factor, runtime, path.try_clone())?)
+                }
+                Some(DurableDecompositionPayload::Structural(_)) | None => None,
+            },
             path,
         })
     }
@@ -116,15 +148,53 @@ impl<'a> PlainObjectTask<'a> {
             }
             return Ok((completed, None));
         }
-        Ok((
-            1,
-            Some(Value::Object(
+        if let Some(factor) = &mut self.numeric_factor {
+            let (completed, data) = factor.advance(maximum_work, &self.path)?;
+            if let Some(data) = data {
                 self.object
-                    .take()
-                    .expect("decoded object")
-                    .finish(&self.path)?,
-            )),
-        ))
+                    .as_mut()
+                    .expect("object")
+                    .attach_numeric_factor(data, &self.path)?;
+                self.numeric_factor = None;
+            }
+            return Ok((completed, None));
+        }
+        let object = self
+            .object
+            .take()
+            .expect("decoded object")
+            .finish(&self.path)?;
+        if let Some(expected) = &self.source.decomposition {
+            use crate::builtins::math::linalg::factor::decomposition::{
+                decomposition_persistence_kind, DecompositionPersistenceKind,
+            };
+            let actual = decomposition_persistence_kind(&object)
+                .map_err(|error| ValueCodecError::runtime(&self.path, error))?;
+            let matching = matches!(
+                (expected, actual),
+                (
+                    DurableDecompositionPayload::Data(_),
+                    DecompositionPersistenceKind::Factor(_)
+                ) | (
+                    DurableDecompositionPayload::Structural(
+                        DurableStructuralDecomposition::Diagonal,
+                    ),
+                    DecompositionPersistenceKind::Diagonal,
+                ) | (
+                    DurableDecompositionPayload::Structural(
+                        DurableStructuralDecomposition::Triangular,
+                    ),
+                    DecompositionPersistenceKind::Triangular,
+                )
+            );
+            if !matching {
+                return Err(ValueCodecError::invalid(
+                    &self.path,
+                    "decomposition payload differs from its public recipe",
+                ));
+            }
+        }
+        Ok((1, Some(Value::Object(object))))
     }
 
     pub(super) fn take_children(&mut self) -> TakenValues<'a> {

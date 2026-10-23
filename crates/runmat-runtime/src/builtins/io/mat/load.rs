@@ -302,7 +302,9 @@ async fn evaluate_with_context(
     };
 
     if invocation.path_was_default {
-        if let Ok(override_path) = std::env::var("RUNMAT_LOAD_DEFAULT_PATH") {
+        if let Some(override_path) =
+            crate::builtins::common::env::optional_var("RUNMAT_LOAD_DEFAULT_PATH")?
+        {
             path_value = Value::from(override_path);
         }
     }

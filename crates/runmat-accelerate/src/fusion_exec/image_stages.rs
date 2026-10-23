@@ -150,9 +150,9 @@ enum State {
     Failed,
 }
 
-mod moment_publications;
 mod host_memory;
 mod host_source;
+mod moment_publications;
 mod nd_resources;
 mod observed;
 mod ordered_mean;
@@ -174,6 +174,7 @@ pub(crate) use host_source::HostSingleImageSource;
 #[cfg(feature = "wgpu")]
 pub use original_route::ImageVmOriginalRoute;
 pub(crate) use prepared::PreparedImageStages;
+pub(crate) use prepared::{admit_region_audit, admit_region_tail, RegionTailAdmission};
 pub use vm::{
     ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmSourceFallbackRoute,
     ImageVmStages,

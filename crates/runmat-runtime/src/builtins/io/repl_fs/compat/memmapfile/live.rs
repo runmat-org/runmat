@@ -350,7 +350,7 @@ fn member(step: &ObjectSubscript) -> BuiltinResult<Property> {
     let ObjectIndexSelector::Member(name) = step.selector() else {
         return Err(format_error("memmapfile: invalid property selector"));
     };
-    match name.0.as_str() {
+    match name.as_str() {
         "Filename" => Ok(Property::Filename),
         "Writable" => Ok(Property::Writable),
         "Offset" => Ok(Property::Offset),

@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -54,12 +55,42 @@ pub(super) struct NativeMexLane {
     next_service: Cell<u64>,
     callback_depth: Cell<usize>,
     abandoned: Cell<bool>,
+    default_owner: NativeLaneOwner,
+    session_owners: RefCell<Vec<NativeLaneOwner>>,
+}
+
+/// A host-session identity for service settlement on a shared native lane.
+/// It does not own the lane or authorize another session's module lifecycle.
+#[derive(Clone, Default)]
+pub(super) struct NativeLaneOwner(Arc<AtomicBool>);
+
+impl NativeLaneOwner {
+    pub(super) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    fn is_live(&self) -> bool {
+        !self.0.load(Ordering::Acquire)
+    }
+
+    fn retire(&self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 struct NativeLaneState {
     receiver: RefCell<mpsc::Receiver<NativeCommand>>,
-    modules: RefCell<HashMap<PathBuf, Rc<MexModule>>>,
+    modules: RefCell<HashMap<PathBuf, OwnedNativeModule>>,
     callbacks: async_mpsc::UnboundedSender<BoundaryEnvelope>,
+    command_depth: Cell<usize>,
+    retirement_pending: Cell<bool>,
+    retirement_pruning: Cell<bool>,
+    stop_requested: Cell<bool>,
+}
+
+struct OwnedNativeModule {
+    owner: NativeLaneOwner,
+    module: Rc<MexModule>,
 }
 
 thread_local! {
@@ -67,6 +98,7 @@ thread_local! {
 }
 
 struct OriginServiceEntry {
+    owner: NativeLaneOwner,
     services: Rc<dyn OriginMexBoundaryServices>,
     invocation_active: bool,
     native_lease_active: bool,
@@ -76,11 +108,13 @@ struct OriginServiceEntry {
 
 enum NativeCommand {
     Load {
+        owner: NativeLaneOwner,
         path: PathBuf,
         compatible_isolated: bool,
         response: oneshot::Sender<Result<NativeModuleMetadata, NativeModuleLoadError>>,
     },
     Invoke {
+        owner: NativeLaneOwner,
         path: PathBuf,
         inputs: Vec<MxArray>,
         requested_outputs: usize,
@@ -88,14 +122,19 @@ enum NativeCommand {
         response: oneshot::Sender<Result<MexNativeInvocation, MexLoadError>>,
     },
     Clear {
+        owner: NativeLaneOwner,
         path: PathBuf,
         service_id: u64,
         response: oneshot::Sender<Result<bool, MexLoadError>>,
     },
     ShutdownModule {
+        owner: NativeLaneOwner,
         path: PathBuf,
         service_id: u64,
         response: oneshot::Sender<Result<MexModuleRetirement, MexLoadError>>,
+    },
+    RetireOwner {
+        owner: NativeLaneOwner,
     },
     Shutdown,
 }
@@ -177,6 +216,7 @@ pub(super) struct NativeAsyncResult {
 struct OriginServiceLease {
     callbacks: async_mpsc::UnboundedSender<BoundaryEnvelope>,
     service_id: u64,
+    owner: NativeLaneOwner,
 }
 
 impl Drop for OriginServiceLease {
@@ -319,12 +359,68 @@ impl MexAsyncResult for NativeAsyncResult {
 }
 
 impl NativeMexLane {
-    pub(super) fn in_callback(&self) -> bool {
-        self.callback_depth.get() != 0
+    /// Only runtime sessions register here. The direct lane API's default
+    /// owner remains outside this lease set and retains its old Drop behavior.
+    pub(super) fn register_session_owner(
+        &self,
+        owner: &NativeLaneOwner,
+    ) -> Result<(), MexLoadError> {
+        if self.abandoned.get() || !owner.is_live() {
+            return Err(MexLoadError::NativeLane(
+                "the MEX native lane has retired".into(),
+            ));
+        }
+        let mut owners = self.session_owners.borrow_mut();
+        if !owners.iter().any(|registered| registered.same(owner)) {
+            owners.push(owner.clone());
+        }
+        Ok(())
     }
 
-    pub(super) fn has_pending_services(&self) -> bool {
-        !self.services.borrow().is_empty()
+    pub(super) fn retire_session_owner(&self, owner: &NativeLaneOwner) {
+        let mut owners = self.session_owners.borrow_mut();
+        let Some(index) = owners.iter().position(|registered| registered.same(owner)) else {
+            return;
+        };
+        owner.retire();
+        owners.swap_remove(index);
+        let last = owners.is_empty();
+        drop(owners);
+        if self
+            .commands
+            .send(NativeCommand::RetireOwner {
+                owner: owner.clone(),
+            })
+            .is_err()
+        {
+            self.force_abandon();
+            return;
+        }
+        if last {
+            self.force_abandon();
+        }
+    }
+
+    pub(super) fn has_pending_services_for(&self, owner: &NativeLaneOwner) -> bool {
+        self.services
+            .borrow()
+            .values()
+            .any(|entry| entry.owner.same(owner))
+    }
+
+    pub(super) fn in_callback_for(&self, owner: &NativeLaneOwner) -> bool {
+        self.callback_tasks.active_for(owner)
+    }
+
+    /// Revoke only this session's callbacks. A testing child may retire while
+    /// its parent MEX is still waiting for the test result on this same lane.
+    pub(super) fn force_abandon_for(&self, owner: &NativeLaneOwner) {
+        self.callback_tasks.cancel_for(owner);
+        self.services
+            .borrow_mut()
+            .retain(|_, entry| !entry.owner.same(owner));
+        // Queued envelopes for the retired owner are rejected by the ordinary
+        // missing-service path; the shared channel and other owners stay live.
     }
 
     /// Explicit host forced-disposal boundary. It must run even if an origin
@@ -333,6 +429,10 @@ impl NativeMexLane {
     pub(super) fn force_abandon(&self) {
         if self.abandoned.replace(true) {
             return;
+        }
+        self.default_owner.retire();
+        for owner in std::mem::take(&mut *self.session_owners.borrow_mut()) {
+            owner.retire();
         }
         self.callback_closer.close_channel();
         let pending_services = self.services.borrow().len();
@@ -375,18 +475,40 @@ impl NativeMexLane {
             next_service: Cell::new(1),
             callback_depth: Cell::new(0),
             abandoned: Cell::new(false),
+            default_owner: NativeLaneOwner::default(),
+            session_owners: RefCell::new(Vec::new()),
         })
     }
 
+    #[cfg(test)]
     pub(super) async fn load(
         &self,
         path: &Path,
     ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
-        self.load_with_policy(path, false).await
+        self.load_with_policy_for(&self.default_owner, path, false)
+            .await
     }
 
     pub(super) async fn load_with_policy(
         &self,
+        path: &Path,
+        compatible_isolated: bool,
+    ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
+        self.load_with_policy_for(&self.default_owner, path, compatible_isolated)
+            .await
+    }
+
+    pub(super) async fn load_for(
+        &self,
+        owner: &NativeLaneOwner,
+        path: &Path,
+    ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
+        self.load_with_policy_for(owner, path, false).await
+    }
+
+    async fn load_with_policy_for(
+        &self,
+        owner: &NativeLaneOwner,
         path: &Path,
         compatible_isolated: bool,
     ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
@@ -399,17 +521,24 @@ impl NativeMexLane {
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Load {
+                owner: owner.clone(),
                 path: path.to_path_buf(),
                 compatible_isolated,
                 response,
             })
-            .map_err(|_| NativeModuleLoadError::Failed {
-                message: "the MEX native lane stopped".into(),
-                dependency: None,
+            .map_err(|_| {
+                self.force_abandon();
+                NativeModuleLoadError::Failed {
+                    message: "the MEX native lane stopped".into(),
+                    dependency: None,
+                }
             })?;
-        receiver.await.map_err(|_| NativeModuleLoadError::Failed {
-            message: "the MEX native lane stopped while loading a module".into(),
-            dependency: None,
+        receiver.await.map_err(|_| {
+            self.force_abandon();
+            NativeModuleLoadError::Failed {
+                message: "the MEX native lane stopped while loading a module".into(),
+                dependency: None,
+            }
         })?
     }
 
@@ -420,22 +549,44 @@ impl NativeMexLane {
         requested_outputs: usize,
         services: Rc<dyn OriginMexBoundaryServices>,
     ) -> Result<MexNativeInvocation, MexLoadError> {
+        self.invoke_for(
+            &self.default_owner,
+            path,
+            inputs,
+            requested_outputs,
+            services,
+        )
+        .await
+    }
+
+    pub(super) async fn invoke_for(
+        &self,
+        owner: &NativeLaneOwner,
+        path: &Path,
+        inputs: Vec<MxArray>,
+        requested_outputs: usize,
+        services: Rc<dyn OriginMexBoundaryServices>,
+    ) -> Result<MexNativeInvocation, MexLoadError> {
         if self.abandoned.get() {
             return Err(MexLoadError::NativeLane(
                 "the originating MEX host was disposed".into(),
             ));
         }
-        let service_id = self.register_services(services)?;
+        let service_id = self.register_services_for(owner, services)?;
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Invoke {
+                owner: owner.clone(),
                 path: path.to_path_buf(),
                 inputs,
                 requested_outputs,
                 service_id,
                 response,
             })
-            .map_err(|_| MexLoadError::NativeLane("the MEX native lane stopped".into()))?;
+            .map_err(|_| {
+                self.force_abandon();
+                MexLoadError::NativeLane("the MEX native lane stopped".into())
+            })?;
 
         self.wait_with_callbacks(receiver, "invocation").await
     }
@@ -445,20 +596,33 @@ impl NativeMexLane {
         path: &Path,
         services: Rc<dyn OriginMexBoundaryServices>,
     ) -> Result<bool, MexLoadError> {
+        self.clear_for(&self.default_owner, path, services).await
+    }
+
+    pub(super) async fn clear_for(
+        &self,
+        owner: &NativeLaneOwner,
+        path: &Path,
+        services: Rc<dyn OriginMexBoundaryServices>,
+    ) -> Result<bool, MexLoadError> {
         if self.abandoned.get() {
             return Err(MexLoadError::NativeLane(
                 "the originating MEX host was disposed".into(),
             ));
         }
-        let service_id = self.register_services(services)?;
+        let service_id = self.register_services_for(owner, services)?;
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Clear {
+                owner: owner.clone(),
                 path: path.to_path_buf(),
                 service_id,
                 response,
             })
-            .map_err(|_| MexLoadError::NativeLane("the MEX native lane stopped".into()))?;
+            .map_err(|_| {
+                self.force_abandon();
+                MexLoadError::NativeLane("the MEX native lane stopped".into())
+            })?;
         self.wait_with_callbacks(receiver, "clear").await
     }
 
@@ -467,25 +631,48 @@ impl NativeMexLane {
         path: &Path,
         services: Rc<dyn OriginMexBoundaryServices>,
     ) -> Result<MexModuleRetirement, MexLoadError> {
+        self.shutdown_module_for(&self.default_owner, path, services)
+            .await
+    }
+
+    pub(super) async fn shutdown_module_for(
+        &self,
+        owner: &NativeLaneOwner,
+        path: &Path,
+        services: Rc<dyn OriginMexBoundaryServices>,
+    ) -> Result<MexModuleRetirement, MexLoadError> {
         if self.abandoned.get() {
             return Err(MexLoadError::NativeLane(
                 "the originating MEX host was disposed".into(),
             ));
         }
-        let service_id = self.register_services(services)?;
+        let service_id = self.register_services_for(owner, services)?;
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::ShutdownModule {
+                owner: owner.clone(),
                 path: path.to_path_buf(),
                 service_id,
                 response,
             })
-            .map_err(|_| MexLoadError::NativeLane("the MEX native lane stopped".into()))?;
+            .map_err(|_| {
+                self.force_abandon();
+                MexLoadError::NativeLane("the MEX native lane stopped".into())
+            })?;
         self.wait_with_callbacks(receiver, "shutdown").await
     }
 
+    #[cfg(test)]
     fn register_services(
         &self,
+        services: Rc<dyn OriginMexBoundaryServices>,
+    ) -> Result<u64, MexLoadError> {
+        self.register_services_for(&self.default_owner, services)
+    }
+
+    fn register_services_for(
+        &self,
+        owner: &NativeLaneOwner,
         services: Rc<dyn OriginMexBoundaryServices>,
     ) -> Result<u64, MexLoadError> {
         let id = self.next_service.get();
@@ -496,6 +683,7 @@ impl NativeMexLane {
         self.services.borrow_mut().insert(
             id,
             OriginServiceEntry {
+                owner: owner.clone(),
                 services,
                 invocation_active: true,
                 native_lease_active: true,
@@ -543,6 +731,7 @@ impl NativeMexLane {
             match event {
                 WaitEvent::Response(response) => {
                     let response = response.map_err(|_| {
+                        self.force_abandon();
                         MexLoadError::NativeLane(format!(
                             "the MEX native lane stopped during {operation}"
                         ))
@@ -553,6 +742,7 @@ impl NativeMexLane {
                 WaitEvent::Callback(envelope) => {
                     let Some(envelope) = envelope else {
                         return result.await.map_err(|_| {
+                            self.force_abandon();
                             MexLoadError::NativeLane(format!(
                                 "the MEX native lane stopped during {operation}"
                             ))
@@ -604,13 +794,15 @@ impl NativeMexLane {
     /// This remains necessary when the foreground future was cancelled after
     /// command submission. Calling it from within a callback would wait on
     /// the callback currently on the stack, so that phase is rejected.
-    pub(super) async fn settle_pending(&self) -> Result<(), MexLoadError> {
-        if self.callback_depth.get() != 0 {
+    pub(super) async fn settle_pending_for(
+        &self,
+        owner: &NativeLaneOwner,
+    ) -> Result<(), MexLoadError> {
+        if self.in_callback_for(owner) {
             return Err(MexLoadError::ReentrantModule);
         }
         loop {
-            let pending = !self.services.borrow().is_empty();
-            if !pending {
+            if !self.has_pending_services_for(owner) {
                 break;
             }
             if !self.service_background_once().await {
@@ -625,9 +817,12 @@ impl NativeMexLane {
     /// Reach native command completion before module unload. A completed
     /// async-result handle may intentionally remain in the module's request
     /// table until mexAtExit or unload drops it, so it is not a pre-unload
-    /// quiescence condition. `settle_pending` remains the post-unload gate.
-    pub(super) async fn settle_commands(&self) -> Result<(), MexLoadError> {
-        if self.callback_depth.get() != 0 {
+    /// quiescence condition. `settle_pending_for` remains the post-unload gate.
+    pub(super) async fn settle_commands_for(
+        &self,
+        owner: &NativeLaneOwner,
+    ) -> Result<(), MexLoadError> {
+        if self.in_callback_for(owner) {
             return Err(MexLoadError::ReentrantModule);
         }
         loop {
@@ -635,7 +830,7 @@ impl NativeMexLane {
                 .services
                 .borrow()
                 .values()
-                .any(|entry| entry.invocation_active);
+                .any(|entry| entry.invocation_active && entry.owner.same(owner));
             if !pending_command {
                 return Ok(());
             }
@@ -667,13 +862,16 @@ impl NativeMexLane {
                     reject_request(*request, "the originating MEX host was disposed");
                     return;
                 }
-                let services = self
+                let selected = self
                     .services
                     .borrow()
                     .get(&service_id)
-                    .map(|entry| Rc::clone(&entry.services));
-                if let Some(services) = services {
-                    if self.callback_tasks.admit(service_id, *request, services) {
+                    .map(|entry| (entry.owner.clone(), Rc::clone(&entry.services)));
+                if let Some((owner, services)) = selected {
+                    if self
+                        .callback_tasks
+                        .admit(&owner, service_id, *request, services)
+                    {
                         if let Some(entry) = self.services.borrow_mut().get_mut(&service_id) {
                             entry.active_callbacks += 1;
                         }
@@ -747,6 +945,10 @@ fn lane_main(
         receiver: RefCell::new(receiver),
         modules: RefCell::new(HashMap::new()),
         callbacks,
+        command_depth: Cell::new(0),
+        retirement_pending: Cell::new(false),
+        retirement_pruning: Cell::new(false),
+        stop_requested: Cell::new(false),
     });
     CURRENT_NATIVE_LANE.with(|current| {
         assert!(current.borrow_mut().replace(Rc::clone(&lane)).is_none());
@@ -764,23 +966,44 @@ fn process_next_command(lane: &Rc<NativeLaneState>, wait: bool) -> bool {
         lane.receiver.borrow_mut().try_recv().ok()
     };
     let Some(command) = command else {
-        return !wait;
+        return !wait && !lane.stop_requested.get();
     };
     process_command(lane, command)
 }
 
 fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
+    lane.command_depth.set(
+        lane.command_depth
+            .get()
+            .checked_add(1)
+            .expect("MEX native command nesting exhausted"),
+    );
+    let keep_running = process_command_inner(lane, command);
+    let remaining = lane.command_depth.get() - 1;
+    lane.command_depth.set(remaining);
+    if remaining == 0 && lane.retirement_pending.get() && !lane.retirement_pruning.replace(true) {
+        while lane.retirement_pending.replace(false) {
+            prune_retired_modules(lane);
+        }
+        lane.retirement_pruning.set(false);
+    }
+    keep_running && !lane.stop_requested.get()
+}
+
+fn process_command_inner(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
     match command {
         NativeCommand::Load {
+            owner,
             path,
             compatible_isolated,
             response,
         } => {
-            let result =
-                load_module(lane, &path, compatible_isolated).map(|module| NativeModuleMetadata {
+            let result = load_module(lane, &owner, &path, compatible_isolated).map(|module| {
+                NativeModuleMetadata {
                     mode: module.api_mode(),
                     interface: module.boundary_interface(),
-                });
+                }
+            });
             let _ = response.send(result.map_err(|error| {
                 if error.requires_isolated_host() {
                     NativeModuleLoadError::IsolatedHostRequired
@@ -793,6 +1016,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             }));
         }
         NativeCommand::Invoke {
+            owner,
             path,
             inputs,
             requested_outputs,
@@ -802,8 +1026,9 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let origin = Arc::new(OriginServiceLease {
                 callbacks: lane.callbacks.clone(),
                 service_id,
+                owner: owner.clone(),
             });
-            let result = load_module(lane, &path, false).and_then(|module| {
+            let result = load_module(lane, &owner, &path, false).and_then(|module| {
                 module.invoke_native(
                     inputs,
                     requested_outputs,
@@ -820,6 +1045,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let _ = response.send(result);
         }
         NativeCommand::Clear {
+            owner,
             path,
             service_id,
             response,
@@ -827,18 +1053,22 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let origin = Arc::new(OriginServiceLease {
                 callbacks: lane.callbacks.clone(),
                 service_id,
+                owner: owner.clone(),
             });
-            let module = lane.modules.borrow().get(&path).cloned();
-            let result = if let Some(module) = module {
-                let cleared = module.clear_with_boundary_services(Arc::new(NativeBoundaryProxy {
-                    origin: Arc::clone(&origin),
-                }));
-                if cleared.as_ref().is_ok_and(|cleared| *cleared) {
-                    lane.modules.borrow_mut().remove(&path);
+            let module = owned_module(lane, &owner, &path);
+            let result = match module {
+                Ok(Some(module)) => {
+                    let cleared =
+                        module.clear_with_boundary_services(Arc::new(NativeBoundaryProxy {
+                            origin: Arc::clone(&origin),
+                        }));
+                    if cleared.as_ref().is_ok_and(|cleared| *cleared) {
+                        lane.modules.borrow_mut().remove(&path);
+                    }
+                    cleared
                 }
-                cleared
-            } else {
-                Ok(true)
+                Ok(None) => Ok(true),
+                Err(error) => Err(error),
             };
             drop(origin);
             let _ = lane
@@ -847,6 +1077,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let _ = response.send(result);
         }
         NativeCommand::ShutdownModule {
+            owner,
             path,
             service_id,
             response,
@@ -854,47 +1085,114 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let origin = Arc::new(OriginServiceLease {
                 callbacks: lane.callbacks.clone(),
                 service_id,
+                owner: owner.clone(),
             });
             let services = Arc::new(NativeBoundaryProxy {
                 origin: Arc::clone(&origin),
             });
-            let module = lane.modules.borrow().get(&path).cloned();
-            let outcome = module
-                .as_ref()
-                .map_or(MexModuleRetirement::Retired(Ok(())), |module| {
-                    module.shutdown_with_boundary_services_retirement(services)
-                });
-            if matches!(&outcome, MexModuleRetirement::Retired(_)) {
+            let outcome = owned_module(lane, &owner, &path).map(|module| {
+                module
+                    .as_ref()
+                    .map_or(MexModuleRetirement::Retired(Ok(())), |module| {
+                        module.shutdown_with_boundary_services_retirement(services)
+                    })
+            });
+            if matches!(&outcome, Ok(MexModuleRetirement::Retired(_))) {
                 lane.modules.borrow_mut().remove(&path);
             }
             drop(origin);
             let _ = lane
                 .callbacks
                 .unbounded_send(BoundaryEnvelope::InvocationFinished { service_id });
-            let _ = response.send(Ok(outcome));
+            let _ = response.send(outcome);
         }
-        NativeCommand::Shutdown => return false,
+        NativeCommand::RetireOwner { owner } => {
+            debug_assert!(!owner.is_live());
+            lane.retirement_pending.set(true);
+        }
+        NativeCommand::Shutdown => {
+            lane.stop_requested.set(true);
+            return false;
+        }
     }
     true
 }
 
+/// Forced disposal has no acknowledged mexAtExit. Drop only after the entire
+/// native reentry stack unwinds, never while a retired module's code is on it.
+/// Remove entries under the map borrow, then run module unloads outside it:
+/// unload hooks may synchronously reenter the same physical lane.
+fn prune_retired_modules(lane: &NativeLaneState) {
+    let paths = lane
+        .modules
+        .borrow()
+        .iter()
+        .filter(|(_, entry)| !entry.owner.is_live())
+        .map(|(path, _)| path.clone())
+        .collect::<Vec<_>>();
+    let retired = {
+        let mut modules = lane.modules.borrow_mut();
+        paths
+            .into_iter()
+            .filter_map(|path| modules.remove(&path))
+            .collect::<Vec<_>>()
+    };
+    drop(retired);
+}
+
 fn load_module(
     lane: &NativeLaneState,
+    owner: &NativeLaneOwner,
     path: &Path,
     compatible_isolated: bool,
 ) -> Result<Rc<MexModule>, MexLoadError> {
-    if let Some(module) = lane.modules.borrow().get(path) {
-        return Ok(Rc::clone(module));
+    if !owner.is_live() {
+        return Err(MexLoadError::NativeLane(
+            "the MEX session has retired".into(),
+        ));
+    }
+    if let Some(module) = owned_module(lane, owner, path)? {
+        return Ok(module);
     }
     let module = Rc::new(if compatible_isolated {
         MexModule::load_compatible_isolated(path)?
     } else {
         MexModule::load(path)?
     });
-    lane.modules
-        .borrow_mut()
-        .insert(path.to_path_buf(), Rc::clone(&module));
+    if !owner.is_live() {
+        return Err(MexLoadError::NativeLane(
+            "the MEX session retired while loading a module".into(),
+        ));
+    }
+    lane.modules.borrow_mut().insert(
+        path.to_path_buf(),
+        OwnedNativeModule {
+            owner: owner.clone(),
+            module: Rc::clone(&module),
+        },
+    );
     Ok(module)
+}
+
+fn owned_module(
+    lane: &NativeLaneState,
+    owner: &NativeLaneOwner,
+    path: &Path,
+) -> Result<Option<Rc<MexModule>>, MexLoadError> {
+    if !owner.is_live() {
+        return Err(MexLoadError::NativeLane(
+            "the MEX session has retired".into(),
+        ));
+    }
+    lane.modules.borrow().get(path).map_or(Ok(None), |entry| {
+        if entry.owner.same(owner) {
+            Ok(Some(Rc::clone(&entry.module)))
+        } else {
+            Err(MexLoadError::InProcessOwnership {
+                path: path.display().to_string(),
+            })
+        }
+    })
 }
 
 struct NativeBoundaryProxy {
@@ -906,6 +1204,9 @@ impl NativeBoundaryProxy {
         &self,
         build: impl FnOnce(mpsc::SyncSender<Result<T, MexDiagnostic>>) -> BoundaryRequest,
     ) -> Result<T, MexDiagnostic> {
+        if !self.origin.owner.is_live() {
+            return Err(lane_diagnostic("the originating MEX session has retired"));
+        }
         let (response, receiver) = mpsc::sync_channel(1);
         self.origin
             .callbacks
@@ -927,6 +1228,9 @@ impl NativeBoundaryProxy {
                     let _ = process_next_command(&lane, false);
                 }
             });
+            if !self.origin.owner.is_live() {
+                return Err(lane_diagnostic("the originating MEX session has retired"));
+            }
         }
     }
 }
@@ -1093,6 +1397,7 @@ mod tests {
         Arc::new(NativeAsyncResult::pending(Arc::new(OriginServiceLease {
             callbacks,
             service_id: 1,
+            owner: NativeLaneOwner::default(),
         })))
     }
 
@@ -1139,6 +1444,8 @@ mod tests {
             next_service: Cell::new(1),
             callback_depth: Cell::new(0),
             abandoned: Cell::new(false),
+            default_owner: NativeLaneOwner::default(),
+            session_owners: RefCell::new(Vec::new()),
         };
         let (release, released) = oneshot::channel();
         let service_id = lane
@@ -1182,12 +1489,91 @@ mod tests {
     }
 
     #[test]
+    fn retiring_child_owner_does_not_wait_on_or_revoke_parent_service() {
+        let (commands, worker_commands) = mpsc::channel();
+        let (sender, callbacks) = async_mpsc::unbounded();
+        let lane = NativeMexLane {
+            commands,
+            callback_closer: sender,
+            callbacks: CallbackInbox::new(callbacks),
+            services: RefCell::new(HashMap::new()),
+            callback_tasks: CallbackTasks::new(),
+            next_service: Cell::new(1),
+            callback_depth: Cell::new(0),
+            abandoned: Cell::new(false),
+            default_owner: NativeLaneOwner::default(),
+            session_owners: RefCell::new(Vec::new()),
+        };
+        let parent = NativeLaneOwner::default();
+        let child = NativeLaneOwner::default();
+        lane.register_session_owner(&parent)
+            .expect("parent owns lane");
+        lane.register_session_owner(&child)
+            .expect("child owns lane");
+        lane.register_session_owner(&child)
+            .expect("owner registration is idempotent");
+        lane.register_services_for(&parent, Rc::new(NoopServices))
+            .expect("register parent callback");
+        lane.register_services_for(&child, Rc::new(NoopServices))
+            .expect("register child callback");
+        lane.force_abandon_for(&child);
+        lane.retire_session_owner(&child);
+        lane.retire_session_owner(&child);
+        assert!(lane.has_pending_services_for(&parent));
+        assert!(!lane.has_pending_services_for(&child));
+        assert!(!lane.abandoned.get());
+        futures::executor::block_on(lane.settle_commands_for(&child))
+            .expect("child may retire while parent command remains live");
+        assert!(matches!(
+            worker_commands.try_recv(),
+            Ok(NativeCommand::RetireOwner { owner }) if owner.same(&child)
+        ));
+        assert!(matches!(
+            worker_commands.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        lane.force_abandon_for(&parent);
+        lane.retire_session_owner(&parent);
+        assert!(lane.abandoned.get());
+        assert!(matches!(
+            worker_commands.try_recv(),
+            Ok(NativeCommand::RetireOwner { owner }) if owner.same(&parent)
+        ));
+        assert!(matches!(
+            worker_commands.try_recv(),
+            Ok(NativeCommand::Shutdown)
+        ));
+    }
+
+    #[test]
+    fn nested_shutdown_remains_visible_after_its_immediate_result_is_ignored() {
+        let (_commands, receiver) = mpsc::channel();
+        let (callbacks, _callback_receiver) = async_mpsc::unbounded();
+        let lane = Rc::new(NativeLaneState {
+            receiver: RefCell::new(receiver),
+            modules: RefCell::new(HashMap::new()),
+            callbacks,
+            command_depth: Cell::new(1),
+            retirement_pending: Cell::new(false),
+            retirement_pruning: Cell::new(false),
+            stop_requested: Cell::new(false),
+        });
+        assert!(!process_command(&lane, NativeCommand::Shutdown));
+        assert_eq!(lane.command_depth.get(), 1);
+        assert!(lane.stop_requested.get());
+        // NativeBoundaryProxy intentionally ignores the nested poll result;
+        // the outer worker still observes the latched terminal state.
+        assert!(!process_next_command(&lane, false));
+    }
+
+    #[test]
     fn forced_origin_retirement_rejects_late_native_callback() {
         let (callbacks, receiver) = async_mpsc::unbounded();
         let proxy = NativeBoundaryProxy {
             origin: Arc::new(OriginServiceLease {
                 callbacks,
                 service_id: 1,
+                owner: NativeLaneOwner::default(),
             }),
         };
         drop(receiver);
@@ -1211,6 +1597,8 @@ mod tests {
             next_service: Cell::new(1),
             callback_depth: Cell::new(0),
             abandoned: Cell::new(false),
+            default_owner: NativeLaneOwner::default(),
+            session_owners: RefCell::new(Vec::new()),
         };
         let service_id = lane
             .register_services(Rc::new(NoopServices))
@@ -1258,6 +1646,8 @@ mod tests {
             next_service: Cell::new(1),
             callback_depth: Cell::new(0),
             abandoned: Cell::new(false),
+            default_owner: NativeLaneOwner::default(),
+            session_owners: RefCell::new(Vec::new()),
         };
         let mut pending = Box::pin(lane.callbacks.next());
         let waker = futures::task::noop_waker();
@@ -1865,6 +2255,11 @@ public:
         let lane = Rc::new(NativeMexLane::spawn().expect("start reentrant native lane"));
         let metadata = futures::executor::block_on(lane.load(&outer.module))
             .expect("load outer reentrant fixture");
+        let foreign_owner = NativeLaneOwner::default();
+        assert!(matches!(
+            futures::executor::block_on(lane.load_for(&foreign_owner, &outer.module)),
+            Err(NativeModuleLoadError::IsolatedHostRequired)
+        ));
         let values = runmat_mex::MxValueContext::new();
         let input = values
             .encode(
@@ -1905,6 +2300,30 @@ public:
             futures::executor::block_on(lane.shutdown_module(&outer.module, Rc::new(NoopServices)))
                 .expect("shutdown after outer invocation");
         assert!(matches!(retirement, MexModuleRetirement::Retired(Ok(()))));
+
+        // The original direct-lane module has retired. A child-owned reload
+        // must leave no path-only cache entry after forced child retirement;
+        // the still-live parent owner can then load the same physical module.
+        let parent_owner = NativeLaneOwner::default();
+        let child_owner = NativeLaneOwner::default();
+        lane.register_session_owner(&parent_owner)
+            .expect("parent session owns lane");
+        lane.register_session_owner(&child_owner)
+            .expect("child session owns lane");
+        futures::executor::block_on(lane.load_for(&child_owner, &outer.module))
+            .expect("child owns reloaded module");
+        lane.force_abandon_for(&child_owner);
+        lane.retire_session_owner(&child_owner);
+        futures::executor::block_on(lane.load_for(&parent_owner, &outer.module))
+            .expect("retired child module releases path ownership");
+        let retirement = futures::executor::block_on(lane.shutdown_module_for(
+            &parent_owner,
+            &outer.module,
+            Rc::new(NoopServices),
+        ))
+        .expect("parent module shutdown");
+        assert!(matches!(retirement, MexModuleRetirement::Retired(Ok(()))));
+        lane.retire_session_owner(&parent_owner);
     }
 
     #[test]

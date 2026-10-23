@@ -79,7 +79,9 @@ fn mixed_cell_and_string_paths_follow_semantic_order_in_every_dimension() {
 
 #[test]
 fn nd_character_components_reject_instead_of_losing_pages() {
-    let value = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    let value = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+    );
     assert!(run(vec![value.clone()]).is_err());
     assert!(run(vec![Value::Cell(
         CellArray::new(vec![value], 1, 1).unwrap()
@@ -89,7 +91,9 @@ fn nd_character_components_reject_instead_of_losing_pages() {
 
 #[test]
 fn trailing_singleton_character_components_are_rows() {
-    let row = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+    let row = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+    );
     assert_eq!(
         run(vec![row]).unwrap(),
         Value::CharArray(CharArray::new_row("ab"))

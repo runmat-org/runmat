@@ -1,14 +1,12 @@
 use runmat_builtins::BuiltinBindingIdentity;
 use runmat_value::Value;
-use std::{future::Future, pin::Pin};
 
 use crate::context::host_allocation::HostAllocationError;
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
 
-pub type RuntimeBuiltinFuture = Pin<
-    Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'static>,
->;
+pub type RuntimeBuiltinFuture =
+    crate::execution::RuntimeContinuationFuture<'static, crate::execution::RootedValueSequence>;
 /// Borrowed embedding ingress or an already-rooted language invocation.
 /// The latter transfers its original segmented owners into the continuation.
 pub enum BuiltinInvocationArguments<'a> {
@@ -136,6 +134,9 @@ pub struct RuntimeBuiltinBinding {
     pub identity: BuiltinBindingIdentity,
     pub implementation: RuntimeBuiltinImplementation,
     pub continuation_layout: Option<RuntimeBuiltinContinuationLayout>,
+    /// Declaration-owned physical association, carried by the selected
+    /// implementation rather than resolved from process-wide evidence.
+    pub provenance: Option<&'static runmat_builtins::BuiltinImplementationProvenance>,
 }
 
 impl RuntimeBuiltinBinding {
@@ -147,6 +148,7 @@ impl RuntimeBuiltinBinding {
             identity,
             implementation,
             continuation_layout: None,
+            provenance: None,
         }
     }
 
@@ -156,6 +158,25 @@ impl RuntimeBuiltinBinding {
     ) -> Self {
         self.continuation_layout = Some(layout);
         self
+    }
+
+    pub const fn with_provenance(
+        mut self,
+        provenance: &'static runmat_builtins::BuiltinImplementationProvenance,
+    ) -> Self {
+        self.provenance = Some(provenance);
+        self
+    }
+
+    pub fn physical_provenance(
+        self,
+    ) -> Option<&'static runmat_builtins::BuiltinImplementationProvenance> {
+        self.provenance.filter(|provenance| {
+            provenance.authority
+                == runmat_builtins::BuiltinImplementationAuthority::CanonicalBinding
+                && provenance.name == self.identity.builtin.name
+                && provenance.binding_variant == Some(self.identity.variant)
+        })
     }
 }
 

@@ -53,7 +53,8 @@ fn rejects_too_many_inputs_before_decoding() {
 fn rejects_invalid_scalar_text_shapes() {
     let string_array =
         StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("string array");
-    let character = CharArray::new(vec!['a', 'b'], 2, 1).expect("character column");
+    let character =
+        CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1).expect("character column");
     for value in [
         Value::StringArray(string_array),
         Value::CharArray(character),
@@ -91,8 +92,9 @@ fn accepts_trailing_singleton_text_and_numeric_roots() {
     let directory = tempdir().unwrap();
     let text = directory.path().to_string_lossy().into_owned();
     let chars: Vec<char> = text.chars().collect();
-    let shape = vec![1, chars.len(), 1];
-    let character = CharArray::new_with_shape(chars.clone(), shape.clone()).unwrap();
+    let shape = vec![1, text.encode_utf16().count(), 1];
+    let character =
+        CharArray::from_unicode_scalars_with_shape(chars.clone(), shape.clone()).unwrap();
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     let numeric = Tensor::new(
         chars.into_iter().map(|c| u32::from(c) as f64).collect(),

@@ -1,20 +1,24 @@
 //! Linear algebra operations builtins.
 
-pub(crate) mod cross;
 pub(crate) mod callable_linear_operator;
+pub(in crate::builtins::math::linalg) mod complex_division;
+pub(crate) mod cross;
 pub(crate) mod ctranspose;
+pub(crate) mod dense_evd;
+pub(crate) mod dense_factor;
 pub(crate) mod dot;
+pub(crate) mod iterative_preconditioner;
 /// Borrowed typed dense/CSC operator shared by host iterative solvers.
 pub mod linear_operator;
 pub(crate) mod matrix_arithmetic;
 pub(crate) mod pagemtimes;
 pub(crate) mod pagetranspose;
+pub(crate) mod sparse_factor;
 /// Borrowed typed CSC operator boundary shared by sparse solvers and providers.
 pub mod sparse_operator;
-pub(crate) mod sparse_factor;
-pub(crate) mod triangular_operator;
 pub(crate) mod trace;
 pub(crate) mod transpose;
+pub(crate) mod triangular_operator;
 
 pub use cross::cross_host_real_for_provider;
 pub use dot::dot_host_complex_for_provider;

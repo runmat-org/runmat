@@ -31,7 +31,7 @@ pub const MUST_BE_NONSPARSE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogE
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::InspectHandles,
     },

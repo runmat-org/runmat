@@ -54,9 +54,9 @@ impl CallbackFailure {
     pub(super) fn message(&self) -> Cow<'_, str> {
         match self {
             Self::Runtime(error) => Cow::Borrowed(error.message()),
-            Self::UndefinedExternal { identity } => Cow::Owned(format!(
-                "Undefined function for callable identity {identity:?}"
-            )),
+            Self::UndefinedExternal { identity } => {
+                Cow::Owned(crate::call::identity::undefined_callable_message(identity))
+            }
             Self::SemanticUnavailable {
                 function_name,
                 function,
@@ -78,9 +78,9 @@ impl CallbackFailure {
                     error::function_with_source(error)
                 }
             }
-            Self::UndefinedExternal { identity } => error::undefined(format!(
-                "Undefined function for callable identity {identity:?}"
-            )),
+            Self::UndefinedExternal { identity } => {
+                error::undefined(crate::call::identity::undefined_callable_message(&identity))
+            }
             Self::SemanticUnavailable {
                 function_name,
                 function,

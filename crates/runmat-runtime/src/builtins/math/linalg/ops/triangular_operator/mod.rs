@@ -5,15 +5,25 @@
 //! second matrix. The caller must retain/root its source Value throughout the
 //! borrow and admit its output scratch before any source effect.
 
+mod cooperative;
 mod product;
+pub(in crate::builtins::math::linalg) use cooperative::{
+    substitute_indexed, BorrowedTriangleGeometry, TriangularSolvePolicy,
+};
 mod scalar;
 
-use self::scalar::TriangularScalar;
+pub(in crate::builtins::math::linalg) use self::scalar::TriangularScalar;
+#[cfg(test)]
 use super::linear_operator::LinearOperator;
 use super::sparse_operator::SparseOperatorError;
-use crate::context::host_allocation::{HostAllocationError, HostAllocationReceipt};
+use crate::context::host_allocation::HostAllocationError;
+#[cfg(test)]
+use crate::context::host_allocation::HostAllocationReceipt;
+#[cfg(test)]
 use crate::context::RuntimeContext;
-use runmat_value::{ComplexElement, Value};
+use runmat_value::ComplexElement;
+#[cfg(test)]
+use runmat_value::Value;
 use std::error::Error;
 use std::fmt;
 
@@ -34,6 +44,7 @@ pub enum Diagonal {
 pub enum TriangularOperatorError {
     Operator(SparseOperatorError),
     Admission(HostAllocationError),
+    Execution(crate::execution::ExecutionServiceError),
     DimensionMismatch,
     NonTriangular {
         row: usize,
@@ -73,6 +84,7 @@ impl fmt::Display for TriangularOperatorError {
                 write!(formatter, "coefficient operator admission failed: {error}")
             }
             Self::Admission(error) => write!(formatter, "host admission failed: {error}"),
+            Self::Execution(error) => write!(formatter, "triangular execution failed: {error}"),
             Self::DimensionMismatch => formatter.write_str("matrix and vector dimensions differ"),
             Self::NonTriangular { row, col } => write!(
                 formatter,
@@ -106,6 +118,7 @@ impl fmt::Display for TriangularOperatorError {
 impl Error for TriangularOperatorError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Execution(error) => Some(error),
             Self::Operator(SparseOperatorError::Admission(error)) | Self::Admission(error) => {
                 Some(error)
             }
@@ -160,15 +173,6 @@ pub enum TriangularLinearOperator<'a> {
 }
 
 impl<'a> TriangularLinearOperator<'a> {
-    pub fn borrow_with_context(
-        matrix: &'a Value,
-        triangle: Triangle,
-        diagonal: Diagonal,
-        context: &RuntimeContext,
-    ) -> Result<Self, TriangularOperatorError> {
-        Self::borrow(matrix, triangle, diagonal, Some(context))
-    }
-
     #[cfg(test)]
     pub(super) fn borrow_unbounded(
         matrix: &'a Value,
@@ -178,6 +182,7 @@ impl<'a> TriangularLinearOperator<'a> {
         Self::borrow(matrix, triangle, diagonal, None)
     }
 
+    #[cfg(test)]
     fn borrow(
         matrix: &'a Value,
         triangle: Triangle,
@@ -318,6 +323,7 @@ fn check_coefficient<T: TriangularScalar>(
     Ok(())
 }
 
+#[cfg(test)]
 fn make_dense<'a, T: TriangularScalar>(
     order: usize,
     triangle: Triangle,
@@ -343,6 +349,7 @@ fn make_dense<'a, T: TriangularScalar>(
     })
 }
 
+#[cfg(test)]
 fn make_csc<'a, T: TriangularScalar>(
     order: usize,
     triangle: Triangle,

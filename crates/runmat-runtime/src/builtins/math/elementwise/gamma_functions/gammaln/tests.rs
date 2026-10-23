@@ -135,7 +135,7 @@ fn gammaln_integer_bool_logical_and_char_promote() {
         other => panic!("expected tensor result, got {other:?}"),
     }
 
-    let chars = CharArray::new(vec!['\0', '\u{1}'], 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars(vec!['\0', '\u{1}'], 1, 2).unwrap();
     match call(Value::CharArray(chars)).expect("gammaln") {
         Value::Tensor(t) => {
             assert_eq!(t.shape(), &[1, 2]);
@@ -185,7 +185,7 @@ fn gammaln_integer_and_logical_extensions_are_independently_gated() {
         Some("RunMat:compatibility:GammalnLogicalInputExtension")
     );
     let character = call(Value::CharArray(
-        CharArray::new(vec!['A'], 1, 1).expect("character"),
+        CharArray::from_unicode_scalars(vec!['A'], 1, 1).expect("character"),
     ))
     .unwrap_err();
     assert_eq!(

@@ -1,4 +1,4 @@
-use runmat_value::{IntValue, IntegerStorage, Value};
+use runmat_value::{IntValue, IntegerStorage, Utf16CodeUnit, Value};
 
 use super::classify::{self, ClassifiedValue};
 use super::{finish, push, UniformScalarError};
@@ -20,7 +20,7 @@ pub(crate) enum UniformScalarCollector<'a> {
         real: Vec<IntValue>,
         imaginary: Vec<IntValue>,
     },
-    Char(Vec<char>),
+    Char(Vec<Utf16CodeUnit>),
 }
 
 impl<'a> UniformScalarCollector<'a> {

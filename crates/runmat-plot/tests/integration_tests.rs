@@ -4,6 +4,22 @@
 //! and performance characteristics.
 use runmat_plot::plots::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test(flavor = "current_thread")]
+async fn synchronous_export_inside_session_reactor_writes_png() {
+    let mut figure = Figure::new();
+    figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+    let path = std::env::temp_dir().join(format!("runmat-sync-export-{}.png", std::process::id()));
+    // Refuse to overwrite an artifact left by another invocation.
+    drop(std::fs::File::create_new(&path).unwrap());
+    let exported = runmat_plot::show_plot_unified(figure, Some(path.to_str().unwrap()));
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    exported.expect("synchronous plotting must not nest or replace the session reactor");
+    let image = image::load_from_memory(&bytes).expect("complete PNG export");
+    assert_eq!((image.width(), image.height()), (800, 600));
+}
+
 #[test]
 fn test_complete_2d_plotting_pipeline() {
     // Test data

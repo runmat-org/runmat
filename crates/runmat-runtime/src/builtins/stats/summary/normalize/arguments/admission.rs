@@ -9,8 +9,10 @@ pub(in crate::builtins::stats::summary::normalize) fn admit_args(
 ) -> BuiltinResult<AdmittedArgs> {
     let keywords = rest
         .iter()
-        .map(|value| keyword_of(value).map(|text| NormalizeKeyword::from_public_text(&text)))
-        .collect::<Vec<_>>();
+        .map(|value| {
+            keyword_of(value).map(|text| text.map(|text| NormalizeKeyword::from_public_text(&text)))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     let mut cursor = Cursor {
         rest,
         keywords,

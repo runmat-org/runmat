@@ -1,5 +1,16 @@
 use super::*;
 
+mod encoded;
+mod fixed;
+mod output;
+pub(super) mod presentation;
+mod scalar;
+mod workspace;
+
+use encoded::read_encoded_source;
+use fixed::read_fixed_source;
+use presentation::Projection;
+
 #[derive(Debug)]
 pub(super) enum ReadFailure {
     Io {
@@ -42,66 +53,62 @@ impl std::error::Error for ReadFailure {
     }
 }
 
-pub(super) async fn read_from_handle<R: Read + Seek>(
-    file: &mut R,
+pub(super) async fn read_from_handle(
+    file: &mut registry::FileOperation,
     size_spec: &SizeSpec,
     precision: &PrecisionSpec,
     skip: usize,
     machine: MachineFormat,
     cooperation: &mut super::super::cooperation::FileCooperation,
+    runtime: Option<&crate::context::RuntimeContext>,
+    projection: Projection<'_>,
 ) -> Result<(FreadEval, bool), ReadFailure> {
     let endianness = machine.to_endianness();
-    match precision.output {
-        OutputKind::Numeric(output_dtype) => {
-            let limit = size_spec.element_limit();
-            let (values, count, encountered_eof) = read_numeric_values(
+    if matches!(precision.input, InputSource::EncodedCharacter) {
+        return read_encoded_source(
+            file,
+            size_spec,
+            precision,
+            skip,
+            cooperation,
+            runtime,
+            projection,
+        )
+        .await;
+    }
+    let InputSource::Numeric(input) = precision.input else {
+        unreachable!("encoded source selected above")
+    };
+    macro_rules! read {
+        ($native:ty) => {
+            read_fixed_source::<$native>(
                 file,
-                precision.input,
-                precision.repeat,
-                limit,
+                size_spec,
+                precision,
                 skip,
                 endianness,
                 cooperation,
+                runtime,
+                projection,
             )
-            .await?;
-            let (data, rows, cols) =
-                finalize_numeric(size_spec, count, values, cooperation).await?;
-            let tensor = Tensor::from_numeric_storage(data, vec![rows, cols])
-                .map_err(|e| format!("fread: {e}"))?;
-            let tensor = if tensor.numeric_dtype() == output_dtype {
-                tensor
-            } else {
-                tensor::coerce_tensor_dtype(tensor, output_dtype)
-            };
-            Ok((
-                FreadEval::new(Value::Tensor(tensor), count),
-                encountered_eof,
-            ))
-        }
-        OutputKind::Char => {
-            let limit = size_spec.element_limit();
-            let (values, count, encountered_eof) = read_char_values(
-                file,
-                precision.input,
-                precision.repeat,
-                limit,
-                skip,
-                endianness,
-                cooperation,
-            )
-            .await?;
-            let (row_major, rows, cols) =
-                finalize_char(size_spec, count, values, cooperation).await?;
-            let char_array =
-                CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
-            Ok((
-                FreadEval::new(Value::CharArray(char_array), count),
-                encountered_eof,
-            ))
-        }
+            .await
+        };
+    }
+    match input {
+        InputType::UInt8 => read!(u8),
+        InputType::Int8 => read!(i8),
+        InputType::UInt16 => read!(u16),
+        InputType::Int16 => read!(i16),
+        InputType::UInt32 => read!(u32),
+        InputType::Int32 => read!(i32),
+        InputType::UInt64 => read!(u64),
+        InputType::Int64 => read!(i64),
+        InputType::Float32 => read!(f32),
+        InputType::Float64 => read!(f64),
     }
 }
 
+#[cfg(test)]
 pub(super) async fn read_numeric_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
@@ -171,68 +178,4 @@ pub(super) async fn read_numeric_values<R: Read + Seek>(
         count,
         encountered_eof,
     ))
-}
-
-pub(super) async fn read_char_values<R: Read + Seek>(
-    reader: &mut R,
-    input: InputType,
-    repeat: usize,
-    limit: Option<usize>,
-    skip: usize,
-    endianness: Endianness,
-    cooperation: &mut super::super::cooperation::FileCooperation,
-) -> Result<(Vec<char>, usize, bool), ReadFailure> {
-    if let Some(0) = limit {
-        return Ok((Vec::new(), 0, false));
-    }
-    let element_size = input.byte_len();
-    let mut buffer = vec![0u8; element_size];
-    let mut values = Vec::new();
-    let mut count = 0usize;
-    let target = limit.unwrap_or(usize::MAX);
-    let mut encountered_eof = false;
-
-    'outer: loop {
-        if count >= target {
-            break;
-        }
-        let mut remaining = element_size;
-        while remaining > 0 {
-            match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => {
-                    encountered_eof = true;
-                    break 'outer;
-                }
-                Ok(n) => remaining -= n,
-                Err(err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(source) => {
-                    return Err(ReadFailure::Io {
-                        operation: "failed to read from file",
-                        source,
-                    })
-                }
-            }
-        }
-        if remaining > 0 {
-            break;
-        }
-        let ch = decode_to_char(&buffer, input, endianness)?;
-        values.push(ch);
-        count += 1;
-        let applied_skip = skip > 0 && count.is_multiple_of(repeat);
-        if applied_skip {
-            reader
-                .seek(SeekFrom::Current(skip as i64))
-                .map_err(|source| ReadFailure::Io {
-                    operation: "failed to skip bytes",
-                    source,
-                })?;
-        }
-        cooperation
-            .completed(element_size.saturating_add(if applied_skip { skip } else { 0 }))
-            .await
-            .map_err(ReadFailure::from)?;
-    }
-
-    Ok((values, count, encountered_eof))
 }

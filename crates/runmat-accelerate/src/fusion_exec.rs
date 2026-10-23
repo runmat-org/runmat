@@ -28,9 +28,9 @@ use runmat_value::{NumericDType, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-mod observation;
-pub(crate) mod host_readback;
 mod host_input_uses;
+pub(crate) mod host_readback;
+mod observation;
 pub use host_input_uses::{VmHostInputUses, VmHostLoadUse};
 pub(crate) use host_readback::checked_extra_host_scratch;
 pub use host_readback::PreparedVmHostInputs;
@@ -69,6 +69,7 @@ pub use image_stages::{
 };
 #[cfg(test)]
 mod ownership_tests;
+pub(crate) use elementwise::execute_elementwise_native;
 pub use elementwise::{
     elementwise_floating_admission, execute_elementwise, execute_elementwise_placed,
     execute_elementwise_placed_vm, execute_elementwise_placed_vm_decline,
@@ -512,7 +513,9 @@ fn select_fusion_provider_with_implementation(
     } else {
         None
     };
-    if request.placement.is_none() {
+    if request.placement.is_none()
+        && !matches!(host, host_readback::CpuHostPlacement::Native { .. })
+    {
         if matches!(
             implementation,
             crate::placement::LocalProviderAdmission::ImplementationUnavailable
@@ -552,6 +555,7 @@ fn select_fusion_provider_with_implementation(
     let operation = fusion_operation_token(&request.plan.group.kind);
     let element_count = u64::try_from(elements.unwrap_or(1)).unwrap_or(u64::MAX);
     let host_available = match host {
+        host_readback::CpuHostPlacement::Native { .. } => true,
         host_readback::CpuHostPlacement::Readbacks(_) => true,
         host_readback::CpuHostPlacement::Unavailable => false,
         host_readback::CpuHostPlacement::Legacy => request
@@ -571,7 +575,10 @@ fn select_fusion_provider_with_implementation(
         Some(element_count)
     };
     let host_execution_ns = host_units.and_then(|units| units.checked_mul(100));
-    if host_available && host_execution_ns.is_none() {
+    if host_available
+        && host_execution_ns.is_none()
+        && !matches!(host, host_readback::CpuHostPlacement::Native { .. })
+    {
         // Ordinary execution remains valid without a comparative cost proof.
         // The caller retains any admitted private-readback continuation. Do
         // not publish a fabricated estimate or timing feedback for this route.
@@ -617,33 +624,53 @@ fn select_fusion_provider_with_implementation(
         confidence: EstimateConfidence::Prior,
         source: EstimateSource::StaticPrior,
     };
-    let cpu_admission = match host {
-        _ if host_execution_ns.is_none() => crate::placement::LocalCpuAdmission::Unavailable,
-        host_readback::CpuHostPlacement::Legacy => crate::placement::LocalCpuAdmission::Legacy,
+    let (cpu, cpu_admission) = match host {
+        host_readback::CpuHostPlacement::Native {
+            cpu: native_cpu,
+            right,
+            source_host,
+        } => crate::placement::LocalCpuCandidate::native_region(
+            native_cpu,
+            provider,
+            right,
+            source_host,
+        ),
+        _ if host_execution_ns.is_none() => {
+            (cpu.into(), crate::placement::LocalCpuAdmission::Unavailable)
+        }
+        host_readback::CpuHostPlacement::Legacy => {
+            (cpu.into(), crate::placement::LocalCpuAdmission::Legacy)
+        }
         host_readback::CpuHostPlacement::Unavailable => {
-            crate::placement::LocalCpuAdmission::Unavailable
+            (cpu.into(), crate::placement::LocalCpuAdmission::Unavailable)
         }
         host_readback::CpuHostPlacement::Readbacks(exact) => {
             cpu.presentation = exact.presentation.clone();
             cpu.cost.scratch_bytes = Some(exact.scratch_bytes);
-            crate::placement::LocalCpuAdmission::ExactReadbacks {
-                resources: Box::new(exact.resources),
-                download_bytes: exact.download_bytes,
-                readback_count: exact.readback_count,
-            }
+            (
+                cpu.into(),
+                crate::placement::LocalCpuAdmission::ExactReadbacks {
+                    resources: Box::new(exact.resources),
+                    download_bytes: exact.download_bytes,
+                    readback_count: exact.readback_count,
+                },
+            )
         }
     };
     let host_unavailable = matches!(
         cpu_admission,
         crate::placement::LocalCpuAdmission::Unavailable
-    );
+    ) && !matches!(host, host_readback::CpuHostPlacement::Native { .. });
     match crate::placement::plan_local_vm_cpu_with_provider(
         provider,
         LocalPlacementRequest {
             compound: None,
             operation,
             semantic_identity,
-            observation_contract: if vm_right.is_some() {
+            observation_contract: if matches!(host, host_readback::CpuHostPlacement::Native { .. })
+            {
+                crate::placement::TotalCandidateObservationContract::NativeFullCall
+            } else if vm_right.is_some() {
                 crate::placement::TotalCandidateObservationContract::FullCall
             } else {
                 crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
@@ -689,7 +716,7 @@ fn select_fusion_provider_with_implementation(
             },
             preparation_program,
             shader_requirements,
-            cpu: cpu.into(),
+            cpu,
             provider_fallback: runmat_execution::CandidateCostEvidence::Estimated(
                 provider_fallback,
             ),
@@ -769,7 +796,10 @@ fn select_fusion_provider_with_implementation(
             Ok(FusionExecutionOutcome::Executed(ticket))
         }
         LocalPlacementOutcome::Selected {
-            cpu_cost, feedback, ..
+            selected,
+            cpu_cost,
+            feedback,
+            ..
         } => {
             observer.provider_candidate();
             observer.selected(
@@ -777,8 +807,22 @@ fn select_fusion_provider_with_implementation(
                 "complete_cost",
                 cpu_cost.estimate().and_then(|cost| cost.checked_total_ns()),
             );
+            let native_kind = match selected.kind {
+                ExecutionCandidateKind::SpecializedNativeCpu if matches!(host, host_readback::CpuHostPlacement::Native { source_host: Some(_), .. }) => Some(runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic),
+                ExecutionCandidateKind::VectorizedNativeCpu if matches!(host, host_readback::CpuHostPlacement::Native { .. }) => Some(runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Vectorized),
+                _ => None,
+            };
             Ok(FusionExecutionOutcome::SharedRuntime(
-                FusionCpuObservation::new(feedback),
+                FusionCpuObservation::native_selected(
+                    feedback,
+                    native_kind,
+                    (selected.kind == ExecutionCandidateKind::OriginalNativeRegion)
+                        .then(runmat_accelerate_api::provider)
+                        .flatten()
+                        .filter(|selected| {
+                            runmat_accelerate_api::same_provider_instance(*selected, provider)
+                        }),
+                ),
             ))
         }
     }

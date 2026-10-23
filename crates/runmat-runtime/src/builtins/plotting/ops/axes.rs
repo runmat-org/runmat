@@ -12,7 +12,6 @@ use super::state::{
     create_axes_for_figure_for_property, encode_axes_handle, select_axes_for_figure_for_property,
     FigureHandle, PropertyMutationTarget,
 };
-use super::style::value_as_string;
 
 const BUILTIN_NAME: &str = "axes";
 
@@ -232,13 +231,11 @@ fn parent_figure_from_value(value: &Value) -> crate::BuiltinResult<FigureHandle>
 }
 
 fn starts_property_pairs(value: &Value) -> bool {
-    value_as_string(value).is_some()
+    matches!(value, Value::String(_) | Value::CharArray(_))
 }
 
 fn property_name_is(value: &Value, expected: &str) -> bool {
-    value_as_string(value)
-        .map(|name| name.trim().eq_ignore_ascii_case(expected))
-        .unwrap_or(false)
+    crate::builtins::plotting::style::value_text_equals_ascii(value, expected, true)
 }
 
 #[cfg(test)]

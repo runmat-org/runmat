@@ -109,6 +109,9 @@ impl SignalCooperation {
                     "{}:Cancelled",
                     self.namespace.as_deref().unwrap_or("RunMat")
                 ))
+                .with_failure_origin(
+                    crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation,
+                )
                 .build()
         } else {
             let mut error = source.clone().into_runtime_error();
@@ -244,6 +247,10 @@ mod tests {
         assert_eq!(turns.get(), 1);
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert_eq!(
+            error.failure_origin,
+            crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
+        );
         assert!(std::error::Error::source(&error).is_some());
     }
 }

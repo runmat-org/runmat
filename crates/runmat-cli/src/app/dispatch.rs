@@ -193,7 +193,9 @@ async fn execute_command(
             file,
             iterations,
             jit,
-        } => benchmark::execute_benchmark(file, iterations, jit, cli, config).await,
+            warmup,
+            report,
+        } => benchmark::execute_benchmark(file, iterations, jit, warmup, report, cli, config).await,
         Commands::Config { config_command } => {
             config::execute_config_command(config_command, config).await
         }

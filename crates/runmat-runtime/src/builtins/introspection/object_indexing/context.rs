@@ -52,7 +52,14 @@ pub(super) fn parse_indexing_context(value: &Value) -> crate::BuiltinResult<Inde
         {
             match object.property(ENUM_MEMBER_PROPERTY) {
                 Some(Value::String(member)) => member.as_str().to_owned(),
-                Some(Value::CharArray(chars)) => chars.data().iter().collect(),
+                Some(Value::CharArray(chars)) => {
+                    super::super::text::decode_utf16_with_error(chars.data(), || {
+                        num_args_error(
+                            &NUM_ARGUMENTS_ERROR_CONTEXT,
+                            "indexing context member is not valid UTF-16 text",
+                        )
+                    })?
+                }
                 _ => {
                     return Err(num_args_error(
                         &NUM_ARGUMENTS_ERROR_CONTEXT,
@@ -87,15 +94,34 @@ pub(super) fn parse_indexing_context(value: &Value) -> crate::BuiltinResult<Inde
 }
 
 pub(super) fn indexing_context_value(context: IndexingContext) -> Value {
-    let member = match context {
-        IndexingContext::Statement => INDEXING_CONTEXT_STATEMENT,
-        IndexingContext::Expression => INDEXING_CONTEXT_EXPRESSION,
-        IndexingContext::Assignment => INDEXING_CONTEXT_ASSIGNMENT,
-    };
+    let member = indexing_context_member(context);
     let mut value = runmat_value::UnboundedObjectBuilder::new(INDEXING_CONTEXT_CLASS);
     value.insert(
         ENUM_MEMBER_PROPERTY.to_string(),
         Value::string(member.to_string()),
     );
     Value::Object(value.finish())
+}
+
+pub(super) fn indexing_context_value_in_context(
+    runtime: &crate::context::RuntimeContext,
+    context: IndexingContext,
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
+    let member = Value::String(crate::call::argument_text::copy_str(
+        indexing_context_member(context),
+        Some(runtime),
+    )?);
+    crate::execution::object::construct_object_from_borrowed_fields(
+        Some(runtime),
+        INDEXING_CONTEXT_CLASS.display_name(),
+        [(ENUM_MEMBER_PROPERTY, &member)].into_iter(),
+    )
+}
+
+fn indexing_context_member(context: IndexingContext) -> &'static str {
+    match context {
+        IndexingContext::Statement => INDEXING_CONTEXT_STATEMENT,
+        IndexingContext::Expression => INDEXING_CONTEXT_EXPRESSION,
+        IndexingContext::Assignment => INDEXING_CONTEXT_ASSIGNMENT,
+    }
 }

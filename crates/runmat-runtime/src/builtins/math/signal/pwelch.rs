@@ -166,6 +166,11 @@ fn pwelch_window_generation_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::TensorBuild(detail) => {
             pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, detail)
         }
+        WindowArgError::Text(source) => {
+            let mut error = pwelch_error(&PWELCH_ERROR_INVALID_WINDOW);
+            error.source = Some(Box::new(source));
+            error
+        }
         WindowArgError::TooManyOptions
         | WindowArgError::InvalidOptionType
         | WindowArgError::UnknownOption(_) => pwelch_error(&PWELCH_ERROR_INTERNAL),

@@ -3,6 +3,25 @@ use runmat_runtime::object::indexing::{
 };
 use runmat_value::Value;
 
+pub(super) fn subscript_values<'a>(
+    root: &'a Value,
+    path: Option<&'a ObjectSubscriptPath>,
+) -> impl Iterator<Item = &'a Value> + Clone {
+    std::iter::once(root).chain(
+        path.into_iter()
+            .flat_map(ObjectSubscriptPath::steps)
+            .flat_map(|step| match step.selector() {
+                ObjectIndexSelector::IndexValues { components } => components.as_slice(),
+                _ => &[],
+            })
+            .filter_map(|component| match component {
+                ObjectIndexComponent::Value(value) => Some(value),
+                ObjectIndexComponent::Colon => None,
+            }),
+    )
+}
+
+#[cfg(test)]
 pub(super) fn subscript_roots(root: &Value, path: Option<&ObjectSubscriptPath>) -> Vec<Value> {
     let mut roots = vec![root.clone()];
     for step in path.into_iter().flat_map(ObjectSubscriptPath::steps) {

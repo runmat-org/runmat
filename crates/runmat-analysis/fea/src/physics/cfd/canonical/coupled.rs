@@ -162,6 +162,7 @@ fn inner_solve(
         &GmresOptions {
             restart: INNER_ITERATIONS,
             side: PreconditionerSide::Right,
+            ..GmresOptions::default()
         },
         control(),
     )?;
@@ -335,6 +336,7 @@ pub(super) fn solve_with_time(
                 &GmresOptions {
                     restart: p.policy.gmres_restart,
                     side: PreconditionerSide::Flexible,
+                    ..GmresOptions::default()
                 },
                 control(),
             )?;

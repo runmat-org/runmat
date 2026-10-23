@@ -92,6 +92,7 @@ impl RuntimeBuiltinService for ClosedWorldBuiltins {
             .iter()
             .any(|member| {
                 member.identity == binding.identity
+                    && member.provenance == binding.provenance
                     && std::ptr::fn_addr_eq(member.implementation, binding.implementation)
             })
             .then(|| {

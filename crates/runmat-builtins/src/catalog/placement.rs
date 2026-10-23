@@ -13,6 +13,8 @@ pub enum BuiltinPortability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinAcceleratorPolicy {
+    /// No accelerator computation placement. Host inspection, transfer, and
+    /// resident alias/container preservation are independent of this policy.
     Forbidden,
     Optional,
     Required,
@@ -21,6 +23,8 @@ pub enum BuiltinAcceleratorPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinResidencyPolicy {
     Host,
+    /// Preserve input residency, including aliases nested in host containers;
+    /// this does not imply accelerator computation or a new device allocation.
     PreserveInputs,
     ProduceResident,
     GatherToHost,

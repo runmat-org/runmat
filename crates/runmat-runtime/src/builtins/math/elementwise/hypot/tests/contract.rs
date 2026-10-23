@@ -70,7 +70,7 @@ fn hypot_runmat_extensions_follow_compatibility_mode() {
             "RunMat:compatibility:HypotLogicalInputExtension",
         ),
         (
-            Value::CharArray(CharArray::new(vec!['A'], 1, 1).unwrap()),
+            Value::CharArray(CharArray::from_unicode_scalars(vec!['A'], 1, 1).unwrap()),
             "RunMat:compatibility:HypotCharacterInputExtension",
         ),
     ] {

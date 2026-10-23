@@ -36,7 +36,7 @@ async fn parse_resample_options_inner(
     let mut positional = Vec::new();
     let mut dim = None;
     while idx < rest.len() {
-        if let Some(key) = value_as_text(&rest[idx]) {
+        if let Some(key) = value_as_text(&rest[idx])? {
             if key.eq_ignore_ascii_case("dimension") {
                 let Some(value) = rest.get(idx + 1) else {
                     return Err(sample_error_with_detail(
@@ -399,12 +399,22 @@ pub(super) fn parse_nonnegative_integer(
     Ok(raw as usize)
 }
 
-pub(super) fn value_as_text(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn value_as_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = sample_error_with_detail(
+                    RESAMPLE_NAME,
+                    &SAMPLE_ERROR_INVALID_OPTION,
+                    source.to_string(),
+                );
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 pub(super) fn gcd(mut a: usize, mut b: usize) -> usize {

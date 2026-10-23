@@ -4,8 +4,7 @@
 
 use super::{builtin_error, integer_storage_from_values, integer_tensor_view, Bounds};
 use crate::builtins::common::{
-    random,
-    random::gpu_upload::{after_stream_commit, GpuChildHostUpload},
+    gpu_helpers::host_upload::GpuHostUpload, random, random::gpu_effect::after_stream_commit,
 };
 use crate::context::host_allocation::{HostAllocationPlan, HostNumericWorkspace};
 use crate::context::host_presentation::select_prepared_host_upload;
@@ -91,7 +90,7 @@ async fn sample(
     bounds: Bounds,
     len: usize,
     class: NumericElementType,
-    upload: &GpuChildHostUpload<'_>,
+    upload: &GpuHostUpload<'_>,
 ) -> BuiltinResult<NativeSamples> {
     let domain = GpuBoundedIntegerDomain::new(bounds.lower, bounds.span)
         .ok_or_else(|| builtin_error("randi: invalid GPU integer range"))?;
@@ -237,7 +236,7 @@ pub(super) async fn like(
         .checked_sub(native_bytes)
         .ok_or_else(|| builtin_error("randi: sample metadata underflow"))?;
     let host_quote =
-        GpuChildHostUpload::quote_candidate("randi", source, shape, class, compute_scratch)?;
+        GpuHostUpload::quote_candidate("randi", source, shape, class, compute_scratch)?;
     let chosen = random::gpu_integer_batch::select_initial_route(
         source,
         domain,
@@ -305,7 +304,7 @@ pub(super) async fn like(
     // before the selected upload constructs a fresh, separately admitted
     // query. Keeping both would charge overlapping but unused descriptions.
     drop(host_quote);
-    let mut upload = GpuChildHostUpload::prepare("randi", source, shape, class, compute_scratch)?;
+    let mut upload = GpuHostUpload::prepare("randi", source, shape, class, compute_scratch)?;
     if let Some(selected) = host_selection {
         upload = upload.with_selected_host_route(selected, selected_upload_bytes)?;
     }

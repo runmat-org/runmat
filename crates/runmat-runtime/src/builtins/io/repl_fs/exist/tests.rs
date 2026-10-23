@@ -37,7 +37,8 @@ fn output_count_rejects_before_lookup_and_zero_still_queries() {
 fn character_pages_reject_and_trailing_singletons_preserve_names() {
     let (_guard, _lock) = test_guard();
     let pages = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap(),
     );
     assert_eq!(
         exist_builtin(pages.clone(), Vec::new())
@@ -52,7 +53,11 @@ fn character_pages_reject_and_trailing_singletons_preserve_names() {
         Some("RunMat:exist:InvalidTypeArgument")
     );
     let row = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['s', 'i', 'n'], vec![1, 3, 1]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(
+            vec!['s', 'i', 'n'],
+            vec![1, 3, 1],
+        )
+        .unwrap(),
     );
     assert_eq!(
         exist_builtin(row, vec![Value::from("builtin")]).unwrap(),

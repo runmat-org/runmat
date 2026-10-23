@@ -401,16 +401,43 @@ impl NumericStorage {
     /// Wider floating and integer values may lose precision or overflow.
     pub fn materialize_f32(&self) -> Vec<f32> {
         match self {
-            Self::F64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::F64(values) => values
+                .iter()
+                .map(|&value| NumericScalar::F64(value).materialize_f32())
+                .collect(),
             Self::F32(values) => values.clone(),
-            Self::I8(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::I16(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::I32(values) => values.iter().map(|&value| value as f32).collect(),
-            Self::I64(values) => values.iter().map(|&value| value as f32).collect(),
-            Self::U8(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::U16(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::U32(values) => values.iter().map(|&value| value as f32).collect(),
-            Self::U64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::I8(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I8(value).materialize_f32())
+                .collect(),
+            Self::I16(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I16(value).materialize_f32())
+                .collect(),
+            Self::I32(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I32(value).materialize_f32())
+                .collect(),
+            Self::I64(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I64(value).materialize_f32())
+                .collect(),
+            Self::U8(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U8(value).materialize_f32())
+                .collect(),
+            Self::U16(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U16(value).materialize_f32())
+                .collect(),
+            Self::U32(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U32(value).materialize_f32())
+                .collect(),
+            Self::U64(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U64(value).materialize_f32())
+                .collect(),
         }
     }
 

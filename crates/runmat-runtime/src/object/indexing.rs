@@ -9,7 +9,17 @@ pub use standard_substruct::parse_standard_substruct;
 mod path;
 pub use path::{ObjectSubscript, ObjectSubscriptOrigin, ObjectSubscriptPath};
 mod plan;
-pub use plan::{plan_for_components, plan_for_fixed_assignment, plan_for_shape};
+pub(crate) use plan::plan_for_components_with_context;
+pub use plan::{
+    plan_for_components, plan_for_components_in_context, plan_for_fixed_assignment,
+    plan_for_fixed_assignment_in_context, plan_for_shape, plan_for_shape_in_context,
+};
+mod admission;
+pub(crate) use admission::{allocation_error, array_in_context};
+pub use admission::{
+    prepare_components_in_context, prepare_subscripts_in_context, PreparedObjectIndexComponents,
+    PreparedObjectSubscripts,
+};
 
 pub const OBJECT_PROTOCOL_SUBSREF: StaticMethodName = crate::OBJECT_SUBSREF_METHOD;
 pub const OBJECT_PROTOCOL_SUBSASGN: StaticMethodName = crate::OBJECT_SUBSASGN_METHOD;
@@ -88,6 +98,16 @@ impl ObjectIndexComponent {
             Self::Colon => Value::string(OBJECT_SELECTOR_COLON.to_string()),
         }
     }
+    pub(crate) fn protocol_value_in_context(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+    ) -> Result<Value, crate::RuntimeError> {
+        match self {
+            Self::Value(value) => Ok(value.clone()),
+            Self::Colon => crate::call::argument_text::copy_str(OBJECT_SELECTOR_COLON, context)
+                .map(Value::String),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,9 +116,9 @@ pub enum ObjectIndexSelector {
         indices: Vec<usize>,
     },
     IndexValues {
-        components: Vec<ObjectIndexComponent>,
+        components: runmat_value::ExactArrayStorage<ObjectIndexComponent>,
     },
-    Member(runmat_types::MemberName),
+    Member(runmat_value::Utf8Text),
 }
 
 #[cfg(test)]
@@ -124,12 +144,13 @@ pub(crate) fn standard_substruct_fixture_from_parts(
                 ));
             };
             let selector = ObjectIndexSelector::IndexValues {
-                components: cell
-                    .data()
-                    .iter()
-                    .cloned()
-                    .map(ObjectIndexComponent::from_protocol_value)
-                    .collect(),
+                components: runmat_value::ExactArrayStorage::shared_unbounded(
+                    cell.data()
+                        .iter()
+                        .cloned()
+                        .map(ObjectIndexComponent::from_protocol_value)
+                        .collect::<Vec<_>>(),
+                ),
             };
             if kind == OBJECT_PROTOCOL_KIND_PAREN {
                 ObjectSubscript::parentheses(selector)
@@ -152,6 +173,17 @@ pub fn class_name_from_base(base: &Value) -> Option<&runmat_types::ClassIdentity
         Value::Object(obj) => Some(obj.class_name()),
         Value::ObjectArray(array) => Some(array.class_name()),
         Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
+    }
+}
+
+pub(crate) fn class_name_owner_from_base(
+    base: &Value,
+) -> Option<&runmat_value::SharedClassIdentity> {
+    match base {
+        Value::Object(value) => Some(value.class_name_owner()),
+        Value::ObjectArray(value) => Some(value.class_name_owner()),
+        Value::HandleObject(value) => Some(&value.class_name),
         _ => None,
     }
 }

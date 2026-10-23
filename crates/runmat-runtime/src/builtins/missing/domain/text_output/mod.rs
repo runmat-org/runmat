@@ -6,11 +6,12 @@ use crate::context::host_allocation::{
 use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_value::{
-    ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray, Utf8Text,
+    ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray, Utf16TextCopyError,
+    Utf8Text,
 };
 
-mod outputs;
 mod literal;
+mod outputs;
 pub(super) use literal::TextLiteral;
 pub(super) use outputs::fill_outputs;
 
@@ -106,7 +107,14 @@ pub(super) fn selected_string_array(
             .checked_add(
                 literal
                     .requested_bytes(runtime)
-                    .map_err(|cause| admission_error(runtime, cause))?,
+                    .map_err(|cause| match cause {
+                        Utf16TextCopyError::Checkpoint(cause) => admission_error(runtime, cause),
+                        Utf16TextCopyError::Decode(source) => {
+                            let mut error = invalid(source.to_string());
+                            error.source = Some(Box::new(source));
+                            error
+                        }
+                    })?,
             )
             .ok_or_else(|| admission_error(runtime, HostAllocationError::Overflow))?;
         claims = claims
@@ -140,7 +148,19 @@ pub(super) fn selected_string_array(
                     literal.copy_exact(permit, &receipt, runtime)
                 })
                 .map_err(|cause| admission_error(runtime, cause))?
-                .map_err(|cause| admission_error(runtime, initialization_error(cause)))?,
+                .map_err(|cause| match cause {
+                    ExactArrayInitializationError::Allocation(cause) => {
+                        admission_error(runtime, HostAllocationError::Numeric(cause))
+                    }
+                    ExactArrayInitializationError::Element(cause) => match cause {
+                        Utf16TextCopyError::Checkpoint(cause) => admission_error(runtime, cause),
+                        Utf16TextCopyError::Decode(source) => {
+                            let mut error = invalid(source.to_string());
+                            error.source = Some(Box::new(source));
+                            error
+                        }
+                    },
+                })?,
         )
     } else {
         None
@@ -228,7 +248,13 @@ fn ordinary(
 ) -> BuiltinResult<StringArray> {
     let literal = match literal {
         TextLiteral::Utf8(text) => text.to_owned(),
-        TextLiteral::Chars(chars) => chars.iter().collect(),
+        TextLiteral::Chars(chars) => {
+            runmat_value::decode_utf16_code_units(chars).map_err(|source| {
+                let mut error = invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?
+        }
     };
     let data = (0..input.data().len())
         .map(|index| match select(&input, index) {

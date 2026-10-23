@@ -35,6 +35,7 @@ impl RuntimeBindingRegistration {
     /// selected binding. Addresses are compared, never hashed into revision.
     pub fn certifies(self, selected: RuntimeBuiltinBinding) -> bool {
         self.binding.identity == selected.identity
+            && self.binding.provenance == selected.provenance
             && std::ptr::fn_addr_eq(self.binding.implementation, selected.implementation)
             && match (
                 self.binding.continuation_layout,
@@ -229,6 +230,9 @@ mod tests {
         let mut foreign_layout = binding;
         foreign_layout.continuation_layout = Some(other_layout);
         assert!(!row.registration().certifies(foreign_layout));
+        let mut foreign_provenance = binding;
+        foreign_provenance.provenance = None;
+        assert!(!row.registration().certifies(foreign_provenance));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

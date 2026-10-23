@@ -68,7 +68,7 @@ fn logical_partition_vector_supported() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn char_array_partition() {
-    let chars = CharArray::new(
+    let chars = CharArray::from_unicode_scalars(
         vec!['f', 'o', 'o', ' ', 'b', 'a', 'r', ' ', 'b', 'a', 'z', ' '],
         3,
         4,
@@ -88,7 +88,8 @@ fn char_array_partition() {
         Value::CharArray(slice) => {
             assert_eq!(slice.rows, 1);
             assert_eq!(slice.cols, 2);
-            let text: String = slice.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(slice.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "o ");
         }
         other => panic!("expected CharArray, got {other:?}"),

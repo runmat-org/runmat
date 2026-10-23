@@ -17,11 +17,26 @@ use runmat_runtime::context::{
 };
 use runmat_types::NumericDomain;
 
-pub(super) struct Admission {
+// ValueId is u32; this bounded transcript is at most 4096 bytes, including
+// tuple padding, on supported 32/64-bit targets. This is not another plan cap.
+const _: () = assert!(
+    std::mem::size_of::<[(ValueId, usize); runmat_runtime::numeric_region::MAX_NODES]>() <= 4096
+);
+
+pub(in crate::fusion_exec) struct Admission {
     pub plan: CpuReadbackPlan,
     pub resources: CpuHostResources,
     pub program: crate::fusion::semantics::ResolvedProgram,
     pub outputs: HostOutputPlan,
+    pub canonical: Vec<VmFusionHostOperation>,
+}
+
+enum InputIdentity<'a> {
+    Vm(&'a VmHostInputUses),
+    Native {
+        program: &'a runmat_runtime::numeric_region::service::NativeNumericRegionProgramOwner,
+        right: &'a runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+    },
 }
 
 pub(crate) struct HostOutputSpec {
@@ -234,7 +249,7 @@ pub(super) fn admit(
     provider: &dyn AccelProvider,
     uses: &VmHostInputUses,
 ) -> Option<Admission> {
-    admit_inputs(request, bindings, provider, uses, false)
+    admit_inputs(request, bindings, provider, InputIdentity::Vm(uses), false)
 }
 
 /// A shader-unavailable route also needs an exact bound for entirely host
@@ -245,14 +260,51 @@ pub(super) fn admit_host(
     provider: &dyn AccelProvider,
     uses: &VmHostInputUses,
 ) -> Option<Admission> {
-    admit_inputs(request, bindings, provider, uses, true)
+    admit_inputs(request, bindings, provider, InputIdentity::Vm(uses), true)
+}
+
+pub(super) fn admit_native(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    program: &runmat_runtime::numeric_region::service::NativeNumericRegionProgramOwner,
+    right: &runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+) -> Option<Admission> {
+    let mut admission = admit_inputs(
+        request,
+        bindings,
+        provider,
+        InputIdentity::Native { program, right },
+        true,
+    )?;
+    let control = runmat_runtime::context::NativeRegionHostRoute::retained_control_bytes()?;
+    let slots = runmat_value::OutputListStorage::requested_bytes(program.input_count()).ok()?;
+    let slots = u64::try_from(slots).ok()?;
+    let slots =
+        runmat_runtime::context::host_allocation::HostAllocationPlan::retained_exact_output_bytes(
+            slots,
+            usize::from(program.input_count() != 0),
+        )
+        .ok()?;
+    let runmat_execution::ResourceByteBound::Known(retained) =
+        admission.resources.resources.retained_bytes
+    else {
+        return None;
+    };
+    admission.resources.resources.retained_bytes = runmat_execution::ResourceByteBound::Known(
+        retained
+            .checked_add(control)?
+            .checked_add(slots)?
+            .checked_add(super::super::observation::native_host_admission_retained_bytes()?)?,
+    );
+    Some(admission)
 }
 
 fn admit_inputs(
     request: &FusionExecutionRequest<'_>,
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
-    uses: &VmHostInputUses,
+    identity: InputIdentity<'_>,
     allow_host_only: bool,
 ) -> Option<Admission> {
     // This route executes ordinary host operators. Provider-effective facts
@@ -262,31 +314,52 @@ fn admit_inputs(
     let program = &host_program;
     // These exact compiler offsets can cover a proper subset of operation
     // inputs: later occurrences have separately certified ordinary load PCs.
-    let layout = request.plan.group.stack_layout.as_ref()?;
-    if uses.entry.iter().any(|&(id, offset)| {
-        !layout
-            .compiler_variable_bindings
-            .iter()
-            .any(|binding| binding.value_id == id && binding.stack_offset == offset)
-    }) {
-        return None;
-    }
-    let mut used_offsets = uses
-        .entry
-        .iter()
-        .map(|&(_, offset)| offset)
-        .collect::<Vec<_>>();
-    if used_offsets
-        .iter()
-        .any(|&offset| offset >= layout.required_stack_operands)
-    {
+    // Native program validation already bounds captured inputs by MAX_NODES.
+    // Keep this request-local transcript inline, not in an unquoted Vec.
+    let mut native_entry = [(0 as ValueId, 0usize); runmat_runtime::numeric_region::MAX_NODES];
+    let (entry, loads, stack_len) = match &identity {
+        InputIdentity::Vm(uses) => {
+            let layout = request.plan.group.stack_layout.as_ref()?;
+            if uses.entry.iter().any(|&(id, offset)| {
+                !layout
+                    .compiler_variable_bindings
+                    .iter()
+                    .any(|binding| binding.value_id == id && binding.stack_offset == offset)
+            }) {
+                return None;
+            }
+            (
+                uses.entry.as_slice(),
+                uses.loads.as_slice(),
+                layout.required_stack_operands,
+            )
+        }
+        InputIdentity::Native { program, right } => {
+            let runtime = request.runtime.as_ref()?;
+            if !right.is_current(runtime)
+                || !program.has_native_operation_sites()
+                || program.native_operation_count() != request.plan.operations.len()
+            {
+                return None;
+            }
+            // These are actual positions in the native producer's immutable
+            // captured input vector, not fabricated bytecode stack/load PCs.
+            let entry = native_entry.get_mut(..request.plan.inputs.len())?;
+            for (index, (slot, &id)) in entry.iter_mut().zip(&request.plan.inputs).enumerate() {
+                *slot = (id, index);
+            }
+            (&*entry, &[][..], request.inputs.len())
+        }
+    };
+    let mut used_offsets = entry.iter().map(|&(_, offset)| offset).collect::<Vec<_>>();
+    if used_offsets.iter().any(|&offset| offset >= stack_len) {
         return None;
     }
     used_offsets.sort_unstable();
     if used_offsets.windows(2).any(|pair| pair[0] == pair[1]) {
         return None;
     }
-    let mut used_loads = uses.loads.iter().map(|load| load.pc).collect::<Vec<_>>();
+    let mut used_loads = loads.iter().map(|load| load.pc).collect::<Vec<_>>();
     if used_loads
         .iter()
         .any(|&pc| pc < request.plan.group.span.start || pc > request.plan.group.span.end)
@@ -319,19 +392,14 @@ fn admit_inputs(
         if program.floating_class(id).ok()? != class || shape(program, id)? != handle.shape() {
             return None;
         }
-        let mut offsets = Vec::with_capacity(uses.entry.len());
+        let mut offsets = Vec::with_capacity(entry.len());
         offsets.extend(
-            uses.entry
+            entry
                 .iter()
                 .filter_map(|&(value, offset)| (value == id).then_some(offset)),
         );
-        let mut loads = Vec::with_capacity(uses.loads.len());
-        loads.extend(
-            uses.loads
-                .iter()
-                .filter(|load| load.value_id == id)
-                .cloned(),
-        );
+        let mut source_loads = Vec::with_capacity(loads.len());
+        source_loads.extend(loads.iter().filter(|load| load.value_id == id).cloned());
         let occurrences = request
             .plan
             .operations
@@ -342,7 +410,9 @@ fn admit_inputs(
                 }
             })
             .sum::<usize>();
-        if occurrences == 0 || offsets.len().checked_add(loads.len())? != occurrences {
+        if matches!(identity, InputIdentity::Vm(_))
+            && (occurrences == 0 || offsets.len().checked_add(source_loads.len())? != occurrences)
+        {
             return None;
         }
         if let Some(source) = sources
@@ -350,9 +420,9 @@ fn admit_inputs(
             .find(|source| source.matches_handle(handle))
         {
             source.offsets.extend(offsets);
-            source.loads.extend(loads);
+            source.loads.extend(source_loads);
         } else {
-            sources.push(Source::admit(handle, provider, offsets, loads)?);
+            sources.push(Source::admit(handle, provider, offsets, source_loads)?);
         }
     }
     // Resident captured constants have no ordinary-load identity; never invent
@@ -372,7 +442,7 @@ fn admit_inputs(
     {
         return None;
     }
-    let canonical = if managed {
+    let canonical = if managed || matches!(identity, InputIdentity::Native { .. }) {
         let canonical = bindings.host_numerical_operations(request.runtime.as_ref())?;
         if canonical.len() != request.plan.operations.len() {
             return None;
@@ -587,7 +657,7 @@ fn admit_inputs(
             active_scratch.max(bound.scratch_bytes)
         };
     }
-    let liveness = if managed {
+    let liveness = if managed && matches!(identity, InputIdentity::Vm(_)) {
         super::host_liveness::plan(
             request.plan,
             program,
@@ -611,7 +681,7 @@ fn admit_inputs(
         operand_metadata,
         managed,
     )?;
-    let mut resident_offsets = Vec::with_capacity(uses.entry.len());
+    let mut resident_offsets = Vec::with_capacity(entry.len());
     resident_offsets.extend(
         sources
             .iter()
@@ -627,9 +697,10 @@ fn admit_inputs(
         },
         plan: CpuReadbackPlan {
             sources,
-            stack_len: layout.required_stack_operands,
+            stack_len,
             resident_offsets,
         },
         resources,
+        canonical,
     })
 }

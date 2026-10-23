@@ -14,7 +14,7 @@ pub(super) fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<V
     if !args.is_empty() {
         return Err(error::builtin(IDENTITY, &TEMPDIR_ERROR_TOO_MANY_INPUTS));
     }
-    let path = crate::builtins::common::env::temp_dir();
+    let path = crate::builtins::common::env::temp_dir()?;
     output::character_directory(&path)
         .ok_or_else(|| error::builtin(IDENTITY, &TEMPDIR_ERROR_UNAVAILABLE))
 }

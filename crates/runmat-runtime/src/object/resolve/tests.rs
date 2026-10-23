@@ -10,6 +10,36 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn static_callable_fallback_observes_canonical_and_selected_runtime_inventory() {
+    use crate::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
+    struct Empty;
+    impl RuntimeBuiltinService for Empty {
+        fn bindings_by_name(&self, _: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
+            Vec::new()
+        }
+    }
+    // This actual namespace callable has a canonical binding, not legacy
+    // descriptor metadata. Looking it up must not execute its filesystem body.
+    assert!(!runmat_builtins::builtin_functions()
+        .iter()
+        .any(|entry| entry.name == "data.open"));
+    let class = ClassIdentity::from("data");
+    let Value::Closure(target) = load_static_member(&class, "open", None).unwrap() else {
+        panic!("canonical callable closure");
+    };
+    assert_eq!(target.function_name.as_str(), "data.open");
+    let selected = RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(RuntimeServicePorts::default().with_builtin(std::rc::Rc::new(Empty)));
+    let _scope = selected.enter();
+    assert!(
+        load_static_member(&class, "open", None).is_err(),
+        "a selected inventory must not fall back to global registrations"
+    );
+}
+
+#[test]
 fn graphics_handle_predicate_preserves_wide_integer_sign() {
     assert!(is_possible_graphics_handle_value(&Value::Int(
         IntValue::U64(u64::MAX)
@@ -128,7 +158,6 @@ fn store_member_updates_inherited_static_property_owner_slot() {
         Value::ClassRef(child_name.clone().into()),
         "version".to_string(),
         Value::Num(9.0),
-        false,
         None,
         |_old, _new| {},
     ))
@@ -260,7 +289,6 @@ fn store_member_uses_inherited_subsasgn_for_missing_property() {
         Value::Object(ObjectInstance::new(child_name)),
         "missing".to_string(),
         Value::Num(13.0),
-        false,
         None,
         |_old, _new| {},
     ))

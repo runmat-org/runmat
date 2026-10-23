@@ -32,7 +32,8 @@ fn rejects_nonscalar_string_and_multiline_character_arrays() {
     let error = call(vec![Value::StringArray(strings)]).expect_err("array");
     assert_eq!(error.identifier(), Some("RunMat:cd:InvalidFolder"));
 
-    let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("characters");
+    let chars =
+        CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).expect("characters");
     let error = call(vec![Value::CharArray(chars)]).expect_err("matrix");
     assert_eq!(error.identifier(), Some("RunMat:cd:InvalidFolder"));
 }

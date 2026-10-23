@@ -14,11 +14,11 @@ type WeakBuffer = std::rc::Weak<wgpu::Buffer>;
 fn weak_buffer(buffer: &runmat_accelerate_api::WgpuBufferOwner) -> WeakBuffer {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::sync::Arc::downgrade(buffer)
+        runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer)
     }
     #[cfg(target_arch = "wasm32")]
     {
-        std::rc::Rc::downgrade(buffer)
+        runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer)
     }
 }
 

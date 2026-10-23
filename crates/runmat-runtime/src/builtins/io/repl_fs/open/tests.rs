@@ -9,7 +9,8 @@ fn invalid_names_reject_without_host_or_provider_access() {
             .handle,
     );
     let pages = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap(),
     );
     for value in [resident, pages, Value::Num(1.0)] {
         assert_eq!(
@@ -23,7 +24,8 @@ fn invalid_names_reject_without_host_or_provider_access() {
         );
     }
     let row = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1])
+            .unwrap(),
     );
     assert_eq!(open_name(&row).unwrap(), "ab");
 }
@@ -114,7 +116,7 @@ fn selected_openfig(
     };
     assert_eq!(invocation.args.len(), 1);
     assert!(path.ends_with("selected.fig"));
-    Box::pin(async {
+    crate::builtin::admitted_builtin_future(None, "fixture", async {
         let sequence = runmat_value::ValueSequence::single(Value::Num(90_210.0))
             .map_err(crate::sequence::sequence_error_to_runtime)?;
         crate::execution::RootedValueSequence::new(sequence)

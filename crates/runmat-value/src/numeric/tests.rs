@@ -544,6 +544,31 @@ mod integer_storage_tests {
             NumericStorage::F64(vec![0.1, f64::MAX]).materialize_f32(),
             vec![0.1_f32, f32::INFINITY]
         );
+        // One integer above a binary32 midpoint must round upwards, even
+        // when binary64 would first round it back onto that midpoint.
+        let unsigned = (1_u64 << 63) + (1_u64 << 39) + 1;
+        let signed = (1_i64 << 62) + (1_i64 << 38) + 1;
+        for (scalar, storage, bits) in [
+            (
+                NumericScalar::U64(unsigned),
+                NumericStorage::U64(vec![unsigned]),
+                0x5f00_0001,
+            ),
+            (
+                NumericScalar::I64(signed),
+                NumericStorage::I64(vec![signed]),
+                0x5e80_0001,
+            ),
+            (
+                NumericScalar::I64(-signed),
+                NumericStorage::I64(vec![-signed]),
+                0xde80_0001,
+            ),
+        ] {
+            assert_eq!(scalar.materialize_f32().to_bits(), bits);
+            assert_eq!(storage.materialize_f32()[0].to_bits(), bits);
+            assert_ne!((scalar.materialize_f64() as f32).to_bits(), bits);
+        }
     }
 
     #[test]
@@ -1027,5 +1052,26 @@ mod integer_storage_tests {
         )
         .expect_err("component lengths must match");
         assert!(length_mismatch.contains("matching class and length"));
+    }
+}
+#[test]
+fn exact_f64_integer_projection_checks_representability_not_only_magnitude() {
+    use crate::IntValue;
+    for value in [
+        IntValue::U64(1_u64 << 54),
+        IntValue::U64(1_u64 << 63),
+        IntValue::I64(i64::MIN),
+        IntValue::I64(-(1_i64 << 54)),
+        IntValue::U64((1_u64 << 53) + 2),
+    ] {
+        assert_eq!(value.to_exact_f64(), Some(value.to_f64()));
+    }
+    for value in [
+        IntValue::U64((1_u64 << 53) + 1),
+        IntValue::I64(-((1_i64 << 53) + 1)),
+        IntValue::U64(u64::MAX),
+        IntValue::I64(i64::MAX),
+    ] {
+        assert_eq!(value.to_exact_f64(), None);
     }
 }

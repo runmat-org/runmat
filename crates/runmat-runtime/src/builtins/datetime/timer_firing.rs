@@ -121,13 +121,12 @@ fn timer_text_serials(value: &Value, reference: NaiveDateTime) -> BuiltinResult<
         Value::CharArray(array) => (
             (0..array.rows)
                 .map(|row| {
-                    array.data()[row * array.cols..(row + 1) * array.cols]
-                        .iter()
-                        .collect::<String>()
-                        .trim_end()
-                        .to_string()
+                    super::text_parsing::decode_datetime_row(
+                        &array.data()[row * array.cols..(row + 1) * array.cols],
+                    )
+                    .map(|text| text.trim_end().to_string())
                 })
-                .collect(),
+                .collect::<BuiltinResult<Vec<_>>>()?,
             vec![array.rows, 1],
         ),
         _ => unreachable!("text admission precedes timer text decoding"),

@@ -646,21 +646,43 @@ pub(crate) mod tests {
 
     #[test]
     fn tril_character_matrix_preserves_class_and_row_major_layout() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix");
+        let chars = CharArray::from_code_units(
+            [0xD800, 65, 0xDC00, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .expect("character matrix");
         let value = tril_builtin(Value::CharArray(chars), Vec::new()).expect("tril char");
         let Value::CharArray(result) = value else {
             panic!("expected character result");
         };
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
-        assert_eq!(result.data(), vec!['a', '\0', 'c', 'd']);
+        assert_eq!(
+            result
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            vec![0xD800, 0, 0xDC00, 0xFFFF]
+        );
 
-        let pages = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
+        let pages =
+            CharArray::from_unicode_scalars_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+                .unwrap();
         let original = pages.clone();
         let masked = tril_char_array(pages, 0).unwrap();
         assert_eq!(masked.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(masked.data(), &['a', '\0', 'c', 'd', 'e', '\0', 'g', 'h']);
-        assert_eq!(original.data(), &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+        assert_eq!(
+            masked.data(),
+            runmat_value::encode_utf16_code_units("a\0cde\0gh")
+        );
+        assert_eq!(
+            original.data(),
+            runmat_value::encode_utf16_code_units("abcdefgh")
+        );
         let pointer = masked.data().as_ptr();
         let reused = tril_char_array(masked, isize::MAX).unwrap();
         assert_eq!(reused.data().as_ptr(), pointer);

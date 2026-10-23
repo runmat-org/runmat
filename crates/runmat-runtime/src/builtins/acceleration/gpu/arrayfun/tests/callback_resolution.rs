@@ -158,8 +158,8 @@ fn arrayfun_external_handle_errors_as_undefined_when_unresolved() {
         "unexpected error: {err:?}"
     );
     assert!(
-        !err.message().contains("Undefined function 'pkg.callback'"),
-        "well-formed external callback should report typed identity: {err:?}"
+        err.message().contains("Undefined function 'pkg.callback'"),
+        "external callback should retain its readable name alongside its typed identity: {err:?}"
     );
 }
 

@@ -32,11 +32,13 @@ fn csvread_descriptor_signatures_cover_core_forms() {
 
 #[test]
 fn csvread_path_requires_effective_scalar_text_geometry() {
-    let paged =
-        Value::CharArray(CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).unwrap());
+    let paged = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 1, 2]).unwrap(),
+    );
     assert!(resolve_path(&paged).is_err());
-    let singleton =
-        Value::CharArray(CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1]).unwrap());
+    let singleton = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 2, 1]).unwrap(),
+    );
     assert_eq!(resolve_path(&singleton).unwrap(), PathBuf::from("ab"));
 }
 
@@ -241,8 +243,8 @@ fn csvread_accepts_char_array_filename() {
     let path = write_temp_file(&["1,2"]);
     let path_string = path.to_string_lossy().to_string();
     let data: Vec<char> = path_string.chars().collect();
-    let cols = data.len();
-    let chars = CharArray::new(data, 1, cols).expect("char array");
+    let cols = path_string.encode_utf16().count();
+    let chars = CharArray::from_unicode_scalars(data, 1, cols).expect("char array");
     let result = csvread_builtin(Value::CharArray(chars), Vec::new()).expect("csv");
     match result {
         Value::Tensor(t) => {

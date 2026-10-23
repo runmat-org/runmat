@@ -5,10 +5,10 @@ use runmat_value::{ObjectInstance, Value};
 
 use crate::RuntimeError;
 
-pub(super) async fn dimensions(
-    object: &ObjectInstance,
+pub(super) fn dimensions<'a>(
+    object: &'a ObjectInstance,
     declaration: &ClassArrayShape,
-) -> Result<Vec<usize>, RuntimeError> {
+) -> Result<super::ValueDimensions<'a>, RuntimeError> {
     let (primary, others, kind) = match declaration {
         ClassArrayShape::Property { property, payload } => (property, &[][..], *payload),
         ClassArrayShape::ConsistentProperties {
@@ -17,9 +17,9 @@ pub(super) async fn dimensions(
             payload,
         } => (primary, others.as_slice(), *payload),
     };
-    let dimensions = property_dimensions(object, primary, kind).await?;
+    let dimensions = property_dimensions(object, primary, kind)?;
     for property in others {
-        let sibling = property_dimensions(object, property, kind).await?;
+        let sibling = property_dimensions(object, property, kind)?;
         if sibling != dimensions {
             return Err(crate::build_runtime_error(format!(
                 "{}: array payload properties {} and {} have inconsistent dimensions",
@@ -33,11 +33,11 @@ pub(super) async fn dimensions(
     Ok(dimensions)
 }
 
-async fn property_dimensions(
-    object: &ObjectInstance,
+fn property_dimensions<'a>(
+    object: &'a ObjectInstance,
     property: &MemberName,
     kind: ClassArrayPayload,
-) -> Result<Vec<usize>, RuntimeError> {
+) -> Result<super::ValueDimensions<'a>, RuntimeError> {
     let payload = object.properties().get(&property.0).ok_or_else(|| {
         crate::build_runtime_error(format!(
             "{}: array payload property {} is missing",
@@ -56,7 +56,7 @@ async fn property_dimensions(
     }
     // This reads geometry, not numerical contents. Numerical admission and
     // conversions remain the responsibility of the consuming domain.
-    super::value_dimensions(payload).await
+    super::value_dimensions_borrowed(payload)
 }
 
 pub(crate) fn array_payload_storage_matches(value: &Value, kind: ClassArrayPayload) -> bool {

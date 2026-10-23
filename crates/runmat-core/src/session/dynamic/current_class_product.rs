@@ -1,6 +1,7 @@
 //! Re-admit a current class source without invoking its constructor.
 
 use std::ops::ControlFlow;
+use std::rc::Rc;
 
 use runmat_runtime::context::{CurrentClassProductResolution, RuntimeContext};
 use runmat_runtime::{build_runtime_error, RuntimeError};
@@ -12,7 +13,7 @@ use super::DynamicFunctionEnvironment;
 pub(in crate::session) async fn resolve(
     runtime: RuntimeContext,
     class: ClassIdentity,
-    environment: DynamicFunctionEnvironment,
+    environment: Rc<DynamicFunctionEnvironment>,
 ) -> Result<CurrentClassProductResolution, RuntimeError> {
     let arguments = runmat_runtime::call::RootedFunctionArguments::ordinary(
         runmat_runtime::execution::RootedValues::new(Vec::new())

@@ -242,7 +242,7 @@ fn cosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).cosh())
+        .map(|&ch| (u32::from(ch.raw()) as f64).cosh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?;
@@ -566,7 +566,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cosh_char_array_roundtrip() {
-        let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars("AZ".chars().collect(), 1, 2).unwrap();
         let result = cosh_builtin(Value::CharArray(chars)).expect("cosh");
         match result {
             Value::Tensor(t) => {

@@ -7,9 +7,6 @@ use std::{cell::RefCell, rc::Rc};
 #[derive(Default)]
 struct Probe(RefCell<Vec<String>>);
 impl RuntimeAccelerationService for Probe {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_legacy(
         &self,
         _: RuntimeContext,
@@ -50,7 +47,7 @@ impl crate::context::RuntimeBuiltinService for Override {
             |invocation| {
                 let value = invocation.args[0].clone();
                 assert!(matches!(value, Value::Tensor(_)));
-                Box::pin(async {
+                crate::builtin::admitted_builtin_future(None, "fixture", async {
                     crate::user_functions::test_support::rooted_single_value_sequence(value)
                 })
             },

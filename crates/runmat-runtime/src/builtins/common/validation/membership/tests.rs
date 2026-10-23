@@ -100,7 +100,8 @@ fn admission_precedes_access_and_nested_membership_preserves_exact_borrowed_valu
             Some("RunMat:mustBeMember:InvalidArgument")
         );
         let invalid_shape = Value::CharArray(
-            runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![2, 1]).unwrap(),
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![2, 1])
+                .unwrap(),
         );
         let error = futures::executor::block_on(value_is_member_async(&resident, &invalid_shape))
             .unwrap_err();

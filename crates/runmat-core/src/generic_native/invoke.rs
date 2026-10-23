@@ -11,10 +11,10 @@ use runmat_value::{Value, ValueSequence};
 
 use crate::ExecutableUnit;
 
-#[path = "invoke/native_semantic.rs"]
-mod native_semantic;
 #[path = "invoke/bound_constructor.rs"]
 mod bound_constructor;
+#[path = "invoke/native_semantic.rs"]
+mod native_semantic;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "invoke/native_semantic_tests.rs"]
 mod native_semantic_tests;
@@ -171,9 +171,10 @@ pub(crate) async fn invoke(
                         .get(runmat_hir::FunctionId(function))
                         .and_then(|function| function.class_method_owner.clone())
                 });
+            let admission_runtime = runtime.clone();
             let runtime = runtime.with_constructor_receiver_for_method(method_owner.as_ref());
             let is_native = semantic_native_functions.contains(&FunctionId(function));
-            Box::pin(async move {
+            user_functions::admit_user_function_with(Some(&admission_runtime), move || async move {
                 if !same_owner {
                     return Err(super::error::stage(
                         "NativeCallbackOwner",
@@ -225,7 +226,7 @@ pub(crate) async fn invoke(
                             function,
                             arguments,
                             requested_outputs,
-                        ))
+                        )?)
                         .await
                 } else {
                     Err(super::error::stage(
@@ -287,154 +288,158 @@ pub(crate) async fn invoke(
                 .filter(|owner| owner.role == runmat_types::ClassMethodRole::Constructor);
             let selected_product =
                 selected_body.and_then(|body| body.selected_class_product.clone());
-            let super_selection = runtime.take_retained_super_body_for(&binding);
-            Box::pin(async move {
-                let (runtime, super_body_owner) = super_selection?;
-                if let Some(expected) = &super_body_owner {
-                    if constructor_owner.as_ref() != Some(expected)
-                        || expected.is_static
-                        || expected.role != runmat_types::ClassMethodRole::Constructor
-                    {
-                        return Err(super::error::stage(
-                            "NativeConstructorOwner",
-                            "selected superclass body disagrees with its admitted owner",
-                        ));
+            let (runtime, super_body_owner) = runtime.take_retained_super_body_for(&binding)?;
+            runmat_runtime::execution::admit_executable_sequence_with(
+                &runtime.clone(),
+                move || async move {
+                    if let Some(expected) = &super_body_owner {
+                        if constructor_owner.as_ref() != Some(expected)
+                            || expected.is_static
+                            || expected.role != runmat_types::ClassMethodRole::Constructor
+                        {
+                            return Err(super::error::stage(
+                                "NativeConstructorOwner",
+                                "selected superclass body disagrees with its admitted owner",
+                            ));
+                        }
                     }
-                }
-                let function = runmat_hir::FunctionId(binding.function);
-                let (view, current_definition) = match &binding.authority {
-                    runmat_value::BoundFunctionAuthority::Local {
-                        definition,
-                        dependencies,
-                        ..
-                    } => {
-                        let current =
-                            std::iter::once(definition)
+                    let function = runmat_hir::FunctionId(binding.function);
+                    let (view, current_definition) = match &binding.authority {
+                        runmat_value::BoundFunctionAuthority::Local {
+                            definition,
+                            dependencies,
+                            ..
+                        } => {
+                            let current = std::iter::once(definition)
                                 .chain(dependencies.iter())
                                 .all(|lease| {
                                     registry
                                         .get(runmat_hir::FunctionId(lease.function()))
                                         .is_some_and(|body| lease.matches(&body.definition_owner))
                                 });
-                        (
-                            (!current)
-                                .then(|| registry.owned_view(function, &binding.authority))
-                                .flatten(),
-                            current,
+                            (
+                                (!current)
+                                    .then(|| registry.owned_view(function, &binding.authority))
+                                    .flatten(),
+                                current,
+                            )
+                        }
+                        runmat_value::BoundFunctionAuthority::Portable { origin } => (
+                            None,
+                            registry
+                                .get(function)
+                                .is_some_and(|body| body.binding_origin == Some(*origin)),
+                        ),
+                        runmat_value::BoundFunctionAuthority::SelectedNative { .. } => {
+                            (None, false)
+                        }
+                    };
+                    if let Some(owner) = constructor_owner.filter(|_| {
+                        (super_body_owner.is_some()
+                            || matches!(
+                                &binding.authority,
+                                runmat_value::BoundFunctionAuthority::Local { .. }
+                            ))
+                            && (current_definition || view.is_some())
+                    }) {
+                        return bound_constructor::invoke(
+                            bound_constructor::Invocation {
+                                runtime,
+                                binding,
+                                owner,
+                                product: selected_product,
+                                registry: view.map(Rc::new).unwrap_or_else(|| Rc::clone(&registry)),
+                                unit,
+                                executor,
+                                arguments,
+                                requested_outputs,
+                                lexical_environment,
+                                is_native: current_definition && native_selected_body,
+                                dynamic_admission,
+                            },
+                            super_body_owner.is_some(),
                         )
+                        .await;
                     }
-                    runmat_value::BoundFunctionAuthority::Portable { origin } => (
-                        None,
-                        registry
-                            .get(function)
-                            .is_some_and(|body| body.binding_origin == Some(*origin)),
-                    ),
-                    runmat_value::BoundFunctionAuthority::SelectedNative { .. } => (None, false),
-                };
-                if let Some(owner) = constructor_owner.filter(|_| {
-                    (super_body_owner.is_some()
-                        || matches!(
-                            &binding.authority,
-                            runmat_value::BoundFunctionAuthority::Local { .. }
-                        ))
-                        && (current_definition || view.is_some())
-                }) {
-                    return bound_constructor::invoke(
-                        bound_constructor::Invocation {
+                    if super_body_owner.is_some() {
+                        return Err(super::error::stage(
+                            "NativeConstructorOwner",
+                            "selected superclass body has no exact executable definition",
+                        ));
+                    }
+                    if current_definition {
+                        let runtime = isolated_procedure_runtime(runtime);
+                        if native_selected_body {
+                            let method_owner = unit
+                                .mir()
+                                .functions
+                                .get(&function)
+                                .and_then(|metadata| metadata.class_method_owner.as_ref());
+                            let runtime =
+                                runtime.with_constructor_receiver_for_method(method_owner)?;
+                            let execution_sources = registry.execution_source_resolver_in(&runtime);
+                            let runtime = super::super_constructor::bind_selected(
+                                runtime,
+                                &registry,
+                                function,
+                                &execution_sources,
+                            )?;
+                            let selected = runtime.clone();
+                            return selected
+                                .scope(native_semantic::invoke_rooted(
+                                    &unit,
+                                    executor,
+                                    native_semantic::RootedInvocation {
+                                        function,
+                                        arguments,
+                                        requested_outputs,
+                                        runtime,
+                                        lexical_environment,
+                                        dynamic_admission,
+                                    },
+                                ))
+                                .await;
+                        }
+                        return invoke_vm_with_rooted_admission(
+                            binding.function,
+                            arguments,
+                            requested_outputs,
+                            &registry,
+                            runtime,
+                            lexical_environment,
+                            dynamic_admission,
+                        )
+                        .await;
+                    }
+                    if let Some(view) = view {
+                        let runtime = isolated_procedure_runtime(runtime);
+                        return invoke_vm_with_rooted_admission(
+                            binding.function,
+                            arguments,
+                            requested_outputs,
+                            &view,
+                            runtime,
+                            lexical_environment,
+                            dynamic_admission,
+                        )
+                        .await;
+                    }
+                    if let Some(previous) = previous {
+                        return previous(
                             runtime,
                             binding,
-                            owner,
-                            product: selected_product,
-                            registry: view.map(Rc::new).unwrap_or_else(|| Rc::clone(&registry)),
-                            unit,
-                            executor,
                             arguments,
                             requested_outputs,
                             lexical_environment,
-                            is_native: current_definition && native_selected_body,
-                            dynamic_admission,
-                        },
-                        super_body_owner.is_some(),
-                    )
-                    .await;
-                }
-                if super_body_owner.is_some() {
-                    return Err(super::error::stage(
-                        "NativeConstructorOwner",
-                        "selected superclass body has no exact executable definition",
-                    ));
-                }
-                if current_definition {
-                    let runtime = isolated_procedure_runtime(runtime);
-                    if native_selected_body {
-                        let method_owner = unit
-                            .mir()
-                            .functions
-                            .get(&function)
-                            .and_then(|metadata| metadata.class_method_owner.as_ref());
-                        let runtime = runtime.with_constructor_receiver_for_method(method_owner)?;
-                        let execution_sources = registry.execution_source_resolver_in(&runtime);
-                        let runtime = super::super_constructor::bind_selected(
-                            runtime,
-                            &registry,
-                            function,
-                            &execution_sources,
-                        )?;
-                        let selected = runtime.clone();
-                        return selected
-                            .scope(native_semantic::invoke_rooted(
-                                &unit,
-                                executor,
-                                native_semantic::RootedInvocation {
-                                    function,
-                                    arguments,
-                                    requested_outputs,
-                                    runtime,
-                                    lexical_environment,
-                                    dynamic_admission,
-                                },
-                            ))
-                            .await;
+                        )?
+                        .await;
                     }
-                    return invoke_vm_with_rooted_admission(
-                        binding.function,
-                        arguments,
-                        requested_outputs,
-                        &registry,
-                        runtime,
-                        lexical_environment,
-                        dynamic_admission,
-                    )
-                    .await;
-                }
-                if let Some(view) = view {
-                    let runtime = isolated_procedure_runtime(runtime);
-                    return invoke_vm_with_rooted_admission(
-                        binding.function,
-                        arguments,
-                        requested_outputs,
-                        &view,
-                        runtime,
-                        lexical_environment,
-                        dynamic_admission,
-                    )
-                    .await;
-                }
-                if let Some(previous) = previous {
-                    return previous(
-                        runtime,
-                        binding,
-                        arguments,
-                        requested_outputs,
-                        lexical_environment,
-                    )
-                    .await;
-                }
-                Err(super::error::stage(
-                    "UnavailableBoundFunction",
-                    "bound function definition is unavailable in this execution owner",
-                ))
-            })
+                    Err(super::error::stage(
+                        "UnavailableBoundFunction",
+                        "bound function definition is unavailable in this execution owner",
+                    ))
+                },
+            )
         },
     ))?;
 
@@ -465,7 +470,8 @@ pub(crate) async fn invoke(
             } else {
                 external_runtime.clone()
             };
-            Box::pin(async move {
+            let admission_runtime = runtime.clone();
+            user_functions::admit_user_function_with(Some(&admission_runtime), move || async move {
                 if !same_owner {
                     return Err(super::error::stage(
                         "NativeCallbackOwner",
@@ -486,7 +492,7 @@ pub(crate) async fn invoke(
                     .await;
                 }
                 if let Some(previous) = previous {
-                    return runtime.scope(previous(Some(runtime.clone()), call)).await;
+                    return runtime.scope(previous(Some(runtime.clone()), call)?).await;
                 }
                 Err(super::error::stage(
                     "UndefinedFunction",
@@ -530,56 +536,63 @@ pub(crate) async fn invoke(
                 .functions
                 .get(&runmat_hir::FunctionId(call.function))
                 .and_then(|metadata| metadata.class_method_owner.as_ref());
+            let admission_runtime = runtime.clone();
             let runtime = runtime.with_constructor_receiver_for_method(method_owner);
             let is_native = lexical_native_functions.contains(&FunctionId(call.function));
-            Box::pin(async move {
-                let _call_roots = call_roots?;
-                if !same_owner {
-                    return Err(super::error::stage(
-                        "NativeCallbackOwner",
-                        "lexical callback selected another native session owner",
-                    ));
-                }
-                let runtime = runtime?;
-                let runtime = isolated_procedure_runtime(runtime);
-                if !is_native {
-                    if let Some(previous) = previous {
-                        return runtime.scope(previous(Some(runtime.clone()), call)).await;
+            user_functions::admit_lexical_function_with(
+                Some(&admission_runtime),
+                move || async move {
+                    let _call_roots = call_roots?;
+                    if !same_owner {
+                        return Err(super::error::stage(
+                            "NativeCallbackOwner",
+                            "lexical callback selected another native session owner",
+                        ));
                     }
-                    return Err(super::error::stage(
-                        "UndefinedFunction",
-                        format!("lexical function {} is unavailable", call.function),
-                    ));
-                }
-                let function = runmat_hir::FunctionId(call.function);
-                let execution = super::deopt::invoke(
-                    &unit,
-                    super::deopt::DeoptimizationRequest {
-                        executor,
-                        function,
-                        lexical_environment: call.environment,
-                        inputs: super::deopt::Inputs::Source {
-                            captures: call.captures,
-                            arguments: call.arguments,
+                    let runtime = runtime?;
+                    let runtime = isolated_procedure_runtime(runtime);
+                    if !is_native {
+                        if let Some(previous) = previous {
+                            return runtime.scope(previous(Some(runtime.clone()), call)?).await;
+                        }
+                        return Err(super::error::stage(
+                            "UndefinedFunction",
+                            format!("lexical function {} is unavailable", call.function),
+                        ));
+                    }
+                    let function = runmat_hir::FunctionId(call.function);
+                    let execution = super::deopt::invoke(
+                        &unit,
+                        super::deopt::DeoptimizationRequest {
+                            executor,
+                            function,
+                            lexical_environment: call.environment,
+                            inputs: super::deopt::Inputs::Source {
+                                captures: call.captures,
+                                arguments: call.arguments,
+                            },
+                            requested_outputs: call.requested_outputs,
+                            runtime,
+                            dynamic_admission,
+                            osr: None,
+                            workspace: None,
                         },
-                        requested_outputs: call.requested_outputs,
-                        runtime,
-                        dynamic_admission,
-                        osr: None,
-                        workspace: None,
-                    },
-                )
-                .await?;
-                execution.try_map_owned(
-                    |execution| {
-                        Ok(runmat_runtime::call::lexical::LexicalCallResult {
-                            outputs: normalize_outputs(execution.outputs, call.requested_outputs)?,
-                            captures: execution.captures,
-                        })
-                    },
-                    |error| error.into_runtime_error(),
-                )
-            })
+                    )
+                    .await?;
+                    execution.try_map_owned(
+                        |execution| {
+                            Ok(runmat_runtime::call::lexical::LexicalCallResult {
+                                outputs: normalize_outputs(
+                                    execution.outputs,
+                                    call.requested_outputs,
+                                )?,
+                                captures: execution.captures,
+                            })
+                        },
+                        |error| error.into_runtime_error(),
+                    )
+                },
+            )
         }));
 
     let previous_resolver = user_functions::current_semantic_function_resolver();

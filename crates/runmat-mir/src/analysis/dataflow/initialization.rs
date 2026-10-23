@@ -235,7 +235,15 @@ fn transfer_block(
             }
         }
         match &stmt.kind {
-            MirStmtKind::Assign { place, .. } => {
+            MirStmtKind::PreparedAssign {
+                preparation:
+                    crate::MirPreparedAssignment {
+                        mutation: crate::MirPlaceMutation { place, .. },
+                        ..
+                    },
+                ..
+            }
+            | MirStmtKind::Assign { place, .. } => {
                 mark_place_assigned(place, &mut state);
             }
             MirStmtKind::MultiAssign { targets, .. } => {
@@ -263,6 +271,11 @@ fn transfer_block(
                 mark_declared_storage(effect, bindings, &mut state);
             }
             MirStmtKind::CaptureSequence { .. } => {}
+            MirStmtKind::PrepareFixedAssignment(phase) => {
+                if let Some(crate::MirFixedSelectorDestination::Scalar(local)) = phase.output() {
+                    mark_place_assigned(&crate::MirPlace::Local(local), &mut state);
+                }
+            }
             MirStmtKind::Expr(_) => {}
             MirStmtKind::StatementOutput(_)
             | MirStmtKind::PlaceMutation(_)

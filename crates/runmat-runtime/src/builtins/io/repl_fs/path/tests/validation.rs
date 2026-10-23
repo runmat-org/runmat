@@ -39,7 +39,8 @@ fn numeric_path_admission_retains_empty_and_low_rank_rows() {
 fn rejects_invalid_text_shapes_and_value_kinds() {
     let (_lock, _guard) = locked();
     let strings = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("strings");
-    let characters = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("characters");
+    let characters =
+        CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).expect("characters");
     for value in [
         Value::StringArray(strings),
         Value::CharArray(characters),
@@ -108,13 +109,13 @@ fn validates_later_arguments_before_resident_access() {
 #[test]
 fn semantic_character_rank_and_empty_numeric_rows_are_preserved() {
     let (_lock, _guard) = locked();
-    let chars = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap();
+    let chars = CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap();
     call(vec![Value::CharArray(chars)]).unwrap();
     assert_eq!(
         crate::builtins::common::path_state::current_path_string(),
         "ab"
     );
-    let pages = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let pages = CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
     assert_eq!(
         call(vec![Value::CharArray(pages)])
             .unwrap_err()

@@ -56,7 +56,9 @@ async fn cellstr_groups_use_first_appearance_and_remain_cellstr() {
 
 #[tokio::test]
 async fn character_matrix_treats_each_row_as_one_label() {
-    let input = Value::CharArray(CharArray::new(vec!['b', ' ', 'a', ' ', 'b', ' '], 3, 2).unwrap());
+    let input = Value::CharArray(
+        CharArray::from_unicode_scalars(vec!['b', ' ', 'a', ' ', 'b', ' '], 3, 2).unwrap(),
+    );
     let values = outputs(execute::apply(input).await.unwrap());
     let Value::Tensor(g) = &values[0] else {
         panic!("expected g")

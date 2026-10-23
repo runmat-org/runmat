@@ -99,7 +99,7 @@ fn sqrt_tensor_with_negatives() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn sqrt_char_array_inputs() {
-    let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AZ".chars().collect(), 1, 2).unwrap();
     let result = sqrt_builtin(Value::CharArray(chars)).expect("sqrt");
     match result {
         Value::Tensor(t) => {

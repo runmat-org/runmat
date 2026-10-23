@@ -8,13 +8,45 @@ use runmat_runtime::numeric_region::{
 };
 use runmat_types::{ProgramPointId, RegionContract, RegionId, RegionValueId};
 
+/// Retain the executor's existing immutable plan collection, never deep-copy
+/// the program, traversal, output or skipped-site metadata at a checkpoint.
+#[derive(Clone)]
+pub(crate) struct OptimizedRegionPlanLease {
+    plans: std::sync::Arc<Vec<OptimizedRegionPlan>>,
+    index: usize,
+}
+
+impl OptimizedRegionPlanLease {
+    pub(crate) fn new(plans: std::sync::Arc<Vec<OptimizedRegionPlan>>, index: usize) -> Self {
+        assert!(index < plans.len());
+        Self { plans, index }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_test_plan(plan: OptimizedRegionPlan) -> Self {
+        Self::new(std::sync::Arc::new(vec![plan]), 0)
+    }
+}
+
+impl std::ops::Deref for OptimizedRegionPlanLease {
+    type Target = OptimizedRegionPlan;
+    fn deref(&self) -> &Self::Target {
+        &self.plans[self.index]
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct OptimizedRegionPlan {
     pub region: RegionId,
     pub entry: SiteIdentity,
-    /// First site outside the linear region, from the compiler's exit contract.
-    pub exit: ProgramPointId,
+    /// Exact first compiler-authored site outside this traversal, including
+    /// phase and occurrence ordinal. A point alone cannot complete feedback.
+    pub exit_site: SiteIdentity,
     pub traversal_sites: Vec<SiteIdentity>,
+    /// Arithmetic occurrences in the exact order of the verified program's
+    /// Unary/Binary nodes; structural alias/assignment sites are not invented
+    /// as numerical operations.
+    pub operation_sites: Vec<SiteIdentity>,
     pub inputs: Vec<RegionValueId>,
     pub outputs: Vec<RegionOutput>,
     pub program: NumericRegionProgram,
@@ -38,6 +70,7 @@ pub(crate) enum RegionOutputSource {
 struct LinearRegion<'a> {
     instructions: Vec<&'a runmat_native_codegen::NativeInstruction>,
     sites: Vec<SiteIdentity>,
+    exit_site: SiteIdentity,
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -122,6 +155,7 @@ fn derive_plan(
         .map(|(index, binding)| (binding.ssa, index))
         .collect::<BTreeMap<_, _>>();
     let mut arithmetic_operations = 0_u32;
+    let mut operation_sites = Vec::new();
     let mut skipped_sites = BTreeSet::new();
     let mut region_sites = BTreeSet::new();
     let mut pending_assignment = None;
@@ -138,6 +172,7 @@ fn derive_plan(
                     runmat_mir::MirRvalue::Unary(..) | runmat_mir::MirRvalue::Binary(..)
                 ) {
                     arithmetic_operations = arithmetic_operations.saturating_add(1);
+                    operation_sites.push(site_identity(&instruction.site));
                 }
                 if instruction.outputs.len() != 1 {
                     return None;
@@ -206,8 +241,9 @@ fn derive_plan(
     Some(OptimizedRegionPlan {
         region: contract.id,
         entry,
-        exit: contract.exits[0],
+        exit_site: trace.exit_site,
         traversal_sites: trace.sites,
+        operation_sites,
         inputs,
         outputs,
         program,
@@ -430,6 +466,7 @@ fn linear_region<'a>(
                 return Some(LinearRegion {
                     instructions,
                     sites,
+                    exit_site: site_identity(&instruction.site),
                 });
             }
             instructions.push(instruction);
@@ -439,6 +476,7 @@ fn linear_region<'a>(
             return Some(LinearRegion {
                 instructions,
                 sites,
+                exit_site: site_identity(&current.terminator.site),
             });
         }
         let runmat_native_codegen::NativeTerminatorKind::Goto { edge } = &current.terminator.kind

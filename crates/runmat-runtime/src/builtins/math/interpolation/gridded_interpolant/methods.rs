@@ -35,7 +35,7 @@ pub(super) fn parse_trailing_methods(
 ) -> BuiltinResult<(InterpMethod, ExtrapolationMethod)> {
     let mut methods = Vec::new();
     while methods.len() < 2 {
-        let Some(name) = args.last().and_then(text_from_value) else {
+        let Some(name) = args.last().map(text_from_value).transpose()?.flatten() else {
             break;
         };
         let Some(keyword) = MethodKeyword::parse(&name) else {
@@ -98,10 +98,16 @@ pub(super) fn parse_extrap_method(keyword: MethodKeyword) -> BuiltinResult<Extra
     }
 }
 
-pub(super) fn text_from_value(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn text_from_value(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }

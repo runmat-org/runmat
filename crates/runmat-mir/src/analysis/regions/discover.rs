@@ -253,6 +253,7 @@ fn statement_is_pure(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> bool {
     let local_targets = match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(_) | MirStmtKind::PreparedAssign { .. } => false,
         MirStmtKind::Assign { place, .. } => matches!(place, MirPlace::Local(_)),
         MirStmtKind::MultiAssign { targets, .. } => targets.targets.iter().all(|target| {
             matches!(

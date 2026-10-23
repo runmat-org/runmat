@@ -8,19 +8,22 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
+mod dialog;
 #[cfg(not(target_arch = "wasm32"))]
 mod file_lock;
-mod dialog;
+mod invocation;
 mod mapped_backing;
 mod memory;
-mod provider_path;
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_path;
 mod native_path_intent;
+mod provider_path;
 mod resource;
+mod selected_provider;
 mod staged_output;
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
+mod unavailable;
 #[cfg(not(target_arch = "wasm32"))]
 pub use file_lock::ExclusiveFileLock;
 mod publication;
@@ -35,6 +38,9 @@ mod wasm;
 mod workspace_native;
 
 pub use dialog::*;
+pub use invocation::{
+    register_invocation_filesystem_resolver, InvocationFilesystem, InvocationFilesystemSelection,
+};
 pub use mapped_backing::{
     capture_mapped_backing, capture_mapped_backing_on, CapturedMappedBacking, FsMappedBacking,
     FsMappedWriteDisposition, FsMappedWriteFailure, FsMappedWriteOutcome,
@@ -60,7 +66,9 @@ pub use resource::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox::{CapturedIo, SandboxFsProvider};
+pub use selected_provider::SelectedFsProvider;
 pub use staged_output::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
+pub use unavailable::UnavailableFsProvider;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
@@ -872,6 +880,9 @@ pub fn provider_override_lock() -> MutexGuard<'static, ()> {
 }
 
 fn current_dir_override() -> Option<PathBuf> {
+    if let Some((_, directory)) = invocation::snapshot() {
+        return directory;
+    }
     provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned")
@@ -943,6 +954,9 @@ pub fn with_provider_override<R>(provider: Arc<dyn FsProvider>, f: impl FnOnce()
 
 /// Returns the currently installed provider.
 pub fn current_provider() -> Arc<dyn FsProvider> {
+    if let Some((provider, _)) = invocation::snapshot() {
+        return provider;
+    }
     provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned")
@@ -954,6 +968,12 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
 /// invocation authority. A virtual CWD belongs to the same registry state as
 /// the provider; native process CWD is copied after that state is released.
 pub fn current_provider_with_current_dir() -> io::Result<(Arc<dyn FsProvider>, PathBuf)> {
+    if let Some((provider, directory)) = invocation::snapshot() {
+        return Ok((
+            provider,
+            directory.expect("selected filesystem has virtual CWD"),
+        ));
+    }
     let (provider, virtual_dir) = {
         let state = provider_state_lock()
             .read()
@@ -983,6 +1003,18 @@ pub fn current_provider_supports_read() -> bool {
 }
 
 pub fn current_dir() -> io::Result<PathBuf> {
+    match invocation::selected() {
+        Some(InvocationFilesystemSelection::Selected(owner)) => return owner.current_dir(),
+        Some(InvocationFilesystemSelection::Denied {
+            directory,
+            environment_read,
+        }) => {
+            return directory
+                .filter(|_| environment_read)
+                .ok_or_else(invocation::denied_environment)
+        }
+        None => {}
+    }
     if let Some(current) = current_dir_override() {
         return Ok(current);
     }
@@ -1001,6 +1033,48 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
 }
 
 pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
+    match invocation::selected() {
+        Some(InvocationFilesystemSelection::Selected(owner)) => {
+            if !owner.environment_write_allowed() {
+                return Err(invocation::denied_environment());
+            }
+            let mut target = PathBuf::from(path.as_ref());
+            if !owner.provider().path_namespace().is_absolute(&target) {
+                target = owner.captured_dir().join(target);
+            }
+            let canonical = owner
+                .provider()
+                .canonicalize(&target)
+                .await
+                .unwrap_or(target.clone());
+            let metadata = owner.provider().metadata(&canonical).await?;
+            if !metadata.is_dir() {
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    format!("Not a directory: {}", canonical.display()),
+                ));
+            }
+            if !matches!(
+                invocation::selected(),
+                Some(InvocationFilesystemSelection::Selected(ref current))
+                    if current.same_owner(&owner)
+            ) {
+                return Err(io::Error::new(
+                    ErrorKind::Interrupted,
+                    "filesystem invocation changed before working-directory publication",
+                ));
+            }
+            owner.publish_current_dir(canonical)?;
+            return Ok(());
+        }
+        Some(InvocationFilesystemSelection::Denied { .. }) => {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                "selected invocation has no filesystem service",
+            ));
+        }
+        None => {}
+    }
     let (provider, selected_dir) = {
         let state = provider_state_lock()
             .read()

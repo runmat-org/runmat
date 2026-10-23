@@ -5,7 +5,7 @@ use runmat_native_codegen::{aot::AotProgramManifest, aot::LinkedNativeProduct, N
 
 pub(super) struct LinkedSelectedAdmission {
     pub product: LinkedNativeProduct,
-    pub source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    pub services: Vec<runmat_execution::host::VerifiedNativeServiceIssuer>,
 }
 
 pub(super) fn admit(
@@ -13,10 +13,17 @@ pub(super) fn admit(
     assembly: &NativeAssembly,
     verified_link: bool,
     source_service_factory: *const std::ffi::c_void,
+    network_service_factory: *const std::ffi::c_void,
+    external_factories: crate::input::LinkedExternalFactories,
 ) -> Result<Option<LinkedSelectedAdmission>, String> {
     let Some(binding) = program.product.selected() else {
-        if !source_service_factory.is_null() {
-            return Err("unselected program passed a linked source-service factory".into());
+        if !source_service_factory.is_null()
+            || !network_service_factory.is_null()
+            || !external_factories.ui.is_null()
+            || !external_factories.callback.is_null()
+            || !external_factories.dynamic.is_null()
+        {
+            return Err("unselected program passed a linked service factory".into());
         }
         return Ok(None);
     };
@@ -40,32 +47,108 @@ pub(super) fn admit(
     linked
         .validate_assembly(assembly)
         .map_err(|error| format!("selected Native IR is invalid: {error}"))?;
-    let source_evaluation = if binding.required_services.is_empty() {
-        if !source_service_factory.is_null() {
-            return Err("pure selected program passed a source-service factory".into());
+    let has_source = binding.services.iter().any(|service| {
+        service.kind == runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+    });
+    if !has_source && !source_service_factory.is_null() {
+        return Err(
+            "selected program without SourceEvaluation passed a source-service factory".into(),
+        );
+    }
+    let has_network = binding.services.iter().any(|service| {
+        service.kind
+            == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::Network,
+            )
+    });
+    if !has_network && !network_service_factory.is_null() {
+        return Err("selected program without Network passed a network-service factory".into());
+    }
+    for (kind, factory) in [
+        (
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::UserInterface,
+            ),
+            external_factories.ui,
+        ),
+        (
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::HostCallback,
+            ),
+            external_factories.callback,
+        ),
+        (
+            runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch,
+            external_factories.dynamic,
+        ),
+    ] {
+        let reached = binding.services.iter().any(|service| service.kind == kind);
+        if reached == factory.is_null() {
+            return Err(format!(
+                "selected linked factory inventory differs for {kind:?}"
+            ));
         }
-        None
-    } else if binding.required_services.len() == 1
-        && binding
-            .required_services
-            .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
+    }
+    if !external_factories.dynamic.is_null()
+        && program.runtime_binding_mode
+            != runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic
     {
-        #[cfg(feature = "source-evaluation")]
-        {
-            Some(crate::source_service::admit(
-                &linked,
-                source_service_factory,
-            )?)
-        }
-        #[cfg(not(feature = "source-evaluation"))]
-        {
-            return Err("selected source-evaluation component is not linked".into());
-        }
-    } else {
-        return Err("selected program requires unsupported linked runtime services".into());
-    };
+        return Err("hosted dynamic bindings cannot replace a closed-world table".into());
+    }
+    let mut services = Vec::with_capacity(binding.services.len());
+    for service in &binding.services {
+        let issuer = match service.kind {
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::Clock,
+            ) => crate::clock_service::admit(&linked)?,
+            runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation => {
+                #[cfg(feature = "source-evaluation")]
+                {
+                    crate::source_service::admit(&linked, source_service_factory)?
+                }
+                #[cfg(not(feature = "source-evaluation"))]
+                {
+                    return Err("selected source-evaluation component is not linked".into());
+                }
+            }
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::Network,
+            ) => crate::network_service::admit(&linked, network_service_factory)?,
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::UserInterface,
+            ) => crate::external_service::admit(&linked, service.kind, external_factories.ui)?,
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::HostCallback,
+            ) => {
+                crate::external_service::admit(&linked, service.kind, external_factories.callback)?
+            }
+            runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch => {
+                crate::external_service::admit(&linked, service.kind, external_factories.dynamic)?
+            }
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::WorkspaceRead
+                | runmat_types::EffectKind::WorkspaceWrite
+                | runmat_types::EffectKind::EnvironmentRead
+                | runmat_types::EffectKind::EnvironmentWrite
+                | runmat_types::EffectKind::FilesystemRead
+                | runmat_types::EffectKind::FilesystemWrite
+                | runmat_types::EffectKind::Randomness,
+            ) => crate::local_service::admit(&linked, service.kind)?,
+            runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::MaySuspend
+                | runmat_types::EffectKind::MayThrow
+                | runmat_types::EffectKind::Unknown,
+            ) => {
+                return Err(format!(
+                    "selected program requires unsupported linked runtime service {:?}",
+                    service.kind
+                ))
+            }
+        };
+        services.push(issuer);
+    }
     Ok(Some(LinkedSelectedAdmission {
         product: linked,
-        source_evaluation,
+        services,
     }))
 }

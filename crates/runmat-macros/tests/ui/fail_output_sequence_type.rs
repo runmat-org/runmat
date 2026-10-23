@@ -37,6 +37,10 @@ mod builtin {
     pub type RuntimeBuiltinFuture =
         Pin<Box<dyn Future<Output = Result<ValueSequence, String>> + 'static>>;
 
+    pub fn rejected_builtin_future(error: String) -> RuntimeBuiltinFuture {
+        Box::pin(std::future::ready(Err(error)))
+    }
+
     pub fn admitted_builtin_future_with<F>(
         context: Option<()>,
         _name: &'static str,
@@ -71,6 +75,7 @@ mod builtin {
         pub identity: runmat_builtins::BuiltinBindingIdentity,
         pub implementation: for<'a> fn(RuntimeBuiltinInvocation<'a>) -> RuntimeBuiltinFuture,
         pub continuation_layout: Option<fn() -> Result<u64, String>>,
+        pub provenance: Option<&'static runmat_builtins::BuiltinImplementationProvenance>,
     }
 
     impl RuntimeBuiltinBinding {
@@ -82,6 +87,7 @@ mod builtin {
                 identity,
                 implementation,
                 continuation_layout: None,
+                provenance: None,
             }
         }
 
@@ -90,6 +96,14 @@ mod builtin {
             layout: fn() -> Result<u64, String>,
         ) -> Self {
             self.continuation_layout = Some(layout);
+            self
+        }
+
+        pub const fn with_provenance(
+            mut self,
+            provenance: &'static runmat_builtins::BuiltinImplementationProvenance,
+        ) -> Self {
+            self.provenance = Some(provenance);
             self
         }
     }

@@ -305,7 +305,9 @@ async fn boxplot_in_runtime(
     let x = args.pop_front().expect("data input checked above");
     let first_option = args
         .first()
-        .and_then(keyword_of)
+        .map(keyword_of)
+        .transpose()?
+        .flatten()
         .and_then(|name| BoxplotOptionKind::parse(&name));
     let group = if !args.is_empty() && first_option.is_none() {
         Some(args.pop_front().expect("group input checked above"))

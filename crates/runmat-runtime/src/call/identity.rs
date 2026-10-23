@@ -1,5 +1,48 @@
 use runmat_types::{CallableIdentity, QualifiedName, SymbolName};
 
+/// Ownership of the existing canonical semantic identity at a call boundary.
+/// Owned callers keep their original representation; compiled retained callers
+/// share the original immutable source allocation, never a per-call Arc copy.
+#[derive(Debug, Clone)]
+pub enum CallableIdentityOwner {
+    Owned(CallableIdentity),
+    Retained(std::sync::Arc<CallableIdentity>),
+}
+
+impl CallableIdentityOwner {
+    pub fn as_identity(&self) -> &CallableIdentity {
+        match self {
+            Self::Owned(identity) => identity,
+            Self::Retained(identity) => identity.as_ref(),
+        }
+    }
+}
+
+impl From<CallableIdentity> for CallableIdentityOwner {
+    fn from(identity: CallableIdentity) -> Self {
+        Self::Owned(identity)
+    }
+}
+
+impl From<std::sync::Arc<CallableIdentity>> for CallableIdentityOwner {
+    fn from(identity: std::sync::Arc<CallableIdentity>) -> Self {
+        Self::Retained(identity)
+    }
+}
+
+impl PartialEq for CallableIdentityOwner {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_identity() == other.as_identity()
+    }
+}
+impl Eq for CallableIdentityOwner {}
+
+impl PartialEq<CallableIdentity> for CallableIdentityOwner {
+    fn eq(&self, other: &CallableIdentity) -> bool {
+        self.as_identity() == other
+    }
+}
+
 /// Builds the stable identity used for an externally resolved member.
 pub fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
     let base_segments = {
@@ -49,9 +92,52 @@ pub fn external_qualified_display_name(base: &str, member: &str) -> String {
         .expect("external qualified identity should always have a display name")
 }
 
+/// Missing-callable text preserves the source-facing name and the selected
+/// typed identity. Formatting a name here never changes dispatch selection.
+pub(crate) fn undefined_callable_message(identity: &CallableIdentity) -> String {
+    match strict_callable_display_name(identity) {
+        Some(name) => format!("Undefined function '{name}' for callable identity {identity:?}"),
+        None => format!("Undefined function for callable identity {identity:?}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ownership_wrapper_retains_original_segments_without_allocating_an_arc_for_owned_calls() {
+        let owned = CallableIdentity::DynamicName(SymbolName("plain".into()));
+        let CallableIdentity::DynamicName(name) = &owned else {
+            unreachable!()
+        };
+        let original_name = name.0.as_ptr();
+        let owned: CallableIdentityOwner = owned.into();
+        let CallableIdentityOwner::Owned(CallableIdentity::DynamicName(name)) = &owned else {
+            panic!("owned call allocated a retained identity")
+        };
+        assert_eq!(name.0.as_ptr(), original_name);
+
+        let original = std::sync::Arc::new(external_qualified_identity("pkg.Point", "origin"));
+        let CallableIdentity::ExternalName(name) = original.as_ref() else {
+            unreachable!()
+        };
+        let segments = name.0.as_ptr();
+        let owner = CallableIdentityOwner::from(std::sync::Arc::clone(&original));
+        let retained = owner.clone();
+        let CallableIdentityOwner::Retained(retained) = retained else {
+            panic!("retained source was copied")
+        };
+        assert!(std::sync::Arc::ptr_eq(&original, &retained));
+        let CallableIdentity::ExternalName(name) = owner.as_identity() else {
+            unreachable!()
+        };
+        assert_eq!(name.0.as_ptr(), segments);
+        assert_eq!(std::sync::Arc::strong_count(&original), 3);
+        drop(retained);
+        drop(owner);
+        assert_eq!(std::sync::Arc::strong_count(&original), 1);
+    }
 
     #[test]
     fn qualified_identity_preserves_valid_segments() {

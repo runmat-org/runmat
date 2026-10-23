@@ -125,7 +125,13 @@ pub(super) fn value_to_string(value: &Value) -> BuiltinResult<runmat_value::Utf8
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => {
-            Ok(chars.data().iter().collect::<String>().into())
+            crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                timer_error(
+                    &TIMER_ERROR_INVALID_PROPERTY,
+                    "timer: property text is not valid UTF-16",
+                )
+            })
+            .map(Into::into)
         }
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,

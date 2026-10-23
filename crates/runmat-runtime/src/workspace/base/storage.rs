@@ -153,14 +153,26 @@ impl ManagedWorkspaceStorage {
     }
 
     /// Commit an explicitly unbounded direct-owner action prepared off-state.
-    /// No collection grows here: the new nodes and their immutable values are
-    /// already owned by `pending` before the canonical revision changes.
-    pub(super) fn commit_unbounded_pending(&mut self) {
+    /// Path-copy only overlay-touched bindings into the immutable tree. Keeping
+    /// tombstones over an old base would make the current generation retain
+    /// removed roots even when no actual snapshot still owns that generation.
+    /// Preparation is fallible and off-state; installation still only swaps
+    /// owners, and callers retire the displaced storage outside the Base borrow.
+    pub(super) fn commit_unbounded_pending(&mut self) -> Result<(), HostAllocationError> {
         if self.pending.is_empty() {
-            return;
+            return Ok(());
         }
-        self.pending.attach_canonical_tail(&self.committed);
-        self.committed = std::mem::take(&mut self.pending);
+        let tree = self
+            .base
+            .as_ref()
+            .map(|base| base.0.clone())
+            .unwrap_or_default();
+        let tree = self.committed.prepare_unbounded_tree(tree)?;
+        let tree = self.pending.prepare_unbounded_tree(tree)?;
+        self.base = Some(WorkspaceTableGeneration(tree));
+        self.committed = WorkspaceOverlay::default();
+        self.pending = WorkspaceOverlay::default();
+        Ok(())
     }
 
     /// Capture the complete projected view under the explicitly unbounded

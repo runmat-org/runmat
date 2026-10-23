@@ -51,15 +51,23 @@ use metadata::{dataset_info, group_info, render_dataset, render_group};
 mod attribute_values;
 use attribute_values::scalar_attribute_text;
 
-fn char_rows(chars: &CharArray) -> Vec<String> {
+fn char_rows(builtin: &'static str, chars: &CharArray) -> BuiltinResult<Vec<String>> {
     if chars.rows == 0 || chars.cols == 0 {
-        return vec![String::new()];
+        return Ok(vec![String::new()]);
     }
     (0..chars.rows)
         .map(|row| {
-            (0..chars.cols)
-                .map(|col| chars.data()[row * chars.cols + col])
-                .collect()
+            let start = row * chars.cols;
+            crate::builtins::io::utf16::decode_utf16_with_error(
+                &chars.data()[start..start + chars.cols],
+                || {
+                    hdf5_error(
+                        builtin,
+                        &ERR_ARGUMENT,
+                        format!("{builtin}: character input contains malformed UTF-16 text"),
+                    )
+                },
+            )
         })
         .collect()
 }

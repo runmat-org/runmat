@@ -397,9 +397,11 @@ fn exercise_remainder_lifetimes(provider: &'static Provider) {
 
 #[test]
 fn rounding_characters_retain_pages_and_semantic_element_order() {
-    let input =
-        CharArray::new_with_shape(vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], vec![2, 2, 2])
-            .unwrap();
+    let input = CharArray::from_unicode_scalars_with_shape(
+        vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
+        vec![2, 2, 2],
+    )
+    .unwrap();
     for name in ["ceil", "floor", "fix", "round"] {
         let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             name,
@@ -416,7 +418,7 @@ fn rounding_characters_retain_pages_and_semantic_element_order() {
             input
                 .to_column_major()
                 .into_iter()
-                .map(|ch| ch as u32 as f64)
+                .map(|ch| f64::from(ch.raw()))
                 .collect::<Vec<_>>()
         );
     }
@@ -464,7 +466,7 @@ fn round_scalar_ties_integral_extremes_and_signed_zero_have_independent_oracles(
 fn remainder_character_pages_are_not_scalarized_or_reordered() {
     for shape in [vec![1, 1, 2], vec![2, 2, 2]] {
         let count = shape.iter().product();
-        let input = CharArray::new_with_shape(
+        let input = CharArray::from_unicode_scalars_with_shape(
             (0..count)
                 .map(|index| char::from_u32(65 + index as u32).unwrap())
                 .collect(),
@@ -487,7 +489,7 @@ fn remainder_character_pages_are_not_scalarized_or_reordered() {
                 input
                     .to_column_major()
                     .into_iter()
-                    .map(|ch| (ch as u32 % 7) as f64)
+                    .map(|ch| f64::from(ch.raw() % 7))
                     .collect::<Vec<_>>()
             );
         }

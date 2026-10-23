@@ -1091,14 +1091,15 @@ pub(crate) mod tests {
     #[test]
     fn flip_char_array_horizontal() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("runmat".chars().collect(), 2, 3).unwrap();
         let value =
             flip_builtin(Value::CharArray(chars), vec![Value::from("horizontal")]).expect("flip");
         match value {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 3);
-                let collected: String = out.data().iter().collect();
+                let collected: String = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(collected, "nurtam");
             }
             other => panic!("expected char array, got {other:?}"),

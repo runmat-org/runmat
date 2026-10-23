@@ -3,7 +3,11 @@ use super::*;
 #[test]
 fn selected_sink_binding_projects_exact_requested_status_count() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
@@ -72,7 +76,11 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
 #[test]
 fn selected_sink_binding_rejects_status_in_matlab_mode_before_file_effects() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));

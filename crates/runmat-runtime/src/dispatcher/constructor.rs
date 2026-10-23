@@ -1,6 +1,11 @@
 use super::*;
 
-pub(super) enum ConstructorInvocationTarget {
+#[path = "constructor/invocation.rs"]
+mod invocation;
+pub use invocation::PreparedConstructorInvoke;
+use invocation::{PreparedConstructorBody, PreparedConstructorGuard};
+
+pub(super) enum ConstructorInvocationTarget<'a> {
     Registered,
     ExactBound {
         owner: runmat_types::ClassMethodOwner,
@@ -8,7 +13,8 @@ pub(super) enum ConstructorInvocationTarget {
     },
     ExactPrepared {
         owner: runmat_types::ClassMethodOwner,
-        invoke: PreparedConstructorInvoke,
+        invoke: PreparedConstructorBody,
+        guard: &'a PreparedConstructorGuard,
     },
 }
 
@@ -45,20 +51,6 @@ impl ConstructorArguments<'_> {
         }
     }
 }
-
-/// The callback is constructed only after the exact receiver is rooted, and
-/// receives that invocation's selected context under its receiver poll guard.
-pub type PreparedConstructorInvoke = Box<
-    dyn FnOnce(
-        crate::context::RuntimeContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                Output = Result<crate::execution::RootedValueSequence, RuntimeError>,
-            >,
-        >,
-    >,
->;
 
 /// Core's exact staged body enters the ordinary constructor policy after its
 /// selected class projection is installed, without re-resolving a class name.
@@ -132,12 +124,19 @@ async fn call_admitted_prepared_constructor_sequence_in_context(
     selected
         .clone()
         .scope(async move {
+            // The body is consumed by the borrowed target. Keep its original
+            // external funding alive through the whole constructor child.
+            let (guard, invoke) = invoke.into_parts();
             super::call_class_constructor(
                 class_identity,
                 args,
                 Some(requested_outputs),
                 Some(&selected),
-                ConstructorInvocationTarget::ExactPrepared { owner, invoke },
+                ConstructorInvocationTarget::ExactPrepared {
+                    owner,
+                    invoke,
+                    guard: &guard,
+                },
             )
             .await?
             .try_map_owned(
@@ -258,23 +257,21 @@ pub async fn call_rooted_bound_constructor_sequence_in_context(
     }
     let argument_count = arguments.len();
     let selected = context.clone();
-    let invoke: PreparedConstructorInvoke = Box::new(move |runtime| {
-        Box::pin(async move {
-            crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
-                &runtime,
-                binding,
-                arguments,
-                requested_outputs,
-                None,
-            )
-            .await
-            .ok_or_else(|| {
-                build_runtime_error("selected runtime has no exact bound invoker")
-                    .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
-                    .build()
-            })?
-        })
-    });
+    let invoke = PreparedConstructorInvoke::new(context, move |runtime| async move {
+        crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
+            &runtime,
+            binding,
+            arguments,
+            requested_outputs,
+            None,
+        )
+        .await
+        .ok_or_else(|| {
+            build_runtime_error("selected runtime has no exact bound invoker")
+                .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                .build()
+        })?
+    })?;
     selected
         .clone()
         .scope(async move {

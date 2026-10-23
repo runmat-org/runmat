@@ -134,7 +134,7 @@ fn evaluate_characters(operation: LogarithmOperation, chars: CharArray) -> Built
     let values = chars
         .to_column_major()
         .iter()
-        .map(|&ch| ch as u32 as f64)
+        .map(|&ch| f64::from(ch.raw()))
         .collect();
     let tensor = Tensor::new(values, chars.shape)
         .map_err(|error| super::errors::internal(operation, &error))?;

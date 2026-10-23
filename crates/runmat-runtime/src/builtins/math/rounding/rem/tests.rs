@@ -204,7 +204,7 @@ fn rem_rejects_complex_operands() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn rem_char_array_support() {
-    let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).unwrap();
     let result = rem_builtin(Value::CharArray(chars.clone()), Value::Num(5.0)).expect("char rem");
     match result {
         Value::Tensor(t) => {
@@ -212,7 +212,7 @@ fn rem_char_array_support() {
             let expected: Vec<f64> = chars
                 .data()
                 .iter()
-                .map(|&ch| rem_real_scalar(ch as u32 as f64, 5.0))
+                .map(|&ch| rem_real_scalar(f64::from(ch.raw()), 5.0))
                 .collect();
             assert_eq!(t.materialize_f64(), expected);
         }

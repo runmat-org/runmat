@@ -412,18 +412,12 @@ fn string_to_mx(value: &str) -> Result<MxArray, MxConversionError> {
 }
 
 fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
-    let mut encoded = Vec::with_capacity(value.data().len());
-    for character in value.to_column_major() {
-        let codepoint = u32::from(character);
-        let unit = u16::try_from(codepoint).map_err(|_| {
-            MxConversionError::new(
-                "RunMat character arrays containing non-BMP scalars cannot preserve their shape in the UTF-16 C Matrix API",
-            )
-        })?;
-        encoded.push(unit);
-    }
+    let encoded = value
+        .iter_column_major()
+        .map(runmat_value::Utf16CodeUnit::raw)
+        .collect::<Vec<_>>();
     record_host_copy(
-        HostCopyReason::CharacterEncoding,
+        HostCopyReason::MemoryLayoutConversion,
         encoded.len().saturating_mul(std::mem::size_of::<u16>()),
     );
     MxArray::character(encoded, value.shape().to_vec()).map_err(MxConversionError::new)
@@ -689,19 +683,15 @@ fn complex_from_components(
 
 fn char_from_mx(values: &[u16], shape: &[usize]) -> Result<Value, MxConversionError> {
     record_host_copy(
-        HostCopyReason::CharacterEncoding,
+        HostCopyReason::MemoryLayoutConversion,
         values.len().saturating_mul(std::mem::size_of::<u16>()),
     );
-    let mut characters = Vec::with_capacity(values.len());
-    for value in values {
-        let character = char::from_u32(u32::from(*value)).ok_or_else(|| {
-            MxConversionError::new(
-                "UTF-16 surrogate code units cannot be represented by the current RunMat character scalar",
-            )
-        })?;
-        characters.push(character);
-    }
-    CharArray::from_column_major(characters, shape.to_vec())
+    let code_units = values
+        .iter()
+        .copied()
+        .map(runmat_value::Utf16CodeUnit::from_raw)
+        .collect();
+    CharArray::from_column_major(code_units, shape.to_vec())
         .map(Value::CharArray)
         .map_err(MxConversionError::new)
 }
@@ -927,7 +917,28 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage, Utf16CodeUnit};
+
+    #[test]
+    fn character_boundary_preserves_utf16_units_shape_and_layout() {
+        let original = Value::CharArray(
+            CharArray::from_code_units(
+                vec![
+                    Utf16CodeUnit::from_raw(0xD83D),
+                    Utf16CodeUnit::from_raw(0xDE42),
+                    Utf16CodeUnit::from_raw(b'x' as u16),
+                    Utf16CodeUnit::from_raw(0xD800),
+                ],
+                2,
+                2,
+            )
+            .expect("raw UTF-16 fixture"),
+        );
+        let boundary = value_to_mx(&original, MxApiMode::SeparateComplex)
+            .expect("convert raw character payload to mxArray");
+        assert_eq!(boundary.shape(), &[2, 2]);
+        assert_eq!(value_from_mx(&boundary).expect("convert back"), original);
+    }
 
     #[test]
     fn native_object_payload_is_not_silently_projected_as_properties() {

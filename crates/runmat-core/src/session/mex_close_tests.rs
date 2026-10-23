@@ -2,9 +2,21 @@ use super::*;
 use runmat_runtime::context::IsolatedMemoryPreferenceService;
 use std::fs;
 
+struct RestoreCwd(std::path::PathBuf);
+impl Drop for RestoreCwd {
+    fn drop(&mut self) {
+        std::env::set_current_dir(&self.0).expect("restore working directory");
+    }
+}
+
 #[test]
 fn failing_cleanup_still_runs_real_mex_at_exit_before_host_closes() {
+    let _cwd_lock = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().expect("temporary MEX lifecycle fixture");
+    let _cwd = RestoreCwd(std::env::current_dir().expect("read working directory"));
+    // Ordinary source admits MEX bytes from its current search-path choice;
+    // installing metadata alone is not a selected-unit artifact receipt.
+    std::env::set_current_dir(directory.path()).expect("select fixture directory");
     let source = directory.path().join("close_probe.c");
     let marker = directory.path().join("at_exit.marker");
     let marker_literal = marker
@@ -54,11 +66,25 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {{
         .build()
         .expect("test runtime");
     runtime.block_on(async {
-        session
+        let outcome = session
             .execute_request(request)
             .await
             .result
             .expect("fixture invocation and cleanup registration");
+        assert!(
+            !outcome.has_errors(),
+            "fixture invocation must reach successful cleanup registration: {:?}",
+            outcome.diagnostics
+        );
+        assert!(
+            outcome
+                .workspace_delta
+                .upserts
+                .iter()
+                .any(|upsert| upsert.name.0 == "cleanupObj"),
+            "fixture invocation must publish the cleanup owner"
+        );
+        drop(outcome);
         let cleanup = match session.close_gracefully_retirement().await {
             SessionRetirement::Retired(Err(error)) => error,
             SessionRetirement::Retired(Ok(())) => {
@@ -80,13 +106,195 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {{
 }
 
 #[test]
-fn compiled_mex_runtests_child_preserves_logical_callback_ancestry() {
-    struct RestoreCwd(std::path::PathBuf);
-    impl Drop for RestoreCwd {
-        fn drop(&mut self) {
-            std::env::set_current_dir(&self.0).expect("restore working directory");
+fn cleanup_released_by_cpp_engine_unload_reports_its_original_error() {
+    let _cwd_lock = runmat_filesystem::provider_override_lock();
+    let directory = tempfile::tempdir().expect("temporary retained-engine lifecycle fixture");
+    let _cwd = RestoreCwd(std::env::current_dir().expect("read working directory"));
+    std::env::set_current_dir(directory.path()).expect("select fixture directory");
+    let source = directory.path().join("cpp_probe.cpp");
+    let marker = directory.path().join("engine_unload.marker");
+    let marker_literal = marker
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    fs::write(
+        &source,
+        format!(
+            r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+#include <cstdio>
+class MexFunction : public matlab::mex::Function {{
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {{
+        (void)outputs; (void)inputs;
+        // Function caches this explicit engine-context owner until unload.
+        (void)getEngine();
+    }}
+    ~MexFunction() override {{
+        FILE *file = fopen("{marker_literal}", "a");
+        if (file != NULL) {{ fputs("unloaded\n", file); fclose(file); }}
+    }}
+}};
+"#
+        ),
+    )
+    .expect("write retained-engine C++ MEX fixture");
+    let artifact = runmat_mex::MexBuild::new(&source, directory.path())
+        .compile()
+        .expect("compile retained-engine C++ MEX fixture");
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    session
+        .install_application_settings(Rc::new(IsolatedMemoryPreferenceService::new()))
+        .expect("isolated settings");
+    session
+        .install_mex_artifact(&artifact.module)
+        .expect("install exact retained-engine MEX fixture");
+    let request = crate::abi::ExecutionRequest::for_source(
+        crate::abi::SourceInput::Text {
+            name: "<cleanup-after-engine-unload>".into(),
+            // The cached engine legitimately retains this invocation's
+            // cleanup owner, so the initial workspace drain cannot run it.
+            text: "cleanupObj = onCleanup(@() error('Cleanup:RetainedEngine','expected retained engine cleanup failure')); cpp_probe();".into(),
+        },
+        session.compat_mode(),
+        crate::abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let outcome = session
+            .execute_request(request)
+            .await
+            .result
+            .expect("cleanup registration and retained-engine invocation");
+        assert!(
+            !outcome.has_errors(),
+            "fixture must register cleanup and acquire its engine context: {:?}",
+            outcome.diagnostics
+        );
+        assert!(
+            outcome
+                .workspace_delta
+                .upserts
+                .iter()
+                .any(|upsert| upsert.name.0 == "cleanupObj"),
+            "fixture must publish the cleanup owner"
+        );
+        drop(outcome);
+        assert!(
+            !marker.exists(),
+            "engine owner must remain live until close"
+        );
+        let cleanup = match session.close_gracefully_retirement().await {
+            SessionRetirement::Retired(Err(error)) => error,
+            SessionRetirement::Retired(Ok(())) => {
+                panic!("cleanup exposed by engine unload must report its failure")
+            }
+            SessionRetirement::Retained(error) => {
+                panic!("retained-engine MEX host unexpectedly remained live: {error}")
+            }
+        };
+        assert_eq!(cleanup.identifier(), Some("Cleanup:RetainedEngine"));
+        assert!(
+            cleanup
+                .to_string()
+                .contains("expected retained engine cleanup failure"),
+            "original cleanup diagnostic must survive foreign-host retirement: {cleanup}"
+        );
+    });
+    assert_eq!(
+        fs::read_to_string(marker).expect("retained engine gateway unloaded"),
+        "unloaded\n",
+        "gateway destruction must happen exactly once"
+    );
+}
+
+#[test]
+fn cleanup_republished_into_base_during_close_reports_its_original_error() {
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    session
+        .install_application_settings(Rc::new(IsolatedMemoryPreferenceService::new()))
+        .expect("isolated settings");
+    let request = crate::abi::ExecutionRequest::for_source(
+        crate::abi::SourceInput::Text {
+            name: "<cleanup-repopulates-base-during-close>".into(),
+            // The first callback publishes a new canonical base owner. It
+            // must be retired while base authority and cleanup host are live,
+            // not dropped for the first time by final workspace closure.
+            text: r#"
+cleanupObj = onCleanup(@publish_cleanup_during_close);
+function publish_cleanup_during_close()
+    assignin('base','repopulatedCleanup',onCleanup(@() error('Cleanup:Repopulated','expected republished cleanup failure')));
+    error('Cleanup:First','expected first cleanup failure');
+end
+"#.into(),
+        },
+        session.compat_mode(),
+        crate::abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let outcome = session
+            .execute_request(request)
+            .await
+            .result
+            .expect("register workspace-publishing cleanup callback");
+        assert!(
+            !outcome.has_errors(),
+            "fixture must register its first cleanup callback: {:?}",
+            outcome.diagnostics
+        );
+        assert!(
+            outcome
+                .workspace_delta
+                .upserts
+                .iter()
+                .any(|upsert| upsert.name.0 == "cleanupObj"),
+            "fixture must publish the first cleanup owner"
+        );
+        drop(outcome);
+        let cleanup = match session.close_gracefully_retirement().await {
+            SessionRetirement::Retired(Err(error)) => error,
+            SessionRetirement::Retired(Ok(())) => {
+                panic!("cleanup republished during close must not be abandoned")
+            }
+            SessionRetirement::Retained(error) => {
+                panic!("pure cleanup fixture unexpectedly retained a foreign host: {error}")
+            }
+        };
+        assert_eq!(cleanup.identifier(), Some("Cleanup:First"));
+        assert!(
+            cleanup
+                .to_string()
+                .contains("expected first cleanup failure"),
+            "first callback diagnostic must remain primary: {cleanup}"
+        );
+        let mut source = std::error::Error::source(&cleanup);
+        let mut republished_failure = false;
+        while let Some(error) = source {
+            republished_failure |= error
+                .to_string()
+                .contains("expected republished cleanup failure");
+            source = error.source();
         }
-    }
+        assert!(
+            republished_failure,
+            "republished cleanup must execute and retain its failure under the original error"
+        );
+    });
+}
+
+#[test]
+fn compiled_mex_runtests_child_preserves_logical_callback_ancestry() {
     let _cwd_lock = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().expect("temporary MEX ancestry fixture");
     let _cwd = RestoreCwd(std::env::current_dir().expect("read working directory"));

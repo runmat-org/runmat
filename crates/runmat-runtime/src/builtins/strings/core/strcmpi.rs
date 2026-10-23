@@ -188,7 +188,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_row_compare_casefold() {
-        let chars = CharArray::new(vec!['c', 'a', 't', 'D', 'O', 'G'], 2, 3).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['c', 'a', 't', 'D', 'O', 'G'], 2, 3).unwrap();
         let result =
             strcmpi_builtin(Value::CharArray(chars), Value::String("CaT".into())).expect("cmp");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -198,8 +199,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_to_char_array_casefold() {
-        let left = CharArray::new(vec!['A', 'b', 'C', 'd'], 2, 2).unwrap();
-        let right = CharArray::new(vec!['a', 'B', 'x', 'Y'], 2, 2).unwrap();
+        let left = CharArray::from_unicode_scalars(vec!['A', 'b', 'C', 'd'], 2, 2).unwrap();
+        let right = CharArray::from_unicode_scalars(vec!['a', 'B', 'x', 'Y'], 2, 2).unwrap();
         let result =
             strcmpi_builtin(Value::CharArray(left), Value::CharArray(right)).expect("strcmpi");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -265,7 +266,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_trailing_space_not_equal() {
-        let chars = CharArray::new(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
         let result =
             strcmpi_builtin(Value::CharArray(chars), Value::String("cat".into())).expect("strcmpi");
         assert_eq!(result, Value::Bool(false));
@@ -338,7 +339,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_empty_char_array_returns_empty() {
-        let chars = CharArray::new(Vec::<char>::new(), 0, 3).unwrap();
+        let chars = CharArray::from_code_units(Vec::new(), 0, 3).unwrap();
         let result = strcmpi_builtin(Value::CharArray(chars), Value::String("anything".into()))
             .expect("cmp");
         let expected = LogicalArray::new(Vec::<u8>::new(), vec![0, 1]).unwrap();

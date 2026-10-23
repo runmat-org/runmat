@@ -72,6 +72,7 @@ fn is_consumer(instruction: &Instr) -> bool {
         Instr::StoreMemberSequence(_)
             | Instr::StoreMemberDynamicSequence
             | Instr::CommitPreparedOutputTargets { .. }
+            | Instr::CommitFixedAssignment { .. }
     )
 }
 

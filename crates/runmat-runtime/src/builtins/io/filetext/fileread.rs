@@ -89,8 +89,8 @@ async fn fileread_builtin(
     let resolved = resolve_path(&path)?;
     let bytes = read_all(&resolved).await?;
     let chars = decode_bytes(bytes, encoding)?;
-    let cols = chars.len();
-    let char_array = CharArray::new(chars, 1, cols)
+    let cols = chars.iter().map(|value| value.len_utf16()).sum();
+    let char_array = CharArray::from_unicode_scalars(chars, 1, cols)
         .map_err(|e| fileread_error_with_detail(&FILEREAD_ERROR_INTERNAL, &e))?;
     Ok(Value::CharArray(char_array))
 }
@@ -151,9 +151,11 @@ fn is_encoding_keyword(value: &Value) -> BuiltinResult<bool> {
 fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Ok(std::borrow::Cow::Owned(ca.data().iter().collect()))
-        }
+        Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
+            .map(std::borrow::Cow::Owned)
+            .map_err(|source| {
+                fileread_error_with_detail(&FILEREAD_ERROR_INVALID_OPTION, source.to_string())
+            }),
         Value::CharArray(_) => Err(fileread_error_with_detail(
             &FILEREAD_ERROR_INVALID_OPTION,
             "encoding name must be a 1-by-N character vector",
@@ -178,10 +180,11 @@ fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let path: String = ca.data().iter().collect();
-            normalize_path(&path)
-        }
+        Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
+            .map_err(|source| {
+                fileread_error_with_detail(&FILEREAD_ERROR_INVALID_INPUT, source.to_string())
+            })
+            .and_then(|path| normalize_path(&path)),
         Value::CharArray(_) => Err(fileread_error_with_detail(
             &FILEREAD_ERROR_INVALID_INPUT,
             "expected a 1-by-N character vector for the file name",

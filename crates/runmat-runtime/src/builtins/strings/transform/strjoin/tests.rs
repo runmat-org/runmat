@@ -101,7 +101,8 @@ fn rowwise_extension_preserves_matrix_column_and_character_behavior() {
         block_on(strjoin_builtin_source(column.clone(), delimiter())).unwrap(),
         column
     );
-    let chars = Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap());
+    let chars =
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap());
     assert_eq!(
         block_on(strjoin_builtin_source(chars, delimiter())).unwrap(),
         strings(&["ab", "cd"], vec![2, 1])
@@ -113,7 +114,9 @@ fn unsupported_rank_rejects_without_silent_data_loss_in_both_modes() {
         let _mode = crate::compatibility::push_runmat_extensions_enabled(enabled);
         for value in [
             strings(&["a", "b"], vec![1, 1, 2]),
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+            ),
         ] {
             let error =
                 block_on(strjoin_builtin_source(value, vec![Value::from("-")])).unwrap_err();

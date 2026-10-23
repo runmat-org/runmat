@@ -232,7 +232,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
             let points = chars
                 .to_column_major()
                 .into_iter()
-                .map(|character| Point::real(Component::Floating(f64::from(character as u32))))
+                .map(|character| Point::real(Component::Floating(f64::from(character.raw()))))
                 .collect();
             Ok(HostData {
                 points,

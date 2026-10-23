@@ -157,6 +157,83 @@ pub enum CandidateObservationEvidence {
     Unavailable(CandidateCostUnavailable),
 }
 
+/// Preparation economics derived from two completed, comparable execution
+/// observations. This is not an execution permit or a prediction of reuse.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PreparationPaybackEvidence {
+    Unavailable(PreparationPaybackUnavailable),
+    NonImproving {
+        preparation_ns: u64,
+        baseline_ns: u64,
+        prepared_ns: u64,
+        confidence: EstimateConfidence,
+    },
+    BreakEven {
+        preparation_ns: u64,
+        saving_per_invocation_ns: u64,
+        invocations: u64,
+        confidence: EstimateConfidence,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PreparationPaybackUnavailable {
+    PreparationUnavailable,
+    Baseline(CandidateCostUnavailable),
+    Prepared(CandidateCostUnavailable),
+    ArithmeticOverflow,
+}
+
+impl PreparationPaybackEvidence {
+    /// The caller supplies exact paid preparation and observations from the
+    /// same semantic boundary/current recipe. Warm execution costs retain no
+    /// amortized preparation surcharge: that cost is paid only when preparing.
+    pub fn from_observations(
+        preparation_ns: Option<u64>,
+        baseline: CandidateObservationEvidence,
+        prepared: CandidateObservationEvidence,
+    ) -> Self {
+        let Some(preparation_ns) = preparation_ns else {
+            return Self::Unavailable(PreparationPaybackUnavailable::PreparationUnavailable);
+        };
+        let baseline = match baseline {
+            CandidateObservationEvidence::Observed(observed) => observed,
+            CandidateObservationEvidence::Unavailable(reason) => {
+                return Self::Unavailable(PreparationPaybackUnavailable::Baseline(reason))
+            }
+        };
+        let prepared = match prepared {
+            CandidateObservationEvidence::Observed(observed) => observed,
+            CandidateObservationEvidence::Unavailable(reason) => {
+                return Self::Unavailable(PreparationPaybackUnavailable::Prepared(reason))
+            }
+        };
+        let Some(saving) = baseline
+            .elapsed_ns
+            .checked_sub(prepared.elapsed_ns)
+            .filter(|saving| *saving > 0)
+        else {
+            return Self::NonImproving {
+                preparation_ns,
+                baseline_ns: baseline.elapsed_ns,
+                prepared_ns: prepared.elapsed_ns,
+                confidence: baseline.confidence.min(prepared.confidence),
+            };
+        };
+        let Some(invocations) =
+            (preparation_ns / saving).checked_add(u64::from(preparation_ns % saving != 0))
+        else {
+            return Self::Unavailable(PreparationPaybackUnavailable::ArithmeticOverflow);
+        };
+        Self::BreakEven {
+            preparation_ns,
+            saving_per_invocation_ns: saving,
+            invocations,
+            confidence: baseline.confidence.min(prepared.confidence),
+        }
+    }
+}
+
 impl ExecutionCostEstimate {
     pub fn checked_total_ns(self) -> Option<u64> {
         self.components.checked_total_ns()
@@ -175,6 +252,54 @@ impl ExecutionCostEstimate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_payback_is_checked_unknown_aware_and_never_a_warm_surcharge() {
+        let observed = |elapsed_ns| {
+            CandidateObservationEvidence::Observed(ObservedCandidateDuration {
+                elapsed_ns,
+                confidence: EstimateConfidence::High,
+            })
+        };
+        assert_eq!(
+            PreparationPaybackEvidence::from_observations(Some(101), observed(100), observed(50)),
+            PreparationPaybackEvidence::BreakEven {
+                preparation_ns: 101,
+                saving_per_invocation_ns: 50,
+                invocations: 3,
+                confidence: EstimateConfidence::High
+            }
+        );
+        assert!(matches!(
+            PreparationPaybackEvidence::from_observations(Some(1), observed(100), observed(100)),
+            PreparationPaybackEvidence::NonImproving { .. }
+        ));
+        assert!(matches!(
+            PreparationPaybackEvidence::from_observations(None, observed(100), observed(50)),
+            PreparationPaybackEvidence::Unavailable(
+                PreparationPaybackUnavailable::PreparationUnavailable
+            )
+        ));
+        assert!(matches!(
+            PreparationPaybackEvidence::from_observations(
+                Some(1),
+                CandidateObservationEvidence::Unavailable(
+                    CandidateCostUnavailable::StaleObservations
+                ),
+                observed(50)
+            ),
+            PreparationPaybackEvidence::Unavailable(PreparationPaybackUnavailable::Baseline(
+                CandidateCostUnavailable::StaleObservations
+            ))
+        ));
+        assert!(matches!(
+            PreparationPaybackEvidence::from_observations(Some(u64::MAX), observed(2), observed(1)),
+            PreparationPaybackEvidence::BreakEven {
+                invocations: u64::MAX,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn component_totals_and_uncertainty_are_checked() {

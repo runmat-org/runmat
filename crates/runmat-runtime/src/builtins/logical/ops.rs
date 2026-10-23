@@ -478,7 +478,7 @@ impl LogicalBuffer {
         let bits: Vec<u8> = chars
             .to_column_major()
             .iter()
-            .map(|&ch| if (ch as u32) != 0 { 1 } else { 0 })
+            .map(|&ch| if u32::from(ch.raw()) != 0 { 1 } else { 0 })
             .collect();
         let shape = canonical_shape(&chars.shape, bits.len());
         Self { bits, shape }

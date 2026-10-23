@@ -3,9 +3,10 @@ use std::rc::Rc;
 use faer::{c32, c64};
 use runmat_value::SparseTensor;
 
-use super::{SparseLuError, SparseLuFactor};
+use super::{ManagedSparseLu, ManagedSparseLuError};
 use crate::context::RuntimeContext;
 use crate::execution::RuntimeExecutionService;
+use futures::executor::block_on;
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -14,9 +15,10 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
     // A = [0 2; 1 3], requiring a row pivot. The factor is reused for two
     // right-hand columns without a dense coefficient conversion.
     let real = SparseTensor::new(2, 2, vec![0, 1, 3], vec![1, 0, 1], vec![1.0, 2.0, 3.0]).unwrap();
-    let factor = SparseLuFactor::factor_unbounded(&real, &context).unwrap();
+    let mut factor = block_on(ManagedSparseLu::<f64>::factor(&real, &context)).unwrap();
     let mut rhs = [10.0, 19.0, -2.0, -1.0];
-    factor.solve_real_f64(&mut rhs, 2, &context).unwrap();
+    let input = rhs;
+    block_on(factor.solve_into(&input, &mut rhs, 2, &context)).unwrap();
     for (actual, expected) in rhs.into_iter().zip([4.0, 5.0, 2.0, -1.0]) {
         assert!((actual - expected).abs() < 1e-12);
     }
@@ -29,9 +31,10 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
         vec![4.0, 2.0, 1.0, 3.0],
     )
     .unwrap();
-    let factor = SparseLuFactor::factor_unbounded(&single, &context).unwrap();
+    let mut factor = block_on(ManagedSparseLu::<f32>::factor(&single, &context)).unwrap();
     let mut rhs = [6.0_f32, 8.0, 7.0, 1.0];
-    factor.solve_real_f32(&mut rhs, 2, &context).unwrap();
+    let input = rhs;
+    block_on(factor.solve_into(&input, &mut rhs, 2, &context)).unwrap();
     for (actual, expected) in rhs.into_iter().zip([1.0_f32, 2.0, 2.0, -1.0]) {
         assert!((actual - expected).abs() < 1e-5);
     }
@@ -44,9 +47,10 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
         vec![(2.0, 1.0), (1.0, -2.0)],
     )
     .unwrap();
-    let factor = SparseLuFactor::factor_unbounded(&complex_single, &context).unwrap();
+    let mut factor = block_on(ManagedSparseLu::<c32>::factor(&complex_single, &context)).unwrap();
     let mut rhs = [c32::new(1.0, 3.0), c32::new(0.0, -5.0)];
-    factor.solve_complex_f32(&mut rhs, 1, &context).unwrap();
+    let input = rhs;
+    block_on(factor.solve_into(&input, &mut rhs, 1, &context)).unwrap();
     for (actual, expected) in rhs
         .into_iter()
         .zip([c32::new(1.0, 1.0), c32::new(2.0, -1.0)])
@@ -62,9 +66,10 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
         vec![(2.0, 1.0), (1.0, -2.0)],
     )
     .unwrap();
-    let factor = SparseLuFactor::factor_unbounded(&complex_double, &context).unwrap();
+    let mut factor = block_on(ManagedSparseLu::<c64>::factor(&complex_double, &context)).unwrap();
     let mut rhs = [c64::new(1.0, 3.0), c64::new(0.0, -5.0)];
-    factor.solve_complex_f64(&mut rhs, 1, &context).unwrap();
+    let input = rhs;
+    block_on(factor.solve_into(&input, &mut rhs, 1, &context)).unwrap();
     for (actual, expected) in rhs
         .into_iter()
         .zip([c64::new(1.0, 1.0), c64::new(2.0, -1.0)])
@@ -74,7 +79,7 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
 
     // Structural fill is present in both columns, but the second numeric
     // pivot vanishes after elimination. The public solve must not publish a
-    // seemingly successful result with NaNs from faer's pivot division.
+    // seemingly successful result with NaNs from pivot division.
     let singular = SparseTensor::new(
         2,
         2,
@@ -83,20 +88,13 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
         vec![1.0, 1.0, 1.0, 1.0],
     )
     .unwrap();
-    match SparseLuFactor::factor_unbounded(&singular, &context) {
-        Err(SparseLuError::Singular { .. } | SparseLuError::NumericalBreakdown) => {}
-        Ok(factor) => {
-            let mut rhs = [1.0, 1.0];
-            assert!(matches!(
-                factor.solve_real_f64(&mut rhs, 1, &context),
-                Err(SparseLuError::NumericalBreakdown)
-            ));
-        }
-        Err(error) => panic!("unexpected sparse LU failure: {error:?}"),
-    }
+    assert!(matches!(
+        block_on(ManagedSparseLu::<f64>::factor(&singular, &context)),
+        Err(ManagedSparseLuError::Singular { .. })
+    ));
 
     // Constructors validate topology, not numeric finiteness. Reject these
-    // coefficients before they reach the opaque factorization kernel.
+    // coefficients before numerical factorization.
     for invalid in [
         SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap(),
         SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![f32::INFINITY]).unwrap(),
@@ -104,9 +102,27 @@ fn sparse_lu_pivots_and_preserves_native_precision_across_reused_rhs() {
         SparseTensor::new_complex_f32(1, 1, vec![0, 1], vec![0], vec![(f32::NEG_INFINITY, 1.0)])
             .unwrap(),
     ] {
-        assert!(matches!(
-            SparseLuFactor::factor_unbounded(&invalid, &context),
-            Err(SparseLuError::NonFiniteInput)
-        ));
+        let rejected = if invalid.as_f32_slice().is_some() {
+            matches!(
+                block_on(ManagedSparseLu::<f32>::factor(&invalid, &context)),
+                Err(ManagedSparseLuError::NonFiniteInput)
+            )
+        } else if invalid.as_f64_slice().is_some() {
+            matches!(
+                block_on(ManagedSparseLu::<f64>::factor(&invalid, &context)),
+                Err(ManagedSparseLuError::NonFiniteInput)
+            )
+        } else if invalid.as_complex_f32_slice().is_some() {
+            matches!(
+                block_on(ManagedSparseLu::<c32>::factor(&invalid, &context)),
+                Err(ManagedSparseLuError::NonFiniteInput)
+            )
+        } else {
+            matches!(
+                block_on(ManagedSparseLu::<c64>::factor(&invalid, &context)),
+                Err(ManagedSparseLuError::NonFiniteInput)
+            )
+        };
+        assert!(rejected);
     }
 }

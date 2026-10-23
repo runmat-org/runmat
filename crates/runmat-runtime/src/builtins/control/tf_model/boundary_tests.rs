@@ -167,7 +167,6 @@ fn assign_public_property(model: Value, name: &str, value: Value) -> crate::exec
         model,
         name.into(),
         value,
-        false,
         None,
         |_, _| {},
     ))

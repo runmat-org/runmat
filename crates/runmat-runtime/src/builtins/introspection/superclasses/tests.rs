@@ -85,7 +85,9 @@ fn cell_strings(value: Value) -> Vec<String> {
     cell.data()
         .iter()
         .map(|value| match value {
-            Value::CharArray(chars) => chars.data().iter().collect::<String>(),
+            Value::CharArray(chars) => {
+                runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture")
+            }
             other => panic!("expected char superclass name, got {other:?}"),
         })
         .collect()

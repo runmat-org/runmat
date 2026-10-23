@@ -4,7 +4,7 @@ pub(super) fn parse_delete_options<'a>(
     args: crate::call::FunctionArgumentView<'a>,
 ) -> BuiltinResult<(crate::call::FunctionArgumentView<'a>, Option<bool>)> {
     if args.len() >= 2
-        && args.last().and_then(option_name).is_some_and(|name| {
+        && option_name(args.last().expect("validated length"))?.is_some_and(|name| {
             DeleteOption::from_name(&name) == Some(DeleteOption::ResolveSymbolicLinks)
         })
     {
@@ -14,7 +14,7 @@ pub(super) fn parse_delete_options<'a>(
         ));
     }
     if args.len() >= 3 {
-        if let Some(name) = option_name(&args[args.len() - 2]) {
+        if let Some(name) = option_name(&args[args.len() - 2])? {
             if DeleteOption::from_name(&name) == Some(DeleteOption::ResolveSymbolicLinks) {
                 return Ok((
                     args.range(..args.len() - 2)?,
@@ -44,14 +44,22 @@ fn looks_like_option_value(value: &Value) -> bool {
     )
 }
 
-fn option_name(value: &Value) -> Option<String> {
+fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::CharArray(array) if array.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                delete_error_with(
+                    &DELETE_ERROR_INVALID_INPUT,
+                    "delete: option name contains malformed UTF-16 text",
+                )
+            })
+            .map(Some)
         }
-        _ => None,
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Some(array.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -82,10 +90,16 @@ fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> B
         return Ok(());
     }
     for row in 0..array.rows {
-        let mut text = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            text.push(array.data()[row * array.cols + col]);
-        }
+        let start = row * array.cols;
+        let text = crate::builtins::io::utf16::decode_utf16_with_error(
+            &array.data()[start..start + array.cols],
+            || {
+                delete_error_with(
+                    &DELETE_ERROR_INVALID_INPUT,
+                    "delete: filename contains malformed UTF-16 text",
+                )
+            },
+        )?;
         let trimmed = text.trim_end().to_string();
         if trimmed.is_empty() {
             return Err(delete_error_with(

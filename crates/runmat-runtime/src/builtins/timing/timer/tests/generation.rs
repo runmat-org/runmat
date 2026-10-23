@@ -13,7 +13,7 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
             let handle = args[0].clone();
             let calls = callback_calls.clone();
             let runtime = callback_runtime.clone();
-            Box::pin(async move {
+            crate::user_functions::admit_user_function_with(_runtime.as_ref(), move || async move {
                 let count = calls.get() + 1;
                 calls.set(count);
                 if count == 1 {
@@ -66,7 +66,7 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
             let errors = callback_errors.clone();
             let stops = callback_stops.clone();
             let completion = callback_completion.clone();
-            Box::pin(async move {
+            crate::user_functions::admit_user_function_with(_runtime.as_ref(), move || async move {
                 match function {
                     1 => {
                         let count = ticks.get() + 1;

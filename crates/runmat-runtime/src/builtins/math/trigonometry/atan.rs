@@ -266,9 +266,8 @@ fn atan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn atan_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data()
-        .iter()
-        .map(|&ch| (ch as u32 as f64).atan())
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()).atan())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![array.rows, array.cols])
         .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))?;
@@ -327,7 +326,7 @@ pub(crate) mod tests {
             logical.identifier(),
             ATAN_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
         let character = block_on(super::atan_builtin(
             None,
             Value::CharArray(chars),
@@ -564,13 +563,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_char_array_roundtrip() {
-        let chars = CharArray::new_row("RU");
+        let chars = CharArray::from_code_units(
+            [0x0052, 0xD800, 0xDC00, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .unwrap();
         let result = atan_builtin(Value::CharArray(chars.clone()), Vec::new()).expect("atan");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape(), &[1, chars.cols]);
-                for (value, ch) in t.materialize_f64().iter().zip(chars.data().iter()) {
-                    let expected = (*ch as u32 as f64).atan();
+                assert_eq!(t.shape(), &[2, 2]);
+                for (value, code) in t
+                    .materialize_f64()
+                    .iter()
+                    .zip([82.0_f64, 56320.0, 55296.0, 65535.0])
+                {
+                    let expected = code.atan();
                     assert!((value - expected).abs() < 1e-12);
                 }
             }

@@ -6,9 +6,9 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{FillMissingMethodKind, FillMissingOptionKind};
 
-pub(super) mod numeric;
 mod lines;
 mod managed_text;
+pub(super) mod numeric;
 mod runs;
 mod text;
 use lines::FillLines;
@@ -44,7 +44,7 @@ impl FillOptions {
             return Err(invalid_argument("fillmissing: method is required"));
         }
         let mut idx = 0;
-        let method_text = scalar_text(&args[idx])
+        let method_text = scalar_text(&args[idx])?
             .ok_or_else(|| invalid_argument("fillmissing: method must be a string"))?
             .to_ascii_lowercase();
         idx += 1;
@@ -71,7 +71,7 @@ impl FillOptions {
         };
         let mut dim = None;
         while idx < args.len() {
-            if let Some(text) = scalar_text(&args[idx]) {
+            if let Some(text) = scalar_text(&args[idx])? {
                 if let Some(FillMissingOptionKind::Dimension) = FillMissingOptionKind::parse(&text)
                 {
                     let value = args
@@ -127,7 +127,7 @@ impl FillOptions {
                 FillLines::new(&array.shape, self.dim)?;
                 match &self.method {
                     FillMethod::Constant(fill) => {
-                        scalar_text(fill).ok_or_else(|| {
+                        scalar_text(fill)?.ok_or_else(|| {
                             invalid_argument("fillmissing: string constant must be text")
                         })?;
                         Ok(())
@@ -340,7 +340,7 @@ pub(super) fn fill_missing_string_array(
         .collect();
     match &options.method {
         FillMethod::Constant(fill) => {
-            let fill = scalar_text(fill)
+            let fill = scalar_text(fill)?
                 .ok_or_else(|| invalid_argument("fillmissing: string constant must be text"))?;
             for (idx, text) in data.iter_mut().enumerate() {
                 if mask[idx] != 0 {

@@ -1134,15 +1134,10 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
         });
     }
-    let mut data = vec![0.0; rows * cols];
-    // Store in row-major to preserve the original character order when interpreted with column-major indexing
-    for row in 0..rows {
-        for col in 0..cols {
-            let idx_char = row * cols + col;
-            let ch = ca.data()[idx_char];
-            data[row * cols + col] = ch as u32 as f64;
-        }
-    }
+    let data = ca
+        .iter_column_major()
+        .map(|unit| f64::from(unit.raw()))
+        .collect();
     Tensor::new(data, vec![rows, cols]).map_err(|err| {
         gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
     })
@@ -1279,7 +1274,8 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_text_upload_is_gated() {
         test_support::with_test_provider(|_| {
-            let chars = CharArray::new("ab".chars().collect(), 1, 2).expect("chars");
+            let chars =
+                CharArray::from_unicode_scalars("ab".chars().collect(), 1, 2).expect("chars");
             let error = call_with_mode(Value::CharArray(chars), Vec::new(), false)
                 .expect_err("char upload is a RunMat extension");
             assert_eq!(
@@ -1690,8 +1686,14 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_supports_char_arrays() {
         test_support::with_test_provider(|_| {
-            let chars = CharArray::new("row1row2".chars().collect(), 2, 4).unwrap();
-            let original: Vec<char> = chars.data().to_vec();
+            let chars = CharArray::from_code_units(
+                [0x0041, 0xD83D, 0xDE00, 0xD800, 0x0042, 0xDC00, 0, 0xFFFF]
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .to_vec(),
+                2,
+                4,
+            )
+            .unwrap();
             let result =
                 call(Value::CharArray(chars), Vec::new()).expect("gpuArray char array upload");
             let Value::GpuTensor(handle) = result else {
@@ -1700,17 +1702,12 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather chars");
             assert_eq!(gathered.shape(), [2, 4]);
-            let mut recovered = Vec::new();
-            for col in 0..4 {
-                for row in 0..2 {
-                    let idx = row + col * 2;
-                    let code = gathered.materialize_f64()[idx];
-                    let ch = char::from_u32(code as u32)
-                        .expect("valid unicode scalar from numeric code");
-                    recovered.push(ch);
-                }
-            }
-            assert_eq!(recovered, original);
+            // Independent column-major numeric payload: valid surrogate pair,
+            // isolated high/low surrogates, NUL and noncharacter stay raw.
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![65.0, 66.0, 55357.0, 56320.0, 56832.0, 0.0, 55296.0, 65535.0]
+            );
         });
     }
 

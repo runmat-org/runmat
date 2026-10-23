@@ -80,23 +80,31 @@ pub(super) fn style_text_entries(value: &Value, option_name: &str) -> BuiltinRes
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
-        Value::CharArray(chars) if chars.rows > 1 => Ok((0..chars.rows)
-            .map(|row| {
+        Value::CharArray(chars) if chars.rows > 1 => (0..chars.rows)
+            .map(|row| -> BuiltinResult<String> {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                chars.data()[start..end]
-                    .iter()
-                    .collect::<String>()
-                    .trim()
-                    .to_string()
+                crate::builtins::stats::decode_utf16_with_error(&chars.data()[start..end], || {
+                    invalid(format!(
+                        "scatterhist: {option_name} row is not valid UTF-16 text"
+                    ))
+                })
+                .map(|text| text.trim().to_string())
             })
-            .collect()),
-        Value::CharArray(chars) => Ok(vec![chars.data().iter().collect()]),
+            .collect(),
+        Value::CharArray(chars) => Ok(vec![crate::builtins::stats::decode_utf16_with_error(
+            chars.data(),
+            || {
+                invalid(format!(
+                    "scatterhist: {option_name} is not valid UTF-16 text"
+                ))
+            },
+        )?]),
         Value::Cell(cell) => cell
             .data()
             .iter()
             .map(|entry| {
-                scalar_text(entry).ok_or_else(|| {
+                scalar_text(entry)?.ok_or_else(|| {
                     invalid(format!(
                         "scatterhist: {option_name} cell entries must be text"
                     ))
@@ -110,7 +118,7 @@ pub(super) fn style_text_entries(value: &Value, option_name: &str) -> BuiltinRes
 }
 
 pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
-    if let Some(text) = scalar_text(value) {
+    if let Some(text) = scalar_text(value)? {
         let tokens = text
             .chars()
             .filter(|ch| !ch.is_whitespace())
@@ -160,19 +168,23 @@ pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
     }
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(
+            crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid("scatterhist: text value is not valid UTF-16")
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 pub(super) fn parse_color_text_or_value(value: &Value) -> BuiltinResult<Vec4> {
-    if let Some(text) = scalar_text(value) {
+    if let Some(text) = scalar_text(value)? {
         return parse_color_text(&text);
     }
     parse_color_value(&LineStyleParseOptions::generic(NAME), value)

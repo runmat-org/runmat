@@ -66,7 +66,9 @@ fn duration_low_rank_components_and_indexing_preserve_admitted_geometry() {
     let selected = futures::executor::block_on(duration_subsref(vector, "()".into(), selectors))
         .expect("rank-one duration selection");
     let selected = duration_tensor_from_duration_value(&selected).unwrap();
-    assert_eq!(selected.shape(), &[2]);
+    // Shared numeric linear indexing canonicalizes rank-one storage to its
+    // minimum two-dimensional column result; the original remains rank one.
+    assert_eq!(selected.shape(), &[2, 1]);
     let values = days.materialize_f64();
     assert_eq!(selected.materialize_f64(), vec![values[1], values[0]]);
 
@@ -300,7 +302,10 @@ fn duration_public_components_preserve_nan_and_infinity() {
         let chars = duration_char_array(&value)
             .expect("char conversion")
             .expect("duration char array");
-        assert_eq!(chars.data().iter().collect::<String>(), expected);
+        assert_eq!(
+            runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture"),
+            expected
+        );
     }
 }
 

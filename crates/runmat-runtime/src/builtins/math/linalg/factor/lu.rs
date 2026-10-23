@@ -93,12 +93,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "lu",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
-async fn lu_builtin(
+async fn lu_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
+    let count = crate::output_count::current_output_count();
+    if let Value::SparseTensor(sparse) = &value {
+        if count.is_some_and(|count| count > 5) {
+            return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
+        }
+        return sparse::evaluate(runtime.as_ref(), sparse, rest.view(), count).await;
+    }
+    if count.is_some_and(|count| count > 3) {
+        return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
+    }
     let eval = evaluate(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
@@ -120,6 +132,12 @@ async fn lu_builtin(
         return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
     }
     Ok(eval.combined())
+}
+
+mod sparse;
+#[cfg(test)]
+async fn lu_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    lu_builtin_context(None, value, rest).await
 }
 
 /// Output form for `lu`, reused by both the builtin wrapper and the VM multi-output path.

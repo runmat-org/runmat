@@ -55,7 +55,10 @@ fn integer_zeros(
         .map_err(|_| super::super::error::internal("complex output class must be numeric"))
 }
 
-pub(super) fn characters(characters: Vec<char>, shape: &[usize]) -> crate::BuiltinResult<Value> {
+pub(super) fn characters(
+    characters: Vec<runmat_value::Utf16CodeUnit>,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
     let normalized = if shape.is_empty() {
         vec![1, 1]
     } else {
@@ -78,13 +81,13 @@ pub(super) fn characters(characters: Vec<char>, shape: &[usize]) -> crate::Built
             Some("callback returned the wrong number of characters".to_string()),
         ));
     }
-    let mut row_major = vec!['\0'; expected];
+    let mut row_major = vec![runmat_value::Utf16CodeUnit::from_raw(0); expected];
     for column in 0..columns {
         for row in 0..rows {
             row_major[row * columns + column] = characters[row + column * rows];
         }
     }
-    CharArray::new(row_major, rows, columns)
+    CharArray::from_code_units(row_major, rows, columns)
         .map(Value::CharArray)
         .map_err(super::super::error::internal)
 }

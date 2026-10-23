@@ -113,7 +113,9 @@ pub async fn text_builtin(
         ));
     }
     let mut cooperation = runtime.as_ref().map(|context| context.cpu_cooperation());
-    let (z, text_idx) = if let Some(text) = value_as_text_string(&rest[2]) {
+    let (z, text_idx) = if let Some(text) = value_as_text_string(&rest[2]).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source("text", source.to_string(), source)
+    })? {
         let style = parse_text_style_pairs(BUILTIN_NAME, rest.range(3..)?)
             .map_err(map_text_invalid_argument)?;
         validate_coordinate(&rest[0], "x")?;
@@ -146,9 +148,17 @@ pub async fn text_builtin(
             "expected annotation string",
         ));
     }
-    let text = value_as_text_string(&rest[text_idx]).ok_or_else(|| {
-        text_error_with_detail(&TEXT_ERROR_INVALID_ARGUMENT, "label must be text")
-    })?;
+    let text = value_as_text_string(&rest[text_idx])
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "text",
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            text_error_with_detail(&TEXT_ERROR_INVALID_ARGUMENT, "label must be text")
+        })?;
     let style = parse_text_style_pairs(BUILTIN_NAME, rest.range(text_idx + 1..)?)
         .map_err(map_text_invalid_argument)?;
     validate_coordinate(&rest[0], "x")?;

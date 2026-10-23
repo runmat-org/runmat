@@ -24,9 +24,9 @@ pub(super) fn parse(parse_error: CallableParseError) -> crate::RuntimeError {
 pub(super) fn call(call_error: CallableCallError) -> crate::RuntimeError {
     match call_error {
         CallableCallError::Runtime(error) => error,
-        CallableCallError::UndefinedExternal { identity } => error::undefined(format!(
-            "Undefined function for callable identity {identity:?}"
-        )),
+        CallableCallError::UndefinedExternal { identity } => {
+            error::undefined(crate::call::identity::undefined_callable_message(&identity))
+        }
         CallableCallError::SemanticUnavailable {
             function_name,
             function,

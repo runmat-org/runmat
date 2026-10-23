@@ -430,7 +430,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             default_window(signal_len)
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             default_window(signal_len)
         } else {
             idx += 1;
@@ -445,7 +445,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             window_len / 2
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             window_len / 2
         } else {
             idx += 1;
@@ -468,7 +468,7 @@ async fn parse_options(
             FrequencyGrid::Uniform {
                 nfft: default_nfft(window_len)?,
             }
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             FrequencyGrid::Uniform {
                 nfft: default_nfft(window_len)?,
             }
@@ -486,7 +486,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             FrequencyUnits::Hz(1.0)
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             FrequencyUnits::NormalizedRadians
         } else {
             idx += 1;
@@ -511,7 +511,7 @@ async fn parse_options(
     let mut scale = SpectrumScale::Psd;
     let reassigned = false;
     while let Some(value) = rest.get(idx) {
-        let Some(keyword) = keyword(value) else {
+        let Some(keyword) = keyword(value)? else {
             return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_OPTION));
         };
         idx += 1;
@@ -951,22 +951,24 @@ fn is_empty(value: &Value) -> bool {
     }
 }
 
-fn keyword(value: &Value) -> Option<String> {
-    match value {
+fn keyword(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.trim().to_ascii_lowercase()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].trim().to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
-            chars
-                .data()
-                .iter()
-                .collect::<String>()
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| {
+                    let mut error = spectrogram_error(&SPECTROGRAM_ERROR_INVALID_OPTION);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
                 .trim()
                 .to_ascii_lowercase(),
         ),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1068,6 +1070,7 @@ mod tests {
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs
             .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
             .expect("output-count scope");
         block_on(evaluate(x, rest))
     }

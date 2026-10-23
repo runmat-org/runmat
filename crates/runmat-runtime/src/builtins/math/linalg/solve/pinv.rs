@@ -712,7 +712,7 @@ pub(crate) mod tests {
     #[test]
     fn pinv_tolerance_rejects_char_array() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let chars = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars("hi".chars().collect(), 1, 2).unwrap();
         let err = unwrap_error(
             pinv_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).unwrap_err(),
         );

@@ -39,7 +39,7 @@ async fn normalize_words_builtin(
         ));
     }
     let (words, options) = parse_args(runtime.as_ref(), args).await?;
-    normalize_words_value(words, options)
+    normalize_words_value(runtime.as_ref(), words, options)
 }
 
 async fn parse_args(
@@ -193,7 +193,11 @@ impl Style {
     }
 }
 
-fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResult<Value> {
+fn normalize_words_value(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    options: NormalizeOptions,
+) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => {
             options.validate_standalone()?;
@@ -214,8 +218,10 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
             options.validate_standalone()?;
             let rows = (0..array.rows)
                 .map(|row| {
+                    let text = char_row_to_string_slice(array.data(), array.cols, row)
+                        .map_err(|err| normalize_error(format!("normalizeWords: {err}")))?;
                     normalize_word_or_missing(
-                        &char_row_to_string_slice(array.data(), array.cols, row),
+                        &text,
                         options,
                     )
                 })
@@ -233,7 +239,7 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
             make_cell_with_shape(data, shape).map_err(|err| normalize_error(err.to_string()))
         }
         Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-            normalize_tokenized_document(&object, options)
+            normalize_tokenized_document(runtime, &object, options)
         }
         Value::Object(object) => Err(normalize_error(format!(
             "normalizeWords: expected tokenizedDocument object, got {}",
@@ -246,6 +252,7 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
 }
 
 fn normalize_tokenized_document(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &runmat_value::ObjectInstance,
     mut options: NormalizeOptions,
 ) -> BuiltinResult<Value> {
@@ -255,7 +262,7 @@ fn normalize_tokenized_document(
         ));
     }
     options.language = Language::parse_document_language(&tokenized_document_language(object))?;
-    transform_tokenized_document(object, "normalizeWords", |token, token_type| {
+    transform_tokenized_document(runtime, object, "normalizeWords", |token, token_type| {
         if matches!(
             token_type,
             DocumentTokenType::Letters | DocumentTokenType::Other
@@ -282,6 +289,7 @@ fn normalize_cell_item(value: &Value, options: NormalizeOptions) -> BuiltinResul
                 String::new()
             } else {
                 char_row_to_string_slice(array.data(), array.cols, 0)
+                    .map_err(|err| normalize_error(format!("normalizeWords: {err}")))?
             };
             Ok(Value::CharArray(CharArray::new_row(&normalize_word_or_missing(
                 &text, options,
@@ -322,16 +330,16 @@ fn char_rows(rows: Vec<String>) -> BuiltinResult<Value> {
     let row_count = rows.len();
     let cols = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(row_count * cols);
     for row in rows {
-        let mut chars = row.chars().collect::<Vec<_>>();
-        chars.resize(cols, ' ');
-        data.extend(chars);
+        let mut units = row.encode_utf16().collect::<Vec<_>>();
+        units.resize(cols, b' ' as u16);
+        data.extend(units.into_iter().map(runmat_value::Utf16CodeUnit::from_raw));
     }
-    CharArray::new(data, row_count, cols)
+    CharArray::from_code_units(data, row_count, cols)
         .map(Value::CharArray)
         .map_err(|err| normalize_error(format!("normalizeWords: {err}")))
 }
@@ -756,7 +764,9 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repads_multi_row_char_array_after_normalization() {
-        let input = CharArray::new("runningworded ".chars().collect(), 2, "running".len()).unwrap();
+        let input =
+            CharArray::from_unicode_scalars("runningworded ".chars().collect(), 2, "running".len())
+                .unwrap();
         let out = run(vec![Value::CharArray(input)]).expect("normalize");
         let Value::CharArray(array) = out else {
             panic!("expected char array");
@@ -764,7 +774,7 @@ mod tests {
         assert_eq!(array.rows, 2);
         assert_eq!(array.cols, 4);
         assert_eq!(
-            array.data().iter().copied().collect::<String>(),
+            runmat_value::decode_utf16_code_units(array.data()).unwrap(),
             "run word".to_string()
         );
     }

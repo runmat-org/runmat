@@ -77,7 +77,7 @@ pub(super) fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| sign_real_scalar(ch as u32 as f64))
+        .map(|&ch| sign_real_scalar(u32::from(ch.raw()) as f64))
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| OPERATION.error(&SIGN_ERROR_INTERNAL, e))?;

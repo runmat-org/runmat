@@ -62,7 +62,7 @@ pub(crate) fn lower_expr_place_with_replacements(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &std::collections::HashMap<runmat_hir::ExprId, crate::MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirPlace, HirError> {
     if let Some(operand) = await_replacements.get(&expr.id) {
         return match operand {

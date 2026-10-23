@@ -329,6 +329,11 @@ fn direct_pre_effect_call(function: &HirFunction) -> Option<&HirExpr> {
     let expression = match &statement.kind {
         HirStmtKind::Assign(HirPlace::Binding(_), expression, _)
         | HirStmtKind::ExprStmt(expression, _) => expression,
+        HirStmtKind::SequenceAssign {
+            target,
+            value,
+            suppressed: _,
+        } if anonymous_output_forwarding_target(function, target) => value,
         _ => return None,
     };
     let HirExprKind::Call(call) = &expression.kind else {
@@ -342,6 +347,35 @@ fn direct_pre_effect_call(function: &HirFunction) -> Option<&HirExpr> {
     Some(expression)
 }
 
+/// Unknown-output anonymous calls lower to `varargout{1:nargout} = call()`.
+/// Only this body's ABI-owned destination is inert before the call. A general
+/// sequence/index assignment may evaluate user code to determine cardinality.
+fn anonymous_output_forwarding_target(
+    function: &HirFunction,
+    target: &runmat_hir::HirSequenceTarget,
+) -> bool {
+    let runmat_hir::HirSequenceTarget::CellContents { base, indexing } = target else {
+        return false;
+    };
+    let (Some(output), Some(count)) = (function.abi.varargout, function.abi.implicit_nargout)
+    else {
+        return false;
+    };
+    if !matches!(base.kind, HirExprKind::Binding(binding) if binding == output)
+        || indexing.kind != runmat_hir::IndexKind::Brace
+        || indexing.result_context != runmat_hir::IndexResultContext::AssignmentTarget
+    {
+        return false;
+    }
+    let [runmat_hir::IndexComponent::Expr(range)] = indexing.components.as_slice() else {
+        return false;
+    };
+    matches!(&range.kind,
+        HirExprKind::Range(first, None, last)
+            if matches!(&first.kind, HirExprKind::Number(number) if number == "1")
+                && matches!(last.kind, HirExprKind::Binding(binding) if binding == count))
+}
+
 fn side_effect_free_input(expression: &HirExpr) -> bool {
     matches!(
         &expression.kind,
@@ -352,4 +386,40 @@ fn side_effect_free_input(expression: &HirExpr) -> bool {
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)
     )
+}
+
+#[cfg(test)]
+mod frontier_tests {
+    use super::*;
+
+    #[test]
+    fn anonymous_forwarded_outputs_preserve_only_the_inert_entry_call_frontier() {
+        for (source, selected) in [
+            ("h = @() helper();", true),
+            ("h = @(x) helper(x);", true),
+            ("h = @() helper(other());", false),
+            ("h = @() other() + helper();", false),
+        ] {
+            let ast = runmat_parser::parse(source).unwrap();
+            let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).unwrap();
+            let mut function = hir
+                .assembly
+                .functions
+                .into_iter()
+                .find(|f| f.kind == FunctionKind::Anonymous)
+                .unwrap();
+            let sites = all_unresolved_sites(&function);
+            assert!(!sites.is_empty());
+            assert_eq!(
+                !pre_effect_sites(&function, sites).is_empty(),
+                selected,
+                "{source}"
+            );
+            if selected {
+                // A different destination cannot borrow this ABI's inertness.
+                function.abi.varargout = None;
+                assert!(pre_effect_sites(&function, all_unresolved_sites(&function)).is_empty());
+            }
+        }
+    }
 }

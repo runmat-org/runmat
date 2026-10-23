@@ -25,7 +25,7 @@ pub(super) fn parse_size_args(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     let mut out = Vec::with_capacity(args.len());
     let mut idx = 0;
     while idx < args.len() {
-        if scalar_text(&args[idx])
+        if scalar_text(&args[idx])?
             .map(|text| text.eq_ignore_ascii_case("like"))
             .unwrap_or(false)
         {
@@ -105,7 +105,7 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         Value::String(s) => Ok(Value::Bool(is_missing_text(s))),
         Value::CharArray(array) => Ok(Value::LogicalArray(
             LogicalArray::new(
-                char_rows(array)
+                char_rows(array)?
                     .into_iter()
                     .map(|text| u8::from(text.trim().is_empty() || is_missing_text(&text)))
                     .collect(),

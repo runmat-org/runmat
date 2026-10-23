@@ -167,8 +167,8 @@ fn and_accepts_all_integer_classes_independently() {
 #[test]
 fn and_char_arrays() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
-    let rhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
+    let lhs = CharArray::from_unicode_scalars("Run".chars().collect(), 1, 3).unwrap();
+    let rhs = CharArray::from_unicode_scalars(vec!['R', 'u', '\0'], 1, 3).unwrap();
     let result = run_and(Value::CharArray(lhs), Value::CharArray(rhs)).expect("and char arrays");
     match result {
         Value::LogicalArray(arr) => {

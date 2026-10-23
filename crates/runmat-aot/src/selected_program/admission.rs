@@ -6,6 +6,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::archive::RuntimeArchiveCapabilities;
+use crate::installation::{ExternalNativeInstallationAdmission, NativeInstallationAdmissionRecord};
 use crate::link::{
     ExternalNativeLinkAdmission, HostedNativeBuildTrees, HostedNativeTree, NativeHostedDependency,
     NativeLinkAdapter, NativeLinkExecutionHost, NativeStorageGrant,
@@ -65,6 +66,9 @@ pub struct SelectedHostAdmission {
     pub additional_components: Vec<ComponentId>,
     pub numerical_qualification: Option<NumericalQualification>,
     pub runtime_capabilities: RuntimeArchiveCapabilities,
+    /// Invocation inputs supplied by the caller, independently of pack metadata.
+    pub clock_inputs: Option<runmat_execution::host::NativeClockInputs>,
+    pub local_service_inputs: Option<runmat_execution::host::NativeLocalServiceInputs>,
     pub link: QualifiedLink,
 }
 
@@ -209,6 +213,12 @@ impl SelectedHostAdmission {
         admission.expected_target.validate()?;
         admission.expected_abi.validate()?;
         admission.numerical.validate()?;
+        if let Some(inputs) = &admission.clock_inputs {
+            inputs.validate()?;
+        }
+        if let Some(inputs) = &admission.local_service_inputs {
+            inputs.fingerprint()?;
+        }
         admission
             .link
             .storage_grant()
@@ -333,6 +343,17 @@ fn load_hosted_tree(
 pub fn load_manifest(path: &Path) -> Result<TargetPackManifest> {
     let bytes = read_bounded(path, MAX_MANIFEST_BYTES)?;
     TargetPackManifest::from_canonical_bytes(&bytes).map_err(anyhow::Error::msg)
+}
+
+/// Decode an independently issued deployment admission. This trusted operator
+/// input is never inferred from a persisted link receipt or target pack.
+pub(super) fn load_installation_admission(
+    path: &Path,
+) -> Result<ExternalNativeInstallationAdmission> {
+    let bytes = read_bounded(path, MAX_ADMISSION_BYTES)?;
+    NativeInstallationAdmissionRecord::from_canonical_bytes(&bytes)
+        .with_context(|| format!("decode installation admission `{}`", path.display()))
+        .map(NativeInstallationAdmissionRecord::into_external)
 }
 
 pub fn read_component(

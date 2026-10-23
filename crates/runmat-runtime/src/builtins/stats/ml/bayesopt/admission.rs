@@ -34,7 +34,16 @@ pub(super) fn value_to_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(Cow::Borrowed(array.data()[0].as_str()))
         }
-        Value::CharArray(chars) if chars.rows == 1 => Ok(Cow::Owned(chars.data().iter().collect())),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map(Cow::Owned)
+                .map_err(|error| {
+                    bayesopt_error(
+                        format!("bayesopt: {label} contains {error}"),
+                        &ERROR_INVALID_ARGUMENT,
+                    )
+                })
+        }
         other => Err(bayesopt_error(
             format!("bayesopt: {label} must be a text scalar, got {other:?}"),
             &ERROR_INVALID_ARGUMENT,

@@ -20,6 +20,54 @@ pub(super) fn validate(body: &MirBody) -> Result<(), String> {
 
     for block in &body.blocks {
         for (statement_index, statement) in block.statements.iter().enumerate() {
+            if let MirStmtKind::PrepareFixedAssignment(owner) = &statement.kind {
+                owner.validate()?;
+                for step in owner.steps() {
+                    match step {
+                        crate::MirExpressionStep::Let { local, value, .. } => {
+                            *region_definitions.entry(*local).or_default() += 1;
+                            value.visit_direct_sequence_locals(|sequence| {
+                                *all_sequence_uses.entry(*sequence).or_insert(0usize) += 1;
+                            });
+                        }
+                        crate::MirExpressionStep::CaptureSequence {
+                            destination,
+                            source,
+                            ..
+                        } => {
+                            *region_sequence_definitions
+                                .entry(*destination)
+                                .or_insert(0usize) += 1;
+                            source.visit_sequence_locals(&mut |sequence| {
+                                *all_sequence_uses.entry(*sequence).or_insert(0usize) += 1;
+                            });
+                        }
+                    }
+                }
+                if let Some(region) = owner.selector_region() {
+                    let private = region
+                        .steps
+                        .iter()
+                        .filter_map(|step| match step {
+                            crate::MirExpressionStep::CaptureSequence { destination, .. } => {
+                                Some(*destination)
+                            }
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>();
+                    region.argument.visit_sequence_locals(&mut |sequence| {
+                        if private.contains(sequence) {
+                            *all_sequence_uses.entry(*sequence).or_insert(0usize) += 1;
+                        }
+                    });
+                }
+                if let Some(crate::MirFixedSelectorDestination::Sequence(sequence)) = owner.output()
+                {
+                    if !outer_sequence_definitions.insert(sequence) {
+                        return Err("fixed selector sequence slot has multiple publishers".into());
+                    }
+                }
+            }
             if let MirStmtKind::PlaceMutation(mutation) = &statement.kind {
                 let Some(next) = block.statements.get(statement_index + 1) else {
                     return Err("place mutation annotation has no following assignment".to_owned());
@@ -56,7 +104,9 @@ pub(super) fn validate(body: &MirBody) -> Result<(), String> {
                 });
             });
             if let MirStmtKind::CaptureSequence { destination, .. } = statement.kind {
-                outer_sequence_definitions.insert(destination);
+                if !outer_sequence_definitions.insert(destination) {
+                    return Err("frame CSL slot has multiple publishers".into());
+                }
             }
             traversal::visit_outer_statement_sequences(statement, &mut |sequence| {
                 *all_sequence_uses.entry(sequence).or_insert(0usize) += 1;

@@ -62,6 +62,9 @@ pub(crate) struct FlowState {
     pub capabilities: CapabilitySet,
     pub distributed: BTreeMap<DistributedValueId, ValueFact>,
     sequences: BTreeMap<MirSequenceLocalId, ValueSequenceFact>,
+    /// Abstract counterpart of the single invocation-owned fixed destination.
+    /// RHS workspace changes cannot replace this captured receiver fact.
+    pub fixed_receiver: Option<(runmat_hir::StmtId, MirLocalId, LocalState)>,
 }
 
 impl FlowState {
@@ -94,6 +97,7 @@ impl FlowState {
             capabilities: CapabilitySet::default(),
             distributed: BTreeMap::new(),
             sequences: BTreeMap::new(),
+            fixed_receiver: None,
         };
         let mut parameter = 0;
         let mut capture = 0;
@@ -177,6 +181,35 @@ impl FlowState {
 
     pub fn join_from(&mut self, incoming: &Self, widen: bool) -> bool {
         let mut changed = false;
+        let receiver = match (&self.fixed_receiver, &incoming.fixed_receiver) {
+            (Some((id, root, current)), Some((next_id, next_root, next)))
+                if id == next_id && root == next_root =>
+            {
+                let assignment = join_assignment(current.assignment, next.assignment);
+                Some((
+                    *id,
+                    *root,
+                    LocalState {
+                        fact: if assignment == InitFact::RuntimeWorkspaceLookup {
+                            None
+                        } else {
+                            join_optional(current.fact.as_ref(), next.fact.as_ref(), widen)
+                        },
+                        literal: if current.literal == next.literal {
+                            current.literal.clone()
+                        } else {
+                            LiteralValue::Unknown
+                        },
+                        assignment,
+                    },
+                ))
+            }
+            _ => None,
+        };
+        if self.fixed_receiver != receiver {
+            self.fixed_receiver = receiver;
+            changed = true;
+        }
         for (slot, next) in self.locals.iter_mut().zip(&incoming.locals) {
             let assignment = join_assignment(slot.assignment, next.assignment);
             let fact = if assignment == InitFact::RuntimeWorkspaceLookup {

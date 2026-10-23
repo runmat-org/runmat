@@ -1,205 +1,141 @@
-//! Preconditioned conjugate gradients.
+//! Reliable-residual PCG over exact caller-owned workspace.
+use super::{ApplyStatus, Control, KrylovFailure};
+mod scale;
+mod state;
 
-use super::{relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag};
-use crate::error::SolverResult;
-use crate::par;
-use crate::scalar::Scalar;
-
-/// Workspace entries required by [`pcg_async`].
-pub fn pcg_workspace_len(n: usize, options: &KrylovOptions) -> usize {
-    n * (4 + usize::from(options.return_best_iterate))
+pub trait Arithmetic<T> {
+    const HERMITIAN_EPSILON: f64;
+    fn zero() -> T;
+    fn components(value: T) -> (f64, f64);
+    fn add_scaled(target: &mut T, scale: f64, value: T);
+    fn subtract_scaled(target: &mut T, scale: f64, value: T);
+    fn scaled_conjugate_product(left: T, right: T, left_scale: f64, right_scale: f64)
+        -> (f64, f64);
 }
 
-/// PCG for Hermitian positive definite systems. `x` carries the initial guess in and the returned
-/// iterate out; `work` must hold [`pcg_workspace_len`] entries.
-pub async fn pcg_async<T: Scalar, O: KrylovOps<T>>(
-    ops: &mut O,
-    b: &[T],
-    x: &mut [T],
-    options: &KrylovOptions,
-    work: &mut [T],
-) -> SolverResult<KrylovReport> {
-    let n = b.len();
-    let mut parts = split_work(work, n, 4 + usize::from(options.return_best_iterate));
-    let best = if options.return_best_iterate { parts.pop() } else { None };
-    let mut parts = parts.into_iter();
-    let (r, z, p, q) = (
-        parts.next().unwrap(),
-        parts.next().unwrap(),
-        parts.next().unwrap(),
-        parts.next().unwrap(),
-    );
-    let mut best = best;
-    let mut counters = super::Counters {
-        operator: 0,
-        preconditioner: 0,
-    };
-    let rhs_norm = par::norm2(b);
-    let tol = tolerance(options, rhs_norm);
-    let mut history = Vec::new();
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcgOperation {
+    Coefficient,
+    FirstPreconditioner,
+    SecondPreconditioner,
+}
+enum PcgContinuation<'a, T> {
+    Apply {
+        operation: PcgOperation,
+        input: &'a [T],
+    },
+    Complete(PcgOutcome),
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PcgOutcome {
+    pub flag: u8,
+    pub relres: f64,
+    pub iterations: usize,
+    pub residual_count: usize,
+}
+pub struct PcgWork<'a, T> {
+    pub x: &'a mut [T],
+    pub best: &'a mut [T],
+    pub residual: &'a mut [T],
+    pub direction: &'a mut [T],
+    pub intermediate: Option<&'a mut [T]>,
+    pub residual_norms: &'a mut [f64],
+}
+#[derive(Clone, Copy)]
+pub struct PcgParameters {
+    pub tolerance: f64,
+    pub maximum_iterations: usize,
+    pub preconditioners: (bool, bool),
+}
 
-    // r = b - A x0
-    let x_is_zero = x.iter().all(|v| *v == T::zero());
-    if x_is_zero {
-        r.copy_from_slice(b);
-    } else {
-        ops.apply_operator(x, q).await?;
-        counters.operator += 1;
-        par::sub_into(b, q, r);
-    }
-    let mut residual = par::norm2(r);
-    if options.record_history {
-        history.push(residual);
-    }
-    let finish = |flag, iterations, residual: f64, history: Vec<f64>, counters: &super::Counters| KrylovReport {
-        flag,
-        iterations,
-        relative_residual: relative(residual, rhs_norm),
-        residual_norm: residual,
-        rhs_norm,
-        residual_history: history,
-        restart_position: None,
-        operator_applications: counters.operator,
-        preconditioner_applications: counters.preconditioner,
-    };
-    if residual <= tol || rhs_norm == 0.0 {
-        if rhs_norm == 0.0 {
-            x.iter_mut().for_each(|v| *v = T::zero());
-            return Ok(finish(StopFlag::Converged, 0, 0.0, history, &counters));
+/// Includes the separately borrowed operation-output vector and all history.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PcgGeometry {
+    pub native_elements: usize,
+    pub history_elements: usize,
+}
+impl PcgGeometry {
+    pub fn checked(
+        n: usize,
+        maximum_iterations: usize,
+        both_preconditioners: bool,
+    ) -> Option<Self> {
+        if n == 0 || maximum_iterations == 0 {
+            return None;
         }
-        return Ok(finish(StopFlag::Converged, 0, residual, history, &counters));
+        Some(Self {
+            native_elements: n.checked_mul(if both_preconditioners { 6 } else { 5 })?,
+            history_elements: maximum_iterations.checked_add(1)?,
+        })
     }
-    if let Some(best) = best.as_deref_mut() {
-        best.copy_from_slice(x);
-    }
-    let (mut best_residual, mut best_iteration) = (residual, 0usize);
-    let mut rho_previous = 0.0f64;
-    let mut stagnant = 0usize;
-    let mut verification_rounds = 0usize;
-    let mut flag = StopFlag::MaxIterations;
-    let mut iteration = 0usize;
+}
 
-    while iteration < options.max_iterations {
-        iteration += 1;
-        ops.checkpoint(iteration, relative(residual, rhs_norm)).await?;
-        if ops.has_preconditioner() {
-            counters.preconditioner += 1;
-            if ops.apply_preconditioner(r, z).await? == ApplyStatus::NumericalFailure
-                || z.iter().any(|v| !v.is_finite())
-            {
-                flag = StopFlag::PreconditionerFailure;
-                break;
-            }
-        } else {
-            z.copy_from_slice(r);
-        }
-        let rho_value = par::dot(r, z);
-        let rho = rho_value.re();
-        if !rho.is_finite() || rho <= 0.0 {
-            flag = if ops.has_preconditioner() && rho < 0.0 {
-                StopFlag::PreconditionerFailure
-            } else {
-                StopFlag::Breakdown
-            };
-            break;
-        }
-        if iteration == 1 {
-            p.copy_from_slice(z);
-        } else {
-            let beta = rho / rho_previous;
-            if !beta.is_finite() {
-                flag = StopFlag::Breakdown;
-                break;
-            }
-            par::xpby(z, T::from_f64(beta), p);
-        }
-        ops.apply_operator(p, q).await?;
-        counters.operator += 1;
-        let curvature = par::dot(p, q).re();
-        if !curvature.is_finite() || curvature <= 0.0 {
-            flag = StopFlag::Breakdown;
-            break;
-        }
-        let alpha = rho / curvature;
-        // Stagnation: the update no longer changes x at working precision.
-        let step = alpha.abs() * par::norm2(p);
-        let x_norm = par::norm2(x);
-        if step <= T::EPSILON * x_norm {
-            stagnant += 1;
-        } else {
-            stagnant = 0;
-        }
-        par::axpy(T::from_f64(alpha), p, x);
-        par::axpy(T::from_f64(-alpha), q, r);
-        rho_previous = rho;
-        residual = par::norm2(r);
-        if options.record_history {
-            history.push(residual);
-        }
-        if !residual.is_finite() {
-            flag = StopFlag::Breakdown;
-            break;
-        }
-        if residual <= tol {
-            // Verify with the true residual; replace the recursive one if they disagree.
-            ops.apply_operator(x, q).await?;
-            counters.operator += 1;
-            par::sub_into(b, q, r);
-            residual = par::norm2(r);
-            if residual <= tol {
-                flag = StopFlag::Converged;
-                break;
-            }
-            verification_rounds += 1;
-            if verification_rounds > options.max_verification_rounds {
-                flag = StopFlag::Stagnation;
-                break;
-            }
-            // Restart the recurrence from the true residual.
-            iteration_restart(&mut rho_previous);
-            stagnant = 0;
-            if residual < best_residual {
-                best_residual = residual;
-                best_iteration = iteration;
-                if let Some(best) = best.as_deref_mut() {
-                    best.copy_from_slice(x);
+pub trait PcgOperations<T>: Control {
+    fn apply(
+        &mut self,
+        operation: PcgOperation,
+        input: &[T],
+        output: &mut [T],
+    ) -> impl std::future::Future<Output = Result<ApplyStatus, Self::Error>>;
+}
+
+/// The state is consumed on error. Each emitted A/M1/M2 request is applied
+/// exactly once; convergence and returned-best certificates are never replayed.
+pub async fn solve<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T>>(
+    rhs: &'a [T],
+    initial: Option<&[T]>,
+    parameters: PcgParameters,
+    work: PcgWork<'a, T>,
+    operation_scratch: &mut [T],
+    operations: &mut O,
+) -> Result<PcgOutcome, KrylovFailure<O::Error>> {
+    PcgGeometry::checked(
+        rhs.len(),
+        parameters.maximum_iterations,
+        parameters.preconditioners.0 && parameters.preconditioners.1,
+    )
+    .ok_or(KrylovFailure::Invalid(
+        "PCG workspace geometry overflows or is empty",
+    ))?;
+    if operation_scratch.len() != rhs.len()
+        || !parameters.tolerance.is_finite()
+        || parameters.tolerance <= 0.0
+    {
+        return Err(KrylovFailure::Invalid(
+            "PCG parameters or operation extent are invalid",
+        ));
+    }
+    let mut state = state::RecurrenceState::<T, A>::new(
+        rhs,
+        initial,
+        parameters.tolerance,
+        parameters.maximum_iterations,
+        work,
+        parameters.preconditioners,
+        operations,
+    )
+    .await?;
+    loop {
+        operations.checkpoint().map_err(KrylovFailure::Operation)?;
+        let (operation, input) = match state.continuation() {
+            PcgContinuation::Complete(outcome) => return Ok(outcome),
+            PcgContinuation::Apply { operation, input } => (operation, input),
+        };
+        let status = operations
+            .apply(operation, input, operation_scratch)
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        operations.checkpoint().map_err(KrylovFailure::Operation)?;
+        match status {
+            ApplyStatus::Applied => state.accept(operation_scratch, operations).await?,
+            ApplyStatus::NumericalFailure => {
+                if operation == PcgOperation::Coefficient {
+                    return Err(KrylovFailure::Invalid(
+                        "coefficient returned a preconditioner failure",
+                    ));
                 }
-            }
-            // Next iteration starts a fresh direction.
-            p.iter_mut().for_each(|v| *v = T::zero());
-            continue;
-        }
-        if residual < best_residual {
-            best_residual = residual;
-            best_iteration = iteration;
-            if let Some(best) = best.as_deref_mut() {
-                best.copy_from_slice(x);
+                state.preconditioner_failed(operations).await?;
             }
         }
-        if stagnant >= options.max_stagnation_steps {
-            flag = StopFlag::Stagnation;
-            break;
-        }
     }
-
-    if flag == StopFlag::Converged {
-        return Ok(finish(flag, iteration, residual, history, &counters));
-    }
-    // Failure: return the best iterate (true residual) when requested, else the last iterate.
-    let returned_iteration = if let Some(best) = best.as_deref() {
-        x.copy_from_slice(best);
-        best_iteration
-    } else {
-        iteration
-    };
-    ops.apply_operator(x, q).await?;
-    counters.operator += 1;
-    par::sub_into(b, q, r);
-    let true_residual = par::norm2(r);
-    Ok(finish(flag, returned_iteration, true_residual, history, &counters))
-}
-
-/// After a true-residual replacement the CG recurrence restarts (β = 0 on the next step).
-fn iteration_restart(rho_previous: &mut f64) {
-    *rho_previous = f64::INFINITY;
 }

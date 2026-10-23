@@ -24,23 +24,23 @@ use tokio::sync::Notify;
 #[path = "graphics_callbacks/claim.rs"]
 mod claim;
 use claim::CallbackClaim;
+#[path = "graphics_callbacks/attachment.rs"]
+mod attachment;
 #[path = "graphics_callbacks/mutation.rs"]
 mod mutation;
 #[path = "graphics_callbacks/property_registration.rs"]
 mod property_registration;
-#[path = "graphics_callbacks/attachment.rs"]
-mod attachment;
 pub(crate) use mutation::GraphicsCallbackMutationScope;
 #[path = "graphics_callbacks/host_request.rs"]
 mod host_request;
 pub use host_request::GraphicsCallbackHostTicket;
 use host_request::HostReply;
+#[path = "graphics_callbacks/drive.rs"]
+mod drive;
 #[path = "graphics_callbacks/retirement.rs"]
 mod retirement;
 #[path = "graphics_callbacks/wake.rs"]
 mod wake;
-#[path = "graphics_callbacks/drive.rs"]
-mod drive;
 pub use runmat_value::{GraphicsCallbackDisposition, GraphicsCallbackHostFailure};
 
 /// Host metadata only. The session-side adapter constructs callable arguments
@@ -402,6 +402,10 @@ impl Drop for GraphicsCallbackRegistration {
 }
 
 impl RuntimeGraphicsCallbackQueue {
+    pub(crate) fn belongs_to(&self, selected: RuntimeContextLocalId) -> bool {
+        self.0.owner == Some(selected) && !self.0.closed.load(Ordering::Acquire)
+    }
+
     pub fn downgrade(&self) -> WeakRuntimeGraphicsCallbackQueue {
         WeakRuntimeGraphicsCallbackQueue(Rc::downgrade(&self.0))
     }

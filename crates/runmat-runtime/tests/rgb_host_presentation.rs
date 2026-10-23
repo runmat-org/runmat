@@ -146,9 +146,6 @@ impl RuntimeParallelService for HostBudget {
 
 struct RejectPreparation;
 impl RuntimeAccelerationService for RejectPreparation {
-    fn supports_operation(&self, operation: &str) -> bool {
-        matches!(operation, "rgb2gray" | "rgb2hsv" | "gray2rgb")
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

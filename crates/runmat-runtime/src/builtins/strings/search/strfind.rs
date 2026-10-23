@@ -107,7 +107,7 @@ async fn validate_force_cell_output_extensions(
             &STRFIND_ERROR_INVALID_OPTION,
         ));
     }
-    let name = value_to_owned_string(&rest[0]).ok_or_else(|| {
+    let name = value_to_owned_string(&rest[0], BUILTIN_NAME)?.ok_or_else(|| {
         strfind_error_with_message(
             "strfind: option names must be text scalars",
             &STRFIND_ERROR_INVALID_OPTION,
@@ -345,7 +345,7 @@ fn parse_force_cell_output(rest: crate::call::FunctionArgumentView<'_>) -> Built
 
     let mut force_cell = None;
     for pair in rest.chunks_exact(2) {
-        let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
+        let name = value_to_owned_string(&pair[0], BUILTIN_NAME)?.ok_or_else(|| {
             strfind_error_with_message(
                 "strfind: option names must be text scalars",
                 &STRFIND_ERROR_INVALID_OPTION,
@@ -416,7 +416,7 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
                 Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
             }
         }
-        other => value_to_owned_string(other)
+        other => value_to_owned_string(other, BUILTIN_NAME)?
             .ok_or_else(|| {
                 strfind_error_with_message(
                     "strfind: option values must be logical or numeric scalars",
@@ -912,7 +912,7 @@ pub(crate) mod tests {
     #[test]
     fn strfind_char_matrix_rows() {
         let data = vec!['c', 'a', 't', 'a', 'd', 'a', 'd', 'o', 'g'];
-        let array = CharArray::new(data, 3, 3).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 3, 3).unwrap();
         let result = run_strfind(
             Value::CharArray(array),
             Value::CharArray(CharArray::new_row("d")),

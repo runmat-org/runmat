@@ -1,6 +1,6 @@
 use runmat_value::{CellArray, Value};
 
-use super::{index_cell_value, mex, parse_cell_index_value_for_len};
+use super::{mex, parse_cell_index_value_for_len};
 use crate::RuntimeError;
 
 #[cfg(test)]
@@ -30,15 +30,6 @@ pub(super) fn row_major_pos_from_linear(
     Ok(page * page_len + row * cell.cols + column)
 }
 
-pub(super) fn cell_selector_extents(
-    cell: &CellArray,
-    selector_count: usize,
-) -> Result<Vec<usize>, RuntimeError> {
-    (0..selector_count)
-        .map(|position| cell_selector_extent(cell, selector_count, position))
-        .collect()
-}
-
 pub(super) fn cell_selector_extent(
     cell: &CellArray,
     selector_count: usize,
@@ -66,10 +57,22 @@ pub(super) fn linear_index_from_subscripts(
     cell: &CellArray,
     indices: &[usize],
 ) -> Result<usize, RuntimeError> {
-    let extents = cell_selector_extents(cell, indices.len())?;
+    linear_index_from_subscripts_by(cell, indices.len(), |axis, _| Ok(indices[axis]))
+}
+
+fn linear_index_from_subscripts_by(
+    cell: &CellArray,
+    count: usize,
+    mut index_at: impl FnMut(usize, usize) -> Result<usize, RuntimeError>,
+) -> Result<usize, RuntimeError> {
+    for axis in 0..count {
+        cell_selector_extent(cell, count, axis)?;
+    }
     let mut zero_based = 0usize;
     let mut stride = 1usize;
-    for (&index, extent) in indices.iter().zip(extents) {
+    for axis in 0..count {
+        let extent = cell_selector_extent(cell, count, axis)?;
+        let index = index_at(axis, extent)?;
         if index == 0 || index > extent {
             return Err(mex(
                 "CellSubscriptOutOfBounds",
@@ -92,54 +95,108 @@ pub(super) fn expand_cell_subscripts(
     cell: &CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
-    let extents = cell_selector_extents(cell, indices.len())?;
-    let selections = indices
-        .iter()
-        .zip(extents)
-        .map(|(value, extent)| selector_values(value, extent))
-        .collect::<Result<Vec<_>, _>>()?;
-    if selections.iter().any(Vec::is_empty) {
-        return Ok(Vec::new());
-    }
-
-    let output_len = selections
-        .iter()
-        .try_fold(1usize, |length, selection| {
-            length.checked_mul(selection.len())
-        })
-        .ok_or_else(selection_size_error)?;
-    let mut values = Vec::with_capacity(output_len);
-    let mut positions = vec![0usize; selections.len()];
-    loop {
-        let subscripts = selections
-            .iter()
-            .zip(&positions)
-            .map(|(selection, position)| selection[*position])
-            .collect::<Vec<_>>();
-        values.push(index_cell_value(cell, &subscripts)?);
-
-        let mut dimension = 0usize;
-        while dimension < positions.len() {
-            positions[dimension] += 1;
-            if positions[dimension] < selections[dimension].len() {
-                break;
-            }
-            positions[dimension] = 0;
-            dimension += 1;
-        }
-        if dimension == positions.len() {
-            return Ok(values);
-        }
-    }
+    CellSelection::new(cell, indices)?.collect()
 }
 
-fn selector_values(value: &Value, extent: usize) -> Result<Vec<usize>, RuntimeError> {
-    let is_colon = matches!(value, Value::String(text) if text == ":")
-        || matches!(value, Value::CharArray(chars) if chars.row_string().as_deref() == Some(":"));
-    if is_colon {
-        return Ok((1..=extent).collect());
+fn is_colon(value: &Value) -> bool {
+    matches!(value, Value::String(text) if text == ":")
+        || matches!(value, Value::CharArray(chars) if chars.rows == 1 && chars.data().len() == 1 && chars.data()[0].raw() == u16::from(b':'))
+}
+
+/// The existing Cell brace policy as a repeatable view, rather than nested
+/// selector/coordinate vectors. First selector still varies fastest.
+pub(super) struct CellSelection<'a> {
+    cell: &'a CellArray,
+    indices: &'a [Value],
+    len: usize,
+}
+
+impl<'a> CellSelection<'a> {
+    pub(super) fn new(cell: &'a CellArray, indices: &'a [Value]) -> Result<Self, RuntimeError> {
+        let len = match indices {
+            [] => return Err(mex("CellIndexType", "Unsupported cell index type")),
+            [value] if is_colon(value) => cell.data().len(),
+            [Value::Num(_) | Value::Int(_)] => 1,
+            [Value::Tensor(tensor)] => tensor.len(),
+            [_] => return Err(mex("CellIndexType", "Unsupported cell index type")),
+            _ => {
+                for axis in 0..indices.len() {
+                    cell_selector_extent(cell, indices.len(), axis)?;
+                }
+                // Preserve eager scalar parsing, including selectors after an
+                // empty colon. Index bounds are checked when visiting values.
+                for (axis, value) in indices.iter().enumerate() {
+                    let extent = cell_selector_extent(cell, indices.len(), axis)?;
+                    if !is_colon(value) {
+                        parse_cell_index_value_for_len(value, extent)?;
+                    }
+                }
+                if indices.iter().enumerate().any(|(axis, value)| {
+                    is_colon(value)
+                        && cell_selector_extent(cell, indices.len(), axis)
+                            .expect("validated cell extent")
+                            == 0
+                }) {
+                    0
+                } else {
+                    indices
+                        .iter()
+                        .enumerate()
+                        .try_fold(1usize, |length, (axis, value)| {
+                            let count = if is_colon(value) {
+                                cell_selector_extent(cell, indices.len(), axis)?
+                            } else {
+                                1
+                            };
+                            length.checked_mul(count).ok_or_else(selection_size_error)
+                        })?
+                }
+            }
+        };
+        Ok(Self { cell, indices, len })
     }
-    Ok(vec![parse_cell_index_value_for_len(value, extent)?])
+
+    pub(super) fn len(&self) -> usize {
+        self.len
+    }
+
+    pub(super) fn value_at(&self, ordinal: usize) -> Result<Value, RuntimeError> {
+        self.value_ref_at(ordinal).cloned()
+    }
+
+    pub(super) fn value_ref_at(&self, ordinal: usize) -> Result<&'a Value, RuntimeError> {
+        let linear = match self.indices {
+            [value] if is_colon(value) => ordinal.checked_add(1).ok_or_else(index_size_error)?,
+            [Value::Tensor(tensor)]
+                if !(super::tensor_element_len(tensor) == 1
+                    && tensor.shape().iter().product::<usize>() == 1) =>
+            {
+                super::parse_positive_cell_index(super::index_scalar_from_numeric(
+                    tensor
+                        .numeric_value_at(ordinal)
+                        .expect("validated numeric tensor storage"),
+                )?)?
+            }
+            [value] => parse_cell_index_value_for_len(value, self.cell.data().len())?,
+            _ => {
+                let mut remainder = ordinal;
+                linear_index_from_subscripts_by(self.cell, self.indices.len(), |axis, extent| {
+                    if is_colon(&self.indices[axis]) {
+                        let index = remainder % extent + 1;
+                        remainder /= extent;
+                        Ok(index)
+                    } else {
+                        parse_cell_index_value_for_len(&self.indices[axis], extent)
+                    }
+                })?
+            }
+        };
+        Ok(&self.cell.data()[row_major_pos_from_linear(self.cell, linear)?])
+    }
+
+    pub(super) fn collect(&self) -> Result<Vec<Value>, RuntimeError> {
+        (0..self.len).map(|index| self.value_at(index)).collect()
+    }
 }
 
 fn shape_size_error() -> RuntimeError {

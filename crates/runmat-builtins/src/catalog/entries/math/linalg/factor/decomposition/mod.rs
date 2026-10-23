@@ -1,4 +1,5 @@
 mod documentation;
+mod control;
 mod inference;
 mod integer_inputs;
 mod integer_capabilities;
@@ -14,6 +15,7 @@ mod rdivide;
 mod mrdivide;
 mod mldivide;
 pub use constructor::*;
+pub use control::{DecompositionKind, DecompositionOption, DecompositionTriangle};
 pub use ctranspose::*;
 pub use integer_capabilities::*;
 pub use integer_inputs::*;

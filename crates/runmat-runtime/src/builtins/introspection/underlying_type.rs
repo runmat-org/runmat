@@ -138,7 +138,9 @@ fn parse_type_name(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIde
             Ok(runmat_types::ClassIdentity::new(sa.data()[0].trim()).ok())
         }
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
+            let text = super::text::decode_utf16_with_error(ca.data(), || {
+                is_underlying_type_error(&IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID)
+            })?;
             Ok(runmat_types::ClassIdentity::new(text.trim()).ok())
         }
         _ => Err(is_underlying_type_error(&IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID).into()),

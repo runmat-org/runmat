@@ -27,7 +27,7 @@ fn names(value: &Value) -> Vec<String> {
             let Value::CharArray(chars) = value else {
                 panic!("expected character row")
             };
-            chars.data().iter().collect()
+            runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture")
         })
         .collect()
 }
@@ -120,7 +120,7 @@ fn output_and_character_shape_admission_precede_enumeration() {
         runmat_builtins::WHAT_ERROR_TOO_MANY_OUTPUTS.identifier
     );
     drop(_outputs);
-    let pages = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let pages = CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
     assert_eq!(
         run(vec![Value::CharArray(pages)]).unwrap_err().identifier(),
         runmat_builtins::WHAT_ERROR_FOLDER.identifier

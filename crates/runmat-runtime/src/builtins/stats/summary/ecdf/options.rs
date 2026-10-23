@@ -44,12 +44,19 @@ impl EcdfOptionPlan {
                 ))));
                 continue;
             }
-            let Some(name) = keyword_of(&name) else {
-                steps.push(Step::Ready(Err(invalid_argument(
-                    ECDF_OWNER,
-                    "ecdf: option names must be text",
-                ))));
-                continue;
+            let name = match keyword_of(&name) {
+                Ok(Some(name)) => name,
+                Ok(None) => {
+                    steps.push(Step::Ready(Err(invalid_argument(
+                        ECDF_OWNER,
+                        "ecdf: option names must be text",
+                    ))));
+                    continue;
+                }
+                Err(error) => {
+                    steps.push(Step::Ready(Err(error)));
+                    continue;
+                }
             };
             let Some(option) = EcdfOptionName::from_public(&name) else {
                 steps.push(Step::Ready(Err(invalid_argument(
@@ -243,7 +250,7 @@ impl EcdfOptionPlan {
     fn decode(option: EcdfOptionName, value: &Value) -> BuiltinResult<DecodedOption> {
         match option {
             EcdfOptionName::Function => {
-                let text = keyword_of(value).ok_or_else(|| {
+                let text = keyword_of(value)?.ok_or_else(|| {
                     invalid_argument(ECDF_OWNER, "ecdf: Function option must be text")
                 })?;
                 let function = FunctionKind::from_public(&text).ok_or_else(|| {
@@ -278,7 +285,7 @@ impl EcdfOptionPlan {
                 Ok(DecodedOption::Alpha(alpha))
             }
             EcdfOptionName::Bounds => {
-                let text = keyword_of(value).ok_or_else(|| {
+                let text = keyword_of(value)?.ok_or_else(|| {
                     invalid_argument(ECDF_OWNER, "ecdf: Bounds option must be text")
                 })?;
                 let bounds = EcdfBounds::from_public(&text).ok_or_else(|| {

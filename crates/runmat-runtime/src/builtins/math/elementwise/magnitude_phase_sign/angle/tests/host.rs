@@ -112,7 +112,7 @@ fn angle_rejects_integer_logical_and_char_inputs() {
     let logical = angle_builtin(Value::LogicalArray(logical)).unwrap_err();
     assert_eq!(logical.identifier(), ANGLE_ERROR_INVALID_INPUT.identifier);
 
-    let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).unwrap();
     let chars = angle_builtin(Value::CharArray(chars)).unwrap_err();
     assert_eq!(chars.identifier(), ANGLE_ERROR_INVALID_INPUT.identifier);
 }

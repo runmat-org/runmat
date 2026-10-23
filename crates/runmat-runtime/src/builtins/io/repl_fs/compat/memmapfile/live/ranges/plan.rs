@@ -84,7 +84,7 @@ pub(super) async fn plan(
                 .iter()
                 .map(|index| *index as usize)
                 .collect();
-            record_shape = planned.output_shape;
+            record_shape = planned.output_shape.to_vec();
             next = 1;
         } else if records == 1 {
             record_positions.push(0);
@@ -141,7 +141,7 @@ pub(super) async fn plan(
                 runmat_value::MemmapElementType::Numeric(dtype) => MemmapDataType::Numeric(dtype),
                 runmat_value::MemmapElementType::Character => MemmapDataType::Character,
             };
-            if field.name.as_deref() == Some(name.0.as_str()) {
+            if field.name.as_deref() == Some(name.as_str()) {
                 selected = Some((dtype, field.shape.clone(), prefix));
                 break;
             }
@@ -187,7 +187,7 @@ pub(super) async fn plan(
         };
         let width = dtype.byte_size();
         let mut offsets = Vec::with_capacity(planned.indices.len());
-        for index in planned.indices {
+        for &index in &planned.indices {
             let byte = (index as usize)
                 .checked_mul(width)
                 .ok_or_else(|| format_error("memmapfile: field index overflow"))?;
@@ -202,8 +202,8 @@ pub(super) async fn plan(
             Selected {
                 offsets,
                 unit_bytes: width,
-                shape: planned.output_shape.clone(),
-                format: scalar_format(dtype, planned.output_shape),
+                shape: planned.output_shape.to_vec(),
+                format: scalar_format(dtype, planned.output_shape.to_vec()),
                 records: false,
             },
         ));
@@ -225,7 +225,7 @@ pub(super) async fn plan(
     };
     let width = format.dtype.byte_size();
     let mut offsets = Vec::with_capacity(planned.indices.len());
-    for index in planned.indices {
+    for &index in &planned.indices {
         let byte = (index as usize)
             .checked_mul(width)
             .ok_or_else(|| format_error("memmapfile: Data index overflow"))?;
@@ -239,8 +239,8 @@ pub(super) async fn plan(
         Selected {
             offsets,
             unit_bytes: width,
-            shape: planned.output_shape.clone(),
-            format: scalar_format(format.dtype, planned.output_shape),
+            shape: planned.output_shape.to_vec(),
+            format: scalar_format(format.dtype, planned.output_shape.to_vec()),
             records: false,
         },
     ))

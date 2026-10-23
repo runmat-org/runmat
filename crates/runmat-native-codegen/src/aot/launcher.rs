@@ -12,6 +12,32 @@ use runmat_execution_artifact::target_test::NativePairedProductRole;
 
 use super::AotBuiltinBinding;
 
+pub(super) struct LauncherEntryContract<'a> {
+    pub resolvers: LauncherResolvers,
+    pub services: LauncherServiceImports,
+    pub data: &'a BTreeMap<String, (DataId, u64)>,
+    pub paired_role: Option<NativePairedProductRole>,
+}
+
+pub(super) struct LauncherResolvers {
+    pub functions: FuncId,
+    pub builtins: FuncId,
+}
+
+pub(super) struct LauncherServiceImports {
+    pub source_evaluation: bool,
+    pub network: bool,
+    pub user_interface: bool,
+    pub host_callback: bool,
+    pub hosted_dynamic: bool,
+}
+
+struct ExternalFactories<T> {
+    user_interface: T,
+    host_callback: T,
+    hosted_dynamic: T,
+}
+
 pub(super) fn define_resolver(
     module: &mut ObjectModule,
     functions: &[(runmat_types::FunctionId, FuncId)],
@@ -152,12 +178,25 @@ pub(super) fn define_builtin_resolver(
 
 pub(super) fn define(
     module: &mut ObjectModule,
-    resolver: FuncId,
-    builtin_resolver: FuncId,
-    source_service: bool,
-    data: &BTreeMap<String, (DataId, u64)>,
-    paired_role: Option<NativePairedProductRole>,
+    contract: LauncherEntryContract<'_>,
 ) -> NativeCodegenResult<()> {
+    let LauncherEntryContract {
+        resolvers,
+        services,
+        data,
+        paired_role,
+    } = contract;
+    let LauncherResolvers {
+        functions: resolver,
+        builtins: builtin_resolver,
+    } = resolvers;
+    let LauncherServiceImports {
+        source_evaluation: source_service,
+        network: network_service,
+        user_interface,
+        host_callback,
+        hosted_dynamic,
+    } = services;
     let native_ir = required_data(data, super::AOT_NATIVE_IR_SYMBOL)?;
     let program = required_data(data, super::AOT_PROGRAM_SYMBOL)?;
     let resume_points = required_data(data, super::AOT_RESUME_POINTS_SYMBOL)?;
@@ -187,10 +226,50 @@ pub(super) fn define(
     } else {
         None
     };
+    let network_service_factory = if network_service {
+        let mut signature = module.make_signature();
+        signature.params.push(AbiParam::new(pointer));
+        signature.returns.push(AbiParam::new(pointer));
+        Some(
+            module
+                .declare_function(
+                    super::AOT_NETWORK_SERVICE_FACTORY_SYMBOL,
+                    Linkage::Import,
+                    &signature,
+                )
+                .map_err(module_error)?,
+        )
+    } else {
+        None
+    };
+    let external_factories = ExternalFactories {
+        user_interface: declare_external_factory(
+            module,
+            pointer,
+            super::AOT_UI_SERVICE_FACTORY_SYMBOL,
+            user_interface,
+        )?,
+        host_callback: declare_external_factory(
+            module,
+            pointer,
+            super::AOT_HOST_CALLBACK_FACTORY_SYMBOL,
+            host_callback,
+        )?,
+        hosted_dynamic: declare_external_factory(
+            module,
+            pointer,
+            super::AOT_HOSTED_DYNAMIC_FACTORY_SYMBOL,
+            hosted_dynamic,
+        )?,
+    };
 
     let mut runtime_signature = module.make_signature();
     runtime_signature.params.extend([
         AbiParam::new(types::I32),
+        AbiParam::new(pointer),
+        AbiParam::new(pointer),
+        AbiParam::new(pointer),
+        AbiParam::new(pointer),
         AbiParam::new(pointer),
         AbiParam::new(pointer),
         AbiParam::new(pointer),
@@ -244,6 +323,19 @@ pub(super) fn define(
     let builtin_resolver = module.declare_func_in_func(builtin_resolver, &mut context.func);
     let source_service_factory = source_service_factory
         .map(|function| module.declare_func_in_func(function, &mut context.func));
+    let network_service_factory = network_service_factory
+        .map(|function| module.declare_func_in_func(function, &mut context.func));
+    let external_factories = ExternalFactories {
+        user_interface: external_factories
+            .user_interface
+            .map(|function| module.declare_func_in_func(function, &mut context.func)),
+        host_callback: external_factories
+            .host_callback
+            .map(|function| module.declare_func_in_func(function, &mut context.func)),
+        hosted_dynamic: external_factories
+            .hosted_dynamic
+            .map(|function| module.declare_func_in_func(function, &mut context.func)),
+    };
     let native_ir_data = module.declare_data_in_func(native_ir.0, &mut context.func);
     let program_data = module.declare_data_in_func(program.0, &mut context.func);
     let resume_data = module.declare_data_in_func(resume_points.0, &mut context.func);
@@ -268,6 +360,27 @@ pub(super) fn define(
         Some(factory) => builder.ins().func_addr(pointer, factory),
         None => builder.ins().iconst(pointer, 0),
     };
+    let network_service_factory = match network_service_factory {
+        Some(factory) => builder.ins().func_addr(pointer, factory),
+        None => builder.ins().iconst(pointer, 0),
+    };
+    let external_factories = ExternalFactories {
+        user_interface: optional_factory_address(
+            &mut builder,
+            pointer,
+            external_factories.user_interface,
+        ),
+        host_callback: optional_factory_address(
+            &mut builder,
+            pointer,
+            external_factories.host_callback,
+        ),
+        hosted_dynamic: optional_factory_address(
+            &mut builder,
+            pointer,
+            external_factories.hosted_dynamic,
+        ),
+    };
     let native_ir_ptr = builder.ins().symbol_value(pointer, native_ir_data);
     let program_ptr = builder.ins().symbol_value(pointer, program_data);
     let resume_ptr = builder.ins().symbol_value(pointer, resume_data);
@@ -288,6 +401,10 @@ pub(super) fn define(
         resolver,
         builtin_resolver,
         source_service_factory,
+        network_service_factory,
+        external_factories.user_interface,
+        external_factories.host_callback,
+        external_factories.hosted_dynamic,
         native_ir_ptr,
         native_ir_len,
         program_ptr,
@@ -321,6 +438,37 @@ pub(super) fn define(
         .map_err(module_error)?;
     module.clear_context(&mut context);
     Ok(())
+}
+
+fn declare_external_factory(
+    module: &mut ObjectModule,
+    pointer: cranelift_codegen::ir::Type,
+    symbol: &str,
+    required: bool,
+) -> NativeCodegenResult<Option<FuncId>> {
+    if !required {
+        return Ok(None);
+    }
+    let mut signature = module.make_signature();
+    signature
+        .params
+        .extend((0..3).map(|_| AbiParam::new(pointer)));
+    signature.returns.push(AbiParam::new(pointer));
+    module
+        .declare_function(symbol, Linkage::Import, &signature)
+        .map(Some)
+        .map_err(module_error)
+}
+
+fn optional_factory_address(
+    builder: &mut FunctionBuilder<'_>,
+    pointer: cranelift_codegen::ir::Type,
+    factory: Option<cranelift_codegen::ir::FuncRef>,
+) -> cranelift::prelude::Value {
+    match factory {
+        Some(factory) => builder.ins().func_addr(pointer, factory),
+        None => builder.ins().iconst(pointer, 0),
+    }
 }
 
 fn length_constant(

@@ -11,18 +11,21 @@ pub(super) async fn parse_constructor(
     let raw_matrix = host_args
         .pop_front()
         .ok_or_else(|| invalid("decomposition: expected coefficient matrix"))?;
-    let (matrix, is_sparse) = normalize_matrix(raw_matrix)?;
+    let selected_runtime = runtime.ok_or_else(|| {
+        invalid("decomposition constructor requires its selected runtime context")
+    })?;
+    let (matrix, is_sparse) = native::normalize_selected(raw_matrix, selected_runtime)?;
     let mut decomp_type = DecompositionType::Auto;
     let mut triangular_flag: Option<TriangularFlag> = None;
     let mut option_start = 0usize;
 
     if let Some(next) = host_args.first() {
-        if let Some(text) = text_from_value(next) {
+        if let Some(text) = text_from_value(next)? {
             if is_decomposition_type(&text) {
                 decomp_type = parse_decomposition_type(&text)?;
                 option_start = 1;
                 if let Some(candidate) = host_args.get(1) {
-                    if let Some(flag) = text_from_value(candidate)
+                    if let Some(flag) = text_from_value(candidate)?
                         .and_then(|value| parse_triangular_flag(&value).ok())
                     {
                         triangular_flag = Some(flag);
@@ -42,26 +45,22 @@ pub(super) async fn parse_constructor(
         .range(option_start..)
         .expect("bounded decomposition option range");
     let (check_condition, rank_tolerance) = parse_options(options)?;
-    let matrix = apply_constructor_structure(matrix, decomp_type, triangular_flag)?;
-    let decomp_type = if decomp_type == DecompositionType::Auto {
-        infer_decomposition_type(&matrix)
-    } else {
-        validate_type_compatibility(&matrix, decomp_type)?;
-        if decomp_type == DecompositionType::Chol {
-            validate_chol_positive_definite(&matrix).await?;
-        }
-        decomp_type
-    };
-
-    Ok(DecompositionSpec {
-        matrix,
-        decomp_type,
-        check_condition,
-        rank_tolerance,
-        is_conjugate_transposed: false,
-        is_sparse,
-        scale: (1.0, 0.0),
-    })
+    initialize::initialize(
+        DecompositionSpec {
+            matrix,
+            decomp_type,
+            check_condition,
+            rank_tolerance,
+            is_conjugate_transposed: false,
+            is_sparse,
+            scale: (1.0, 0.0),
+            factor_data: None,
+            triangle: triangular_flag,
+            source_is_real: None,
+        },
+        selected_runtime,
+    )
+    .await
 }
 
 pub(super) async fn gather_values(
@@ -102,9 +101,7 @@ pub(super) fn normalize_matrix(value: Value) -> BuiltinResult<(Value, bool)> {
             validate_matrix_shape(&array.shape)?;
             Ok((Value::LogicalArray(array), false))
         }
-        Value::SparseTensor(_) => Err(invalid(
-            "decomposition: sparse coefficient matrices are not supported yet",
-        )),
+        Value::SparseTensor(matrix) => Ok((Value::SparseTensor(matrix), true)),
         Value::Num(n) => Ok((
             Value::Tensor(
                 Tensor::new(vec![n], vec![1, 1])
@@ -140,7 +137,7 @@ pub(super) fn normalize_matrix(value: Value) -> BuiltinResult<(Value, bool)> {
 }
 
 pub(super) fn validate_matrix_shape(shape: &[usize]) -> BuiltinResult<()> {
-    if shape.len() > 2 {
+    if shape.iter().skip(2).any(|d| *d != 1) {
         return Err(invalid(
             "decomposition: coefficient matrix must be two-dimensional",
         ));
@@ -160,11 +157,13 @@ pub(super) fn parse_options(
                 "decomposition: name-value options must be provided in pairs",
             ));
         }
-        let name = text_from_value(&args[idx])
+        let name = text_from_value(&args[idx])?
             .ok_or_else(|| invalid("decomposition: option name must be text"))?;
-        match name.to_ascii_lowercase().as_str() {
-            "checkcondition" => check_condition = bool_scalar(&args[idx + 1], "CheckCondition")?,
-            "ranktolerance" => {
+        match DecompositionOption::parse(&name) {
+            Some(DecompositionOption::CheckCondition) => {
+                check_condition = bool_scalar(&args[idx + 1], "CheckCondition")?
+            }
+            Some(DecompositionOption::RankTolerance) => {
                 if crate::builtins::common::validation::is_typed_complex_integer(&args[idx + 1]) {
                     return Err(invalid(
                         "decomposition: RankTolerance must be a real scalar, not a paired complex integer",
@@ -179,9 +178,9 @@ pub(super) fn parse_options(
                 }
                 rank_tolerance = Some(tol);
             }
-            other => {
+            None => {
                 return Err(invalid(format!(
-                    "decomposition: unsupported option '{other}'"
+                    "decomposition: unsupported option '{name}'"
                 )))
             }
         }
@@ -195,69 +194,25 @@ pub(super) fn is_decomposition_type(value: &str) -> bool {
 }
 
 pub(super) fn is_decomposition_option(value: &str) -> bool {
-    matches!(
-        value.to_ascii_lowercase().as_str(),
-        "checkcondition" | "ranktolerance"
-    )
+    DecompositionOption::parse(value).is_some()
 }
 
 pub(super) fn parse_decomposition_type(value: &str) -> BuiltinResult<DecompositionType> {
-    match value.to_ascii_lowercase().as_str() {
-        "auto" => Ok(DecompositionType::Auto),
-        "lu" => Ok(DecompositionType::Lu),
-        "qr" => Ok(DecompositionType::Qr),
-        "chol" => Ok(DecompositionType::Chol),
-        "triangular" => Ok(DecompositionType::Triangular),
-        "diagonal" => Ok(DecompositionType::Diagonal),
-        other => Err(invalid(format!(
-            "decomposition: unsupported decomposition type '{other}'"
-        ))),
-    }
+    DecompositionType::parse(value).ok_or_else(|| {
+        invalid(format!(
+            "decomposition: unsupported decomposition type '{value}'"
+        ))
+    })
 }
 
 pub(super) fn decomposition_type_name(value: DecompositionType) -> &'static str {
-    match value {
-        DecompositionType::Auto => "auto",
-        DecompositionType::Lu => "lu",
-        DecompositionType::Qr => "qr",
-        DecompositionType::Chol => "chol",
-        DecompositionType::Triangular => "triangular",
-        DecompositionType::Diagonal => "diagonal",
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TriangularFlag {
-    Upper,
-    Lower,
+    value.as_str()
 }
 
 pub(super) fn parse_triangular_flag(value: &str) -> BuiltinResult<TriangularFlag> {
-    match value.to_ascii_lowercase().as_str() {
-        "upper" => Ok(TriangularFlag::Upper),
-        "lower" => Ok(TriangularFlag::Lower),
-        other => Err(invalid(format!(
-            "decomposition: unsupported triangular flag '{other}'"
-        ))),
-    }
-}
-
-pub(super) fn apply_constructor_structure(
-    matrix: Value,
-    decomp_type: DecompositionType,
-    triangular_flag: Option<TriangularFlag>,
-) -> BuiltinResult<Value> {
-    match (decomp_type, triangular_flag) {
-        (DecompositionType::Triangular, Some(flag)) => keep_triangle(matrix, flag),
-        (DecompositionType::Chol, Some(flag)) => symmetrize_from_triangle(matrix, flag),
-        (DecompositionType::Triangular, None)
-        | (DecompositionType::Auto, None)
-        | (DecompositionType::Lu, None)
-        | (DecompositionType::Qr, None)
-        | (DecompositionType::Chol, None)
-        | (DecompositionType::Diagonal, None) => Ok(matrix),
-        (_, Some(_)) => Err(invalid(
-            "decomposition: triangularFlag is supported only with types 'triangular' and 'chol'",
-        )),
-    }
+    TriangularFlag::parse(value).ok_or_else(|| {
+        invalid(format!(
+            "decomposition: unsupported triangular flag '{value}'"
+        ))
+    })
 }

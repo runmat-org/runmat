@@ -608,7 +608,10 @@ mod tests {
     use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tokenized_document_builtin(args))
+        futures::executor::block_on(tokenized_document_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_add_entity(args: Vec<Value>) -> BuiltinResult<Value> {

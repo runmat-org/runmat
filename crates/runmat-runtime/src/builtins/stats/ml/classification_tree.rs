@@ -53,9 +53,9 @@ use labels::{
 use values::{
     char_rows, columns_to_tensor, columns_to_tensor_predict, ensure_integer_tensor_exact,
     ensure_integer_tensor_exact_predict, matrix_property, nonnegative_integer, numeric_property,
-    numeric_vector, positive_integer, scalar_text, string_column, string_property, text_list,
-    tree_children_tensor, tree_class_tensor, tree_predictor_tensor, tree_prob_tensor,
-    tree_threshold_tensor, vector_values, vector_values_predict, x_value,
+    numeric_vector, positive_integer, predict_scalar_text, scalar_text, string_column,
+    string_property, text_list, tree_children_tensor, tree_class_tensor, tree_predictor_tensor,
+    tree_prob_tensor, tree_threshold_tensor, vector_values, vector_values_predict, x_value,
 };
 
 fn fitctree_error(
@@ -205,7 +205,7 @@ async fn fitctree_builtin(
     first: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let inspection = HeaderInspection::inspect(&first, rest.view());
+    let inspection = HeaderInspection::inspect(&first, rest.view())?;
     ensure_fitctree_extensions(&first, rest.view(), &inspection)?;
     preflight_matrix_rank(&first)?;
     let arguments = inspection.validate(rest.len())?;
@@ -270,7 +270,7 @@ fn ensure_table_integer_extensions(
     let mut predictors: Option<Vec<String>> = None;
     let mut external_y = false;
     if let Some(arg) = rest.first().filter(|_| inspection.option_start == 1) {
-        if let Some(text) = scalar_text(arg) {
+        if let Some(text) = scalar_text(arg)? {
             if let Some((lhs, rhs)) = text.split_once('~') {
                 response = lhs.trim().to_string();
                 predictors = Some(
@@ -294,12 +294,14 @@ fn ensure_table_integer_extensions(
         };
         match identity {
             FitctreeOption::ResponseName if !external_y => {
-                if let Some(value) = scalar_text(value) {
+                if let Some(value) = scalar_text(value)? {
                     response = value;
                 }
             }
-            FitctreeOption::PredictorNames => predictors = text_list(value, "PredictorNames").ok(),
-            FitctreeOption::Weights => weight_variable = scalar_text(value),
+            FitctreeOption::PredictorNames => {
+                predictors = Some(text_list(value, "PredictorNames")?)
+            }
+            FitctreeOption::Weights => weight_variable = scalar_text(value)?,
             _ => {}
         }
     }

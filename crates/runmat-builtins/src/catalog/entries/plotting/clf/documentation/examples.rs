@@ -1,0 +1,36 @@
+use crate::*;
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "example-1",
+        title: "Clear the current figure after plotting",
+        program: "figure(1);\nplot(1:5, [1 4 2 5 3]);\nout = clf()",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(out==1); assert(strcmp(get(out,'Type'),'figure')); assert(isempty(get(gca,'Children')));" },
+    },
+    BuiltinExample {
+        id: "example-2",
+        title: "Clear a specific figure by handle",
+        program: "figure(3);\nplot(1:5, 1:5);\nout = clf(3)",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(out==3); assert(isempty(get(gca,'Children')));" },
+    },
+    BuiltinExample {
+        id: "example-3",
+        title: "Clear every figure",
+        program: "close('all');\nfigure(1); plot(1:5, 1:5);\nfigure(2); plot(1:5, [5 4 3 2 1]);\ncount = clf(\"all\")",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(count==2); assert(isgraphics(1)); assert(isgraphics(2));" },
+    },
+];

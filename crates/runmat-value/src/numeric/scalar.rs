@@ -110,6 +110,23 @@ impl IntValue {
             _ => self.to_i64() as f64,
         }
     }
+    /// Exact binary64 representation, without a blanket magnitude cutoff.
+    /// Uses the canonical significant-bit predicate shared with integer
+    /// control admission, including the full signed/unsigned endpoints.
+    pub fn to_exact_f64(&self) -> Option<f64> {
+        let magnitude = match self {
+            Self::I8(v) => u64::from(v.unsigned_abs()),
+            Self::I16(v) => u64::from(v.unsigned_abs()),
+            Self::I32(v) => u64::from(v.unsigned_abs()),
+            Self::I64(v) => v.unsigned_abs(),
+            Self::U8(v) => u64::from(*v),
+            Self::U16(v) => u64::from(*v),
+            Self::U32(v) => u64::from(*v),
+            Self::U64(v) => *v,
+        };
+        runmat_types::integer_magnitude_is_exact_binary64(magnitude).then(|| self.to_f64())
+    }
+
     pub fn is_zero(&self) -> bool {
         match self {
             IntValue::I8(value) => *value == 0,
@@ -374,6 +391,23 @@ impl NumericScalar {
             Self::U16(value) => f64::from(value),
             Self::U32(value) => f64::from(value),
             Self::U64(value) => value as f64,
+        }
+    }
+
+    /// Explicit native conversion to binary32, without first rounding a wide
+    /// integer to binary64. Wider values may lose precision or overflow.
+    pub fn materialize_f32(self) -> f32 {
+        match self {
+            Self::F64(value) => value as f32,
+            Self::F32(value) => value,
+            Self::I8(value) => f32::from(value),
+            Self::I16(value) => f32::from(value),
+            Self::I32(value) => value as f32,
+            Self::I64(value) => value as f32,
+            Self::U8(value) => f32::from(value),
+            Self::U16(value) => f32::from(value),
+            Self::U32(value) => value as f32,
+            Self::U64(value) => value as f32,
         }
     }
 }

@@ -28,7 +28,12 @@ fn output_values(order: usize, cutoff: Value, rest: Vec<Value>, outputs: usize) 
 #[test]
 fn character_options_and_row_column_cutoffs_match_catalog_forms() {
     for token in ["high", "s"] {
-        let chars = runmat_value::CharArray::new(token.chars().collect(), 1, token.len()).unwrap();
+        let chars = runmat_value::CharArray::from_unicode_scalars(
+            token.chars().collect(),
+            1,
+            token.encode_utf16().count(),
+        )
+        .unwrap();
         let values = output_values(3, Value::Num(0.25), vec![Value::CharArray(chars)], 2);
         assert_eq!(tensor_data(&values[0]).len(), 4);
     }

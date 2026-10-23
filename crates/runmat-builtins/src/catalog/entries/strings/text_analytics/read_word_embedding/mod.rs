@@ -3,6 +3,7 @@ use runmat_types::CapabilityRequirement;
 
 mod contract;
 mod inference;
+mod documentation;
 pub use contract::*;
 
 pub const READ_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -12,12 +13,7 @@ pub const READ_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalo
         name: "readWordEmbedding",
     },
     category: "strings/text_analytics",
-    // Preserve docs/builtins/reference/readWordEmbedding.json as the prose
-    // authority until the exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation {
-        summary: "Read a word embedding model from a UTF-8 text file or zip archive.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &READ_WORD_EMBEDDING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

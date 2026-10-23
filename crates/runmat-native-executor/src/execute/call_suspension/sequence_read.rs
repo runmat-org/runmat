@@ -1,7 +1,6 @@
 //! Exact-site ownership for sequence-producing member reads and captures.
 
 use std::future::Future;
-use std::pin::Pin;
 
 use runmat_mir::MirSequenceLocalId;
 use runmat_runtime::execution::RootedValueSequence;
@@ -10,7 +9,7 @@ use runmat_types::SequenceUse;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::HostState;
-use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+use super::{CallCompletion, CompletedPayload, PendingCall};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "sequence_read/tests.rs"]
@@ -71,22 +70,30 @@ pub(in crate::execute) fn take_completed_sequence_read(
     Ok(Some(completed.into_sequence_read()?))
 }
 
-pub(in crate::execute) fn begin_sequence_read(
+pub(in crate::execute) fn begin_sequence_read<F>(
     state: &mut HostState,
     stage: SequenceReadStage,
-    future: Pin<Box<dyn Future<Output = NativeExecutorResult<RootedValueSequence>> + 'static>>,
-) -> NativeExecutorResult<RootedValueSequence> {
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<RootedValueSequence>
+where
+    F: Future<Output = NativeExecutorResult<RootedValueSequence>> + 'static,
+{
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending sequence read has no active site".into())
     })?;
     let embedded = state.current_embedded_operation()?;
     let (continuation, generation) = state.next_suspension_identity()?;
-    let future: CompletionFuture = Box::pin(async move {
-        future
-            .await
-            .map(|sequence| CallCompletion::SequenceRead { stage, sequence })
-    });
-    let future = super::scope_completion(state, future);
+    let runtime = state.runtime.clone();
+    let catch = state.active_catch_exception();
+    let future =
+        runmat_runtime::execution::admit_native_hostcall_with(&runtime, allocation_cause, || {
+            let future = make_future();
+            runtime.scope_active_catch_unboxed_shared(catch, async move {
+                future
+                    .await
+                    .map(|sequence| CallCompletion::SequenceRead { stage, sequence })
+            })
+        })?;
     state.pending_call = Some(PendingCall {
         request,
         continuation,
@@ -96,4 +103,16 @@ pub(in crate::execute) fn begin_sequence_read(
         future,
     });
     Err(NativeExecutorError::CallSuspended)
+}
+
+fn allocation_cause(
+    source: runmat_runtime::context::host_allocation::HostAllocationError,
+) -> NativeExecutorError {
+    runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+        None,
+        "RunMat:Native:SequenceRead",
+        "sequence read continuation admission failed",
+        source,
+    )
+    .into()
 }

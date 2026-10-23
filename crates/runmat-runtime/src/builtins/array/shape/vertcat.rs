@@ -213,16 +213,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_rows() {
-        let top = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
-        let bottom = CharArray::new("Rocks!".chars().collect(), 1, 6).unwrap();
+        let top = CharArray::from_unicode_scalars("RunMat".chars().collect(), 1, 6).unwrap();
+        let bottom = CharArray::from_unicode_scalars("Rocks!".chars().collect(), 1, 6).unwrap();
         let result = vertcat_builtin(vec![Value::CharArray(top), Value::CharArray(bottom)])
             .expect("vertcat");
         match result.value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 2);
                 assert_eq!(arr.cols, 6);
-                let first: String = arr.data()[..6].iter().collect();
-                let second: String = arr.data()[6..].iter().collect();
+                let first: String = runmat_value::decode_utf16_code_units(&arr.data()[..6])
+                    .expect("valid UTF-16 fixture text");
+                let second: String = runmat_value::decode_utf16_code_units(&arr.data()[6..])
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(first, "RunMat");
                 assert_eq!(second, "Rocks!");
             }

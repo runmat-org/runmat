@@ -209,7 +209,11 @@ pub(super) fn convert_to_logical_value(data: Value) -> Result<Value, String> {
                 for r in 0..ca.rows {
                     let idx = r * ca.cols + c;
                     let ch = ca.data()[idx];
-                    bits.push(if ch != '\0' { 1 } else { 0 });
+                    bits.push(if ch != runmat_value::Utf16CodeUnit::from_raw(0) {
+                        1
+                    } else {
+                        0
+                    });
                 }
             }
             LogicalArray::new(bits, vec![ca.rows, ca.cols])
@@ -225,7 +229,7 @@ pub(super) fn convert_to_logical_value(data: Value) -> Result<Value, String> {
 
 // Limits a single synchronous Vec fill/transposition run; the execution
 // service, not this value, decides when a charged chunk yields a turn.
-const STORAGE_FILL_CHUNK: usize = 4096;
+pub(super) const STORAGE_FILL_CHUNK: usize = 4096;
 
 pub(super) async fn finalize_numeric(
     size_spec: &SizeSpec,
@@ -299,109 +303,4 @@ pub(super) async fn resize_numeric_storage(
         NumericStorage::U64(values) => resize!(values, 0, 8),
     }
     Ok(())
-}
-
-pub(super) async fn finalize_char(
-    size_spec: &SizeSpec,
-    count_read: usize,
-    mut column_major: Vec<char>,
-    cooperation: &mut super::super::cooperation::FileCooperation,
-) -> Result<(Vec<char>, usize, usize), ReadFailure> {
-    let (rows, cols, target) = match size_spec {
-        SizeSpec::All | SizeSpec::Count(_) => (count_read, 1, count_read),
-        SizeSpec::Matrix {
-            rows,
-            cols: Some(c),
-        } => (*rows, *c, rows.saturating_mul(*c)),
-        SizeSpec::Matrix { rows, cols: None } => {
-            if *rows == 0 {
-                (0, 0, 0)
-            } else {
-                let cols = if count_read == 0 {
-                    0
-                } else {
-                    count_read.div_ceil(*rows)
-                };
-                (*rows, cols, rows.saturating_mul(cols))
-            }
-        }
-    };
-    if column_major.len() < target {
-        column_major
-            .try_reserve(target - column_major.len())
-            .map_err(|error| {
-                ReadFailure::from(
-                    build_runtime_error("fread: character storage cannot be allocated")
-                        .with_builtin(BUILTIN_NAME)
-                        .with_source(error)
-                        .build(),
-                )
-            })?;
-        while column_major.len() < target {
-            let end = target.min(column_major.len().saturating_add(STORAGE_FILL_CHUNK));
-            let added = end - column_major.len();
-            column_major.resize(end, '\0');
-            cooperation
-                .completed(added.saturating_mul(std::mem::size_of::<char>()))
-                .await
-                .map_err(ReadFailure::from)?;
-        }
-    } else {
-        column_major.truncate(target);
-    }
-    let row_major = column_to_row_major(&column_major, rows, cols, cooperation).await?;
-    Ok((row_major, rows, cols))
-}
-
-pub(super) async fn column_to_row_major(
-    data: &[char],
-    rows: usize,
-    cols: usize,
-    cooperation: &mut super::super::cooperation::FileCooperation,
-) -> Result<Vec<char>, ReadFailure> {
-    if rows == 0 || cols == 0 {
-        return Ok(Vec::new());
-    }
-    let target = rows.saturating_mul(cols);
-    let mut output = Vec::new();
-    output.try_reserve(target).map_err(|error| {
-        ReadFailure::from(
-            build_runtime_error("fread: transposed characters cannot be allocated")
-                .with_builtin(BUILTIN_NAME)
-                .with_source(error)
-                .build(),
-        )
-    })?;
-    while output.len() < target {
-        let end = target.min(output.len().saturating_add(STORAGE_FILL_CHUNK));
-        let added = end - output.len();
-        output.resize(end, '\0');
-        cooperation
-            .completed(added.saturating_mul(std::mem::size_of::<char>()))
-            .await
-            .map_err(ReadFailure::from)?;
-    }
-    let mut mapped = 0usize;
-    for c in 0..cols {
-        for r in 0..rows {
-            let src = c * rows + r;
-            let dst = r * cols + c;
-            if let Some(ch) = data.get(src) {
-                output[dst] = *ch;
-            }
-            mapped += 1;
-            if mapped == STORAGE_FILL_CHUNK {
-                cooperation
-                    .completed(mapped)
-                    .await
-                    .map_err(ReadFailure::from)?;
-                mapped = 0;
-            }
-        }
-    }
-    cooperation
-        .completed(mapped)
-        .await
-        .map_err(ReadFailure::from)?;
-    Ok(output)
 }

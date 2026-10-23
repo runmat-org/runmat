@@ -32,7 +32,13 @@ fn scalar_text<'a>(value: &'a Value, name: &str, arg: &str) -> BuiltinResult<Cow
     match value {
         Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
-            Ok(Cow::Owned(array.data().iter().collect()))
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                line_error(
+                    name,
+                    format!("{name}: {arg} contains malformed UTF-16 text"),
+                )
+            })
+            .map(Cow::Owned)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(Cow::Borrowed(array.data()[0].as_str()))
@@ -139,15 +145,20 @@ fn lines_from_value(value: &Value) -> BuiltinResult<Vec<Cow<'_, str>>> {
     match value {
         Value::String(text) => Ok(vec![Cow::Borrowed(text.as_str())]),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
-            Ok(vec![Cow::Owned(array.data().iter().collect())])
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                line_error("textscan", "text input contains malformed UTF-16")
+            })
+            .map(|text| vec![Cow::Owned(text)])
         }
         Value::CharArray(array) if effective_rank(&array.shape) <= 2 => {
             let mut lines = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
                 let start = row * array.cols;
-                lines.push(Cow::Owned(
-                    array.data()[start..start + array.cols].iter().collect(),
-                ));
+                let text = crate::builtins::io::utf16::decode_utf16_with_error(
+                    &array.data()[start..start + array.cols],
+                    || line_error("textscan", "text input contains malformed UTF-16"),
+                )?;
+                lines.push(Cow::Owned(text));
             }
             Ok(lines)
         }
@@ -330,11 +341,15 @@ mod tests {
     #[test]
     fn text_shape_checks_preserve_trailing_singletons_but_reject_pages() {
         let row = Value::CharArray(
-            runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1])
+                .unwrap(),
         );
         let pages = Value::CharArray(
-            runmat_value::CharArray::new_with_shape(vec!['a', 'b', 'c', 'd'], vec![1, 2, 2])
-                .unwrap(),
+            runmat_value::CharArray::from_unicode_scalars_with_shape(
+                vec!['a', 'b', 'c', 'd'],
+                vec![1, 2, 2],
+            )
+            .unwrap(),
         );
         assert_eq!(scalar_text(&row, "readlines", "filename").unwrap(), "ab");
         assert_eq!(lines_from_value(&row).unwrap(), vec!["ab"]);

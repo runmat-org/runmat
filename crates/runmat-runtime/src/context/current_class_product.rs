@@ -9,7 +9,7 @@ use std::rc::Rc;
 use runmat_types::ClassIdentity;
 use runmat_value::SelectedObjectClassFacts;
 
-use super::{RuntimeContext, RuntimeServiceFuture};
+use super::RuntimeContext;
 use crate::{build_runtime_error, RuntimeError};
 
 #[derive(Clone, Debug)]
@@ -18,11 +18,48 @@ pub enum CurrentClassProductResolution {
     RegisteredBuiltin(crate::class_registry::BuiltinClassIssuance),
 }
 
+impl runmat_gc::Trace for CurrentClassProductResolution {
+    fn trace(&self, _: &mut dyn runmat_gc::Tracer) {
+        match self {
+            // SelectedObjectClassFacts contains port-free declarations and
+            // counted definition bindings, not managed Values. Those bindings
+            // retain their own original definition authority.
+            Self::Selected(_) => {}
+            // Builtin issuance contains only class identity, registry revision
+            // and session identity, with no language-value payload.
+            Self::RegisteredBuiltin(_) => {}
+        }
+    }
+}
+
+pub type CurrentClassProductFuture = crate::execution::RuntimeContinuationFuture<
+    'static,
+    crate::execution::RootedResult<CurrentClassProductResolution>,
+>;
+
 pub type CurrentClassProductResolver =
-    dyn Fn(
-        RuntimeContext,
-        ClassIdentity,
-    ) -> RuntimeServiceFuture<Result<CurrentClassProductResolution, RuntimeError>>;
+    dyn Fn(RuntimeContext, ClassIdentity) -> Result<CurrentClassProductFuture, RuntimeError>;
+
+/// Retain one exact concrete resolver future, not a second box around a
+/// previously erased callback. Class selection is root-free typed metadata;
+/// its exhaustive Trace adds no completion-root allocation.
+pub fn admit_current_class_product_with<F>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F,
+) -> Result<CurrentClassProductFuture, RuntimeError>
+where
+    F: std::future::Future<Output = Result<CurrentClassProductResolution, RuntimeError>> + 'static,
+{
+    use futures::FutureExt;
+    crate::execution::admit_rooted_result_with(runtime, move || {
+        make_future().map(|result| {
+            result.and_then(|resolution| {
+                crate::execution::RootedResult::new(resolution)
+                    .map_err(|error| error.into_runtime_error())
+            })
+        })
+    })
+}
 
 impl RuntimeContext {
     /// Install the selected session's current-source resolver. Invocation and
@@ -55,7 +92,7 @@ impl RuntimeContext {
             }
             return Err(unavailable("current class-product resolver is absent"));
         };
-        resolver(self.clone(), class.clone()).await
+        resolver(self.clone(), class.clone())?.await?.with_owned(Ok)
     }
 }
 

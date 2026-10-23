@@ -8,7 +8,9 @@ use runmat_builtins::{
 
 use std::collections::HashSet;
 
-use runmat_value::{CellArray, CharArray, StringArray, Value};
+use runmat_value::{
+    decode_utf16_code_units, CellArray, CharArray, StringArray, Utf16CodeUnit, Value,
+};
 
 use crate::builtins::common::identifiers::{
     is_matlab_keyword, is_valid_varname, MATLAB_NAME_LENGTH_MAX,
@@ -108,7 +110,7 @@ let (data, shape, _, _) = array.into_parts();
                 .map_err(|err| error(&ERROR_INTERNAL, format!("genvarname: {err}")))
         }
         Value::CharArray(chars) if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) => {
-            let text = chars.data().iter().copied().collect::<String>();
+            let text = decode_chars(chars.data())?;
             Ok(Value::CharArray(CharArray::new_row(&unique_name(
                 &text, &mut used,
             ))))
@@ -155,7 +157,7 @@ fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<Strin
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(vec![chars.data().iter().copied().collect::<String>()])
+            Ok(vec![decode_chars(chars.data())?])
         }
         Value::CharArray(_) => Err(error(
             &ERROR_INVALID_INPUT,
@@ -182,7 +184,7 @@ fn text_scalar(value: &Value, context: TextListContext) -> BuiltinResult<String>
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(chars.data().iter().copied().collect())
+            decode_chars(chars.data())
         }
         _ => {
             let message = match context {
@@ -301,6 +303,18 @@ fn error(descriptor: &'static BuiltinErrorDescriptor, message: impl Into<String>
     builder.build()
 }
 
+fn decode_chars(units: &[Utf16CodeUnit]) -> BuiltinResult<String> {
+    decode_utf16_code_units(units).map_err(|source| {
+        let mut builder = build_runtime_error("genvarname: malformed UTF-16 character input")
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
+}
+
 #[cfg(test)]
 pub(crate) async fn genvarname_builtin_source(
     value: Value,
@@ -339,7 +353,8 @@ mod tests {
 
     #[test]
     fn nd_character_input_and_excess_outputs_reject() {
-        let chars = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
         let error =
             block_on(genvarname_builtin_source(Value::CharArray(chars), vec![])).unwrap_err();
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -419,8 +434,12 @@ mod tests {
 
     #[test]
     fn multirow_char_array_is_not_a_multiple_name_container() {
-        let input =
-            CharArray::new(vec!['a', ' ', ' ', 'a', ' ', ' ', '1', ' ', ' '], 3, 3).unwrap();
+        let input = CharArray::from_unicode_scalars(
+            vec!['a', ' ', ' ', 'a', ' ', ' ', '1', ' ', ' '],
+            3,
+            3,
+        )
+        .unwrap();
         assert!(block_on(genvarname_builtin_source(
             Value::CharArray(input),
             Vec::new()

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "durable/numeric_factor.rs"]
+mod numeric_factor;
+
 impl<'a> ValuePayloadValidationCursor<'a> {
     pub(super) fn plain_object(
         &mut self,
@@ -7,6 +10,25 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         depth: u16,
     ) -> Result<(), ContractError> {
         self.class(&value.class_identity)?;
+        if value.class_identity == runmat_types::standard::DECOMPOSITION
+            && value.decomposition.is_none()
+        {
+            return Err(invalid(
+                "numerical factor",
+                "decomposition object is missing its closed payload",
+            ));
+        }
+        if let Some(decomposition) = &value.decomposition {
+            if value.class_identity != runmat_types::standard::DECOMPOSITION {
+                return Err(invalid(
+                    "numerical factor",
+                    "decomposition payload has a different object class",
+                ));
+            }
+            if let DurableDecompositionPayload::Data(factor) = decomposition {
+                self.numeric_factor(factor)?;
+            }
+        }
         self.tasks.push(Task::Dynamic(value, 0));
         self.sorted(Fields::Struct(&value.properties), "struct fields", depth)
     }

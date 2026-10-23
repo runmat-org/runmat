@@ -128,11 +128,20 @@ mod typed_element {
     pub trait Sealed {}
     impl Sealed for f32 {}
     impl Sealed for f64 {}
+    impl Sealed for i8 {}
+    impl Sealed for i16 {}
+    impl Sealed for i32 {}
+    impl Sealed for i64 {}
     impl Sealed for usize {}
+    impl Sealed for (usize, usize) {}
+    impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for u8 {}
+    impl Sealed for u16 {}
     impl Sealed for num_complex::Complex32 {}
     impl Sealed for num_complex::Complex64 {}
+    impl Sealed for runmat_value::ComplexElement<f32> {}
+    impl Sealed for runmat_value::ComplexElement<f64> {}
 }
 
 /// A scratch vector whose exact physical backing and live stage claim remain

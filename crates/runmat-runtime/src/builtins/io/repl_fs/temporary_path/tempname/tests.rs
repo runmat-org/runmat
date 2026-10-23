@@ -22,12 +22,10 @@ fn default_names_are_distinct_unused_character_rows_below_tempdir() {
     let second = run(Vec::new()).expect("second name");
     assert!(matches!(first, Value::CharArray(CharArray { rows: 1, .. })));
     assert_ne!(first, second);
+    let temporary = crate::builtins::common::env::temp_dir().unwrap();
     for value in [&first, &second] {
         let path = PathBuf::from(text(value));
-        assert_eq!(
-            path.parent(),
-            Some(crate::builtins::common::env::temp_dir().as_path())
-        );
+        assert_eq!(path.parent(), Some(temporary.as_path()));
         assert!(runmat_filesystem::metadata(&path).is_err());
     }
 }
@@ -67,8 +65,9 @@ fn rejects_invalid_inputs_before_filesystem_access() {
 
 #[test]
 fn nd_characters_are_not_flattened_into_a_folder() {
-    let folder =
-        Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    let folder = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+    );
     assert_eq!(
         run(vec![folder]).unwrap_err().identifier(),
         Some("RunMat:tempname:InvalidFolder")
@@ -77,8 +76,9 @@ fn nd_characters_are_not_flattened_into_a_folder() {
 
 #[test]
 fn trailing_singleton_character_folder_is_a_row() {
-    let folder =
-        Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+    let folder = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+    );
     assert_eq!(super::input::folder(&folder).unwrap(), PathBuf::from("ab"));
 }
 

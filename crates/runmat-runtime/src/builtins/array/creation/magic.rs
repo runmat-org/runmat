@@ -95,7 +95,7 @@ async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
         let raw = array
             .data()
             .first()
-            .map(|value| *value as u32 as f64)
+            .map(|value| f64::from(value.raw()))
             .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;
         return parse_floating_order(raw);
     }

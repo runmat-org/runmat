@@ -1,9 +1,9 @@
-#[path = "support/mod.rs"]
-mod test_helpers;
-#[path = "support/document_host.rs"]
-mod document_host;
 #[path = "support/captured_arguments.rs"]
 mod captured_arguments;
+#[path = "support/document_host.rs"]
+mod document_host;
+#[path = "support/mod.rs"]
+mod test_helpers;
 
 use captured_arguments::is_expand_all_cell_contents;
 
@@ -38,7 +38,9 @@ fn character_array_slices_preserve_rows_columns_and_linear_order() {
     let vars = interpret(&bytecode).expect("execute character indexing");
     let has_char = |shape: &[usize], data: &[char]| {
         vars.iter().any(|value| {
-            matches!(value, Value::CharArray(chars) if chars.shape() == shape && chars.data() == data)
+            matches!(value, Value::CharArray(chars) if chars.shape() == shape
+                && runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture")
+                    == data.iter().collect::<String>())
         })
     };
     assert!(has_char(&[1, 4], &['w', 'x', 'y', 'z']));

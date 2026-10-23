@@ -13,17 +13,34 @@ pub async fn build_expanded_args_from_specs(
     // Captured windows and ordinary operands leave the registered VM stack
     // before Runtime installs its expansion root. Retain their exact handles
     // across that transfer, including all captures still waiting in a window.
-    let _input_roots = crate::call::root_values(stack.iter())?;
-    let capture_slots = specs
-        .iter()
-        .filter_map(|spec| match spec {
-            ArgumentSpec::CapturedSequence { slot } => Some(*slot),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let _input_roots = runmat_runtime::execution::RootedValueLease::for_value_slices_in_context(
+        &[stack.as_slice()],
+        runtime,
+    )?;
+    let arguments =
+        take_materialized_args_from_specs(stack, specs.iter(), sequence_state, runtime)?;
+    runmat_runtime::call::arguments::expand_arguments(runtime, arguments).await
+}
+
+/// Remove prepared operands and captured sequences in stack order. The caller
+/// retains roots for the input stack until the returned arguments are handed
+/// to the Runtime expansion owner.
+pub(crate) fn take_materialized_args_from_specs<'a>(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    specs: impl DoubleEndedIterator<Item = &'a ArgumentSpec> + Clone,
+    sequence_state: &mut crate::interpreter::dispatch::SequenceState,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<crate::runtime::workspace::FrameVec<MaterializedArgument>, RuntimeError> {
+    sequence_state.validate_capture_context(runtime)?;
+    let count = specs.clone().count();
+    let mut capture_slots = sequence_state.frame_vector(count)?;
+    capture_slots.extend(specs.clone().filter_map(|spec| match spec {
+        ArgumentSpec::CapturedSequence { slot } => Some(*slot),
+        _ => None,
+    }));
     let mut captures = sequence_state.take_captures(stack, &capture_slots)?;
-    let mut arguments = Vec::with_capacity(specs.len());
-    for spec in specs.iter().rev() {
+    let mut arguments = sequence_state.frame_vector(count)?;
+    for spec in specs.rev() {
         match spec {
             ArgumentSpec::Single => {
                 arguments.push(MaterializedArgument::Single(pop_argument(stack)?));
@@ -32,11 +49,13 @@ pub async fn build_expanded_args_from_specs(
                 num_indices,
                 expand_all,
             }) => {
-                let mut indices = Vec::with_capacity(*num_indices);
-                for _ in 0..*num_indices {
-                    indices.push(pop_argument(stack)?);
-                }
-                indices.reverse();
+                let start = stack.len().checked_sub(*num_indices).ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "StackUnderflow",
+                        "cell expansion indices are missing",
+                    )
+                })?;
+                let indices = stack.try_extract_output_range(start, stack.len())?;
                 let base = pop_argument(stack)?;
                 arguments.push(MaterializedArgument::Expansion(
                     MaterializedExpansionSource::CellContents {
@@ -49,8 +68,11 @@ pub async fn build_expanded_args_from_specs(
             ArgumentSpec::Expansion(ArgumentExpansionSpec::ReturnedOutputs) => {
                 arguments.push(MaterializedArgument::Expansion(
                     MaterializedExpansionSource::ReturnedOutputs(
-                        runmat_runtime::call::arguments::adapt_legacy_builtin_result(
-                            pop_argument(stack)?,
+                        runmat_runtime::execution::RootedValueSequence::in_context(
+                            runmat_runtime::call::arguments::adapt_legacy_builtin_result(
+                                pop_argument(stack)?,
+                            )?,
+                            runtime,
                         )?,
                     ),
                 ));
@@ -59,7 +81,10 @@ pub async fn build_expanded_args_from_specs(
                 arguments.push(MaterializedArgument::Expansion(
                     MaterializedExpansionSource::Member {
                         base: pop_argument(stack)?,
-                        member: member.clone(),
+                        member: runmat_runtime::call::argument_text::copy_str(
+                            &member.0,
+                            Some(runtime),
+                        )?,
                     },
                 ));
             }
@@ -78,14 +103,17 @@ pub async fn build_expanded_args_from_specs(
                     )
                 })?;
                 arguments.push(MaterializedArgument::Sequence(
-                    runmat_runtime::sequence::ValueSequence::comma_separated(values)
-                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+                    runmat_runtime::execution::RootedValueSequence::in_context(
+                        runmat_runtime::sequence::ValueSequence::from_output_storage(values)
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+                        runtime,
+                    )?,
                 ));
             }
         }
     }
     arguments.reverse();
-    runmat_runtime::call::arguments::expand_arguments(runtime, arguments).await
+    Ok(arguments)
 }
 
 fn pop_argument(
@@ -127,7 +155,10 @@ mod tests {
     fn object_subscript_path_serializes_standard_substruct_once() {
         let path = ObjectSubscriptPath::single(ObjectSubscript::braces(
             ObjectIndexSelector::IndexValues {
-                components: vec![Value::Num(2.0).into()],
+                components: runmat_value::ExactArrayStorage::shared_unbounded(vec![Value::Num(
+                    2.0,
+                )
+                .into()]),
             },
         ));
 

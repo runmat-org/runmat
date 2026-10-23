@@ -14,7 +14,7 @@ pub use numeric::{NumericTensorAdmission, ValidatedNumericTensorParts};
 
 pub(crate) use shape::BorrowedShapeAdmission;
 
-use shape::ShapeProgress;
+pub(in crate::array) use shape::ShapeProgress;
 use std::num::NonZeroUsize;
 
 struct ShapeAdmission {

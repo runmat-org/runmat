@@ -155,7 +155,9 @@ impl Drop for FopenHandle {
 
 fn char_text(value: Value) -> String {
     match value {
-        Value::CharArray(ca) => ca.data().iter().collect(),
+        Value::CharArray(ca) => {
+            runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture")
+        }
         other => panic!("expected char array, got {other:?}"),
     }
 }

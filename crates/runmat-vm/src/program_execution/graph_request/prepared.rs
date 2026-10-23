@@ -162,17 +162,20 @@ pub async fn execute_prepared_graph_request(
         runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
             move |caller_runtime, binding, arguments, outputs, environment| {
                 let selected = std::rc::Rc::clone(&nested_selected);
-                Box::pin(async move {
-                    super::invoke_selected_nested_bound(
-                        &selected,
-                        caller_runtime,
-                        binding,
-                        arguments,
-                        outputs,
-                        environment,
-                    )
-                    .await
-                })
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &caller_runtime.clone(),
+                    move || async move {
+                        super::invoke_selected_nested_bound(
+                            &selected,
+                            caller_runtime,
+                            binding,
+                            arguments,
+                            outputs,
+                            environment,
+                        )
+                        .await
+                    },
+                )
             },
         ));
     let _selected_bound_invoker = match selected_bound_invoker {

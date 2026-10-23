@@ -267,7 +267,10 @@ fn asin_char_array(ca: CharArray) -> BuiltinResult<Value> {
             .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data: Vec<f64> = ca.data().iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = ca
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
     asin_tensor_real(tensor)
@@ -303,7 +306,7 @@ pub(crate) mod tests {
             logical.identifier(),
             ASIN_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
         let character = block_on(super::asin_builtin(None, Value::CharArray(chars)))
             .expect_err("character input must be gated");
         assert_eq!(
@@ -460,7 +463,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asin_char_array_complex_promotion() {
-        let chars = CharArray::new("B".chars().collect(), 1, 1).expect("char");
+        let chars = CharArray::from_unicode_scalars("B".chars().collect(), 1, 1).expect("char");
         let result = asin_builtin(Value::CharArray(chars)).expect("asin char");
         match result {
             Value::Complex(re, im) => {

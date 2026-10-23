@@ -95,7 +95,11 @@ fn char_array_text(chars: &CharArray, name: &str) -> BuiltinResult<String> {
             format!("{name} must be a character vector"),
         ));
     }
-    Ok(chars.data().iter().collect())
+    runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+        let mut error = error(&DATA_TIP_ERROR_INVALID_ARGUMENT, source.to_string());
+        error.source = Some(Box::new(source));
+        error
+    })
 }
 
 fn string_array_text(array: &StringArray, name: &str) -> BuiltinResult<String> {

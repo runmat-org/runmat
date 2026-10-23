@@ -6,29 +6,64 @@ use runmat_value::Value;
 
 use super::super::{PendingSequenceDestination, PreparedOutputTarget, SequenceState};
 
-pub(super) fn pop_selector_components(
+pub(super) async fn pop_selector_components(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     selectors: &[crate::bytecode::BytecodeSubscriptSelector],
-) -> Result<Vec<ObjectIndexComponent>, RuntimeError> {
-    let value_count = selectors
-        .iter()
-        .filter(|selector| matches!(selector, crate::bytecode::BytecodeSubscriptSelector::Value))
-        .count();
-    let mut values = pop_values(stack, value_count)?.into_iter();
-    selectors
-        .iter()
-        .map(|selector| match selector {
-            crate::bytecode::BytecodeSubscriptSelector::Colon => Ok(ObjectIndexComponent::Colon),
-            crate::bytecode::BytecodeSubscriptSelector::Value => values
-                .next()
-                .map(ObjectIndexComponent::Value)
-                .ok_or_else(stack_underflow),
-        })
-        .collect()
+    expand_all: bool,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    state: &mut SequenceState,
+) -> Result<
+    (
+        runmat_value::ExactArrayStorage<ObjectIndexComponent>,
+        crate::runtime::workspace::FrameVec<runmat_runtime::execution::RootedValueLease>,
+    ),
+    RuntimeError,
+> {
+    use crate::bytecode::BytecodeSubscriptSelector as Selector;
+    state.validate_capture_context(runtime)?;
+    let inputs = runmat_runtime::execution::RootedValueLease::for_value_slices_in_context(
+        &[stack.as_slice()],
+        runtime,
+    )?;
+    let specs = selectors.iter().filter_map(|selector| match selector {
+        Selector::Colon => None,
+        Selector::Value => Some(&runmat_runtime::call::arguments::ArgumentSpec::Single),
+        Selector::Expansion(spec) => Some(spec),
+    });
+    let mut arguments =
+        crate::call::shared::take_materialized_args_from_specs(stack, specs, state, runtime)?
+            .into_iter();
+    let root_count = selectors.len().checked_add(2).ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "RunMat:SubscriptPathState",
+            "selector root count overflows",
+        )
+    })?;
+    let mut roots = state.frame_vector(root_count)?;
+    roots.push(inputs);
+    let components = super::super::object::materialize_ordered_selector_arguments(
+        runtime,
+        &mut arguments,
+        selectors
+            .iter()
+            .map(super::super::object::selector_source)
+            .chain(expand_all.then_some(super::super::object::PreparedSelectorSource::Colon)),
+        &mut roots,
+        state,
+    )
+    .await?;
+    if arguments.next().is_some() {
+        return Err(crate::interpreter::errors::mex(
+            "RunMat:SubscriptPathState",
+            "prepared selectors have excess operands",
+        ));
+    }
+    Ok((components, roots))
 }
 
 pub(super) async fn finish_destination(
     state: &mut SequenceState,
+    runtime: &runmat_runtime::context::RuntimeContext,
     endpoint: SequenceEndpointSpec,
 ) -> Result<(), RuntimeError> {
     let PendingSequenceDestination {
@@ -36,14 +71,16 @@ pub(super) async fn finish_destination(
         builder,
         absent_root,
         root_creation,
+        prepared_root,
     } = state.take_destination_builder()?;
-    let endpoint = builder.finish(endpoint).await?;
+    let endpoint = builder.finish_in_context(runtime, endpoint).await?;
     state.push_output_target(PreparedOutputTarget::Sequence {
         root_slot,
         endpoint,
         absent_root,
         root_creation,
-    });
+        prepared_root,
+    })?;
     Ok(())
 }
 

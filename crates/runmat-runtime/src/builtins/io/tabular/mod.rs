@@ -15,3 +15,5 @@ pub mod writecell;
 pub mod writematrix;
 pub mod xlsread;
 pub mod xlswrite;
+
+pub(crate) mod table_write;

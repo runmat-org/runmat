@@ -15,22 +15,42 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             std::rc::Rc::new(SessionLocalTaskSupervisor::new()),
             None,
+            #[cfg(not(target_arch = "wasm32"))]
+            None,
             None,
         )
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn with_options_on_parent_driver(
         enable_jit: bool,
         verbose: bool,
         parent: &runmat_runtime::context::RuntimeLocalTaskChildFactory,
         parent_context: &runmat_runtime::context::RuntimeContext,
     ) -> Result<Self> {
+        Self::with_options_on_parent_driver_with_mex(
+            enable_jit,
+            verbose,
+            parent,
+            parent_context,
+            None,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_options_on_parent_driver_with_mex(
+        enable_jit: bool,
+        verbose: bool,
+        parent: &runmat_runtime::context::RuntimeLocalTaskChildFactory,
+        parent_context: &runmat_runtime::context::RuntimeContext,
+        parent_mex_lane: Option<runmat_runtime::foreign::MexNativeLaneChildFactory>,
+    ) -> Result<Self> {
         Self::initialize(
             enable_jit,
             verbose,
             std::rc::Rc::new(parent.create()?),
             Some(parent_context),
+            parent_mex_lane,
             None,
         )
     }
@@ -47,6 +67,8 @@ impl RunMatSession {
             verbose,
             #[cfg(not(target_arch = "wasm32"))]
             std::rc::Rc::new(SessionLocalTaskSupervisor::new()),
+            None,
+            #[cfg(not(target_arch = "wasm32"))]
             None,
             Some(entries),
         )
@@ -66,6 +88,9 @@ impl RunMatSession {
         verbose: bool,
         #[cfg(not(target_arch = "wasm32"))] local_tasks: std::rc::Rc<SessionLocalTaskSupervisor>,
         parent_context: Option<&runmat_runtime::context::RuntimeContext>,
+        #[cfg(not(target_arch = "wasm32"))] parent_mex_lane: Option<
+            runmat_runtime::foreign::MexNativeLaneChildFactory,
+        >,
         environment: Option<Vec<(String, String)>>,
     ) -> Result<Self> {
         #[cfg(not(target_arch = "wasm32"))]
@@ -207,7 +232,12 @@ impl RunMatSession {
             let python =
                 runmat_runtime::foreign::PythonAdapter::new(foreign_runtime.handles().clone())?;
             foreign_runtime.register_adapter(python.clone())?;
-            let mex = std::rc::Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
+            let mex = std::rc::Rc::new(match parent_mex_lane {
+                Some(parent) => {
+                    runmat_runtime::foreign::MexRuntimeSession::new_on_parent_native_lane(parent)
+                }
+                None => runmat_runtime::foreign::MexRuntimeSession::new(),
+            });
             foreign_runtime.register_adapter(mex.clone())?;
             (
                 runtime_services.with_foreign(foreign_runtime.clone()),

@@ -335,7 +335,13 @@ impl<'a> QzWork<'a> {
                 .and_then(|runtime| runtime.service_ports().blocking_cpu())
                 .map(|service| service.as_ref());
             budget
-                .run_owned_blocking(service, retained, work)
+                .run_owned_blocking_in_context(
+                    self.runtime
+                        .expect("a cooperation budget has its original runtime"),
+                    service,
+                    retained,
+                    work,
+                )
                 .await
                 .map_err(ExecutionServiceError::into_runtime_error)?
         } else {

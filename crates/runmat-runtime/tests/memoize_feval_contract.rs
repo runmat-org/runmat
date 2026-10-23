@@ -41,21 +41,24 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
                 assert_eq!(actual, expected_binding, "wrong portable callback binding");
                 let observed = observed.clone();
                 let first = args.get(0).cloned().unwrap();
-                Box::pin(async move {
-                    let _args = args;
-                    *observed.lock().unwrap() += 1;
-                    let sequence = if requested == 2 {
-                        runmat_runtime::sequence::ValueSequence::comma_separated(vec![
-                            first,
-                            Value::Num(4.0),
-                        ])
-                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
-                    } else {
-                        runmat_runtime::sequence::single_value_sequence(first)
-                    }?;
-                    runmat_runtime::execution::RootedValueSequence::new(sequence)
-                        .map_err(|error| error.into_runtime_error())
-                })
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &_runtime.clone(),
+                    move || async move {
+                        let _args = args;
+                        *observed.lock().unwrap() += 1;
+                        let sequence = if requested == 2 {
+                            runmat_runtime::sequence::ValueSequence::comma_separated(vec![
+                                first,
+                                Value::Num(4.0),
+                            ])
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                        } else {
+                            runmat_runtime::sequence::single_value_sequence(first)
+                        }?;
+                        runmat_runtime::execution::RootedValueSequence::new(sequence)
+                            .map_err(|error| error.into_runtime_error())
+                    },
+                )
             },
         ))
     };

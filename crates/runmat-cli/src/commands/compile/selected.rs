@@ -126,6 +126,8 @@ pub(super) fn execute(
         bail!("selected compiler retention differs from the canonical link plan");
     }
     let options = runmat_aot::NativeObjectOptions {
+        clock_inputs: host.clock_inputs.clone(),
+        local_service_inputs: host.local_service_inputs.clone(),
         optimization,
         retained_functions: Some(retained),
         runtime_binding_mode: match request.policy {

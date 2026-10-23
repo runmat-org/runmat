@@ -74,7 +74,7 @@ fn parse_command(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<O
             if let Value::Struct(_) = value {
                 return snapshot_from_value(value).map(Command::Restore).map(Some);
             }
-            if let Some(keyword) = keyword_of(value) {
+            if let Some(keyword) = keyword_of(value)? {
                 return match keyword.as_str() {
                     "default" => Ok(Some(Command::Default)),
                     "shuffle" => Ok(Some(Command::Shuffle)),
@@ -86,7 +86,7 @@ fn parse_command(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<O
             parse_seed(value).map(Command::Seed).map(Some)
         }
         (2, Some(seed), Some(generator)) => {
-            let Some(generator) = keyword_of(generator) else {
+            let Some(generator) = keyword_of(generator)? else {
                 return Err(error("gpurng: generator must be a string scalar"));
             };
             if generator != "threefry" {
@@ -170,7 +170,9 @@ fn snapshot_from_value(value: &Value) -> BuiltinResult<GpuRandomSnapshot> {
     let kind = value
         .fields
         .get("Type")
-        .and_then(keyword_of)
+        .map(keyword_of)
+        .transpose()?
+        .flatten()
         .ok_or_else(|| error("gpurng: state Type must be a generator name"))?;
     if kind != "threefry" {
         return Err(unsupported(&kind));

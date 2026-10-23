@@ -5,8 +5,8 @@ use std::sync::{
 
 use super::*;
 use crate::{
-    CellArray, CharArray, ExactHostAllocationReservation, SharedShape, StringArray, Utf8Text,
-    ValueSequence, ValueSequenceError,
+    CellArray, CharArray, ExactHostAllocationReservation, SharedShape, StringArray, Utf16CodeUnit,
+    Utf8Text, ValueSequence, ValueSequenceError,
 };
 
 #[derive(Debug)]
@@ -293,25 +293,46 @@ fn shared_output_backing_and_consumption_preserve_one_physical_claim() {
     drop(values);
     assert_eq!(permit.live.load(Ordering::SeqCst), 0);
 
-    let chars_bytes = ExactArrayStorage::<char>::requested_bytes(3).unwrap();
+    let chars_bytes = ExactArrayStorage::<Utf16CodeUnit>::requested_bytes(3).unwrap();
     let chars_permit = Permit {
         limit: chars_bytes,
         live: Arc::new(AtomicUsize::new(0)),
     };
-    let mut chars = ExactArrayStorage::<char>::try_initialize(3, &chars_permit, |index| {
-        Ok::<_, ()>(['a', 'b', 'c'][index])
+    let mut chars = ExactArrayStorage::<Utf16CodeUnit>::try_initialize(3, &chars_permit, |index| {
+        Ok::<_, ()>(
+            [
+                Utf16CodeUnit::from_raw(b'a'.into()),
+                Utf16CodeUnit::from_raw(0xd800),
+                Utf16CodeUnit::from_raw(b'c'.into()),
+            ][index],
+        )
     })
     .unwrap();
-    assert!(chars.try_push_unbounded('d').is_err());
-    chars.try_as_mut_slice_unique().unwrap()[1] = 'x';
+    assert!(chars
+        .try_push_unbounded(Utf16CodeUnit::from_raw(b'd'.into()))
+        .is_err());
+    chars.try_as_mut_slice_unique().unwrap()[1] = Utf16CodeUnit::from_raw(0xdc00);
     let alias = chars.clone();
     assert!(chars.try_as_mut_slice_unique().is_none());
-    let mut copied_alias = alias.into_char_iter();
-    assert_eq!(copied_alias.next(), Some('a'));
-    assert_eq!(chars.as_slice(), &['a', 'x', 'c']);
+    let mut copied_alias = alias.into_code_unit_iter();
+    assert_eq!(
+        copied_alias.next(),
+        Some(Utf16CodeUnit::from_raw(b'a'.into()))
+    );
+    assert_eq!(
+        chars.as_slice(),
+        &[
+            Utf16CodeUnit::from_raw(b'a'.into()),
+            Utf16CodeUnit::from_raw(0xdc00),
+            Utf16CodeUnit::from_raw(b'c'.into()),
+        ]
+    );
     drop(chars);
     assert_eq!(chars_permit.live.load(Ordering::SeqCst), chars_bytes);
-    assert_eq!(copied_alias.collect::<String>(), "xc");
+    assert_eq!(
+        copied_alias.map(Utf16CodeUnit::raw).collect::<Vec<_>>(),
+        vec![0xdc00, u16::from(b'c')]
+    );
     assert_eq!(chars_permit.live.load(Ordering::SeqCst), 0);
 }
 
@@ -382,7 +403,7 @@ fn ordinary_alias_shares_children_and_exact_adoption_keeps_original_backing() {
 
 #[test]
 fn admitted_char_and_cell_arrays_keep_both_backing_claims_through_aliases() {
-    let char_bytes = ExactArrayStorage::<char>::requested_bytes(8).unwrap();
+    let char_bytes = ExactArrayStorage::<Utf16CodeUnit>::requested_bytes(8).unwrap();
     let cell_bytes = OutputListStorage::requested_bytes(2).unwrap();
     let shape_bytes = SharedShape::requested_bytes_for_rank(2).unwrap();
     let char_shape_bytes = SharedShape::requested_bytes_for_rank(3).unwrap();
@@ -391,8 +412,10 @@ fn admitted_char_and_cell_arrays_keep_both_backing_claims_through_aliases() {
         limit: char_bytes + cell_bytes + shape_bytes + char_shape_bytes,
         live: live.clone(),
     };
-    let chars = ExactArrayStorage::<char>::try_initialize(8, &permit, |index| {
-        Ok::<_, ()>(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'][index])
+    let chars = ExactArrayStorage::<Utf16CodeUnit>::try_initialize(8, &permit, |index| {
+        Ok::<_, ()>(Utf16CodeUnit::from_raw(
+            ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'][index] as u16,
+        ))
     })
     .unwrap();
     let char_shape = SharedShape::new_admitted_from_slice(&[2, 2, 2], &permit).unwrap();
@@ -403,8 +426,24 @@ fn admitted_char_and_cell_arrays_keep_both_backing_claims_through_aliases() {
     chars.rows = 2;
     let char_alias = chars.clone();
     assert!(chars.try_data_mut_unique().is_none());
-    assert_eq!(chars.data(), &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
-    assert_eq!(chars.iter_column_major().collect::<String>(), "acbdegfh");
+    assert_eq!(
+        chars
+            .data()
+            .iter()
+            .map(|unit| unit.raw())
+            .collect::<Vec<_>>(),
+        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(|value| value as u16)
+    );
+    assert_eq!(
+        String::from_utf16(
+            &chars
+                .iter_column_major()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>()
+        )
+        .unwrap(),
+        "acbdegfh"
+    );
     assert_eq!(
         chars.to_column_major(),
         char_alias.iter_column_major().collect::<Vec<_>>()
@@ -468,7 +507,8 @@ fn admitted_char_and_cell_arrays_keep_both_backing_claims_through_aliases() {
         } else {
             shape.iter().product()
         };
-        let mut chars = CharArray::new_with_shape(vec![' '; count], shape).unwrap();
+        let mut chars =
+            CharArray::from_unicode_scalars_with_shape(vec![' '; count], shape).unwrap();
         assert!(chars.validate_layout().is_ok());
         chars.cols += 1;
         assert!(chars.validate_layout().is_err());

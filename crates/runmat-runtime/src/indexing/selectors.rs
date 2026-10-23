@@ -1,24 +1,16 @@
+use super::resident::gather_dispatch_value_in_context as gather_selector_in_context;
 use crate::indexing::plan::total_len_from_shape;
 use crate::runtime_error::semantic_error as mex;
 use crate::{
     builtins::common::{shape::is_scalar_shape, tensor},
-    dispatcher::gather_if_needed_async,
     RuntimeError,
 };
-use runmat_value::{IntValue, LogicalArray, NumericScalar, Tensor, Value};
+use runmat_value::{
+    ExactArrayStorage, IntValue, LogicalArray, NumericScalar, SharedShape, Tensor, Value,
+};
 use std::borrow::{Borrow, Cow};
 
 pub type VmResult<T> = Result<T, RuntimeError>;
-
-fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
-    if crate::builtins::common::shape::is_scalar_shape(shape) {
-        return Ok(1);
-    }
-    shape.iter().try_fold(1usize, |acc, &dim| {
-        acc.checked_mul(dim)
-            .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
-    })
-}
 
 fn map_index_gather_error(err: impl std::fmt::Display) -> RuntimeError {
     mex(
@@ -35,69 +27,133 @@ fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
 pub enum SliceSelector {
     Colon,
     Scalar(usize),
-    Indices(Vec<usize>),
+    Indices(ExactArrayStorage<usize>),
     LinearIndices {
-        values: Vec<usize>,
-        output_shape: Vec<usize>,
+        values: ExactArrayStorage<usize>,
+        output_shape: SharedShape,
     },
+}
+
+impl SliceSelector {
+    pub(crate) fn selection_len(&self, extent: usize) -> usize {
+        match self {
+            Self::Colon => extent,
+            Self::Scalar(_) => 1,
+            Self::Indices(values) | Self::LinearIndices { values, .. } => values.len(),
+        }
+    }
+    pub(crate) fn selection_value(&self, position: usize) -> Option<usize> {
+        match self {
+            Self::Colon => position.checked_add(1),
+            Self::Scalar(value) => (position == 0).then_some(*value),
+            Self::Indices(values) | Self::LinearIndices { values, .. } => {
+                values.get(position).copied()
+            }
+        }
+    }
+    /// Borrow the canonical selector; colon remains an implicit range.
+    pub(crate) fn iter_indices(
+        &self,
+        extent: usize,
+    ) -> impl ExactSizeIterator<Item = usize> + Clone + '_ {
+        (0..self.selection_len(extent)).map(move |position| {
+            self.selection_value(position)
+                .expect("bounded selector position")
+        })
+    }
 }
 
 pub async fn build_component_selectors(
     components: &[crate::object::indexing::ObjectIndexComponent],
     base_shape: &[usize],
     assignment: bool,
-) -> VmResult<Vec<SliceSelector>> {
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    let context = crate::context::legacy::active();
+    build_component_selectors_with_context(context.as_ref(), components, base_shape, assignment)
+        .await
+}
+
+pub async fn build_component_selectors_in_context(
+    context: &crate::context::RuntimeContext,
+    components: &[crate::object::indexing::ObjectIndexComponent],
+    base_shape: &[usize],
+    assignment: bool,
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    build_component_selectors_with_context(Some(context), components, base_shape, assignment).await
+}
+
+pub(crate) async fn build_component_selectors_with_context(
+    context: Option<&crate::context::RuntimeContext>,
+    components: &[crate::object::indexing::ObjectIndexComponent],
+    base_shape: &[usize],
+    assignment: bool,
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    use crate::indexing::plan::{
+        admission, effective_index_extent, numeric_linear_output_shape_in_context,
+    };
     use crate::object::indexing::ObjectIndexComponent;
+    let owner = admission::Owner::new(context)?;
     let dims = components.len();
-    if dims == 1 {
-        let total_len = checked_total_len_from_shape(base_shape)?;
-        return match &components[0] {
-            ObjectIndexComponent::Colon => Ok(vec![SliceSelector::Colon]),
-            ObjectIndexComponent::Value(value) => {
-                if assignment {
-                    let bounded = matches!(value, Value::Bool(_) | Value::LogicalArray(_));
-                    return selector_from_value_dim_with_bounds(value, total_len, bounded)
-                        .await
-                        .map(|selector| vec![selector]);
-                }
-                let materialized = materialize_index_value(value).await?;
-                let selector = match &materialized {
+    if dims == 0 {
+        return Err(mex("MissingIndex", "At least one index is required"));
+    }
+    // Verify shape overflow before admitting control or initiating a download.
+    for dimension in 0..dims {
+        effective_index_extent(base_shape, dims, dimension)?;
+    }
+    let mut selectors =
+        crate::context::host_allocation::prepare_host_array_optional(context, dims)?;
+    for (dimension, component) in components.iter().enumerate() {
+        owner.check()?;
+        let extent = effective_index_extent(base_shape, dims, dimension)?;
+        let selector = match component {
+            ObjectIndexComponent::Colon => SliceSelector::Colon,
+            ObjectIndexComponent::Value(value) if dims == 1 && !assignment => {
+                let materialized = owner
+                    .await_stage(materialize_index_value_in_context(context, value))
+                    .await??;
+                match materialized.as_ref() {
                     Value::Tensor(tensor) => SliceSelector::LinearIndices {
-                        values: numeric_tensor_indices(tensor, Some(total_len))?,
-                        output_shape: crate::indexing::plan::numeric_linear_output_shape(
+                        values: numeric_tensor_indices_in_context(context, tensor, Some(extent))?,
+                        output_shape: numeric_linear_output_shape_in_context(
+                            context,
                             base_shape,
                             tensor.shape(),
                             tensor.len(),
-                        ),
+                        )?,
                     },
-                    Value::LogicalArray(_) => {
-                        let values = indices_from_value_linear(&materialized, total_len).await?;
+                    value @ Value::LogicalArray(_) => {
+                        let values =
+                            indices_from_host_value_linear_in_context(context, value, extent)?;
+                        let output_shape = admission::shape(context, 2, |dimension| {
+                            Ok(if dimension == 0 { values.len() } else { 1 })
+                        })?;
                         SliceSelector::LinearIndices {
-                            output_shape: vec![values.len(), 1],
                             values,
+                            output_shape,
                         }
                     }
-                    _ => SliceSelector::Indices(
-                        indices_from_value_linear(&materialized, total_len).await?,
-                    ),
-                };
-                Ok(vec![selector])
+                    value => SliceSelector::Indices(indices_from_host_value_linear_in_context(
+                        context, value, extent,
+                    )?),
+                }
             }
-        };
-    }
-    let shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
-    let mut selectors = Vec::with_capacity(dims);
-    for (dimension, component) in components.iter().enumerate() {
-        selectors.push(match component {
-            ObjectIndexComponent::Colon => SliceSelector::Colon,
             ObjectIndexComponent::Value(value) => {
                 let bounded =
                     !assignment || matches!(value, Value::Bool(_) | Value::LogicalArray(_));
-                selector_from_value_dim_with_bounds(value, shape[dimension], bounded).await?
+                owner
+                    .await_stage(selector_from_value_dim_with_bounds(
+                        context, value, extent, bounded,
+                    ))
+                    .await??
             }
-        });
+        };
+        selectors
+            .try_push(selector)
+            .map_err(|_| admission::geometry())?;
     }
-    Ok(selectors)
+    owner.check()?;
+    selectors.try_finish().map_err(|_| admission::geometry())
 }
 
 fn exact_index_from_f64(value: f64) -> Option<i64> {
@@ -168,12 +224,22 @@ fn index_scalar_from_host_value(value: &Value) -> Option<IndexScalar> {
 }
 
 pub async fn index_scalar_from_value(value: &Value) -> VmResult<Option<IndexScalar>> {
+    let context = crate::context::legacy::active();
+    index_scalar_from_value_in_context(context.as_ref(), value).await
+}
+pub async fn index_scalar_from_value_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+) -> VmResult<Option<IndexScalar>> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
     if let Value::GpuTensor(handle) = value {
         let total = total_len_from_shape(handle.shape());
         if total != 1 {
             return Ok(None);
         }
-        let gathered = gather_if_needed_async(value).await?;
+        let gathered = owner
+            .await_stage(gather_selector_in_context(value, context))
+            .await??;
         return Ok(index_scalar_from_host_value(&gathered));
     }
     Ok(index_scalar_from_host_value(value))
@@ -189,12 +255,12 @@ fn checked_positive_index(scalar: IndexScalar, upper_bound: Option<usize>) -> Vm
     Ok(index)
 }
 
-pub(crate) fn numeric_tensor_indices(
+pub(super) fn numeric_tensor_indices_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     tensor: &Tensor,
     upper_bound: Option<usize>,
-) -> VmResult<Vec<usize>> {
-    let mut indices = Vec::with_capacity(tensor.len());
-    for index in 0..tensor.len() {
+) -> VmResult<ExactArrayStorage<usize>> {
+    crate::indexing::plan::admission::array(context, tensor.len(), |index| {
         let scalar = match tensor
             .numeric_value_at(index)
             .expect("numeric tensor storage length must match its shape")
@@ -213,91 +279,136 @@ pub(crate) fn numeric_tensor_indices(
                 "Index values must be positive integers or logical values",
             )
         })?;
-        indices.push(checked_positive_index(scalar, upper_bound)?);
-    }
-    Ok(indices)
+        checked_positive_index(scalar, upper_bound)
+    })
 }
 
 pub async fn materialize_index_value(value: &Value) -> VmResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
-        return gather_if_needed_async(value)
+        let context = crate::context::legacy::active();
+        return gather_selector_in_context(value, context.as_ref())
             .await
             .map_err(map_index_gather_error);
     }
     Ok(value.clone())
 }
 
-pub(crate) fn logical_indices_linear(
-    array: &LogicalArray,
-    total_len: usize,
-) -> VmResult<Vec<usize>> {
-    let mut indices = Vec::new();
-    for (index, &selected) in array.data.iter().enumerate() {
-        if selected == 0 {
-            continue;
-        }
-        if index >= total_len {
-            return Err(mex(
-                "IndexOutOfBounds",
-                "Logical index exceeds array bounds",
-            ));
-        }
-        indices.push(index + 1);
+pub(super) async fn materialize_index_value_in_context<'a>(
+    context: Option<&crate::context::RuntimeContext>,
+    value: &'a Value,
+) -> VmResult<Cow<'a, Value>> {
+    crate::indexing::plan::admission::checkpoint(context)?;
+    if matches!(value, Value::GpuTensor(_)) {
+        gather_selector_in_context(value, context)
+            .await
+            .map(Cow::Owned)
+    } else {
+        Ok(Cow::Borrowed(value))
     }
-    Ok(indices)
 }
 
-pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
-    if let Value::GpuTensor(handle) = value {
-        let gathered = if total_len_from_shape(handle.shape()) == 1 {
-            gather_if_needed_async(value).await?
-        } else {
-            materialize_index_value(value).await?
-        };
-        return indices_from_host_value_linear(&gathered, total_len);
+pub(super) fn logical_indices_linear_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    array: &LogicalArray,
+    total_len: usize,
+) -> VmResult<ExactArrayStorage<usize>> {
+    let mut count = 0usize;
+    for (index, &selected) in array.data.iter().enumerate() {
+        crate::indexing::plan::admission::checkpoint(context)?;
+        if selected != 0 {
+            if index >= total_len {
+                return Err(mex(
+                    "IndexOutOfBounds",
+                    "Logical index exceeds array bounds",
+                ));
+            }
+            count = count
+                .checked_add(1)
+                .ok_or_else(crate::indexing::plan::admission::geometry)?;
+        }
     }
-    indices_from_host_value_linear(value, total_len)
+    let mut source = array
+        .data
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &selected)| (selected != 0).then_some(index + 1));
+    crate::indexing::plan::admission::array(context, count, |_| {
+        source
+            .next()
+            .ok_or_else(crate::indexing::plan::admission::geometry)
+    })
+}
+
+pub async fn indices_from_value_linear(
+    value: &Value,
+    total_len: usize,
+) -> VmResult<ExactArrayStorage<usize>> {
+    let context = crate::context::legacy::active();
+    indices_from_value_linear_in_context(context.as_ref(), value, total_len).await
+}
+async fn indices_from_value_linear_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    total_len: usize,
+) -> VmResult<ExactArrayStorage<usize>> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    if matches!(value, Value::GpuTensor(_)) {
+        let gathered = owner
+            .await_stage(gather_selector_in_context(value, context))
+            .await??;
+        return indices_from_host_value_linear_in_context(context, &gathered, total_len);
+    }
+    indices_from_host_value_linear_in_context(context, value, total_len)
 }
 
 async fn selector_from_value_dim_with_bounds(
+    context: Option<&crate::context::RuntimeContext>,
     value: &Value,
     dim_len: usize,
     require_in_bounds: bool,
 ) -> VmResult<SliceSelector> {
-    if let Value::GpuTensor(handle) = value {
-        let gathered = if total_len_from_shape(handle.shape()) == 1 {
-            gather_if_needed_async(value).await?
-        } else {
-            materialize_index_value(value).await?
-        };
-        return selector_from_host_value_dim(&gathered, dim_len, require_in_bounds);
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    if matches!(value, Value::GpuTensor(_)) {
+        let gathered = owner
+            .await_stage(gather_selector_in_context(value, context))
+            .await??;
+        return selector_from_host_value_dim(context, &gathered, dim_len, require_in_bounds);
     }
-    selector_from_host_value_dim(value, dim_len, require_in_bounds)
+    selector_from_host_value_dim(context, value, dim_len, require_in_bounds)
 }
 
 pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
-    selector_from_value_dim_with_bounds(value, dim_len, true).await
+    let context = crate::context::legacy::active();
+    selector_from_value_dim_with_bounds(context.as_ref(), value, dim_len, true).await
 }
 
-fn indices_from_host_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
+pub(super) fn truth_indices(
+    context: Option<&crate::context::RuntimeContext>,
+    selected: bool,
+) -> VmResult<ExactArrayStorage<usize>> {
+    crate::indexing::plan::admission::array(context, usize::from(selected), |_| Ok(1))
+}
+
+fn indices_from_host_value_linear_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    total_len: usize,
+) -> VmResult<ExactArrayStorage<usize>> {
     if let Value::Bool(value) = value {
-        return Ok(if *value { vec![1] } else { Vec::new() });
+        return truth_indices(context, *value);
     }
     if let Value::LogicalArray(value) = value {
         if value.data.len() == 1 && is_scalar_shape(&value.shape) {
-            return Ok(if value.data[0] != 0 {
-                vec![1]
-            } else {
-                Vec::new()
-            });
+            return truth_indices(context, value.data[0] != 0);
         }
     }
     if let Some(value) = index_scalar_from_host_value(value) {
-        return checked_positive_index(value, Some(total_len)).map(|index| vec![index]);
+        let index = checked_positive_index(value, Some(total_len))?;
+        return crate::indexing::plan::admission::array(context, 1, |_| Ok(index));
     }
     match value {
-        Value::Tensor(value) => numeric_tensor_indices(value, Some(total_len)),
-        Value::LogicalArray(value) => logical_indices_linear(value, total_len),
+        Value::Tensor(value) => numeric_tensor_indices_in_context(context, value, Some(total_len)),
+        Value::LogicalArray(value) => logical_indices_linear_in_context(context, value, total_len),
         _ => Err(mex(
             "UnsupportedIndexType",
             "Unsupported index type for linear indexing",
@@ -306,24 +417,17 @@ fn indices_from_host_value_linear(value: &Value, total_len: usize) -> VmResult<V
 }
 
 fn selector_from_host_value_dim(
+    context: Option<&crate::context::RuntimeContext>,
     value: &Value,
     dim_len: usize,
     require_in_bounds: bool,
 ) -> VmResult<SliceSelector> {
     if let Value::Bool(value) = value {
-        return Ok(SliceSelector::Indices(if *value {
-            vec![1]
-        } else {
-            Vec::new()
-        }));
+        return truth_indices(context, *value).map(SliceSelector::Indices);
     }
     if let Value::LogicalArray(value) = value {
         if value.data.len() == 1 && is_scalar_shape(&value.shape) {
-            return Ok(SliceSelector::Indices(if value.data[0] != 0 {
-                vec![1]
-            } else {
-                Vec::new()
-            }));
+            return truth_indices(context, value.data[0] != 0).map(SliceSelector::Indices);
         }
     }
     if let Some(index) = index_scalar_from_host_value(value) {
@@ -331,8 +435,10 @@ fn selector_from_host_value_dim(
             .map(SliceSelector::Scalar);
     }
     match value {
-        Value::Tensor(value) => numeric_tensor_indices(value, require_in_bounds.then_some(dim_len))
-            .map(SliceSelector::Indices),
+        Value::Tensor(value) => {
+            numeric_tensor_indices_in_context(context, value, require_in_bounds.then_some(dim_len))
+                .map(SliceSelector::Indices)
+        }
         Value::LogicalArray(value) => {
             if value.data.len() != dim_len {
                 return Err(mex(
@@ -340,14 +446,7 @@ fn selector_from_host_value_dim(
                     "Logical mask length mismatch for dimension",
                 ));
             }
-            Ok(SliceSelector::Indices(
-                value
-                    .data
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, selected)| (*selected != 0).then_some(index + 1))
-                    .collect(),
-            ))
+            logical_indices_linear_in_context(context, value, dim_len).map(SliceSelector::Indices)
         }
         _ => Err(mex(
             "UnsupportedIndexType",
@@ -377,15 +476,22 @@ fn used_numeric_has_gpu(dims: usize, colon_mask: u32, end_mask: u32, numeric: &[
 }
 
 async fn materialize_used_numeric<'a>(
+    context: Option<&crate::context::RuntimeContext>,
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &'a [Value],
     linear: bool,
-) -> VmResult<Vec<Cow<'a, Value>>> {
-    let mut values = Vec::new();
+) -> VmResult<ExactArrayStorage<Cow<'a, Value>>> {
+    use crate::indexing::plan::admission;
+    let owner = admission::Owner::new(context)?;
+    let count = (0..dims)
+        .filter(|dimension| !selector_mask_has_dim(colon_mask | end_mask, *dimension))
+        .count();
+    let mut values = crate::context::host_allocation::prepare_host_array_optional(context, count)?;
     let mut used = numeric.iter();
     for dimension in 0..dims {
+        owner.check()?;
         if selector_mask_has_dim(colon_mask | end_mask, dimension) {
             continue;
         }
@@ -399,18 +505,23 @@ async fn materialize_used_numeric<'a>(
                 },
             )
         })?;
-        let Value::GpuTensor(handle) = value else {
-            values.push(Cow::Borrowed(value));
-            continue;
-        };
-        let gathered = if linear || total_len_from_shape(handle.shape()) != 1 {
-            materialize_index_value(value).await?
+        let value = if let Value::GpuTensor(handle) = value {
+            let result = owner
+                .await_stage(gather_selector_in_context(value, context))
+                .await?;
+            let gathered = if linear || total_len_from_shape(handle.shape()) != 1 {
+                result.map_err(map_index_gather_error)?
+            } else {
+                result?
+            };
+            Cow::Owned(gathered)
         } else {
-            gather_if_needed_async(value).await?
+            Cow::Borrowed(value)
         };
-        values.push(Cow::Owned(gathered));
+        values.try_push(value).map_err(|_| admission::geometry())?;
     }
-    Ok(values)
+    owner.check()?;
+    values.try_finish().map_err(|_| admission::geometry())
 }
 
 pub async fn build_slice_selectors(
@@ -419,203 +530,311 @@ pub async fn build_slice_selectors(
     end_mask: u32,
     numeric: &[Value],
     base_shape: &[usize],
-) -> VmResult<Vec<SliceSelector>> {
-    // Shape validation precedes any resident selector gather, as it does for
-    // the host decoder. Only selectors actually consumed by this expression
-    // may initiate provider work.
-    if dims == 1 {
-        checked_total_len_from_shape(base_shape)?;
-    } else {
-        crate::indexing::plan::effective_index_shape(base_shape, dims)?;
-    }
-    let materialized =
-        materialize_used_numeric(dims, colon_mask, end_mask, numeric, dims == 1).await?;
-    build_slice_selectors_from_host(dims, colon_mask, end_mask, &materialized, base_shape)
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    let context = crate::context::legacy::active();
+    build_selectors(
+        context.as_ref(),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        false,
+    )
+    .await
 }
-
-/// A typed synchronous completion is possible only when no selector needs a
-/// provider gather. `None` is a routing decision, not an indexing error.
-pub fn build_slice_selectors_host(
+pub async fn build_slice_selectors_in_context(
+    context: &crate::context::RuntimeContext,
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
     base_shape: &[usize],
-) -> VmResult<Option<Vec<SliceSelector>>> {
-    if used_numeric_has_gpu(dims, colon_mask, end_mask, numeric) {
-        return Ok(None);
-    }
-    build_slice_selectors_from_host(dims, colon_mask, end_mask, numeric, base_shape).map(Some)
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    build_selectors(
+        Some(context),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        false,
+    )
+    .await
 }
-
-fn build_slice_selectors_from_host<B: Borrow<Value>>(
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    numeric: &[B],
-    base_shape: &[usize],
-) -> VmResult<Vec<SliceSelector>> {
-    let mut selectors = Vec::with_capacity(dims);
-    if dims == 1 {
-        let total_len = checked_total_len_from_shape(base_shape)?;
-        if (colon_mask & 1u32) != 0 {
-            selectors.push(SliceSelector::Colon);
-            return Ok(selectors);
-        }
-        if (end_mask & 1u32) != 0 {
-            selectors.push(SliceSelector::Scalar(total_len.max(1)));
-            return Ok(selectors);
-        }
-        let value = numeric.first().map(Borrow::borrow).ok_or_else(|| {
-            mex(
-                "MissingNumericIndex",
-                "missing numeric index for linear slice",
-            )
-        })?;
-        if let Value::Tensor(idx_t) = value {
-            let indices = numeric_tensor_indices(idx_t, Some(total_len))?;
-            selectors.push(SliceSelector::LinearIndices {
-                values: indices,
-                output_shape: crate::indexing::plan::numeric_linear_output_shape(
-                    base_shape,
-                    idx_t.shape(),
-                    idx_t.len(),
-                ),
-            });
-        } else if let Value::LogicalArray(_) = value {
-            // MATLAB linear logical indexing always yields a column vector.
-            let idxs = indices_from_host_value_linear(value, total_len)?;
-            selectors.push(SliceSelector::LinearIndices {
-                output_shape: vec![idxs.len(), 1],
-                values: idxs,
-            });
-        } else {
-            let idxs = indices_from_host_value_linear(value, total_len)?;
-            selectors.push(SliceSelector::Indices(idxs));
-        }
-        return Ok(selectors);
-    }
-
-    let effective_shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
-    let mut numeric_iter = 0usize;
-    for d in 0..dims {
-        let is_colon = selector_mask_has_dim(colon_mask, d);
-        if is_colon {
-            selectors.push(SliceSelector::Colon);
-            continue;
-        }
-        let dim_len = effective_shape[d];
-        let is_end = selector_mask_has_dim(end_mask, d);
-        if is_end {
-            selectors.push(SliceSelector::Scalar(dim_len));
-            continue;
-        }
-        let value = numeric
-            .get(numeric_iter)
-            .map(Borrow::borrow)
-            .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
-        numeric_iter += 1;
-        selectors.push(selector_from_host_value_dim(value, dim_len, true)?);
-    }
-    Ok(selectors)
-}
-
-/// Builds selectors for indexed assignment. Numeric selectors may grow their
-/// addressed dimension; colon and logical selectors remain tied to the
-/// existing shape.
 pub async fn build_assignment_selectors(
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
     base_shape: &[usize],
-) -> VmResult<Vec<SliceSelector>> {
-    crate::indexing::plan::effective_index_shape(base_shape, dims)?;
-    let materialized = materialize_used_numeric(dims, colon_mask, end_mask, numeric, false).await?;
-    build_assignment_selectors_from_host(dims, colon_mask, end_mask, &materialized, base_shape)
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    let context = crate::context::legacy::active();
+    build_selectors(
+        context.as_ref(),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        true,
+    )
+    .await
 }
-
+pub async fn build_assignment_selectors_in_context(
+    context: &crate::context::RuntimeContext,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    build_selectors(
+        Some(context),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        true,
+    )
+    .await
+}
+pub(super) async fn build_selectors(
+    context: Option<&crate::context::RuntimeContext>,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+    assignment: bool,
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    validate_shape(base_shape, dims)?;
+    let materialized = materialize_used_numeric(
+        context,
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        !assignment && dims == 1,
+    )
+    .await?;
+    let result = selectors_from_host(
+        context,
+        dims,
+        colon_mask,
+        end_mask,
+        &materialized,
+        base_shape,
+        assignment,
+    )?;
+    owner.check()?;
+    Ok(result)
+}
+fn validate_shape(base_shape: &[usize], dims: usize) -> VmResult<()> {
+    if dims == 0 {
+        return Err(mex("MissingIndex", "At least one index is required"));
+    }
+    for dimension in 0..dims {
+        crate::indexing::plan::effective_index_extent(base_shape, dims, dimension)?;
+    }
+    Ok(())
+}
+pub fn build_slice_selectors_host(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Option<ExactArrayStorage<SliceSelector>>> {
+    let context = crate::context::legacy::active();
+    build_selectors_host(
+        context.as_ref(),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        false,
+    )
+}
+pub fn build_slice_selectors_host_in_context(
+    context: &crate::context::RuntimeContext,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Option<ExactArrayStorage<SliceSelector>>> {
+    build_selectors_host(
+        Some(context),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        false,
+    )
+}
 pub fn build_assignment_selectors_host(
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
     base_shape: &[usize],
-) -> VmResult<Option<Vec<SliceSelector>>> {
+) -> VmResult<Option<ExactArrayStorage<SliceSelector>>> {
+    let context = crate::context::legacy::active();
+    build_selectors_host(
+        context.as_ref(),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        true,
+    )
+}
+pub fn build_assignment_selectors_host_in_context(
+    context: &crate::context::RuntimeContext,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Option<ExactArrayStorage<SliceSelector>>> {
+    build_selectors_host(
+        Some(context),
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+        base_shape,
+        true,
+    )
+}
+pub(super) fn build_selectors_host(
+    context: Option<&crate::context::RuntimeContext>,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+    assignment: bool,
+) -> VmResult<Option<ExactArrayStorage<SliceSelector>>> {
+    crate::indexing::plan::admission::checkpoint(context)?;
     if used_numeric_has_gpu(dims, colon_mask, end_mask, numeric) {
         return Ok(None);
     }
-    build_assignment_selectors_from_host(dims, colon_mask, end_mask, numeric, base_shape).map(Some)
+    selectors_from_host(
+        context, dims, colon_mask, end_mask, numeric, base_shape, assignment,
+    )
+    .map(Some)
 }
 
-fn build_assignment_selectors_from_host<B: Borrow<Value>>(
+fn selectors_from_host<B: Borrow<Value>>(
+    context: Option<&crate::context::RuntimeContext>,
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[B],
     base_shape: &[usize],
-) -> VmResult<Vec<SliceSelector>> {
-    let effective_shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
-    let mut selectors = Vec::with_capacity(dims);
-    let mut numeric_iter = 0usize;
-    for d in 0..dims {
-        if selector_mask_has_dim(colon_mask, d) {
-            selectors.push(SliceSelector::Colon);
-            continue;
+    assignment: bool,
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    use crate::indexing::plan::{
+        admission, effective_index_extent, numeric_linear_output_shape_in_context,
+    };
+    validate_shape(base_shape, dims)?;
+    let mut numeric_position = 0usize;
+    admission::array(context, dims, |dimension| {
+        let extent = effective_index_extent(base_shape, dims, dimension)?;
+        if selector_mask_has_dim(colon_mask, dimension) {
+            return Ok(SliceSelector::Colon);
         }
-        let dim_len = effective_shape[d];
-        if selector_mask_has_dim(end_mask, d) {
-            selectors.push(SliceSelector::Scalar(dim_len));
-            continue;
+        if selector_mask_has_dim(end_mask, dimension) {
+            return Ok(SliceSelector::Scalar(if !assignment && dims == 1 {
+                extent.max(1)
+            } else {
+                extent
+            }));
         }
         let value = numeric
-            .get(numeric_iter)
+            .get(numeric_position)
             .map(Borrow::borrow)
-            .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
-        numeric_iter += 1;
-        match value {
-            Value::Bool(_) | Value::LogicalArray(_) => {
-                selectors.push(selector_from_host_value_dim(value, dim_len, true)?);
-            }
-            _ => {
-                selectors.push(selector_from_host_value_dim(value, dim_len, false)?);
-            }
+            .ok_or_else(|| {
+                mex(
+                    "MissingNumericIndex",
+                    if dims == 1 && !assignment {
+                        "missing numeric index for linear slice"
+                    } else {
+                        "missing numeric index for slice"
+                    },
+                )
+            })?;
+        numeric_position += 1;
+        if dims == 1 && !assignment {
+            return match value {
+                Value::Tensor(tensor) => Ok(SliceSelector::LinearIndices {
+                    values: numeric_tensor_indices_in_context(context, tensor, Some(extent))?,
+                    output_shape: numeric_linear_output_shape_in_context(
+                        context,
+                        base_shape,
+                        tensor.shape(),
+                        tensor.len(),
+                    )?,
+                }),
+                value @ Value::LogicalArray(_) => {
+                    let values = indices_from_host_value_linear_in_context(context, value, extent)?;
+                    let output_shape = admission::shape(context, 2, |dimension| {
+                        Ok(if dimension == 0 { values.len() } else { 1 })
+                    })?;
+                    Ok(SliceSelector::LinearIndices {
+                        values,
+                        output_shape,
+                    })
+                }
+                value => indices_from_host_value_linear_in_context(context, value, extent)
+                    .map(SliceSelector::Indices),
+            };
         }
-    }
-    Ok(selectors)
+        let bounded = !assignment || matches!(value, Value::Bool(_) | Value::LogicalArray(_));
+        selector_from_host_value_dim(context, value, extent, bounded)
+    })
 }
-
 pub async fn build_sparse_assignment_selectors(
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
     base_shape: &[usize],
-) -> VmResult<Vec<SliceSelector>> {
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
     build_assignment_selectors(dims, colon_mask, end_mask, numeric, base_shape).await
 }
-
-/// Parse one-based scalar subscripts for aggregate indexing paths whose caller
-/// deliberately supports scalar selectors only. The selector syntax itself is
-/// independent of the aggregate representation.
-pub async fn build_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<SliceSelector>> {
-    let mut selectors = Vec::with_capacity(raw_indices.len());
+pub async fn build_scalar_selectors(
+    raw_indices: &[Value],
+) -> VmResult<ExactArrayStorage<SliceSelector>> {
+    let context = crate::context::legacy::active();
+    let mut selectors = crate::context::host_allocation::prepare_host_array_optional(
+        context.as_ref(),
+        raw_indices.len(),
+    )?;
     for value in raw_indices {
-        let idx_val = index_scalar_from_value(value).await?.ok_or_else(|| {
-            mex(
-                "ScalarIndexRequired",
-                "Indexing requires scalar numeric indices",
-            )
-        })?;
-        if idx_val.is_below_one() {
-            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-        }
-        let idx = idx_val
-            .positive_usize()
-            .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
-        selectors.push(SliceSelector::Scalar(idx));
+        let scalar = index_scalar_from_value_in_context(context.as_ref(), value)
+            .await?
+            .ok_or_else(|| {
+                mex(
+                    "ScalarIndexRequired",
+                    "Indexing requires scalar numeric indices",
+                )
+            })?;
+        let index = checked_positive_index(scalar, None)?;
+        selectors
+            .try_push(SliceSelector::Scalar(index))
+            .map_err(|_| crate::indexing::plan::admission::geometry())?;
     }
-    Ok(selectors)
+    selectors
+        .try_finish()
+        .map_err(|_| crate::indexing::plan::admission::geometry())
 }
 
 #[cfg(test)]
@@ -690,6 +909,11 @@ mod tests {
         let err = futures::executor::block_on(build_scalar_selectors(&[Value::Num(-2.0)]))
             .expect_err("negative cell scalar index should fail");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+        let err = futures::executor::block_on(build_scalar_selectors(&[Value::String(
+            "not an index".into(),
+        )]))
+        .expect_err("scalar selector conversion preserves its diagnostic");
+        assert_eq!(err.identifier(), Some("RunMat:ScalarIndexRequired"));
     }
 
     #[test]

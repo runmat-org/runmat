@@ -155,7 +155,10 @@ async fn plot_pole_zero_map_statement(
 }
 
 #[cfg(not(feature = "plot-core"))]
-async fn plot_pole_zero_map_statement(_first_sys: Value, _rest: Vec<Value>) -> BuiltinResult<()> {
+async fn plot_pole_zero_map_statement(
+    _first_sys: Value,
+    _rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
     Err(crate::plotting_hooks::unavailable_presentation())
 }
 

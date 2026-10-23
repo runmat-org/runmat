@@ -125,7 +125,7 @@ pub(super) fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
         Value::CharArray(ca) => {
             let mut bytes = Vec::with_capacity(ca.data().len());
             for ch in ca.data() {
-                let code = *ch as u32;
+                let code = ch.raw() as u32;
                 if code > 0xFF {
                     return Err(webwrite_error(
                         "webwrite: character codes exceed 255 for binary payload",

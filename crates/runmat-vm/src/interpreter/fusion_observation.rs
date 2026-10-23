@@ -8,7 +8,7 @@ use runmat_time::{duration_ns_saturating, Instant};
 #[derive(Default)]
 pub(super) struct FusionRegionObservations(
     Vec<RegionObservation>,
-    #[cfg(feature = "wgpu")] Option<runmat_accelerate_api::observation::VmRegionRouteAuditSlot>,
+    #[cfg(feature = "wgpu")] Option<runmat_accelerate_api::observation::SourceRegionRouteAuditSlot>,
     #[cfg(feature = "wgpu")] Option<Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>>,
 );
 
@@ -54,7 +54,7 @@ impl FusionRegionObservations {
     pub(super) fn route_audit_slot(
         &mut self,
         image_capable: bool,
-    ) -> Option<runmat_accelerate_api::observation::VmRegionRouteAuditSlot> {
+    ) -> Option<runmat_accelerate_api::observation::SourceRegionRouteAuditSlot> {
         if image_capable && self.1.is_none() {
             self.1 = Some(std::sync::Arc::new(std::sync::Mutex::new(None)));
         }
@@ -68,7 +68,7 @@ impl FusionRegionObservations {
                 *active = None;
             }
         }
-        runmat_accelerate_api::observation::set_vm_region_for_current_poll(None);
+        runmat_accelerate_api::observation::set_source_region_for_current_poll(None);
     }
 
     #[cfg(feature = "wgpu")]
@@ -82,7 +82,7 @@ impl FusionRegionObservations {
             if let Ok(mut active) = slot.lock() {
                 let audit = route.audit();
                 *active = Some(audit.clone());
-                runmat_accelerate_api::observation::set_vm_region_for_current_poll(Some(audit));
+                runmat_accelerate_api::observation::set_source_region_for_current_poll(Some(audit));
             }
         }
         self.0.push(RegionObservation {

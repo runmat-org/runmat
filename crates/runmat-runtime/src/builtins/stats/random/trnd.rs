@@ -1,15 +1,11 @@
 //! Student's t random variates.
+use runmat_builtins::{
+    TRND_ERROR_INTERNAL as ERROR_INTERNAL, TRND_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    TRND_INTEGER_NU_EXTENSION, TRND_INTEGER_SIZE_EXTENSION,
+};
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
@@ -20,120 +16,6 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "trnd";
-
-const TRND_INTEGER_NU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trnd-integer-degrees-of-freedom",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trnd with typed-integer degrees of freedom is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension"),
-};
-
-const TRND_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trnd-integer-size",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trnd with typed-integer size arguments is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TrndIntegerSizeExtension"),
-};
-
-pub const TRND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [TRND_INTEGER_NU_EXTENSION, TRND_INTEGER_SIZE_EXTENSION];
-
-const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "r",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Random sample array from the Student's t distribution.",
-}];
-
-const INPUT_NU: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nu",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Degrees of freedom parameter.",
-};
-
-const INPUT_SZ: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Output size arguments.",
-};
-
-const INPUTS_NU: [BuiltinParamDescriptor; 1] = [INPUT_NU];
-const INPUTS_NU_SZ: [BuiltinParamDescriptor; 2] = [INPUT_NU, INPUT_SZ];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "r = trnd(nu)",
-        inputs: &INPUTS_NU,
-        outputs: &OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "r = trnd(nu, sz)",
-        inputs: &INPUTS_NU_SZ,
-        outputs: &OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "r = trnd(nu, sz1, sz2, ...)",
-        inputs: &INPUTS_NU_SZ,
-        outputs: &OUTPUT_R,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRND.INVALID_ARGUMENT",
-    identifier: Some("RunMat:trnd:InvalidArgument"),
-    when: "Input parameters or size arguments are missing, malformed, or incompatible.",
-    message: "trnd: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRND.INTERNAL",
-    identifier: Some("RunMat:trnd:Internal"),
-    when: "Internal tensor conversion or allocation fails.",
-    message: "trnd: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const TRND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "nu",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer degrees of freedom are gated by trnd-integer-degrees-of-freedom and enter the floating Student-t computation domain.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "sz",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer scalar/vector size arguments are gated by trnd-integer-size and parsed exactly before allocation.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "r = trnd(nu, sz1, sz2, ...)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed-integer parameters are RunMat-only; integer nu produces double samples, and a resident source receives host-generated fallback output re-uploaded with matching precision.",
-    }];
 
 fn trnd_error(
     descriptor: &'static BuiltinErrorDescriptor,
@@ -146,25 +28,12 @@ fn trnd_error(
     builder.build()
 }
 
-fn trnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args {
-        [_] => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 #[runtime_builtin(
     name = "trnd",
-    category = "stats/random",
-    summary = "Generate Student's t random numbers.",
-    keywords = "trnd,student t,random,statistics,distribution",
-    type_resolver(trnd_type),
-    descriptor(crate::builtins::stats::random::trnd::TRND_DESCRIPTOR),
-    extensions(crate::builtins::stats::random::trnd::TRND_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::random::trnd::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::random::trnd"
 )]
-pub(crate) async fn trnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn trnd_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.first().is_some_and(is_resident_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &TRND_INTEGER_NU_EXTENSION,
@@ -259,7 +128,7 @@ fn build_output(
 }
 
 async fn parse_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(
     Vec<f64>,
     Vec<usize>,
@@ -275,7 +144,7 @@ async fn parse_args(
         ));
     }
     let integer_nu = is_typed_integer_value(&args[0]);
-    let integer_size = args[1..].iter().any(is_typed_integer_value);
+    let integer_size = args.iter().skip(1).any(is_typed_integer_value);
     let output_precision = output_precision(&args[0]);
     let gpu_source = match &args[0] {
         Value::GpuTensor(handle) => Some(handle.clone()),
@@ -298,7 +167,7 @@ async fn parse_args(
     let shape = if args.len() == 1 {
         normalize_shape(nu_shape.clone())
     } else {
-        parse_shape_args(&args[1..]).await?
+        parse_shape_args(args.view().range(1..)?).await?
     };
     if nu.len() != 1 && normalize_shape(nu_shape) != shape {
         return Err(trnd_error(
@@ -326,7 +195,9 @@ fn is_resident_typed_integer_value(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-async fn parse_shape_args(rest: &[Value]) -> BuiltinResult<Vec<usize>> {
+async fn parse_shape_args(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::new();
     for arg in rest {
         match extract_dims(arg, BUILTIN_NAME).await {
@@ -387,7 +258,10 @@ mod tests {
     fn trnd_scalar_is_deterministic_and_finite() {
         let _guard = random::test_guard();
         let _guard = reset();
-        let result = block_on(trnd_builtin(vec![Value::Num(10.0)])).expect("trnd");
+        let result = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(10.0)]),
+        ))
+        .expect("trnd");
         match result {
             Value::Num(value) => assert!(value.is_finite()),
             other => panic!("expected scalar, got {other:?}"),
@@ -398,11 +272,13 @@ mod tests {
     fn trnd_accepts_size_forms() {
         let _guard = random::test_guard();
         let _guard = reset();
-        let out = block_on(trnd_builtin(vec![
-            Value::Num(5.0),
-            Value::Num(3.0),
-            Value::Num(4.0),
-        ]))
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+            ]),
+        ))
         .expect("trnd");
         match out {
             Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[3, 4]),
@@ -410,8 +286,13 @@ mod tests {
         }
 
         let size = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
-        let out = block_on(trnd_builtin(vec![Value::Num(5.0), Value::Tensor(size)]))
-            .expect("trnd size vector");
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::Tensor(size),
+            ]),
+        ))
+        .expect("trnd size vector");
         match out {
             Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
@@ -424,15 +305,19 @@ mod tests {
         let _guard = random::test_guard();
         let _guard = reset();
 
-        let scalar = block_on(trnd_builtin(vec![Value::Tensor(
-            Tensor::new(vec![5.0], Vec::new()).unwrap(),
-        )]))
+        let scalar = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                Tensor::new(vec![5.0], Vec::new()).unwrap(),
+            )]),
+        ))
         .expect("rank-zero nu");
         assert!(matches!(scalar, Value::Num(value) if value.is_finite()));
 
-        let vector = block_on(trnd_builtin(vec![Value::Tensor(
-            Tensor::new(vec![5.0, 6.0], vec![2]).unwrap(),
-        )]))
+        let vector = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                Tensor::new(vec![5.0, 6.0], vec![2]).unwrap(),
+            )]),
+        ))
         .expect("rank-one nu");
         let Value::Tensor(vector) = vector else {
             panic!("rank-one output");
@@ -443,17 +328,24 @@ mod tests {
     #[test]
     fn trnd_non_scalar_nu_shape_must_match_requested_shape() {
         let nu = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let out = block_on(trnd_builtin(vec![Value::Tensor(nu.clone())])).expect("trnd");
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                nu.clone(),
+            )]),
+        ))
+        .expect("trnd");
         match out {
             Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[3, 1]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
-        let err = block_on(trnd_builtin(vec![
-            Value::Tensor(nu),
-            Value::Num(1.0),
-            Value::Num(3.0),
-        ]))
+        let err = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(nu),
+                Value::Num(1.0),
+                Value::Num(3.0),
+            ]),
+        ))
         .expect_err("mismatched shape should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
@@ -464,7 +356,10 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset();
         let nu = integer_tensor(IntegerStorage::U16(vec![5, 6, 7]), vec![3, 1]);
-        let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("trnd");
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(nu)]),
+        ))
+        .expect("trnd");
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape(), &[3, 1]);
@@ -478,8 +373,13 @@ mod tests {
 
         let nu = integer_tensor(IntegerStorage::I16(vec![5]), vec![1, 1]);
         let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
-        let out =
-            block_on(trnd_builtin(vec![Value::Tensor(nu), Value::Tensor(size)])).expect("trnd");
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(nu),
+                Value::Tensor(size),
+            ]),
+        ))
+        .expect("trnd");
         match out {
             Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
@@ -492,15 +392,19 @@ mod tests {
         reset();
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(trnd_builtin(vec![Value::Int(runmat_value::IntValue::U16(
-                0,
-            ))]))
+            let error = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                    runmat_value::IntValue::U16(0),
+                )]),
+            ))
             .expect_err("invalid typed-integer nu retains ordinary validation");
             assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
 
-            let error = block_on(trnd_builtin(vec![Value::Int(runmat_value::IntValue::U16(
-                5,
-            ))]))
+            let error = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                    runmat_value::IntValue::U16(5),
+                )]),
+            ))
             .expect_err("MATLAB mode rejects typed-integer degrees of freedom");
             assert_eq!(
                 error.identifier(),
@@ -508,8 +412,13 @@ mod tests {
             );
 
             let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
-            let error = block_on(trnd_builtin(vec![Value::Num(5.0), Value::Tensor(size)]))
-                .expect_err("MATLAB mode rejects typed-integer size controls");
+            let error = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::Tensor(size),
+                ]),
+            ))
+            .expect_err("MATLAB mode rejects typed-integer size controls");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:TrndIntegerSizeExtension")
@@ -523,8 +432,12 @@ mod tests {
                 )
                 .expect("genuine unregistered resident fixture")
                 .handle;
-            let error = block_on(trnd_builtin(vec![Value::GpuTensor(resident_nu.clone())]))
-                .expect_err("MATLAB mode rejects resident integer nu before gather");
+            let error = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    resident_nu.clone(),
+                )]),
+            ))
+            .expect_err("MATLAB mode rejects resident integer nu before gather");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension")
@@ -538,10 +451,12 @@ mod tests {
                 )
                 .expect("genuine unregistered resident fixture")
                 .handle;
-            let error = block_on(trnd_builtin(vec![
-                Value::Num(5.0),
-                Value::GpuTensor(resident_size.clone()),
-            ]))
+            let error = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::GpuTensor(resident_size.clone()),
+                ]),
+            ))
             .expect_err("MATLAB mode rejects resident integer size before gather");
             assert_eq!(
                 error.identifier(),
@@ -551,10 +466,12 @@ mod tests {
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
-            let out = block_on(trnd_builtin(vec![
-                Value::Int(runmat_value::IntValue::U16(5)),
-                Value::Tensor(size),
-            ]))
+            let out = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(runmat_value::IntValue::U16(5)),
+                    Value::Tensor(size),
+                ]),
+            ))
             .expect("RunMat mode accepts typed-integer trnd arguments");
             let Value::Tensor(tensor) = out else {
                 panic!("expected tensor output");
@@ -568,7 +485,10 @@ mod tests {
         let _guard = random::test_guard();
         reset();
         let nu = Tensor::from_f32(vec![5.0, 6.0], vec![2, 1]).unwrap();
-        let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("single trnd");
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(nu)]),
+        ))
+        .expect("single trnd");
         let Value::Tensor(tensor) = out else {
             panic!("expected native-single tensor");
         };
@@ -587,8 +507,12 @@ mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let nu = Tensor::from_f32(vec![5.0, 6.0], vec![2, 1]).unwrap();
             let input = gpu_helpers::upload_tensor(provider, &nu).expect("upload single parameter");
-            let out = block_on(trnd_builtin(vec![Value::GpuTensor(input)]))
-                .expect("resident single trnd");
+            let out = block_on(trnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    input,
+                )]),
+            ))
+            .expect("resident single trnd");
             let Value::GpuTensor(handle) = out else {
                 panic!("expected resident GPU output");
             };
@@ -602,8 +526,10 @@ mod tests {
 
     #[test]
     fn trnd_rejects_nonpositive_degrees_of_freedom() {
-        let err =
-            block_on(trnd_builtin(vec![Value::Num(0.0)])).expect_err("nonpositive nu should fail");
+        let err = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        ))
+        .expect_err("nonpositive nu should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
 
@@ -612,11 +538,13 @@ mod tests {
         let _guard = random::test_guard();
         let _guard = reset();
         let n = 20_000;
-        let out = block_on(trnd_builtin(vec![
-            Value::Num(3.0),
-            Value::Num(n as f64),
-            Value::Num(1.0),
-        ]))
+        let out = block_on(trnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Num(n as f64),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect("trnd");
         let data = match out {
             Value::Tensor(tensor) => tensor.materialize_f64(),

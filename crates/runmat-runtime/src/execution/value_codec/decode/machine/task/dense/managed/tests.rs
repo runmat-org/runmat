@@ -55,7 +55,7 @@ fn dense_task<'a>(
 }
 
 #[test]
-fn managed_dense_native_classes_retain_backing_until_last_alias() {
+fn managed_native_array_classes_retain_backing_until_last_alias() {
     // Exercise every dense class, including wide integers and NaN payloads.
     let classes = [
         ElementType::Logical,
@@ -119,6 +119,46 @@ fn managed_dense_native_classes_retain_backing_until_last_alias() {
         assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
         drop(alias);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+        if !is_complex_integer(element_type) {
+            let source = runmat_execution::value::SparseValue {
+                element_type,
+                rows: 2,
+                columns: 1,
+                column_offsets: vec![0, 1],
+                row_indices: vec![1],
+                little_endian_data: bytes,
+            };
+            let control = ControlOwner::new(Some(&runtime)).unwrap();
+            let mut task = super::super::super::sparse::SparseTask::new(
+                &source,
+                control.path("$").unwrap(),
+                Some(&runtime),
+            )
+            .unwrap();
+            let value = loop {
+                if let (_, Some(value)) = task.advance(1).unwrap() {
+                    break value;
+                }
+            };
+            drop(task);
+            drop(control);
+            let payload = crate::execution::value_codec::encode_inline_value(&value).unwrap();
+            let runmat_execution::value::ValuePayload::Inline(payload) = payload else {
+                panic!("inline result")
+            };
+            let runmat_execution::value::InlineValue::Sparse(result) = *payload else {
+                panic!("sparse result")
+            };
+            assert_eq!(result, source);
+            let retained = ledger.snapshot().live_reserved_bytes;
+            assert!(retained > 0);
+            let alias = value.clone();
+            drop(value);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+            drop(alias);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
     }
 }
 

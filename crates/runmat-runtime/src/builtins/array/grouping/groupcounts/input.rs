@@ -45,7 +45,8 @@ fn array(
             "groupcounts: array input accepts at most one bin specification",
         ));
     }
-    let mut columns = columns_from_value("A", first, true).map_err(error::invalid)?;
+    let mut columns = columns_from_value("A", first, true)
+        .map_err(|source| source.attach(error::invalid("invalid grouping variable")))?;
     let rows = matching_rows(&columns)?;
     let bins = bins::apply(&mut columns, &positional, options.included_edge)?;
     Ok(GroupCountInput {
@@ -81,7 +82,8 @@ fn table(
                 variables.fields.get(name).cloned().ok_or_else(|| {
                     error::invalid(format!("groupcounts: unknown variable '{name}'"))
                 })?;
-            let column = GroupColumn::vector(name.clone(), value).map_err(error::invalid)?;
+            let column = GroupColumn::vector(name.clone(), value)
+                .map_err(|source| source.attach(error::invalid("invalid grouping variable")))?;
             if column.rows != rows {
                 return Err(error::invalid(format!(
                     "groupcounts: table variable '{name}' has {} rows; expected {rows}",

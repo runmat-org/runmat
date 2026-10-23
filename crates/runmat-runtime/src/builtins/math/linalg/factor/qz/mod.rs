@@ -4,6 +4,16 @@ mod algorithm;
 mod allocation;
 mod eigvals;
 mod eigvectors;
+
+// Borrowed shared owners, not an additional QZ/eigenvector implementation.
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+pub(in crate::builtins::math::linalg) use algorithm::{
+    complex_qz_optional_in_place, complex_qz_scratch, ComplexQzOptionalView,
+};
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+pub(in crate::builtins::math::linalg) use eigvectors::{
+    complex_eigenvectors_in_place, ComplexPencilView,
+};
 mod ordqz;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use ordqz::__runmat_wasm_register_builtin_ordqz_builtin;
@@ -11,9 +21,9 @@ mod real_eigenvectors;
 mod real_reorder;
 mod reorder;
 pub(crate) mod riccati;
-mod work;
 #[cfg(test)]
 mod tests;
+mod work;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use faer::{c64, Mat};
@@ -60,7 +70,13 @@ fn parse_mode(option: Option<&Value>) -> BuiltinResult<Mode> {
     let text = match option {
         Value::String(text) => text.as_str().to_owned(),
         Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
-        Value::CharArray(chars) if chars.rows <= 1 => chars.data().iter().collect(),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?
+        }
         _ => return Err(invalid("qz mode must be 'complex' or 'real'")),
     };
     match text.trim().to_ascii_lowercase().as_str() {

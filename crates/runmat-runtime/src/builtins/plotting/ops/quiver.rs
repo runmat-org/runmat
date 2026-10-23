@@ -1,12 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{QUIVER_ERROR_INTERNAL, QUIVER_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::axis::{AxisData, OwnedAxisData};
 use runmat_plot::plots::NumericPlotData;
@@ -20,7 +13,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
@@ -29,40 +21,14 @@ use super::style::{parse_line_style_args, value_as_f64, LineStyleParseOptions};
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "quiver";
-const QUIVER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X/Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Quiver coordinate data accept numeric arrays, and the public Quiver property contract includes integer numeric types. RunMat retains native class, shape, and exact values as graphics-object source properties.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "U/V",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Vector components follow the same numeric graphics-data contract and remain authoritative until the explicit floating renderer boundary.",
-    },
-];
-pub const QUIVER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = quiver([integer_X,integer_Y,]integer_U,integer_V,...)",
-        inputs: &QUIVER_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native storage is authoritative for XData/YData/UData/VData and scene persistence. Rendering is an explicit floating geometry boundary; documented gpuArray input executes client-side and integer buffers gather exactly when the direct floating WGPU path is inapplicable.",
-    }];
+
 type QuiverArgs = (
-    Option<usize>,
+    super::op_common::AxesTarget,
     QuiverCoordinateInput,
     QuiverCoordinateInput,
     Value,
     Value,
-    Vec<Value>,
+    crate::call::BuiltinArguments,
 );
 type QuiverComponents = (
     NumericPlotData,
@@ -70,357 +36,6 @@ type QuiverComponents = (
     NumericPlotData,
     NumericPlotData,
 );
-
-const QUIVER_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered quiver plot.",
-}];
-
-const QUIVER_INPUTS_U_V: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-];
-
-const QUIVER_INPUTS_X_Y_U_V: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-];
-
-const QUIVER_INPUTS_X_Y_U_V_STYLE: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const QUIVER_INPUTS_X_Y_U_V_PROPS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value quiver style properties.",
-    },
-];
-
-const QUIVER_INPUTS_AX_U_V: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-];
-
-const QUIVER_INPUTS_AX_X_Y_U_V: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-];
-
-const QUIVER_INPUTS_AX_X_Y_U_V_STYLE: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const QUIVER_INPUTS_AX_X_Y_U_V_PROPS: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates (vector or matrix).",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field x-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector field y-components.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value quiver style properties.",
-    },
-];
-
-const QUIVER_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(U, V)",
-        inputs: &QUIVER_INPUTS_U_V,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(X, Y, U, V)",
-        inputs: &QUIVER_INPUTS_X_Y_U_V,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(X, Y, U, V, LineSpec)",
-        inputs: &QUIVER_INPUTS_X_Y_U_V_STYLE,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(X, Y, U, V, Name, Value, ...)",
-        inputs: &QUIVER_INPUTS_X_Y_U_V_PROPS,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(ax, U, V)",
-        inputs: &QUIVER_INPUTS_AX_U_V,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(ax, X, Y, U, V)",
-        inputs: &QUIVER_INPUTS_AX_X_Y_U_V,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(ax, X, Y, U, V, LineSpec)",
-        inputs: &QUIVER_INPUTS_AX_X_Y_U_V_STYLE,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = quiver(ax, X, Y, U, V, Name, Value, ...)",
-        inputs: &QUIVER_INPUTS_AX_X_Y_U_V_PROPS,
-        outputs: &QUIVER_OUTPUT_HANDLE,
-    },
-];
-
-pub const QUIVER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QUIVER.INVALID_ARGUMENT",
-    identifier: Some("RunMat:quiver:InvalidArgument"),
-    when: "Input data, axes targeting, or quiver style arguments are invalid.",
-    message: "quiver: invalid argument",
-};
-
-pub const QUIVER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QUIVER.INTERNAL",
-    identifier: Some("RunMat:quiver:Internal"),
-    when: "Internal quiver construction or rendering fails unexpectedly.",
-    message: "quiver: internal operation failed",
-};
-
-const QUIVER_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [QUIVER_ERROR_INVALID_ARGUMENT, QUIVER_ERROR_INTERNAL];
-
-pub const QUIVER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &QUIVER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &QUIVER_ERRORS,
-};
 
 fn quiver_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -438,14 +53,28 @@ fn map_quiver_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    quiver_error_with_detail(&QUIVER_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = quiver_error_with_detail(&QUIVER_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_quiver_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    quiver_error_with_detail(&QUIVER_ERROR_INTERNAL, err.message)
+    let mapped = quiver_error_with_detail(&QUIVER_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::quiver")]
@@ -477,20 +106,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "quiver",
-    category = "plotting",
-    summary = "Render 2-D quiver vector-field plots.",
-    keywords = "quiver,plotting,vector field,arrows",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::quiver::QUIVER_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::quiver::QUIVER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::quiver"
 )]
-pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn quiver_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "quiver: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "quiver")?;
+    let _arguments = args.fork();
+    work.finish(quiver_impl(args, &work).await)
+}
+
+async fn quiver_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (target_axes, x, y, u, v, rest) =
         parse_quiver_args(args).map_err(map_quiver_invalid_argument)?;
-    let parsed = parse_quiver_style_args(&rest).map_err(map_quiver_invalid_argument)?;
+    let parsed = parse_quiver_style_args(rest.view()).map_err(map_quiver_invalid_argument)?;
     let mut x_in = Some(x);
     let mut y_in = Some(y);
     let mut u_in =
@@ -561,10 +202,13 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let opts = PlotRenderOptions::default();
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
+    work.check()?;
+    super::op_common::apply_axes_target(target_axes, BUILTIN_NAME)?;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let mut prepared = Some(plot);
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let axes = target_axes.unwrap_or(axes);
+        let axes = target_axes.map_or(axes, |(_, index)| index);
         let plot_index = figure
             .add_quiver_plot_on_axes(prepared.take().expect("quiver plot consumed once"), axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
@@ -1009,13 +653,21 @@ struct ParsedQuiverStyle {
     head_size: f32,
 }
 
-fn parse_quiver_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedQuiverStyle> {
+fn parse_quiver_style_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<ParsedQuiverStyle> {
     let mut filtered = Vec::new();
     let mut scale = 1.0f32;
     let mut head_size = 0.1f32;
     let mut idx = 0usize;
     while idx < args.len() {
-        if let Some(key) = super::style::value_as_string(&args[idx]) {
+        if let Some(key) = super::style::value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "quiver",
+                source.to_string(),
+                source,
+            )
+        })? {
             let key = key.trim().to_ascii_lowercase();
             if idx + 1 < args.len() {
                 match key.as_str() {
@@ -1051,60 +703,52 @@ fn parse_quiver_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedQuiverS
     })
 }
 
-fn parse_quiver_args(args: Vec<Value>) -> crate::BuiltinResult<QuiverArgs> {
+fn parse_quiver_args(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<QuiverArgs> {
+    let (target_axes, args) = if args
+        .first()
+        .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        (None, args)
+    } else {
+        super::op_common::split_leading_axes_arguments(args, BUILTIN_NAME)?
+    };
     if args.len() < 2 {
         return Err(plotting_error(
             BUILTIN_NAME,
-            "quiver: expected U,V or X,Y,U,V inputs",
+            "quiver: insufficient coordinate/vector inputs",
         ));
     }
-    let mut it = args.into_iter();
-    let mut target_axes = None;
-    let first = it.next().unwrap();
-    let first = if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
-        crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
-    {
-        target_axes = Some(axes);
-        it.next().ok_or_else(|| {
-            plotting_error(BUILTIN_NAME, "quiver: expected data after axes handle")
-        })?
+    let explicit = args.len() >= 4 && args.iter().take(4).all(quiver_numeric_like);
+    let (x, y, u, v) = if explicit {
+        (
+            QuiverCoordinateInput::Explicit(NumericInput::from_value(
+                args[0].clone(),
+                BUILTIN_NAME,
+            )?),
+            QuiverCoordinateInput::Explicit(NumericInput::from_value(
+                args[1].clone(),
+                BUILTIN_NAME,
+            )?),
+            args[2].clone(),
+            args[3].clone(),
+        )
     } else {
-        first
+        let (rows, cols) = default_quiver_grid_shape(&args[0], &args[1], BUILTIN_NAME)?;
+        (
+            QuiverCoordinateInput::ImplicitX { rows, cols },
+            QuiverCoordinateInput::ImplicitY { rows, cols },
+            args[0].clone(),
+            args[1].clone(),
+        )
     };
-    let second = it.next().unwrap();
-    let third = it.next();
-    let fourth = it.next();
-    match (third, fourth) {
-        (None, _) => {
-            let (rows, cols) = default_quiver_grid_shape(&first, &second, BUILTIN_NAME)?;
-            Ok((
-                target_axes,
-                QuiverCoordinateInput::ImplicitX { rows, cols },
-                QuiverCoordinateInput::ImplicitY { rows, cols },
-                first,
-                second,
-                Vec::new(),
-            ))
-        }
-        (Some(third), Some(fourth)) => Ok((
-            target_axes,
-            QuiverCoordinateInput::Explicit(
-                NumericInput::from_value(first, BUILTIN_NAME)
-                    .map_err(map_quiver_invalid_argument)?,
-            ),
-            QuiverCoordinateInput::Explicit(
-                NumericInput::from_value(second, BUILTIN_NAME)
-                    .map_err(map_quiver_invalid_argument)?,
-            ),
-            third,
-            fourth,
-            it.collect(),
-        )),
-        _ => Err(plotting_error(
-            BUILTIN_NAME,
-            "quiver: expected U,V or X,Y,U,V inputs",
-        )),
-    }
+    Ok((
+        target_axes,
+        x,
+        y,
+        u,
+        v,
+        args.into_range(if explicit { 4 } else { 2 }..)?,
+    ))
 }
 
 fn default_quiver_grid_shape(
@@ -1252,9 +896,25 @@ pub(super) fn expand_quiver_axis_tensor(
         .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))
 }
 
+fn quiver_numeric_like(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::QUIVER_DESCRIPTOR;
+    async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::quiver_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -1503,6 +1163,18 @@ mod tests {
         };
         assert_eq!(quiver.x, vec![1.0, 2.0]);
         assert_eq!(quiver.y, vec![1.0, 1.0]);
+        let styled = futures::executor::block_on(quiver_builtin(vec![
+            Value::Tensor(vec_tensor(&[1.0, -1.0])),
+            Value::Tensor(vec_tensor(&[0.5, 0.5])),
+            Value::from("r"),
+            Value::from("LineWidth"),
+            Value::Num(2.0),
+        ]))
+        .expect("implicit-grid style tail");
+        assert_eq!(
+            get_builtin(vec![Value::Num(styled), Value::from("LineWidth")]).unwrap(),
+            Value::Num(2.0)
+        );
     }
 
     #[test]
@@ -1512,6 +1184,8 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         let ax = subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
+        let target_figure = current_figure_handle();
+        super::super::state::select_figure(super::super::state::FigureHandle::from(9201));
         let handle = futures::executor::block_on(quiver_builtin(vec![
             Value::Num(ax),
             Value::Tensor(vec_tensor(&[0.0, 1.0])),
@@ -1522,6 +1196,7 @@ mod tests {
             Value::Num(2.5),
         ]))
         .unwrap();
+        assert_eq!(current_figure_handle(), target_figure);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plot_axes_indices()[0], 1);
         assert_eq!(
@@ -1568,6 +1243,10 @@ mod tests {
         let ax = subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
         let err = futures::executor::block_on(quiver_builtin(vec![Value::Num(ax)]))
             .expect_err("missing post-axes data should fail");
+        assert_eq!(err.identifier(), QUIVER_ERROR_INVALID_ARGUMENT.identifier);
+        let err =
+            futures::executor::block_on(quiver_builtin(vec![Value::Num(ax), Value::Num(1.0)]))
+                .expect_err("axes plus only U is diagnosed rather than unwrapped");
         assert_eq!(err.identifier(), QUIVER_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

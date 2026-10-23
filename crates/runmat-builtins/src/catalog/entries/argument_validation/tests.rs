@@ -56,6 +56,7 @@ fn unknown_inputs_preserve_zero_output_effects_and_exact_arity() {
         let n = entry.descriptor.signatures[0].inputs.len();
         let args = vec![ValueFact::unknown(DynamicReason::RuntimeValue); n];
         let result = infer_catalog_call(entry, &request(args.clone(), 0));
+        assert_eq!(entry.placement.residency, BuiltinResidencyPolicy::Host);
         assert!(result.outputs.is_empty(), "{}", entry.identity.name);
         assert!(
             result.diagnostics.is_empty(),

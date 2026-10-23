@@ -46,7 +46,9 @@ fn classify_text_ref(
             let data = array
                 .data()
                 .iter()
-                .map(|ch| u8::from(pred(*ch)))
+                // Char arrays expose UTF-16 storage geometry. A surrogate is
+                // not a standalone Unicode scalar and cannot satisfy a property.
+                .map(|unit| u8::from(char::from_u32(u32::from(unit.raw())).is_some_and(pred)))
                 .collect::<Vec<_>>();
             logical_value(data, vec![array.rows, array.cols], fn_name)
         }

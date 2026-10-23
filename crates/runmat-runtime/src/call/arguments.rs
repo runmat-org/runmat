@@ -54,20 +54,20 @@ impl ArgumentSpec {
 pub enum MaterializedArgument {
     Single(Value),
     Expansion(MaterializedExpansionSource),
-    Sequence(ValueSequence),
+    Sequence(RootedValueSequence),
 }
 
 #[derive(Debug, Clone)]
 pub enum MaterializedExpansionSource {
     CellContents {
         base: Value,
-        indices: Vec<Value>,
+        indices: OutputListStorage,
         expand_all: bool,
     },
-    ReturnedOutputs(ValueSequence),
+    ReturnedOutputs(RootedValueSequence),
     Member {
         base: Value,
-        member: runmat_types::MemberName,
+        member: runmat_value::Utf8Text,
     },
     DynamicMember {
         base: Value,
@@ -75,81 +75,135 @@ pub enum MaterializedExpansionSource {
     },
 }
 
-pub async fn expand_arguments(
+pub type PreparedMaterializedArguments =
+    crate::context::host_allocation::PreparedHostArray<MaterializedArgument>;
+pub fn prepare_materialized_arguments_in_context(
     runtime: &RuntimeContext,
-    arguments: Vec<MaterializedArgument>,
-) -> Result<RootedValues, RuntimeError> {
-    use crate::context::host_allocation::{
-        host_allocation_runtime_error, HostAllocationPlan, HostAllocationPolicy,
-        HostAllocationReceipt,
+    count: usize,
+) -> Result<PreparedMaterializedArguments, RuntimeError> {
+    crate::context::host_allocation::prepare_host_array(runtime, count)
+}
+fn raw_expansion_values(
+    source: &MaterializedExpansionSource,
+) -> impl Iterator<Item = &Value> + Clone {
+    let (base, member, indices): (Option<&Value>, Option<&Value>, &[Value]) = match source {
+        MaterializedExpansionSource::CellContents { base, indices, .. } => {
+            (Some(base), None, indices.as_slice())
+        }
+        MaterializedExpansionSource::Member { base, .. } => (Some(base), None, &[]),
+        MaterializedExpansionSource::DynamicMember { base, member } => {
+            (Some(base), Some(member), &[])
+        }
+        MaterializedExpansionSource::ReturnedOutputs(_) => (None, None, &[]),
     };
-    let roots = roots::ExpansionRoots::new()?;
-    roots.retain_arguments(&arguments);
+    [base, member].into_iter().flatten().chain(indices.iter())
+}
+fn raw_argument_values(argument: &MaterializedArgument) -> impl Iterator<Item = &Value> + Clone {
+    let (single, source) = match argument {
+        MaterializedArgument::Single(value) => (Some(value), None),
+        MaterializedArgument::Expansion(source) => (None, Some(source)),
+        MaterializedArgument::Sequence(_) => (None, None),
+    };
+    single
+        .into_iter()
+        .chain(source.into_iter().flat_map(raw_expansion_values))
+}
+pub fn retain_materialized_arguments_in_context(
+    runtime: &RuntimeContext,
+    arguments: &[MaterializedArgument],
+) -> Result<crate::execution::RootedValueLease, RuntimeError> {
+    crate::execution::RootedValueLease::for_values_iterator_in_context(
+        arguments.iter().flat_map(raw_argument_values),
+        runtime,
+    )
+}
+fn prepare_root_leases(
+    runtime: &RuntimeContext,
+    count: usize,
+) -> Result<
+    crate::context::host_allocation::PreparedHostArray<crate::execution::RootedValueLease>,
+    RuntimeError,
+> {
+    crate::context::host_allocation::prepare_host_array(runtime, count)
+}
+impl runmat_gc::Trace for MaterializedArgument {
+    fn trace(&self, tracer: &mut dyn runmat_gc::Tracer) {
+        match self {
+            Self::Sequence(value) => runmat_gc::Trace::trace(value.value(), tracer),
+            Self::Expansion(source) => runmat_gc::Trace::trace(source, tracer),
+            Self::Single(value) => runmat_gc::Trace::trace(value, tracer),
+        }
+    }
+}
+impl runmat_gc::Trace for MaterializedExpansionSource {
+    fn trace(&self, tracer: &mut dyn runmat_gc::Tracer) {
+        if let Self::ReturnedOutputs(sequence) = self {
+            runmat_gc::Trace::trace(sequence.value(), tracer);
+        }
+        for value in raw_expansion_values(self) {
+            runmat_gc::Trace::trace(value, tracer);
+        }
+    }
+}
+
+pub async fn expand_arguments<A>(
+    runtime: &RuntimeContext,
+    arguments: A,
+) -> Result<RootedValues, RuntimeError>
+where
+    A: AsRef<[MaterializedArgument]>
+        + AsMut<[MaterializedArgument]>
+        + IntoIterator<Item = MaterializedArgument>,
+{
+    let _input_roots = retain_materialized_arguments_in_context(runtime, arguments.as_ref())?;
+    let mut sequence_roots = prepare_root_leases(runtime, arguments.as_ref().len())?;
     // Reuse the input descriptor vector as the segment ledger. Each source
     // expression completes exactly once; its returned owner remains present
     // until actual final width is known and the final backing is admitted.
     let mut arguments = arguments;
-    for index in 0..arguments.len() {
+    for index in 0..arguments.as_ref().len() {
         let argument = std::mem::replace(
-            &mut arguments[index],
-            MaterializedArgument::Sequence(ValueSequence::empty()),
+            &mut arguments.as_mut()[index],
+            MaterializedArgument::Single(Value::Num(0.0)),
         );
         match argument {
             MaterializedArgument::Single(value) => {
-                arguments[index] = MaterializedArgument::Single(value);
+                arguments.as_mut()[index] = MaterializedArgument::Single(value);
             }
             MaterializedArgument::Expansion(source) => {
-                let sequence = materialize_expansion(runtime, source)
-                    .await?
-                    .with_owned_sequence(|sequence| {
-                        roots.retain_values(sequence.as_slice());
-                        Ok::<_, RuntimeError>(sequence)
+                let sequence = materialize_expansion(runtime, source).await?;
+                sequence_roots
+                    .try_push(sequence.root_lease())
+                    .map_err(|_| {
+                        semantic_error("RunMat:Call:Arguments", "argument root capacity changed")
                     })?;
-                arguments[index] = MaterializedArgument::Sequence(sequence);
+                arguments.as_mut()[index] = MaterializedArgument::Sequence(sequence);
             }
             MaterializedArgument::Sequence(sequence) => {
-                arguments[index] = MaterializedArgument::Sequence(sequence);
+                sequence_roots
+                    .try_push(sequence.root_lease())
+                    .map_err(|_| {
+                        semantic_error("RunMat:Call:Arguments", "argument root capacity changed")
+                    })?;
+                arguments.as_mut()[index] = MaterializedArgument::Sequence(sequence);
             }
         }
     }
-    let policy = HostAllocationReceipt::policy(Some(runtime)).map_err(|source| {
-        host_allocation_runtime_error(
-            Some(runtime),
-            "RunMat:Call:Arguments",
-            "expanded argument policy unavailable",
-            source,
-        )
-    })?;
-    if arguments.len() == 1 {
-        if let MaterializedArgument::Sequence(sequence) = &arguments[0] {
-            if policy == HostAllocationPolicy::Unbounded
-                || sequence.is_empty()
-                || sequence.has_retained_output_claim()
-            {
-                let MaterializedArgument::Sequence(sequence) =
-                    arguments.pop().expect("one argument")
-                else {
-                    unreachable!("checked sequence")
-                };
-                return RootedValues::from_output_storage_in_context(
-                    sequence.into_output_storage(),
-                    runtime,
-                );
-            }
-        }
-    }
-    let width = arguments.iter().try_fold(0usize, |width, argument| {
-        let next = match argument {
-            MaterializedArgument::Single(_) => 1,
-            MaterializedArgument::Sequence(sequence) => sequence.len(),
-            MaterializedArgument::Expansion(_) => unreachable!("expansions are materialized"),
-        };
-        width.checked_add(next).ok_or_else(|| {
-            semantic_error("RunMat:Call:Arguments", "expanded argument count overflows")
-        })
-    })?;
+    let width = arguments
+        .as_ref()
+        .iter()
+        .try_fold(0usize, |width, argument| {
+            let next = match argument {
+                MaterializedArgument::Single(_) => 1,
+                MaterializedArgument::Sequence(sequence) => sequence.len(),
+                MaterializedArgument::Expansion(_) => unreachable!("expansions are materialized"),
+            };
+            width.checked_add(next).ok_or_else(|| {
+                semantic_error("RunMat:Call:Arguments", "expanded argument count overflows")
+            })
+        })?;
     let mut arguments = arguments.into_iter();
-    let mut current: Option<runmat_value::OutputListIntoIter> = None;
+    let mut current: Option<crate::execution::RootedValuesIntoIter> = None;
     let mut next_value = || -> Result<Value, RuntimeError> {
         loop {
             if let Some(value) = current.as_mut().and_then(Iterator::next) {
@@ -159,112 +213,24 @@ pub async fn expand_arguments(
             match arguments.next() {
                 Some(MaterializedArgument::Single(value)) => return Ok(value),
                 Some(MaterializedArgument::Sequence(sequence)) => {
-                    current = Some(
-                        sequence
-                            .into_output_storage()
-                            .try_into_owned()
-                            .map_err(|_| {
-                                crate::sequence::sequence_error_to_runtime(
-                                    runmat_value::ValueSequenceError::SharedOutputStorage,
-                                )
-                            })?
-                            .into_iter(),
-                    );
+                    current = Some(sequence.try_into_values()?);
                 }
                 Some(MaterializedArgument::Expansion(_)) => unreachable!("materialized source"),
                 None => unreachable!("validated expanded argument width"),
             }
         }
     };
-    let raw = OutputListStorage::requested_bytes(width).map_err(|source| {
-        host_allocation_runtime_error(
-            Some(runtime),
-            "RunMat:Call:Arguments",
-            "expanded argument layout overflow",
-            source.into(),
-        )
-    })?;
-    let raw = u64::try_from(raw).map_err(|_| {
-        semantic_error(
-            "RunMat:Call:Arguments",
-            "expanded argument layout overflows",
-        )
-    })?;
-    let retained = HostAllocationPlan::retained_exact_output_bytes(raw, usize::from(width != 0))
-        .map_err(|source| {
-            host_allocation_runtime_error(
-                Some(runtime),
-                "RunMat:Call:Arguments",
-                "expanded argument admission failed",
-                source,
-            )
-        })?;
-    let receipt = HostAllocationReceipt::admit(
-        Some(runtime),
-        HostAllocationPlan::new(0, retained).map_err(|source| {
-            host_allocation_runtime_error(
-                Some(runtime),
-                "RunMat:Call:Arguments",
-                "expanded argument admission failed",
-                source,
-            )
-        })?,
-    )
-    .map_err(|source| {
-        host_allocation_runtime_error(
-            Some(runtime),
-            "RunMat:Call:Arguments",
-            "expanded argument admission failed",
-            source,
-        )
-    })?;
-    let values = if let Some(receipt) = receipt {
-        let permit = receipt.output_permit(runtime).map_err(|source| {
-            host_allocation_runtime_error(
-                Some(runtime),
-                "RunMat:Call:Arguments",
-                "expanded argument admission failed",
-                source,
-            )
-        })?;
-        let values = OutputListStorage::try_initialize(width, &permit, |_| next_value()).map_err(
-            |error| match error {
-                runmat_value::OutputListInitializationError::Allocation(source) => {
-                    host_allocation_runtime_error(
-                        Some(runtime),
-                        "RunMat:Call:Arguments",
-                        "expanded argument allocation failed",
-                        source.into(),
-                    )
-                }
-                runmat_value::OutputListInitializationError::Element(source) => source,
-            },
-        )?;
-        receipt.checkpoint(runtime).map_err(|source| {
-            host_allocation_runtime_error(
-                Some(runtime),
-                "RunMat:Call:Arguments",
-                "expanded argument checkpoint failed",
-                source,
-            )
-        })?;
-        values
-    } else {
-        let mut values = Vec::with_capacity(width);
-        for _ in 0..width {
-            values.push(next_value()?);
-        }
-        OutputListStorage::unbounded(values)
-    };
-    RootedValues::from_output_storage_in_context(values, runtime)
+    RootedValues::try_initialize_in_context(width, runtime, |_| next_value())
 }
 
 pub async fn materialize_expansion(
     runtime: &RuntimeContext,
     source: MaterializedExpansionSource,
 ) -> Result<RootedValueSequence, RuntimeError> {
-    let source_roots = roots::ExpansionRoots::new()?;
-    source_roots.retain_source(&source);
+    let _source_roots = crate::execution::RootedValueLease::for_values_iterator_in_context(
+        raw_expansion_values(&source),
+        runtime,
+    )?;
     let values = match source {
         MaterializedExpansionSource::CellContents {
             base,
@@ -316,22 +282,21 @@ pub async fn materialize_expansion(
             }
         }
         MaterializedExpansionSource::ReturnedOutputs(sequence) => {
-            return RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error());
+            return Ok(sequence);
         }
         MaterializedExpansionSource::Member { base, member } => {
-            return crate::object::resolve::read_member_sequence_with_context(
+            return crate::object::resolve::read_member_sequence_text_with_context(
                 Some(runtime),
                 base,
-                member.0,
+                member,
                 false,
                 None,
             )
             .await;
         }
         MaterializedExpansionSource::DynamicMember { base, member } => {
-            let member = String::try_from(&member)
-                .map_err(|error| semantic_error("DynamicFieldName", error))?;
-            return crate::object::resolve::read_member_sequence_with_context(
+            let member = crate::call::argument_text::convert(&member, Some(runtime))?;
+            return crate::object::resolve::read_member_sequence_text_with_context(
                 Some(runtime),
                 base,
                 member,
@@ -465,7 +430,9 @@ pub async fn expand_brace_values(
         base @ (Value::Object(_) | Value::HandleObject(_)) => {
             let path = ObjectSubscriptPath::single(ObjectSubscript::braces(
                 ObjectIndexSelector::IndexValues {
-                    components: indices.iter().cloned().map(Into::into).collect(),
+                    components: runmat_value::ExactArrayStorage::shared_unbounded(
+                        indices.iter().cloned().map(Into::into).collect(),
+                    ),
                 },
             ));
             let resolution = crate::object::dispatch::resolve_object_index_protocol(
@@ -530,7 +497,10 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::{CellArray, HandleRef, Value, ValueSequence};
 
-    use super::{expand_arguments, MaterializedArgument, MaterializedExpansionSource};
+    use super::{
+        expand_arguments, MaterializedArgument, MaterializedExpansionSource, OutputListStorage,
+        RootedValueSequence,
+    };
 
     fn runtime() -> crate::context::RuntimeContext {
         crate::context::RuntimeContext::new(std::rc::Rc::new(
@@ -550,7 +520,7 @@ mod tests {
                 vec![MaterializedArgument::Expansion(
                     MaterializedExpansionSource::CellContents {
                         base,
-                        indices,
+                        indices: indices.into(),
                         expand_all: false,
                     },
                 )],
@@ -569,7 +539,7 @@ mod tests {
                 MaterializedArgument::Single(Value::Num(1.0)),
                 MaterializedArgument::Expansion(MaterializedExpansionSource::CellContents {
                     base: Value::Cell(cell),
-                    indices: Vec::new(),
+                    indices: OutputListStorage::empty(),
                     expand_all: true,
                 }),
                 MaterializedArgument::Single(Value::Num(4.0)),
@@ -593,7 +563,11 @@ mod tests {
             &runtime(),
             vec![MaterializedArgument::Expansion(
                 MaterializedExpansionSource::ReturnedOutputs(
-                    ValueSequence::comma_separated(vec![Value::Num(9.0), Value::Num(2.0)]).unwrap(),
+                    RootedValueSequence::new(
+                        ValueSequence::comma_separated(vec![Value::Num(9.0), Value::Num(2.0)])
+                            .unwrap(),
+                    )
+                    .unwrap(),
                 ),
             )],
         ))
@@ -678,7 +652,7 @@ mod tests {
             vec![MaterializedArgument::Expansion(
                 MaterializedExpansionSource::CellContents {
                     base: Value::Num(1.0),
-                    indices: Vec::new(),
+                    indices: OutputListStorage::empty(),
                     expand_all: true,
                 },
             )],

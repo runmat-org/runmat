@@ -227,10 +227,10 @@ pub(crate) fn serials_from_datetime_value(value: &Value) -> BuiltinResult<Tensor
     }
 }
 
-pub(crate) fn datetime_format_from_value(value: &Value) -> String {
+pub(crate) fn datetime_format_from_value(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => format_for_object(obj),
-        _ => DEFAULT_DATETIME_FORMAT.to_string(),
+        _ => Ok(DEFAULT_DATETIME_FORMAT.to_string()),
     }
 }
 
@@ -293,7 +293,7 @@ pub(crate) fn datetime_row_times_from_calendar_step(
         None,
         Tensor::new(serials, vec![count, 1])
             .map_err(|error| datetime_error(format!("array2timetable: {error}")))?,
-        datetime_format_from_value(start),
+        datetime_format_from_value(start)?,
     )
 }
 
@@ -305,7 +305,7 @@ pub fn datetime_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
         return Ok(None);
     }
     let serials = serial_tensor_for_object(obj)?;
-    let format = format_for_object(obj);
+    let format = format_for_object(obj)?;
     let values = tensor::tensor_values_f64_cow(&serials);
     let mut strings = Vec::with_capacity(values.len());
     for serial in values.iter().copied() {

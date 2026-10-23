@@ -1,5 +1,6 @@
 //! Label construction, exact class identity, and class-order validation.
 use super::*;
+use runmat_value::{decode_utf16_code_units, Utf16DecodeError};
 
 pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinResult<LabelArray> {
     match value {
@@ -56,7 +57,10 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             categories: None,
         }),
         Value::CharArray(array) => Ok(LabelArray {
-            labels: char_rows(&array).into_iter().map(text_label).collect(),
+            labels: char_rows(&array, name)?
+                .into_iter()
+                .map(text_label)
+                .collect(),
             shape: vec![array.rows, 1],
             kind: LabelKind::Char,
             categories: None,
@@ -406,13 +410,16 @@ pub(super) fn is_text_kind(kind: LabelKind) -> bool {
     )
 }
 
-pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
+pub(super) fn char_rows(array: &CharArray, builtin: EncodingBuiltin) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data()[start..start + array.cols].iter().collect());
+        rows.push(
+            decode_utf16_code_units(&array.data()[start..start + array.cols])
+                .map_err(|error| invalid_utf16(builtin, "character label row", error))?,
+        );
     }
-    rows
+    Ok(rows)
 }
 
 pub(super) fn scalar_text(
@@ -422,7 +429,8 @@ pub(super) fn scalar_text(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::CharArray(chars) => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) => decode_utf16_code_units(chars.data())
+            .map_err(|error| invalid_utf16(builtin, context, error)),
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
@@ -431,6 +439,18 @@ pub(super) fn scalar_text(
             format!("{context}: expected string scalar, got {other:?}"),
         )),
     }
+}
+
+fn invalid_utf16(builtin: EncodingBuiltin, context: &str, error: Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "{context}: character value is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(builtin.name())
+    .with_source(error);
+    if let Some(identifier) = builtin.invalid().identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 pub(super) fn canonical(text: &str) -> String {

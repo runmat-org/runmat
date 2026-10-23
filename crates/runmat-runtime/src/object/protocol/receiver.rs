@@ -60,8 +60,14 @@ async fn prepare_subscript_receiver_in_scope(
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
 ) -> Result<PreparedSubscriptReceiver, RuntimeError> {
-    let _root = crate::execution::RootedValueLease::for_values(std::iter::once(&root))
-        .map_err(|error| error.into_runtime_error())?;
+    let _root = match runtime {
+        Some(context) => crate::execution::RootedValueLease::for_values_iterator_in_context(
+            std::iter::once(&root),
+            context,
+        )?,
+        None => crate::execution::RootedValueLease::for_values(std::iter::once(&root))
+            .map_err(|error| error.into_runtime_error())?,
+    };
     let receiver = match materialized_prefix {
         Some(prefix) => match runtime {
             Some(runtime) => {
@@ -75,7 +81,7 @@ async fn prepare_subscript_receiver_in_scope(
             }
             None => super::read_subscript_path_with_access(root, prefix, access.clone()).await?,
         },
-        None => RootedValue::new(root).map_err(|error| error.into_runtime_error())?,
+        None => RootedValue::in_optional_context(root, runtime)?,
     };
     let end = super::resolve_object_protocol(&receiver, ObjectProtocol::End, &access)?;
     Ok(PreparedSubscriptReceiver { receiver, end })
@@ -124,26 +130,9 @@ async fn resolve_subscript_end_in_scope(
         )
         .await;
     }
-    let shape = value_shape(&prepared.receiver);
+    let shape = crate::builtins::common::shape::stored_dimensions_borrowed(&prepared.receiver);
     let extent = crate::indexing::shape::selector_extent(&shape, component_count, component_index)?;
     RootedValue::new(exact_double(extent)?).map_err(|error| error.into_runtime_error())
-}
-
-fn value_shape(value: &Value) -> Vec<usize> {
-    match value {
-        Value::Tensor(value) => value.shape().to_vec(),
-        Value::ComplexTensor(value) => value.shape().to_vec(),
-        Value::SparseTensor(value) => value.shape(),
-        Value::GpuTensor(value) => value.shape().to_vec(),
-        Value::StringArray(value) => value.shape().to_vec(),
-        Value::LogicalArray(value) => value.shape.to_vec(),
-        Value::CharArray(value) => value.shape().to_vec(),
-        Value::Cell(value) => value.shape().to_vec(),
-        Value::StructArray(value) => value.shape().to_vec(),
-        Value::ObjectArray(value) => value.shape().to_vec(),
-        Value::SymbolicArray(value) => value.shape.to_vec(),
-        _ => vec![1, 1],
-    }
 }
 
 fn exact_double(value: usize) -> Result<Value, RuntimeError> {
@@ -212,8 +201,14 @@ mod tests {
             let complex = Value::ComplexTensor(
                 runmat_value::ComplexTensor::new(vec![(1.0, 2.0); count], shape.clone()).unwrap(),
             );
-            assert_eq!(value_shape(&real), shape);
-            assert_eq!(value_shape(&complex), shape);
+            assert_eq!(
+                crate::builtins::common::shape::stored_dimensions_borrowed(&real).as_slice(),
+                shape
+            );
+            assert_eq!(
+                crate::builtins::common::shape::stored_dimensions_borrowed(&complex).as_slice(),
+                shape
+            );
         }
     }
 }

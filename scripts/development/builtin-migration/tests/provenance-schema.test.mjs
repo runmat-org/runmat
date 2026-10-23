@@ -136,7 +136,7 @@ test("compiled catalog audience and current schema versions are strict", () => {
   const oldCatalog = compiledInventoryFixture();
   oldCatalog.snapshot.declared.catalog_schema_version = 6;
   reseal(oldCatalog);
-  assert.throws(() => parseCompiledInventory(oldCatalog), /schema version must be 8/);
+  assert.throws(() => parseCompiledInventory(oldCatalog), /schema version must be 10/);
 });
 
 test("compiled aliases require an exact public canonical target", () => {

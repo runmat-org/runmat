@@ -1,22 +1,28 @@
 //! Core Text Analytics document and bag-of-words compatibility objects.
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    BAG_OF_WORDS_DESCRIPTOR,
+    BAG_OF_WORDS_ERROR_BAG_OF_WORDS_INVALID_INPUT as ERROR_BAG_OF_WORDS_INVALID_INPUT,
+    BAG_OF_WORDS_INTEGER_CAPABILITIES, REMOVE_LONG_WORDS_DESCRIPTOR,
+    REMOVE_LONG_WORDS_ERROR_REMOVE_LONG_WORDS_INVALID_INPUT as ERROR_REMOVE_LONG_WORDS_INVALID_INPUT,
+    REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION, REMOVE_LONG_WORDS_EXTENSIONS,
+    REMOVE_LONG_WORDS_INTEGER_CAPABILITIES, REMOVE_SHORT_WORDS_DESCRIPTOR,
+    REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION, REMOVE_SHORT_WORDS_EXTENSIONS,
+    REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES, REMOVE_STOP_WORDS_DESCRIPTOR,
+    REMOVE_STOP_WORDS_ERROR_REMOVE_STOP_WORDS_INVALID_INPUT as ERROR_REMOVE_STOP_WORDS_INVALID_INPUT,
+    REMOVE_STOP_WORDS_INTEGER_AUDIT, REMOVE_WORDS_DESCRIPTOR,
+    REMOVE_WORDS_ERROR_REMOVE_WORDS_INVALID_INPUT as ERROR_REMOVE_WORDS_INVALID_INPUT,
+    REMOVE_WORDS_EXPLICIT_GPU_EXTENSION, REMOVE_WORDS_EXTENSIONS,
+    REMOVE_WORDS_INTEGER_CAPABILITIES, TOKENIZED_DOCUMENT_DESCRIPTOR,
+    TOKENIZED_DOCUMENT_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
+    TOKENIZED_DOCUMENT_INTEGER_AUDIT,
+};
 use runmat_types::MemberAccess;
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
-};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, StringArray, Tensor,
@@ -38,230 +44,10 @@ pub const BAG_OF_WORDS_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("bagOfWords");
 const MAX_DENSE_BAG_COUNT_CELLS: usize = 50_000_000;
 
-pub const REMOVE_STOP_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "removeStopWords accepts a tokenizedDocument and logical IgnoreCase option; native integer and resident numeric arguments are rejected before provider access.",
-    };
-
 static TOKENIZED_DOCUMENT_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(TOKENIZED_DOCUMENT_CLASS);
 static BAG_OF_WORDS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(BAG_OF_WORDS_CLASS);
-
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Tokenized document object.",
-}];
-
-const OUT_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bag",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bag-of-words model object.",
-}];
-
-const OUT_DOCUMENTS_OR_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocumentsOrBag",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filtered tokenizedDocument or bagOfWords object.",
-}];
-
-const OUT_DOCUMENTS_FILTERED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filtered tokenizedDocument object.",
-}];
-
-const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text or pre-tokenized words.",
-}];
-
-const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text or pre-tokenized words.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains, CustomTokens, RegularExpressions.",
-    },
-];
-
-const IN_DOCUMENTS_OR_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documentsOrWords",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Tokenized documents, word vector, or unique vocabulary.",
-}];
-
-const IN_WORDS_COUNTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "uniqueWords",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique words.",
-    },
-    BuiltinParamDescriptor {
-        name: "counts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Word counts per document.",
-    },
-];
-
-const IN_REMOVE_SHORT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documentsOrBag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument or bagOfWords object.",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum word length to remove.",
-    },
-];
-
-const IN_REMOVE_LONG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documentsOrBag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument or bagOfWords object.",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum word length to remove.",
-    },
-];
-
-const IN_REMOVE_WORDS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "documentsOrBag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument or bagOfWords object.",
-    },
-    BuiltinParamDescriptor {
-        name: "wordsOrIdx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to remove or indices into the object's Vocabulary.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const IN_REMOVE_STOP: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const IN_REMOVE_STOP_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
-    identifier: Some("RunMat:textAnalyticsDocuments:InvalidInput"),
-    when: "Inputs do not match a supported Text Analytics document or model helper form.",
-    message: "Text Analytics document helper received invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-const ERROR_BAG_OF_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAGOFWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:bagOfWords:InvalidInput"),
-    when: "Inputs do not match a supported bagOfWords form.",
-    message: "bagOfWords: invalid input",
-};
-
-const BAG_OF_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_BAG_OF_WORDS_INVALID_INPUT];
-
-const ERROR_REMOVE_LONG_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REMOVELONGWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:removeLongWords:InvalidInput"),
-    when: "Inputs do not match a supported removeLongWords form.",
-    message: "removeLongWords: invalid input",
-};
-
-const REMOVE_LONG_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [ERROR_REMOVE_LONG_WORDS_INVALID_INPUT];
-
-const ERROR_REMOVE_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REMOVEWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:removeWords:InvalidInput"),
-    when: "Inputs do not match a supported removeWords form.",
-    message: "removeWords: invalid input",
-};
-
-const REMOVE_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_REMOVE_WORDS_INVALID_INPUT];
-
-const ERROR_REMOVE_STOP_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REMOVESTOPWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:removeStopWords:InvalidInput"),
-    when: "Inputs do not match a supported removeStopWords form.",
-    message: "removeStopWords: invalid input",
-};
-
-const REMOVE_STOP_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [ERROR_REMOVE_STOP_WORDS_INVALID_INPUT];
 
 const ERROR_TOKEN_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TOKENDETAILS.INVALID_INPUT",
@@ -313,230 +99,6 @@ const ERROR_VADER_SENTIMENT_SCORES_INVALID_INPUT: BuiltinErrorDescriptor = Built
     message: "vaderSentimentScores received invalid input",
 };
 
-pub const TOKENIZED_DOCUMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "documents = tokenizedDocument",
-            inputs: &[],
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "documents = tokenizedDocument(str)",
-            inputs: &IN_TEXT,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "documents = tokenizedDocument(str, Name, Value, ...)",
-            inputs: &IN_TEXT_REST,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const TOKENIZED_DOCUMENT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "tokenizedDocument accepts text, text containers, and text-valued tokenization options. Native integer arrays are neither document text nor valid option values; generated document counts remain double object metadata.",
-    };
-
-pub const BAG_OF_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfWords",
-            inputs: &[],
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfWords(documents)",
-            inputs: &IN_DOCUMENTS_OR_WORDS,
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfWords(uniqueWords, counts)",
-            inputs: &IN_WORDS_COUNTS,
-            outputs: &OUT_BAG,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &BAG_OF_WORDS_ERRORS,
-};
-
-const BAG_OF_WORDS_COUNTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "counts",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Explicit count matrices accept every integer class and require nonnegative values.",
-    }];
-
-pub const BAG_OF_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "bag = bagOfWords(uniqueWords, integer_counts)",
-        inputs: &BAG_OF_WORDS_COUNTS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Counts remain authoritative through nonnegative-integer validation and vocabulary-column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
-    }];
-
-const REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    text_control_gpu_extension(
-        "removeshortwords-explicit-gpu-input",
-        "removeShortWords host fallback for explicit gpuArray input is a RunMat extension",
-        "RunMat:compatibility:RemoveShortWordsExplicitGpuInputExtension",
-    );
-const REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    text_control_gpu_extension(
-        "removelongwords-explicit-gpu-input",
-        "removeLongWords host fallback for explicit gpuArray input is a RunMat extension",
-        "RunMat:compatibility:RemoveLongWordsExplicitGpuInputExtension",
-    );
-const REMOVE_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = text_control_gpu_extension(
-    "removewords-explicit-gpu-input",
-    "removeWords host fallback for explicit gpuArray input is a RunMat extension",
-    "RunMat:compatibility:RemoveWordsExplicitGpuInputExtension",
-);
-const fn text_control_gpu_extension(
-    id: &'static str,
-    description: &'static str,
-    error_identifier: &'static str,
-) -> BuiltinExtensionDescriptor {
-    BuiltinExtensionDescriptor {
-        id,
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description,
-        error_identifier: Some(error_identifier),
-    }
-}
-const REMOVE_SHORT_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION];
-const REMOVE_LONG_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION];
-const REMOVE_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REMOVE_WORDS_EXPLICIT_GPU_EXTENSION];
-
-const TEXT_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "len",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive-integer word-length threshold accepts every integer class and is validated exactly against platform bounds.",
-    }];
-const REMOVE_WORDS_INDEX_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "idx",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Documented numeric vocabulary indices accept all eight integer classes and are read exactly before one-based bounds validation and deduplication.",
-    }];
-pub const REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [text_length_integer_capability(
-        "newDocumentsOrBag = removeShortWords(documentsOrBag, integer_len)",
-    )];
-pub const REMOVE_LONG_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [text_length_integer_capability(
-        "newDocumentsOrBag = removeLongWords(documentsOrBag, integer_len)",
-    )];
-const fn text_length_integer_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &TEXT_LENGTH_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact threshold controls host text filtering only. Automatic residency gathers transparently; explicit gpuArray arguments are separately gated.",
-    }
-}
-pub const REMOVE_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "newDocumentsOrBag = removeWords(documentsOrBag, integer_idx)",
-        inputs: &REMOVE_WORDS_INDEX_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact positive indices select vocabulary entries without binary64 collapse; logical masks remain a distinct documented selector form.",
-    }];
-
-pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "newDocumentsOrBag = removeShortWords(documentsOrBag, len)",
-        inputs: &IN_REMOVE_SHORT,
-        outputs: &OUT_DOCUMENTS_OR_BAG,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const REMOVE_LONG_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "newDocumentsOrBag = removeLongWords(documentsOrBag, len)",
-        inputs: &IN_REMOVE_LONG,
-        outputs: &OUT_DOCUMENTS_OR_BAG,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REMOVE_LONG_WORDS_ERRORS,
-};
-
-pub const REMOVE_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "newDocumentsOrBag = removeWords(documentsOrBag, words)",
-            inputs: &IN_REMOVE_WORDS,
-            outputs: &OUT_DOCUMENTS_OR_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocumentsOrBag = removeWords(documentsOrBag, idx)",
-            inputs: &IN_REMOVE_WORDS,
-            outputs: &OUT_DOCUMENTS_OR_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocumentsOrBag = removeWords(___, 'IgnoreCase', tf)",
-            inputs: &IN_REMOVE_WORDS,
-            outputs: &OUT_DOCUMENTS_OR_BAG,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REMOVE_WORDS_ERRORS,
-};
-
-pub const REMOVE_STOP_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = removeStopWords(documents)",
-            inputs: &IN_REMOVE_STOP_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS_FILTERED,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = removeStopWords(documents, Name, Value, ...)",
-            inputs: &IN_REMOVE_STOP,
-            outputs: &OUT_DOCUMENTS_FILTERED,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REMOVE_STOP_WORDS_ERRORS,
-};
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
     fn_name: &str,
     message: impl Into<String>,
@@ -561,6 +123,21 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         Some(identifier) => builder.with_identifier(identifier).build(),
         None => builder.build(),
     }
+}
+
+fn char_row_for_text_analytics(
+    array: &runmat_value::CharArray,
+    row: usize,
+    fn_name: &str,
+) -> BuiltinResult<String> {
+    char_row_to_string_slice(array.data(), array.cols, row).map_err(|source| {
+        let mut diagnostic = text_analytics_error(
+            fn_name,
+            format!("{fn_name}: malformed UTF-16 character input"),
+        );
+        diagnostic.source = Some(Box::new(source));
+        diagnostic
+    })
 }
 
 pub(in crate::builtins::strings::text_analytics) fn replace_document_properties<'a, I>(
@@ -686,28 +263,32 @@ fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
 
 #[runtime_builtin(
     name = "tokenizedDocument",
-    category = "strings/text_analytics",
-    summary = "Create tokenized document objects for Text Analytics workflows.",
-    keywords = "tokenizedDocument,text analytics,tokenize,document",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_builtin(
-    args: Vec<Value>,
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::TOKENIZED_DOCUMENT_DESCRIPTOR,
+        &runmat_builtins::TOKENIZED_DOCUMENT_ERROR_TOO_MANY_OUTPUTS,
+        "tokenizedDocument",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "tokenizedDocument")?;
+    work.finish(async {
+
     if args.iter().any(direct_numeric_or_resident_document_input) {
         return Err(text_analytics_error(
             "tokenizedDocument",
             "tokenizedDocument: inputs and option values must be host text or supported text containers",
         ));
     }
-    let gathered = gather_args(args, "tokenizedDocument").await?;
-    let (input, options) = parse_tokenized_document_args(gathered)?;
+    let gathered = gather_args(&args, runtime.as_ref(), "tokenizedDocument").await?;
+ work.check()?;
+    let (input, options) = parse_tokenized_document_args(gathered.view())?;
     let parsed = match input {
         Some(value) => documents_from_value(value, &options)?,
         None => ParsedDocuments {
@@ -716,7 +297,8 @@ pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_bui
             type_details: None,
         },
     };
-    tokenized_document_value(parsed.documents, parsed.shape, options, parsed.type_details)
+    tokenized_document_value(runtime.as_ref(), parsed.documents, parsed.shape, options, parsed.type_details)
+ }.await)
 }
 
 fn direct_numeric_or_resident_document_input(value: &Value) -> bool {
@@ -736,194 +318,232 @@ fn direct_numeric_or_resident_document_input(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "bagOfWords",
-    category = "strings/text_analytics",
-    summary = "Create bag-of-words model objects.",
-    keywords = "bagOfWords,text analytics,word counts,vocabulary",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn bag_of_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
-        return Err(text_analytics_error(
-            "bagOfWords",
-            "bagOfWords: GPU-resident inputs are not supported",
-        ));
-    }
-    let gathered = gather_args(args, "bagOfWords").await?;
-    match gathered.as_slice() {
-        [] => bag_from_documents(Vec::new()),
-        [value] => match value {
-            Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-                bag_from_documents(documents_from_object(object, "bagOfWords")?)
+async fn bag_of_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BAG_OF_WORDS_DESCRIPTOR,
+        &runmat_builtins::BAG_OF_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "bagOfWords",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "bagOfWords")?;
+    work.finish(
+        async {
+            if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
+                return Err(text_analytics_error(
+                    "bagOfWords",
+                    "bagOfWords: GPU-resident inputs are not supported",
+                ));
             }
-            Value::Object(object) => Err(text_analytics_error(
-                "bagOfWords",
-                format!(
-                    "bagOfWords: expected tokenizedDocument object, got {}",
-                    object.class_name()
-                ),
-            )),
-            other => bag_from_documents(vec![words_from_word_vector(other, "bagOfWords")?]),
-        },
-        [words, counts] => bag_from_unique_words_and_counts(words, counts),
-        _ => Err(text_analytics_error(
-            "bagOfWords",
-            "bagOfWords: expected zero, one, or two inputs",
-        )),
-    }
+            let gathered = gather_args(&args, runtime.as_ref(), "bagOfWords").await?;
+            work.check()?;
+            match gathered.len() {
+                0 => bag_from_documents(runtime.as_ref(), Vec::new()),
+                1 => match &gathered[0] {
+                    Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+                        bag_from_documents(
+                            runtime.as_ref(),
+                            documents_from_object(object, "bagOfWords")?,
+                        )
+                    }
+                    Value::Object(object) => Err(text_analytics_error(
+                        "bagOfWords",
+                        format!(
+                            "bagOfWords: expected tokenizedDocument object, got {}",
+                            object.class_name()
+                        ),
+                    )),
+                    other => bag_from_documents(
+                        runtime.as_ref(),
+                        vec![words_from_word_vector(other, "bagOfWords")?],
+                    ),
+                },
+                2 => bag_from_unique_words_and_counts(runtime.as_ref(), &gathered[0], &gathered[1]),
+                _ => Err(text_analytics_error(
+                    "bagOfWords",
+                    "bagOfWords: expected zero, one, or two inputs",
+                )),
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeShortWords",
-    category = "strings/text_analytics",
-    summary = "Remove short words from tokenized documents or bag-of-words models.",
-    keywords = "removeShortWords,text analytics,tokenizedDocument,bagOfWords",
-    accel = "sink",
-    extensions(REMOVE_SHORT_WORDS_EXTENSIONS),
-    integer_capabilities(REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_SHORT_WORDS_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
-        || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION,
-            "removeShortWords",
-        )?;
-    }
-    let value = gather_if_needed_async(&value).await.map_err(|err| {
-        text_analytics_error("removeShortWords", format!("removeShortWords: {err}"))
-    })?;
-    let len = gather_if_needed_async(&len).await.map_err(|err| {
-        text_analytics_error("removeShortWords", format!("removeShortWords: {err}"))
-    })?;
-    let max_len = parse_positive_integer(&len, "removeShortWords")?;
-    match value {
-        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-            let documents = documents_from_object(&object, "removeShortWords")?
-                .into_iter()
-                .map(|doc| {
-                    doc.into_iter()
-                        .filter(|token| token.chars().count() > max_len)
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>();
-            let shape = shape_from_object(&object, "removeShortWords")?;
-            let options = options_from_document_object(&object);
-            tokenized_document_value(documents, shape, options, None)
-        }
-        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
-            remove_short_words_from_bag(object, max_len)
-        }
-        Value::Object(object) => Err(text_analytics_error(
-            "removeShortWords",
-            format!(
-                "removeShortWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name()
-            ),
-        )),
-        other => Err(text_analytics_error(
-            "removeShortWords",
-            format!(
+async fn remove_short_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    len: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_SHORT_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_SHORT_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeShortWords",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeShortWords")?;
+    work.finish(
+        async {
+            if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+                || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION,
+                    "removeShortWords",
+                )?;
+            }
+            let value = work.wait(gather_if_needed_async(&value)).await?;
+            let len = work.wait(gather_if_needed_async(&len)).await?;
+            let max_len = parse_positive_integer(&len, "removeShortWords")?;
+            match value {
+                Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+                    let documents = documents_from_object(&object, "removeShortWords")?
+                        .into_iter()
+                        .map(|doc| {
+                            doc.into_iter()
+                                .filter(|token| token.chars().count() > max_len)
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>();
+                    let shape = shape_from_object(&object, "removeShortWords")?;
+                    let options = options_from_document_object(&object);
+                    tokenized_document_value(runtime.as_ref(), documents, shape, options, None)
+                }
+                Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
+                    remove_short_words_from_bag(runtime.as_ref(), object, max_len)
+                }
+                Value::Object(object) => Err(text_analytics_error(
+                    "removeShortWords",
+                    format!(
+                        "removeShortWords: expected tokenizedDocument or bagOfWords object, got {}",
+                        object.class_name()
+                    ),
+                )),
+                other => Err(text_analytics_error(
+                    "removeShortWords",
+                    format!(
                 "removeShortWords: expected tokenizedDocument or bagOfWords object, got {other:?}"
             ),
-        )),
-    }
+                )),
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeLongWords",
-    category = "strings/text_analytics",
-    summary = "Remove long words from tokenized documents or bag-of-words models.",
-    keywords = "removeLongWords,text analytics,tokenizedDocument,bagOfWords",
-    accel = "sink",
-    extensions(REMOVE_LONG_WORDS_EXTENSIONS),
-    integer_capabilities(REMOVE_LONG_WORDS_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_LONG_WORDS_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_long_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
-        || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION,
-            "removeLongWords",
-        )?;
-    }
-    let value = gather_if_needed_async(&value).await.map_err(|err| {
-        text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
-    })?;
-    let len = gather_if_needed_async(&len).await.map_err(|err| {
-        text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
-    })?;
-    let min_len = parse_positive_integer(&len, "removeLongWords")?;
-    match value {
-        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-            transform_tokenized_document(&object, "removeLongWords", |token, _| {
-                Ok((token.chars().count() < min_len).then(|| token.to_string()))
-            })
-        }
-        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
-            filter_bag_columns_by_predicate(object, "removeLongWords", |word| {
-                word.chars().count() < min_len
-            })
-        }
-        Value::Object(object) => Err(text_analytics_error(
-            "removeLongWords",
-            format!(
-                "removeLongWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name()
-            ),
-        )),
-        other => Err(text_analytics_error(
-            "removeLongWords",
-            format!(
+async fn remove_long_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    len: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_LONG_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_LONG_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeLongWords",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeLongWords")?;
+    work.finish(
+        async {
+            if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+                || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION,
+                    "removeLongWords",
+                )?;
+            }
+            let value = work.wait(gather_if_needed_async(&value)).await?;
+            let len = work.wait(gather_if_needed_async(&len)).await?;
+            let min_len = parse_positive_integer(&len, "removeLongWords")?;
+            match value {
+                Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+                    transform_tokenized_document(
+                        runtime.as_ref(),
+                        &object,
+                        "removeLongWords",
+                        |token, _| Ok((token.chars().count() < min_len).then(|| token.to_string())),
+                    )
+                }
+                Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
+                    filter_bag_columns_by_predicate(
+                        runtime.as_ref(),
+                        object,
+                        "removeLongWords",
+                        |word| word.chars().count() < min_len,
+                    )
+                }
+                Value::Object(object) => Err(text_analytics_error(
+                    "removeLongWords",
+                    format!(
+                        "removeLongWords: expected tokenizedDocument or bagOfWords object, got {}",
+                        object.class_name()
+                    ),
+                )),
+                other => Err(text_analytics_error(
+                    "removeLongWords",
+                    format!(
                 "removeLongWords: expected tokenizedDocument or bagOfWords object, got {other:?}"
             ),
-        )),
-    }
+                )),
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeWords",
-    category = "strings/text_analytics",
-    summary = "Remove selected words from tokenized documents or bag-of-words models.",
-    keywords = "removeWords,text analytics,tokenizedDocument,bagOfWords,filter",
-    accel = "sink",
-    extensions(REMOVE_WORDS_EXTENSIONS),
-    integer_capabilities(REMOVE_WORDS_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_WORDS_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args
-        .iter()
-        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &REMOVE_WORDS_EXPLICIT_GPU_EXTENSION,
-            "removeWords",
-        )?;
-    }
-    let gathered = gather_args(args, "removeWords").await?;
-    let (value, selector, options) = parse_remove_words_args(gathered)?;
-    match value {
+async fn remove_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeWords",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeWords")?;
+    work.finish(
+        async {
+            if args
+                .iter()
+                .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &REMOVE_WORDS_EXPLICIT_GPU_EXTENSION,
+                    "removeWords",
+                )?;
+            }
+            let gathered = gather_args(&args, runtime.as_ref(), "removeWords").await?;
+            work.check()?;
+            let (value, selector, options) = parse_remove_words_args(gathered.view())?;
+            match value {
         Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
             let vocabulary = documents_vocabulary(&object, "removeWords")?;
             let words = selector.words(&vocabulary, "removeWords")?;
             let remove_set = word_set(words, options.ignore_case);
-            transform_tokenized_document(&object, "removeWords", |token, _| {
+            transform_tokenized_document(runtime.as_ref(), &object, "removeWords", |token, _| {
                 let key = comparable_word(token, options.ignore_case);
                 Ok((!remove_set.contains(&key)).then(|| token.to_string()))
             })
@@ -932,7 +552,7 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             let vocabulary = vocabulary_from_bag(&object, "removeWords")?;
             let words = selector.words(&vocabulary, "removeWords")?;
             let remove_set = word_set(words, options.ignore_case);
-            filter_bag_columns(object, "removeWords", |word| {
+            filter_bag_columns(runtime.as_ref(), object, "removeWords", |word| {
                 let key = comparable_word(word, options.ignore_case);
                 !remove_set.contains(&key)
             })
@@ -949,83 +569,101 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             format!("removeWords: expected tokenizedDocument or bagOfWords object, got {other:?}"),
         )),
     }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeStopWords",
-    category = "strings/text_analytics",
-    summary = "Remove stop words from tokenized documents.",
-    keywords = "removeStopWords,stop words,text analytics,tokenizedDocument",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_stop_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|value| {
-        crate::builtins::common::validation::value_has_native_integer_class(value)
-            || matches!(value, Value::GpuTensor(_))
-    }) {
-        return Err(text_analytics_error(
-            "removeStopWords",
-            "removeStopWords: expected tokenizedDocument input and logical options",
-        ));
-    }
-    let (value, options) = parse_remove_stop_words_args(args)?;
-    let Value::Object(object) = value else {
-        return Err(text_analytics_error(
-            "removeStopWords",
-            format!("removeStopWords: expected tokenizedDocument object, got {value:?}"),
-        ));
-    };
-    if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
-        return Err(text_analytics_error(
-            "removeStopWords",
-            format!(
-                "removeStopWords: expected tokenizedDocument object, got {}",
-                object.class_name()
-            ),
-        ));
-    }
-    let language = stop_words_language_from_document_object(&object, "removeStopWords")?;
-    let words = stop_words_for_language(language);
-    let stop_words = words
-        .iter()
-        .map(|word| {
-            if options.ignore_case {
-                word.to_lowercase()
-            } else {
-                (*word).to_string()
+async fn remove_stop_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_STOP_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_STOP_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeStopWords",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeStopWords")?;
+    work.finish(
+        async {
+            if args.iter().any(|value| {
+                crate::builtins::common::validation::value_has_native_integer_class(value)
+                    || matches!(value, Value::GpuTensor(_))
+            }) {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    "removeStopWords: expected tokenizedDocument input and logical options",
+                ));
             }
-        })
-        .collect::<HashSet<_>>();
-    transform_tokenized_document(&object, "removeStopWords", |token, token_type| {
-        if !matches!(
-            token_type,
-            DocumentTokenType::Letters | DocumentTokenType::Other
-        ) {
-            return Ok(Some(token.to_string()));
+            let (value, options) = parse_remove_stop_words_args(args.view())?;
+            let Value::Object(object) = value else {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    format!("removeStopWords: expected tokenizedDocument object, got {value:?}"),
+                ));
+            };
+            if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    format!(
+                        "removeStopWords: expected tokenizedDocument object, got {}",
+                        object.class_name()
+                    ),
+                ));
+            }
+            let language = stop_words_language_from_document_object(&object, "removeStopWords")?;
+            let words = stop_words_for_language(language);
+            let stop_words = words
+                .iter()
+                .map(|word| {
+                    if options.ignore_case {
+                        word.to_lowercase()
+                    } else {
+                        (*word).to_string()
+                    }
+                })
+                .collect::<HashSet<_>>();
+            transform_tokenized_document(
+                runtime.as_ref(),
+                &object,
+                "removeStopWords",
+                |token, token_type| {
+                    if !matches!(
+                        token_type,
+                        DocumentTokenType::Letters | DocumentTokenType::Other
+                    ) {
+                        return Ok(Some(token.to_string()));
+                    }
+                    let key = if options.ignore_case {
+                        token.to_lowercase()
+                    } else {
+                        token.to_string()
+                    };
+                    Ok((!stop_words.contains(&key)).then(|| token.to_string()))
+                },
+            )
         }
-        let key = if options.ignore_case {
-            token.to_lowercase()
-        } else {
-            token.to_string()
-        };
-        Ok((!stop_words.contains(&key)).then(|| token.to_string()))
-    })
+        .await,
+    )
 }
 
-async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
-            text_analytics_error(fn_name, format!("{fn_name}: failed to gather input: {err}"))
-        })?);
-    }
-    Ok(out)
+async fn gather_args(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+    fn_name: &str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let work = super::model_admission::UnboundedModelWork::admit(runtime, fn_name)?;
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        work.wait(gather_if_needed_async(&args[index])).await
+    })
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -1155,7 +793,7 @@ impl DetectPatterns {
 }
 
 fn parse_tokenized_document_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Option<Value>, DocumentOptions)> {
     if args.is_empty() {
         return Ok((None, DocumentOptions::default()));
@@ -1545,7 +1183,7 @@ impl RemoveWordsSelector {
 }
 
 fn parse_remove_stop_words_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, RemoveStopWordsOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -1582,7 +1220,7 @@ fn parse_remove_stop_words_args(
 }
 
 fn parse_remove_words_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, RemoveWordsSelector, RemoveWordsOptions)> {
     if args.len() < 2 {
         return Err(text_analytics_error(
@@ -1771,7 +1409,7 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(array.data(), array.cols, 0)
+                char_row_for_text_analytics(&array, 0, "tokenizedDocument")?
             };
             let tokenized = tokenize_text(&text, options);
             Ok(ParsedDocuments {
@@ -1785,7 +1423,7 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             let mut type_details = options.requires_type_details().then(Vec::new);
             for row in 0..array.rows {
                 let tokenized = tokenize_text(
-                    &char_row_to_string_slice(array.data(), array.cols, row),
+                    &char_row_for_text_analytics(&array, row, "tokenizedDocument")?,
                     options,
                 );
                 if let Some(details) = &mut type_details {
@@ -1846,7 +1484,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(array.data(), array.cols, 0)
+                char_row_for_text_analytics(&array, 0, "tokenizedDocument")?
             };
             Ok(ParsedDocuments {
                 documents: vec![vec![text]],
@@ -2224,6 +1862,7 @@ fn is_trailing_punctuation(ch: char) -> bool {
 }
 
 fn tokenized_document_value(
+    runtime: Option<&crate::context::RuntimeContext>,
     documents: Vec<Vec<String>>,
     shape: Vec<usize>,
     options: DocumentOptions,
@@ -2283,7 +1922,7 @@ fn tokenized_document_value(
         .map(|details| type_details_cell(details).map(|value| ("TypeDetails", value)))
         .transpose()?;
     crate::execution::object::construct_object_from_borrowed_fields(
-        None,
+        runtime,
         TOKENIZED_DOCUMENT_CLASS.display_name(),
         fields
             .iter()
@@ -2355,6 +1994,7 @@ pub(in crate::builtins::strings::text_analytics) fn tokenized_document_language(
 }
 
 pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &ObjectInstance,
     fn_name: &str,
     mut transform: impl FnMut(&str, DocumentTokenType) -> BuiltinResult<Option<String>>,
@@ -2375,6 +2015,7 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     tokenized_document_value(
+        runtime,
         documents,
         shape_from_object(object, fn_name)?,
         options,
@@ -2497,6 +2138,7 @@ fn transform_tokenized_document_by_type_name(
     }
 
     tokenized_document_value(
+        None,
         output_documents,
         shape_from_object(object, fn_name)?,
         options,
@@ -2959,7 +2601,10 @@ pub(in crate::builtins::strings::text_analytics) fn options_from_document_object
     }
 }
 
-fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
+fn bag_from_documents(
+    runtime: Option<&crate::context::RuntimeContext>,
+    documents: Vec<Vec<String>>,
+) -> BuiltinResult<Value> {
     let mut vocabulary = Vec::new();
     let mut positions = BTreeMap::new();
     for token in documents.iter().flatten() {
@@ -2978,7 +2623,7 @@ fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
             }
         }
     }
-    bag_object(vocabulary, counts, rows)
+    bag_object(runtime, vocabulary, counts, rows)
 }
 
 fn count_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
@@ -2989,7 +2634,11 @@ fn count_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
     }
 }
 
-fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinResult<Value> {
+fn bag_from_unique_words_and_counts(
+    runtime: Option<&crate::context::RuntimeContext>,
+    words: &Value,
+    counts: &Value,
+) -> BuiltinResult<Value> {
     let raw_words = words_from_word_vector_preserving_missing(words, "bagOfWords")?;
     let tensor = match counts {
         Value::Tensor(tensor) => tensor.clone(),
@@ -3053,10 +2702,15 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
             filtered_counts.push(values[row + col * rows]);
         }
     }
-    bag_object(vocabulary, filtered_counts, rows)
+    bag_object(runtime, vocabulary, filtered_counts, rows)
 }
 
-fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> BuiltinResult<Value> {
+fn bag_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    vocabulary: Vec<String>,
+    counts: Vec<f64>,
+    rows: usize,
+) -> BuiltinResult<Value> {
     ensure_bag_of_words_class_registered();
     let cols = vocabulary.len();
     let expected = checked_count_len(rows, cols, "bagOfWords")?;
@@ -3091,7 +2745,7 @@ fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> Builtin
         ("NumDocuments", Value::Num(rows as f64)),
     ];
     crate::execution::object::construct_object_from_borrowed_fields(
-        None,
+        runtime,
         BAG_OF_WORDS_CLASS.display_name(),
         fields.iter().map(|(name, value)| (*name, value)),
     )
@@ -3120,21 +2774,27 @@ pub(in crate::builtins::strings::text_analytics) fn checked_count_len(
     Ok(len)
 }
 
-fn remove_short_words_from_bag(object: ObjectInstance, max_len: usize) -> BuiltinResult<Value> {
-    filter_bag_columns_by_predicate(object, "removeShortWords", |word| {
+fn remove_short_words_from_bag(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: ObjectInstance,
+    max_len: usize,
+) -> BuiltinResult<Value> {
+    filter_bag_columns_by_predicate(runtime, object, "removeShortWords", |word| {
         word.chars().count() > max_len
     })
 }
 
 fn filter_bag_columns_by_predicate(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
     fn_name: &str,
     mut keep_word: impl FnMut(&str) -> bool,
 ) -> BuiltinResult<Value> {
-    filter_bag_columns(object, fn_name, |word| keep_word(word))
+    filter_bag_columns(runtime, object, fn_name, |word| keep_word(word))
 }
 
 fn filter_bag_columns(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
     fn_name: &str,
     mut keep_word: impl FnMut(&str) -> bool,
@@ -3156,7 +2816,7 @@ fn filter_bag_columns(
             new_counts.push(count_values[row + col * rows]);
         }
     }
-    bag_object(new_vocab, new_counts, rows)
+    bag_object(runtime, new_vocab, new_counts, rows)
 }
 
 fn documents_vocabulary(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
@@ -3221,14 +2881,14 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(array.data(), array.cols, 0)
+                char_row_for_text_analytics(array, 0, fn_name)?
             };
             Ok(vec![text])
         }
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row_to_string_slice(array.data(), array.cols, row));
+                words.push(char_row_for_text_analytics(array, row, fn_name)?);
             }
             Ok(words)
         }
@@ -3262,14 +2922,14 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(array.data(), array.cols, 0)
+                char_row_for_text_analytics(array, 0, fn_name)?
             };
             Ok(vec![text])
         }
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row_to_string_slice(array.data(), array.cols, row));
+                words.push(char_row_for_text_analytics(array, row, fn_name)?);
             }
             Ok(words)
         }
@@ -3338,27 +2998,39 @@ mod tests {
     }
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tokenized_document_builtin(args))
+        futures::executor::block_on(tokenized_document_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_bag(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(bag_of_words_builtin(args))
+        futures::executor::block_on(bag_of_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_remove_short(value: Value, len: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_short_words_builtin(value, len))
+        futures::executor::block_on(remove_short_words_builtin(None, value, len))
     }
 
     fn run_remove_long(value: Value, len: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_long_words_builtin(value, len))
+        futures::executor::block_on(remove_long_words_builtin(None, value, len))
     }
 
     fn run_remove_words(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_words_builtin(args))
+        futures::executor::block_on(remove_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_remove_stop(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_stop_words_builtin(args))
+        futures::executor::block_on(remove_stop_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn object(value: Value) -> ObjectInstance {

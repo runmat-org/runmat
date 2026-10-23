@@ -9,8 +9,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
-    Tensor, Utf8Text, Value,
+    decode_utf16_code_units, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar,
+    SparseTensor, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
 };
 
 use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
@@ -238,10 +238,14 @@ fn has_format_placeholders(value: &Value) -> bool {
         Value::StringArray(sa) => sa.data().iter().any(|s| text_has_format_placeholder(s)),
         Value::CharArray(ca) => {
             for row in 0..ca.rows {
-                let mut row_str = String::with_capacity(ca.cols);
-                for col in 0..ca.cols {
-                    row_str.push(ca.data()[row * ca.cols + col]);
-                }
+                let Some(units) = ca.data().get(row * ca.cols..(row + 1) * ca.cols) else {
+                    return false;
+                };
+                // This is an extension-selection hint only. Conversion validates text below.
+                let row_str = match decode_utf16_code_units(units) {
+                    Ok(text) => text,
+                    Err(_) => return false,
+                };
                 if text_has_format_placeholder(&row_str) {
                     return true;
                 }
@@ -280,6 +284,18 @@ fn move_string_arguments(data: runmat_value::ExactArrayStorage<Utf8Text>) -> Vec
 
 fn string_flow(message: impl Into<String>) -> RuntimeError {
     string_error_with_detail(&STRING_ERROR_INVALID_INPUT, message)
+}
+
+fn decoded_char_text(units: &[Utf16CodeUnit]) -> BuiltinResult<String> {
+    decode_utf16_code_units(units).map_err(|source| {
+        let mut builder = build_runtime_error("string: malformed UTF-16 character data")
+            .with_builtin("string")
+            .with_source(source);
+        if let Some(identifier) = STRING_ERROR_INVALID_INPUT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
 }
 
 fn string_error_with_detail(
@@ -478,7 +494,7 @@ pub(crate) async fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpe
                     let gathered = gather_if_needed_async(&value)
                         .await
                         .map_err(|flow| remap_string_flow(flow))?;
-                    let text = value_to_scalar_text(&gathered).ok_or_else(|| {
+                    let text = value_to_scalar_text(&gathered)?.ok_or_else(|| {
                         string_flow("string: formatSpec cell elements must be text scalars")
                     })?;
                     specs.push(text);
@@ -602,11 +618,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                                     "string: cell format arguments must contain char row vectors",
                                 ));
                             }
-                            let mut row_str = String::with_capacity(ca.cols);
-                            for ch in ca.data().iter().copied() {
-                                row_str.push(ch);
-                            }
-                            Value::string(row_str)
+                            Value::string(decoded_char_text(ca.data())?)
                         }
                         Value::Num(n) => Value::Num(n),
                         Value::Int(i) => Value::Int(i),
@@ -757,14 +769,14 @@ fn string_scalar<S: Into<String>>(text: S) -> BuiltinResult<StringArray> {
     StringArray::new(vec![text.into()], vec![1, 1]).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn value_to_scalar_text(value: &Value) -> Option<Utf8Text> {
+fn value_to_scalar_text(value: &Value) -> BuiltinResult<Option<Utf8Text>> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::String(s) => Ok(Some(s.clone())),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(Some(sa.data()[0].clone())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Some(Utf8Text::new(ca.data().iter().collect::<String>()))
+            Ok(Some(Utf8Text::new(decoded_char_text(ca.data())?)))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -774,11 +786,17 @@ fn char_array_to_string_array(
 ) -> BuiltinResult<StringArray> {
     let mut rows: Vec<String> = Vec::with_capacity(array.rows);
     for r in 0..array.rows {
-        let mut row = String::with_capacity(array.cols);
-        for c in 0..array.cols {
-            row.push(array.data()[r * array.cols + c]);
-        }
-        rows.push(row);
+        let start = r
+            .checked_mul(array.cols)
+            .ok_or_else(|| string_flow("string: character shape overflow"))?;
+        let end = start
+            .checked_add(array.cols)
+            .ok_or_else(|| string_flow("string: character shape overflow"))?;
+        let units = array
+            .data()
+            .get(start..end)
+            .ok_or_else(|| string_flow("string: character shape exceeds payload"))?;
+        rows.push(decoded_char_text(units)?);
     }
     let shape = if array.rows == 0 {
         vec![0, 1]
@@ -910,7 +928,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                Ok(ca.data().iter().collect())
+                decoded_char_text(ca.data())
             } else {
                 Err(string_flow(
                     "string: cell character arrays must be row vectors",
@@ -1185,7 +1203,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_char_array_produces_column_vector() {
-        let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("abc".chars().collect(), 1, 3).unwrap();
         let out = string_builtin(Value::CharArray(chars), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {

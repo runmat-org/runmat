@@ -3,7 +3,7 @@ use crate::object::indexing::{ObjectIndexSelector, ObjectSubscript};
 
 pub(super) fn object_subscript_from_step(step: AssignmentStepSpec) -> ObjectSubscript {
     match step {
-        AssignmentStepSpec::Member(member) => ObjectSubscript::member(member),
+        AssignmentStepSpec::Member(member) => ObjectSubscript::member_retained(member),
         AssignmentStepSpec::Parentheses { selectors } => {
             ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
                 components: selectors,
@@ -17,7 +17,8 @@ pub(super) fn object_subscript_from_step(step: AssignmentStepSpec) -> ObjectSubs
 
 pub(super) fn object_subscript_from_endpoint(endpoint: SequenceEndpointSpec) -> ObjectSubscript {
     match endpoint {
-        SequenceEndpointSpec::Member(member) => ObjectSubscript::member(member),
+        SequenceEndpointSpec::Fixed { step, .. } => object_subscript_from_step(step),
+        SequenceEndpointSpec::Member(member) => ObjectSubscript::member_retained(member),
         SequenceEndpointSpec::CellContents(components) => {
             ObjectSubscript::braces(ObjectIndexSelector::IndexValues { components })
         }

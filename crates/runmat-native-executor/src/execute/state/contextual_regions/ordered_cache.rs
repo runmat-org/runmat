@@ -123,6 +123,15 @@ impl<K: Eq + Hash + Clone, V> OrderedCache<K, V> {
         self.entries.iter().map(|(_, value)| value)
     }
 
+    pub(super) fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        let index = *self.index.get(key)?;
+        self.entries.get_mut(index).map(|(_, value)| value)
+    }
+
+    pub(super) fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.entries.iter_mut().map(|(_, value)| value)
+    }
+
     pub(super) fn clear_in_source_order(&mut self) {
         for entry in self.entries.drain(..) {
             drop(entry);

@@ -9,12 +9,33 @@ paragraphs: &["Single output: `R = qr(A)` returns the upper-triangular (or upper
 "Public MATLAB matrix classes are single and double. RunMat mode separately admits logical matrices and every real integer class through named extensions; integer matrix values cross only after exact binary64 representability checks. Scalars and vectors are treated as 1-D or 2-D dense arrays.",
 "Typed-integer and logical zero economy selectors are separately gated RunMat extensions. An explicit resident option is independently gated and read through its exact owner; nonzero or nonscalar numeric options reject.",
 "Integer inputs never enter a floating provider QR kernel. Resident integer input gathers through its exact owner, computes double factors, and restores only requested outputs through checked class-preserving uploads. Unsupported transfers report an error."] },
+    BuiltinDocumentationSection { heading: "Sparse factors and transformed right-hand sides",
+paragraphs: &["Sparse single and double coefficients, real or complex, use native-class sparse Householder factors without a dense coefficient copy. R and matrix-form P are sparse; explicit Q is dense. Complex coefficient storage remains complex even for empty or numerically real factors. Sparse integer and logical coefficients are not admitted by this route.",
+"Three-output sparse QR chooses columns with a structural fill-reducing heuristic, not the dense descending-diagonal rank ordering. The exact pivot order is implementation-dependent. Public factors do not discard small nonzero columns using the separate minimum-norm solver's numerical-rank tolerance.",
+"For sparse S, [C,R] = qr(S,B) returns C = Q' * B without constructing Q. B may be dense or sparse, single or double, real or complex, with the same row count as S. C uses S's floating class, is complex if either operand is complex, and is dense. The three-output form additionally satisfies S*P = Q*R. Economy size keeps the first min(m,n) rows of C and R. An m-by-zero B produces the correctly shaped empty C without a Q basis or column workspace.",
+"Sparse factor fill, replacement overlap, output storage and permutation storage are admitted from the actual execution owner. Long sparse traversals and publication validate cooperation and the original allocation authority; errors preserve their cause and do not retry after factor execution."] },
     BuiltinDocumentationSection { heading: "Acceleration and residency",
 paragraphs: &["For a resident input, RunMat selects the handle's exact provider owner for the QR hook. The bundled WGPU backend computes ordinary QR through its host implementation and re-uploads only the requested output form as `gpuTensor` handles.",
 "If the exact owner has no QR hook, RunMat downloads through that owner without changing the input's residency, computes CPU factors, and uploads all requested outputs with their classes and device intent preserved. Unsupported uploads and provider failures report an error; they do not return a partial or mixed-residency result.",
 "The economy two-output power-iteration optimization uses its unpivoted device route when eligible; a three-output pivoted request uses the correctness-oriented factorization path."] },
 ];
 const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "sparse-transformed-rhs", title: "Solving with sparse QR without constructing Q",
+        program: "S = sparse([1 0; 0 2; 1 1]); B = [1; 2; 0];\n[C,R,p] = qr(S,B,'econ','vector');\ny = R \\ C; x = zeros(2,1); x(p) = y;",
+        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(issparse(R)); assert(norm(S'*(S*x-B)) < 1e-10);" },
+    },
+    BuiltinExample {
+        id: "sparse-empty-rhs", title: "Obtaining sparse R without an explicit Q",
+        program: "S = sparse([1 0; 0 2; 1 1]);\n[C,R] = qr(S,zeros(3,0),'econ');",
+        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(C),[2 0])); assert(isequal(size(R),[2 2])); assert(issparse(R));" },
+    },
     BuiltinExample {
         id: "example-1",
         title: "Computing the full QR factorization of a square matrix",

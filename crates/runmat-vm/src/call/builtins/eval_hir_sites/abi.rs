@@ -50,6 +50,8 @@ pub(crate) struct ClosureIssuanceAbi {
     locals_shape: Vec<HirBinding>,
     captures_shape: Vec<HirBinding>,
     parent_bindings_shape: Vec<HirBinding>,
+    auxiliary_bindings_shape: [Option<HirBinding>; 4],
+    canonical_output_forwarding: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +80,13 @@ fn binding_shape(hir: &HirAssembly, id: BindingId) -> Option<HirBinding> {
 
 fn binding_shapes(hir: &HirAssembly, ids: &[BindingId]) -> Option<Vec<HirBinding>> {
     ids.iter().map(|id| binding_shape(hir, *id)).collect()
+}
+
+fn optional_binding_shape(hir: &HirAssembly, id: Option<BindingId>) -> Option<Option<HirBinding>> {
+    match id {
+        Some(id) => binding_shape(hir, id).map(Some),
+        None => Some(None),
+    }
 }
 
 impl ClosureIssuanceAbi {
@@ -141,6 +150,20 @@ impl ClosureIssuanceAbi {
                 })
                 .map(|binding| binding_shape(hir, binding.id))
                 .collect::<Option<Vec<_>>>()?,
+            auxiliary_bindings_shape: [
+                optional_binding_shape(hir, selected.abi.varargin)?,
+                optional_binding_shape(hir, selected.abi.varargout)?,
+                optional_binding_shape(hir, selected.abi.implicit_nargin)?,
+                optional_binding_shape(hir, selected.abi.implicit_nargout)?,
+            ],
+            canonical_output_forwarding: match selected.body.statements.as_slice() {
+                [statement] => matches!(&statement.kind,
+                    runmat_hir::HirStmtKind::SequenceAssign { target, .. }
+                        if super::anonymous_output_forwarding_target(selected, target)
+                            && selected.abi.varargout.is_some_and(|output| selected.outputs == [output])
+                            && selected.abi.implicit_nargout.is_some_and(|count| selected.locals.contains(&count))),
+                _ => false,
+            },
         })
     }
 
@@ -183,6 +206,7 @@ impl ClosureIssuanceAbi {
             || selected.private_owner_scope != self.private_owner_scope
             || selected.params_shape != self.params_shape
             || selected.outputs_shape != self.outputs_shape
+            || selected.auxiliary_bindings_shape != self.auxiliary_bindings_shape
             || !self.parent_bindings_shape.iter().all(|binding| {
                 selected.parent_bindings_shape.contains(binding)
                     || (assigned_slots.contains_key(&binding.name.0)
@@ -212,9 +236,12 @@ impl ClosureIssuanceAbi {
             || selected.abi.implicit_nargin.is_some() != self.abi.implicit_nargin.is_some()
             || selected.abi.implicit_nargout.is_some() != self.abi.implicit_nargout.is_some()
             || self.abi.varargin.is_some()
-            || self.abi.varargout.is_some()
             || self.abi.implicit_nargin.is_some()
-            || self.abi.implicit_nargout.is_some()
+            // Current anonymous bodies have an ABI-owned varargout/count
+            // forwarding pair. Capture extension may retain that exact pair,
+            // never admit a different output destination or user variadic ABI.
+            || ((self.abi.varargout.is_some() || self.abi.implicit_nargout.is_some())
+                && !(self.canonical_output_forwarding && selected.canonical_output_forwarding))
             || selected.input_slots.len() != self.input_slots.len()
             || selected.output_slots.len() != self.output_slots.len()
             || selected.varargin_slot.is_some() != self.varargin_slot.is_some()
@@ -289,3 +316,7 @@ impl ClosureIssuanceAbi {
         (original_remaining == selected_locals).then_some(plan)
     }
 }
+
+#[cfg(test)]
+#[path = "abi/tests.rs"]
+mod tests;

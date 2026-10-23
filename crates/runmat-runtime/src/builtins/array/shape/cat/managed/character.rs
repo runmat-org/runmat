@@ -1,5 +1,6 @@
 use super::*;
-use crate::builtins::common::concatenation::char_from_f64_code_point;
+use crate::builtins::common::concatenation::char_from_f64_code_unit;
+use runmat_value::Utf16CodeUnit;
 
 fn source_rank(value: &Value) -> BuiltinResult<usize> {
     match value {
@@ -91,7 +92,7 @@ fn output_extent(
     Ok(if axis == dim { sum } else { first.unwrap_or(1) })
 }
 
-fn source_char(value: &Value, index: usize) -> BuiltinResult<char> {
+fn source_char(value: &Value, index: usize) -> BuiltinResult<Utf16CodeUnit> {
     match value {
         Value::CharArray(chars) => {
             let page_len = chars
@@ -124,9 +125,9 @@ fn source_char(value: &Value, index: usize) -> BuiltinResult<char> {
         Value::Tensor(tensor) => tensor
             .numeric_value_at(index)
             .ok_or_else(|| cat_err("cat: numeric source geometry changed"))
-            .and_then(|scalar| char_from_f64_code_point(scalar.materialize_f64(), "cat")),
-        Value::Num(number) if index == 0 => char_from_f64_code_point(*number, "cat"),
-        Value::Int(number) if index == 0 => char_from_f64_code_point(number.to_f64(), "cat"),
+            .and_then(|scalar| char_from_f64_code_unit(scalar.materialize_f64(), "cat")),
+        Value::Num(number) if index == 0 => char_from_f64_code_unit(*number, "cat"),
+        Value::Int(number) if index == 0 => char_from_f64_code_unit(number.to_f64(), "cat"),
         _ => Err(cat_err("cat: character source geometry changed")),
     }
 }

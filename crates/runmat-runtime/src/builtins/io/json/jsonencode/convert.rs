@@ -271,17 +271,26 @@ fn char_array_to_json(ca: &CharArray, _options: &JsonEncodeOptions) -> BuiltinRe
     }
 
     if ca.rows == 1 {
-        return Ok(JsonValue::String(
-            ca.data().iter().collect::<String>().into(),
-        ));
+        return runmat_value::decode_utf16_code_units(ca.data())
+            .map(|text| JsonValue::String(text.into()))
+            .map_err(|source| {
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    format!("jsonencode: invalid UTF-16 character row: {source}"),
+                )
+            });
     }
 
     let mut rows = Vec::with_capacity(ca.rows);
     for r in 0..ca.rows {
-        let mut row_string = String::with_capacity(ca.cols);
-        for c in 0..ca.cols {
-            row_string.push(ca.data()[r * ca.cols + c]);
-        }
+        let start = r * ca.cols;
+        let row_string = runmat_value::decode_utf16_code_units(&ca.data()[start..start + ca.cols])
+            .map_err(|source| {
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    format!("jsonencode: invalid UTF-16 character row: {source}"),
+                )
+            })?;
         rows.push(JsonValue::String(row_string.into()));
     }
     Ok(JsonValue::Array(rows))

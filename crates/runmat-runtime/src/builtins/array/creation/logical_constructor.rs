@@ -62,7 +62,9 @@ impl ParsedLogicalFill {
         let mut idx = 0usize;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(&arg, "logical")?
+            {
                 match keyword.as_str() {
                     "like" => {
                         if saw_like {
@@ -424,18 +426,6 @@ fn normalize_logical_shape(mut shape: Vec<usize>) -> Vec<usize> {
         shape.pop();
     }
     shape
-}
-
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
 }
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {

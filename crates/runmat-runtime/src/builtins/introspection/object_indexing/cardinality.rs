@@ -42,13 +42,37 @@ pub async fn object_path_assignment_cardinality(
     target: &Value,
     path: &crate::object::indexing::ObjectSubscriptPath,
 ) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
-    object_path_cardinality(
+    object_path_cardinality_with_context(
+        None,
         target,
         path,
         IndexingContext::Assignment,
         &crate::object::protocol::ObjectAccessContext::default(),
+        DefaultCardinality::AssignmentDestination,
     )
     .await
+}
+
+pub async fn object_path_assignment_cardinality_in_context(
+    runtime: &crate::context::RuntimeContext,
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    object_path_cardinality_with_context(
+        Some(runtime),
+        target,
+        path,
+        IndexingContext::Assignment,
+        &crate::object::protocol::ObjectAccessContext::default(),
+        DefaultCardinality::AssignmentDestination,
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum DefaultCardinality {
+    Protocol,
+    AssignmentDestination,
 }
 
 pub async fn object_path_cardinality(
@@ -57,7 +81,15 @@ pub async fn object_path_cardinality(
     indexing_context: IndexingContext,
     access: &crate::object::protocol::ObjectAccessContext,
 ) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
-    object_path_cardinality_with_context(None, target, path, indexing_context, access).await
+    object_path_cardinality_with_context(
+        None,
+        target,
+        path,
+        indexing_context,
+        access,
+        DefaultCardinality::Protocol,
+    )
+    .await
 }
 
 pub async fn object_path_cardinality_in_context(
@@ -67,8 +99,15 @@ pub async fn object_path_cardinality_in_context(
     indexing_context: IndexingContext,
     access: &crate::object::protocol::ObjectAccessContext,
 ) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
-    object_path_cardinality_with_context(Some(runtime), target, path, indexing_context, access)
-        .await
+    object_path_cardinality_with_context(
+        Some(runtime),
+        target,
+        path,
+        indexing_context,
+        access,
+        DefaultCardinality::Protocol,
+    )
+    .await
 }
 
 async fn object_path_cardinality_with_context(
@@ -77,39 +116,64 @@ async fn object_path_cardinality_with_context(
     path: &crate::object::indexing::ObjectSubscriptPath,
     indexing_context: IndexingContext,
     access: &crate::object::protocol::ObjectAccessContext,
+    default: DefaultCardinality,
 ) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    let owner = crate::context::host_allocation::HostAllocationReceipt::capture_owner(runtime)
+        .map_err(|source| crate::object::indexing::allocation_error(runtime, source))?;
     ensure_indexing_context_classes_registered();
-    let descriptor = path.to_standard_substruct_value()?;
-    let context = indexing_context_value(indexing_context);
     let resolution = crate::object::protocol::resolve_object_protocol(
         target,
         crate::object::protocol::ObjectProtocol::NumArgumentsFromSubscript,
         access,
     )?;
     if let Some(method) = resolution {
-        let arguments = vec![target.clone(), descriptor.clone(), context];
-        let value = match runtime {
-            Some(runtime) => {
-                crate::object::protocol::invoke_resolved_object_method_in_context(
-                    runtime, &method, arguments, 1,
-                )
-                .await?
-            }
-            None => {
-                crate::object::protocol::invoke_resolved_object_method(&method, arguments, 1)
-                    .await?
-            }
+        // The language descriptor is needed only by the overload. The default
+        // path below consumes its original verified typed levels directly.
+        let descriptor = match runtime {
+            Some(runtime) => path.to_standard_substruct_value_in_context(runtime)?,
+            None => crate::execution::RootedValue::new(path.to_standard_substruct_value()?)
+                .map_err(|source| source.into_runtime_error())?,
         };
-        let value =
-            value.try_map_owned(require_single_sequence, |error| error.into_runtime_error())?;
+        let context = match runtime {
+            Some(runtime) => indexing_context_value_in_context(runtime, indexing_context)?,
+            None => crate::execution::RootedValue::new(indexing_context_value(indexing_context))
+                .map_err(|source| source.into_runtime_error())?,
+        };
+        let arguments = crate::call::BuiltinArguments::from_borrowed(
+            &[
+                target.clone(),
+                descriptor.value().clone(),
+                context.value().clone(),
+            ],
+            runtime,
+        )?;
+        let value = crate::object::protocol::invoke_resolved_object_method_retained(
+            runtime, &method, arguments, 1,
+        )
+        .await?
+        .try_into_single()?;
         return Ok(PreparedObjectAssignmentCardinality {
             count: exact_output_count(value.value())?,
             method: Some(method),
         });
     }
-    let levels = parse_subscript_levels(&descriptor)?;
+    let count = match default {
+        DefaultCardinality::AssignmentDestination
+            if path.steps().first().is_some_and(|step| {
+                step.kind() == crate::object::indexing::ObjectIndexKind::Member
+            }) =>
+        {
+            crate::object::resolve::member_sequence_cardinality(target)?
+        }
+        _ => default_path_num_arguments(target, path)?,
+    };
+    if let (Some(runtime), Some(owner)) = (runtime, &owner) {
+        owner
+            .check(runtime)
+            .map_err(|source| crate::object::indexing::allocation_error(Some(runtime), source))?;
+    }
     Ok(PreparedObjectAssignmentCardinality {
-        count: default_num_arguments(target, &levels, indexing_context)?,
+        count,
         method: None,
     })
 }

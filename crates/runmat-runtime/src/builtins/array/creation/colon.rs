@@ -9,14 +9,10 @@ use runmat_builtins::{
 };
 
 use runmat_builtins::BuiltinErrorDescriptor;
-#[cfg(test)]
-use runmat_builtins::{LiteralValue, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
@@ -24,10 +20,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(test)]
-use runmat_builtins::shape_rules::infer_range_shape;
-#[cfg(test)]
-use runmat_builtins::ResolveContext;
 
 const MIN_RATIO_TOL: f64 = f64::EPSILON * 8.0;
 const MAX_RATIO_TOL: f64 = 1e-9;
@@ -74,22 +66,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
-
-#[cfg(test)]
-fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
-    let (start, step, end) = match ctx.literal_args.as_slice() {
-        [LiteralValue::Number(start), LiteralValue::Number(end)] => {
-            (Some(*start), None, Some(*end))
-        }
-        [LiteralValue::Number(start), LiteralValue::Number(step), LiteralValue::Number(end)] => {
-            (Some(*start), Some(*step), Some(*end))
-        }
-        _ => (None, None, None),
-    };
-    infer_range_shape(start, step, end)
-        .map(|shape| Type::Tensor { shape: Some(shape) })
-        .unwrap_or_else(|| row_vector_type(ctx))
-}
 
 const BUILTIN_NAME: &str = "colon";
 
@@ -707,12 +683,6 @@ fn finalize_numeric_sequence(
     }
 
     if prefer_gpu {
-        #[cfg(all(test, feature = "wgpu"))]
-        {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
         if let Some(provider) = runmat_accelerate_api::provider() {
             if !gpu_helpers::real_sequence_upload_feasible(
                 provider,
@@ -1050,14 +1020,14 @@ fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
 }
 
 fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
-    if array.rows * array.cols != 1 {
+    if array.data().len() != 1 {
         return Err(colon_error_with_message(
             format!("{name}: expected scalar input"),
             &COLON_ERROR_NON_SCALAR_INPUT,
         ));
     }
     let ch = array.data()[0];
-    Ok(ch as u32 as f64)
+    Ok(f64::from(ch.raw()))
 }
 
 fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
@@ -1068,19 +1038,19 @@ fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
         if (value - rounded).abs() > CHAR_TOL {
             return Err(colon_error(&COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT));
         }
-        if !(0.0..=(u32::MAX as f64)).contains(&rounded) {
+        if !(0.0..=f64::from(u16::MAX)).contains(&rounded) {
             return Err(colon_error(&COLON_ERROR_CHAR_CODEPOINT_RANGE));
         }
-        let code = rounded as u32;
-        let ch = std::char::from_u32(code)
-            .ok_or_else(|| colon_error(&COLON_ERROR_CHAR_CODEPOINT_RANGE))?;
-        chars.push(ch);
+        chars.push(runmat_value::Utf16CodeUnit::from_raw(rounded as u16));
     }
 
-    let array = CharArray::new(chars, 1, len)
+    let array = CharArray::from_code_units(chars, 1, len)
         .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
+
+#[cfg(test)]
+mod f32_preferred_owner;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1273,31 +1243,6 @@ pub(crate) mod tests {
         )
         .expect_err("unlike integer classes must reject");
         assert!(error.message().contains("same integer class"));
-    }
-
-    #[test]
-    fn colon_type_is_row_vector() {
-        assert_eq!(
-            colon_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
-    fn colon_type_infers_literal_length() {
-        let ctx = ResolveContext::new(vec![
-            LiteralValue::Number(-2.0),
-            LiteralValue::Number(0.02),
-            LiteralValue::Number(2.0),
-        ]);
-        assert_eq!(
-            colon_type(&[Type::Num, Type::Num, Type::Num], &ctx),
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(201)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1678,7 +1623,16 @@ pub(crate) mod tests {
 
     #[test]
     fn double_colon_uses_f64_capability_of_f32_preferred_owner() {
-        test_support::with_f32_test_provider(|_| {
+        super::f32_preferred_owner::with_provider(|provider| {
+            assert_eq!(
+                provider.precision(),
+                runmat_accelerate_api::ProviderPrecision::F32
+            );
+            assert!(gpu_helpers::real_sequence_upload_feasible(
+                provider,
+                runmat_accelerate_api::ProviderPrecision::F64,
+                &[1, 3],
+            ));
             let output = finalize_numeric_sequence(vec![0.0, 0.5, 1.0], true, None, &[])
                 .expect("class-preserving sequence");
             let Value::GpuTensor(handle) = output else {
@@ -1688,9 +1642,25 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_precision(&handle),
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
             );
+            assert_eq!(handle.device_id(), provider.device_id());
+            assert_eq!(handle.shape(), [1, 3]);
             let tensor = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
             assert_eq!(tensor.materialize_f64(), vec![0.0, 0.5, 1.0]);
+            // This finite value would round to 1 in F32: a preferred-class
+            // conversion plus an F64 tag cannot satisfy the native oracle.
+            let exact = 1.0_f64 + 2.0_f64.powi(-40);
+            let output = finalize_numeric_sequence(vec![exact], true, None, &[])
+                .expect("native F64 sequence despite F32 preference");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected native resident F64 probe");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            let tensor = test_support::gather(Value::GpuTensor(handle)).expect("native readback");
+            assert_eq!(tensor.as_f64_slice().unwrap()[0].to_bits(), exact.to_bits());
         });
     }
 
@@ -1779,6 +1749,35 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_increasing() {
+        let raw = |unit| {
+            Value::CharArray(
+                CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(unit)], 1, 1)
+                    .expect("raw endpoint"),
+            )
+        };
+        let Value::CharArray(units) =
+            colon_builtin(raw(0xD7FF), raw(0xD801), Vec::new()).expect("raw UTF-16 range")
+        else {
+            panic!("expected character range");
+        };
+        assert_eq!(
+            units
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            [0xD7FF, 0xD800, 0xD801]
+        );
+        let Value::CharArray(last) =
+            colon_builtin(raw(0xFFFF), raw(0xFFFF), Vec::new()).expect("last code unit")
+        else {
+            panic!("expected character range");
+        };
+        assert_eq!(last.data()[0].raw(), 0xFFFF);
+        assert!(build_char_sequence(vec![65536.0]).is_err());
+        assert!(char_scalar("colon", &CharArray::new_row("\u{1F642}")).is_err());
+        let empty = CharArray::from_code_units_with_shape(Vec::new(), vec![1, 1, 0]).unwrap();
+        assert!(char_scalar("colon", &empty).is_err());
         let start = Value::CharArray(CharArray::new_row("a"));
         let stop = Value::CharArray(CharArray::new_row("e"));
         let result = colon_builtin(start, stop, Vec::new()).expect("colon");
@@ -1786,7 +1785,10 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 5);
-                let expected: Vec<char> = "abcde".chars().collect();
+                let expected: Vec<_> = "abcde"
+                    .encode_utf16()
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .collect();
                 assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1804,7 +1806,10 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 4);
-                let expected: Vec<char> = "aceg".chars().collect();
+                let expected: Vec<_> = "aceg"
+                    .encode_utf16()
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .collect();
                 assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1874,7 +1879,10 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 5);
-                let expected: Vec<char> = "fedcb".chars().collect();
+                let expected: Vec<_> = "fedcb"
+                    .encode_utf16()
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .collect();
                 assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),

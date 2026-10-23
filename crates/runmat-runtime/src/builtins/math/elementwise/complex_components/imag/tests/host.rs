@@ -177,7 +177,7 @@ fn imag_logical_array_zero() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn imag_char_array_zeroes() {
-    let chars = CharArray::new("Az".chars().collect(), 1, 2).expect("char array");
+    let chars = CharArray::from_unicode_scalars("Az".chars().collect(), 1, 2).expect("char array");
     let result = imag_builtin(Value::CharArray(chars)).expect("imag");
     match result {
         Value::Tensor(t) => {

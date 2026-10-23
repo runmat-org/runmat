@@ -19,11 +19,10 @@ pub fn gpu_device_index_from_float(value: f64) -> Result<u32, GpuDeviceIndexErro
     if !value.is_finite() {
         return Err(GpuDeviceIndexError::Invalid);
     }
-    let rounded = value.round();
-    if (rounded - value).abs() > 1e-9 || rounded > u32::MAX as f64 {
+    if value.fract() != 0.0 || value < 1.0 || value > u32::MAX as f64 {
         return Err(GpuDeviceIndexError::Invalid);
     }
-    gpu_device_index_from_integer(rounded as i128)
+    gpu_device_index_from_integer(value as i128)
 }
 
 #[cfg(test)]
@@ -43,8 +42,19 @@ mod tests {
                 Err(GpuDeviceIndexError::Invalid)
             );
         }
-        assert_eq!(gpu_device_index_from_float(1.0 - 1e-10), Ok(1));
-        for value in [0.0, 1.5, f64::NAN, f64::INFINITY, u32::MAX as f64 + 1.0] {
+        assert_eq!(gpu_device_index_from_float(1.0), Ok(1));
+        assert_eq!(gpu_device_index_from_float(u32::MAX as f64), Ok(u32::MAX));
+        for value in [
+            0.0,
+            -0.0,
+            -1.0,
+            1.0 - 1e-10,
+            1.0 + 1e-10,
+            1.5,
+            f64::NAN,
+            f64::INFINITY,
+            u32::MAX as f64 + 1.0,
+        ] {
             assert_eq!(
                 gpu_device_index_from_float(value),
                 Err(GpuDeviceIndexError::Invalid)

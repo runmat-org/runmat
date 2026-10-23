@@ -93,8 +93,12 @@ fn invalid_path_classes_and_shapes_have_zero_filesystem_reads() {
             Value::from(7_i32),
             Value::Bool(true),
             Value::Cell(CellArray::new(vec![Value::String("part.stl".into())], 1, 1).unwrap()),
-            Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap()),
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap(),
+            ),
+            Value::CharArray(
+                CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+            ),
             Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
         ];
         for value in invalid {

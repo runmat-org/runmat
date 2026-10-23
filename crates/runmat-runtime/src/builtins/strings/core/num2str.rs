@@ -12,6 +12,17 @@ use runmat_value::{
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 
+use crate::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationError, HostAllocationReceipt,
+};
+use crate::context::RuntimeContext;
+use crate::GpuGatherRetry;
+
+#[path = "num2str/managed.rs"]
+mod managed;
+#[path = "num2str/managed_format.rs"]
+mod managed_format;
+
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -78,9 +89,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "num2str",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
 async fn num2str_builtin(
+    runtime: Option<RuntimeContext>,
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
@@ -89,6 +102,9 @@ async fn num2str_builtin(
         &NUM2STR_ERROR_TOO_MANY_OUTPUTS,
         BUILTIN_NAME,
     )?;
+    let resident_control = rest
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)));
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
         || rest
             .iter()
@@ -112,15 +128,85 @@ async fn num2str_builtin(
     ) {
         return Err(num2str_error(&NUM2STR_ERROR_INVALID_INPUT));
     }
+    validate_option_structure(&rest)?;
+    let capture = || {
+        HostAllocationReceipt::capture_owner(runtime.as_ref()).map_err(|cause| {
+            let runtime = runtime.as_ref().expect("managed capture has runtime");
+            num2str_allocation_error(runtime, cause)
+        })
+    };
+    let early_owner = if resident_control { capture()? } else { None };
     // Parse and validate controls before downloading a resident data operand.
-    let options = parse_options(rest).await?;
+    let options = parse_options_validated(rest).await.map_err(|mut error| {
+        if resident_control {
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+        }
+        error
+    })?;
+    let original_owner = if resident_control {
+        early_owner
+    } else {
+        capture()?
+    };
+    if let (Some(owner), Some(runtime)) = (original_owner.as_ref(), runtime.as_ref()) {
+        owner.check(runtime).map_err(|cause| {
+            let mut error = num2str_allocation_error(runtime, cause);
+            if resident_control {
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+            }
+            error
+        })?;
+    }
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_num2str_flow)?;
+    let gathered = if original_owner.is_some() {
+        if let Value::GpuTensor(handle) = gathered {
+            Value::Tensor(
+                gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(remap_num2str_flow)
+                    .map_err(|mut error| {
+                        error.gpu_gather_retry = GpuGatherRetry::Never;
+                        error
+                    })?,
+            )
+        } else {
+            gathered
+        }
+    } else {
+        gathered
+    };
+    if let Some(owner) = original_owner {
+        let runtime = runtime.as_ref().expect("managed owner has runtime");
+        owner
+            .check(runtime)
+            .map_err(|cause| num2str_allocation_error(runtime, cause))
+            .map_err(|mut error| {
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+                error
+            })?;
+        return managed::format_managed(gathered, &options, runtime)
+            .await
+            .map(Value::CharArray)
+            .map_err(|mut error| {
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+                error
+            });
+    }
     let data = extract_numeric_data(gathered).await?;
 
     let char_array = format_numeric_data(data, &options)?;
     Ok(Value::CharArray(char_array))
+}
+
+fn num2str_allocation_error(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    host_allocation_runtime_error(
+        Some(runtime),
+        "RunMat:num2str:HostFormatting",
+        "num2str: host formatting allocation failed",
+        cause,
+    )
 }
 
 struct FormatOptions {
@@ -175,7 +261,7 @@ enum NumericData {
     },
 }
 
-async fn parse_options(args: crate::call::BuiltinArguments) -> BuiltinResult<FormatOptions> {
+fn validate_option_structure(args: &crate::call::BuiltinArguments) -> BuiltinResult<()> {
     if args.len() > 2 {
         return Err(num2str_error_with_message(
             "num2str: too many input arguments",
@@ -211,6 +297,12 @@ async fn parse_options(args: crate::call::BuiltinArguments) -> BuiltinResult<For
             ));
         }
     }
+    Ok(())
+}
+
+async fn parse_options_validated(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<FormatOptions> {
     if args.is_empty() {
         return Ok(FormatOptions {
             spec: FormatSpec::General {
@@ -243,7 +335,7 @@ async fn parse_options(args: crate::call::BuiltinArguments) -> BuiltinResult<For
 
         spec = if let Some(digits) = try_extract_precision(&first)? {
             FormatSpec::General { digits }
-        } else if let Some(text) = value_to_text(&first) {
+        } else if let Some(text) = value_to_text(&first)? {
             FormatSpec::Custom(parse_custom_format(&text)?)
         } else {
             return Err(num2str_error_with_message(
@@ -270,7 +362,7 @@ async fn parse_options(args: crate::call::BuiltinArguments) -> BuiltinResult<For
 }
 
 fn is_local_token(value: &Value) -> BuiltinResult<bool> {
-    let Some(text) = value_to_text(value) else {
+    let Some(text) = value_to_text(value)? else {
         return Ok(false);
     };
     Ok(text.trim().eq_ignore_ascii_case("local"))
@@ -356,17 +448,26 @@ fn validate_precision(value: i64) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn value_to_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
-    match value {
+fn value_to_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
         Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
         Value::StringArray(sa) if sa.data().len() == 1 => {
             Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(std::borrow::Cow::Owned(ca.data().iter().collect()))
-        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut builder =
+                    build_runtime_error(format!("num2str: invalid UTF-16 format text: {source}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(source);
+                if let Some(identifier) = NUM2STR_ERROR_INVALID_OPTION.identifier {
+                    builder = builder.with_identifier(identifier);
+                }
+                builder.build()
+            })?,
+        )),
         _ => None,
-    }
+    })
 }
 
 fn detect_decimal_separator(local: bool) -> char {
@@ -661,11 +762,11 @@ fn format_real_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     if cols == 0 {
-        return CharArray::new(Vec::new(), rows, 0)
+        return CharArray::from_code_units(Vec::new(), rows, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
 
@@ -686,7 +787,7 @@ fn format_real_matrix(
             let idx = row + col * rows;
             let value = data.get(idx).copied().unwrap_or(0.0);
             let text = format_real(value, &options.spec, options.decimal);
-            let entry_width = text.chars().count();
+            let entry_width = text.encode_utf16().count();
             row_entries[col] = CellEntry {
                 text,
                 width: entry_width,
@@ -716,11 +817,11 @@ fn format_integer_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     if cols == 0 {
-        return CharArray::new(Vec::new(), rows, 0)
+        return CharArray::from_code_units(Vec::new(), rows, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
 
@@ -743,7 +844,7 @@ fn format_integer_matrix(
                 &options.spec,
                 options.decimal,
             );
-            let entry_width = text.chars().count();
+            let entry_width = text.encode_utf16().count();
             row_entries[col] = CellEntry {
                 text,
                 width: entry_width,
@@ -783,11 +884,11 @@ fn format_integer_complex_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     if cols == 0 {
-        return CharArray::new(Vec::new(), rows, 0)
+        return CharArray::from_code_units(Vec::new(), rows, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
 
@@ -806,7 +907,7 @@ fn format_integer_complex_matrix(
     for (col, width) in col_widths.iter_mut().enumerate() {
         for (row, row_entries) in entries.iter_mut().enumerate() {
             let text = format_integer_complex(storage, row + col * rows, options);
-            let entry_width = text.chars().count();
+            let entry_width = text.encode_utf16().count();
             row_entries[col] = CellEntry {
                 text,
                 width: entry_width,
@@ -866,11 +967,11 @@ fn format_complex_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     if cols == 0 {
-        return CharArray::new(Vec::new(), rows, 0)
+        return CharArray::from_code_units(Vec::new(), rows, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
 
@@ -891,7 +992,7 @@ fn format_complex_matrix(
             let idx = row + col * rows;
             let (re, im) = data.get(idx).copied().unwrap_or((0.0, 0.0));
             let text = format_complex(re, im, &options.spec, options.decimal);
-            let entry_width = text.chars().count();
+            let entry_width = text.encode_utf16().count();
             row_entries[col] = CellEntry {
                 text,
                 width: entry_width,
@@ -937,26 +1038,34 @@ fn assemble_rows(entries: Vec<Vec<CellEntry>>, col_widths: Vec<usize>) -> Vec<St
 
 fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
     if rows.is_empty() {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     let row_count = rows.len();
     let col_count = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
 
-    let mut data = Vec::with_capacity(row_count * col_count);
+    let capacity = row_count
+        .checked_mul(col_count)
+        .ok_or_else(|| num2str_error(&NUM2STR_ERROR_INTERNAL))?;
+    let mut data = Vec::with_capacity(capacity);
     for row in rows {
-        let mut chars: Vec<char> = row.chars().collect();
-        if chars.len() < col_count {
-            chars.extend(std::iter::repeat_n(' ', col_count - chars.len()));
-        }
-        data.extend(chars);
+        let width = row.encode_utf16().count();
+        data.extend(
+            row.encode_utf16()
+                .map(runmat_value::Utf16CodeUnit::from_raw),
+        );
+        data.extend(std::iter::repeat_n(
+            runmat_value::Utf16CodeUnit::from_raw(u16::from(b' ')),
+            col_count - width,
+        ));
     }
 
-    CharArray::new(data, row_count, col_count).map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL))
+    CharArray::from_code_units(data, row_count, col_count)
+        .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL))
 }
 
 fn format_real(value: f64, spec: &FormatSpec, decimal: char) -> String {
@@ -1238,7 +1347,7 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
         return text;
     }
 
-    let len = text.chars().count();
+    let len = text.encode_utf16().count();
     if len >= width {
         return text;
     }
@@ -1277,9 +1386,45 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::builtins::strings::core::numeric_format_work::FormatBuffer;
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+
+    struct ManagedParallel(ManagedHostEffectLedger);
+
+    impl RuntimeParallelService for ManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
+    fn managed_runtime(ledger: &ManagedHostEffectLedger) -> RuntimeContext {
+        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+            )
+    }
 
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(
+            None,
             value,
             crate::builtins::common::test_support::builtin_arguments(rest),
         ))
@@ -1291,13 +1436,191 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn admitted_cell_formatter_matches_original_spelling() {
+        let options = [
+            FormatOptions {
+                spec: FormatSpec::General { digits: 15 },
+                decimal: '.',
+            },
+            FormatOptions {
+                spec: FormatSpec::General { digits: 3 },
+                decimal: ',',
+            },
+            FormatOptions {
+                spec: FormatSpec::General { digits: 4 },
+                decimal: '🙂',
+            },
+            FormatOptions {
+                spec: FormatSpec::Custom(CustomFormat {
+                    kind: CustomKind::Fixed,
+                    width: Some(32),
+                    precision: Some(3),
+                    sign_always: true,
+                    left_align: false,
+                    zero_pad: true,
+                    uppercase: false,
+                }),
+                decimal: '.',
+            },
+            FormatOptions {
+                spec: FormatSpec::Custom(CustomFormat {
+                    kind: CustomKind::Exponent,
+                    width: Some(20),
+                    precision: Some(6),
+                    sign_always: false,
+                    left_align: true,
+                    zero_pad: false,
+                    uppercase: true,
+                }),
+                decimal: '.',
+            },
+            FormatOptions {
+                spec: FormatSpec::Custom(CustomFormat {
+                    kind: CustomKind::Fixed,
+                    width: Some(20),
+                    precision: Some(2),
+                    sign_always: false,
+                    left_align: false,
+                    zero_pad: true,
+                    uppercase: false,
+                }),
+                decimal: '.',
+            },
+        ];
+        for options in &options {
+            for &value in &[0.0, -0.0, 1e-7, -123.456, 1e100, f64::NAN, f64::INFINITY] {
+                let mut backing = [0u8; 512];
+                let mut text = FormatBuffer::new(&mut backing);
+                managed_format::real(value, options, &mut text).unwrap();
+                assert_eq!(
+                    apply_decimal_locale(text.as_str().to_owned(), options.decimal),
+                    format_real(value, &options.spec, options.decimal),
+                    "value {value:?}"
+                );
+            }
+            for raw in [
+                i64::MIN.to_string(),
+                u64::MAX.to_string(),
+                "99999999999999999999".into(),
+            ] {
+                let mut backing = [0u8; 512];
+                let mut text = FormatBuffer::new(&mut backing);
+                managed_format::integer(&raw, options, &mut text).unwrap();
+                assert_eq!(
+                    apply_decimal_locale(text.as_str().to_owned(), options.decimal),
+                    format_integer(raw.clone(), &options.spec, options.decimal),
+                    "integer {raw}"
+                );
+            }
+            for &(real, imag) in &[
+                (0.0, -2.5),
+                (-0.0, 2.5),
+                (1.25, -0.0),
+                (1.25, 2.5),
+                (1e-7, f64::NAN),
+            ] {
+                let mut first = [0u8; 512];
+                let mut second = [0u8; 512];
+                let mut output = FormatBuffer::new(&mut first);
+                let mut scratch = FormatBuffer::new(&mut second);
+                managed_format::complex(real, imag, options, &mut output, &mut scratch).unwrap();
+                assert_eq!(
+                    output.as_str().replace('.', &options.decimal.to_string()),
+                    format_complex(real, imag, &options.spec, options.decimal),
+                    "complex ({real:?},{imag:?})"
+                );
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn managed_num2str_borrows_wide_integer_and_retains_exact_output() {
+        let denied = ManagedHostEffectLedger::new(1);
+        let denied_options = FormatOptions {
+            spec: FormatSpec::General { digits: 20 },
+            decimal: '.',
+        };
+        let denied_result = futures::executor::block_on(managed::format_managed(
+            Value::Int(IntValue::U64(u64::MAX)),
+            &denied_options,
+            &managed_runtime(&denied),
+        ));
+        assert!(denied_result.is_err());
+        assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+
+        let ledger = ManagedHostEffectLedger::new(1 << 20);
+        let runtime = managed_runtime(&ledger);
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+        );
+        let options = FormatOptions {
+            spec: FormatSpec::General { digits: 20 },
+            decimal: '.',
+        };
+        let output =
+            futures::executor::block_on(managed::format_managed(input, &options, &runtime))
+                .expect("managed num2str");
+        assert!(output.data_owner().is_exact());
+        assert_eq!(
+            output.try_row_string().unwrap().as_deref(),
+            Some("18446744073709551615")
+        );
+        let retained = ledger.snapshot().live_reserved_bytes;
+        assert!(retained > 0);
+        let alias = output.clone();
+        drop(output);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+        drop(alias);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+        let local = FormatOptions {
+            spec: FormatSpec::Custom(CustomFormat {
+                kind: CustomKind::Fixed,
+                width: None,
+                precision: Some(2),
+                sign_always: false,
+                left_align: false,
+                zero_pad: false,
+                uppercase: false,
+            }),
+            decimal: '🙂',
+        };
+        let localized = futures::executor::block_on(managed::format_managed(
+            Value::Num(1.5),
+            &local,
+            &managed_runtime(&ledger),
+        ))
+        .expect("supplementary decimal separator");
+        assert_eq!(localized.cols, 5);
+        assert_eq!(
+            localized.try_row_string().unwrap().as_deref(),
+            Some("1🙂50")
+        );
+        drop(localized);
+        let complex = futures::executor::block_on(managed::format_managed(
+            Value::Complex(1.5, 2.25),
+            &local,
+            &managed_runtime(&ledger),
+        ))
+        .expect("two supplementary decimal separators");
+        let expected = "1🙂50 + 2🙂25i";
+        assert_eq!(complex.cols, expected.encode_utf16().count());
+        assert_eq!(complex.try_row_string().unwrap().as_deref(), Some(expected));
+        drop(complex);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_scalar_default_precision() {
         let value = Value::Num(std::f64::consts::PI);
         let out = num2str_builtin(value, Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(ca.rows, 1);
                 assert!(text.starts_with("3.1415926535897"));
             }
@@ -1312,7 +1635,8 @@ pub(crate) mod tests {
         let out = num2str_builtin(value, vec![Value::Int(IntValue::I32(4))]).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text.trim(), "3.142");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1352,7 +1676,9 @@ pub(crate) mod tests {
                 let rows: Vec<String> = ca
                     .data()
                     .chunks(ca.cols)
-                    .map(|chunk| chunk.iter().collect())
+                    .map(|chunk| {
+                        runmat_value::decode_utf16_code_units(chunk).expect("valid UTF-16 fixture")
+                    })
                     .collect();
                 assert_eq!(rows[0], " 1  23  456");
                 assert_eq!(rows[1], "78   9   10");
@@ -1369,7 +1695,8 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::Tensor(tensor), vec![fmt]).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "1.23  5.68");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1383,7 +1710,8 @@ pub(crate) mod tests {
             .expect("default integer format");
         match scalar {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "1.84467440737096e+19");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1396,7 +1724,8 @@ pub(crate) mod tests {
         .expect("fixed integer format");
         match fixed {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, format!("{}.00", u64::MAX));
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1409,7 +1738,8 @@ pub(crate) mod tests {
         .expect("precision integer format");
         match rounded {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "1.845e+19");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1423,7 +1753,8 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::ComplexTensor(complex), Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "3 + 4i  5 - 6i");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1441,7 +1772,10 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!((real_scalar.rows, real_scalar.cols), (1, 1));
-        assert_eq!(real_scalar.data(), vec!['7']);
+        assert_eq!(
+            real_scalar.data(),
+            runmat_value::encode_utf16_code_units("7")
+        );
 
         let Value::CharArray(real_vector) = num2str_builtin(
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
@@ -1451,7 +1785,10 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!((real_vector.rows, real_vector.cols), (2, 1));
-        assert_eq!(real_vector.data(), vec!['1', '2']);
+        assert_eq!(
+            real_vector.data(),
+            runmat_value::encode_utf16_code_units("12")
+        );
 
         let Value::CharArray(complex_scalar) = num2str_builtin(
             Value::ComplexTensor(ComplexTensor::new(vec![(7.0, 1.0)], Vec::new()).unwrap()),
@@ -1474,7 +1811,8 @@ pub(crate) mod tests {
         };
         assert_eq!(complex_vector.rows, 1);
         assert_eq!(
-            complex_vector.data().iter().collect::<String>(),
+            runmat_value::decode_utf16_code_units(complex_vector.data())
+                .expect("valid text fixture"),
             "1 + 2i  3 + 4i"
         );
     }
@@ -1493,7 +1831,8 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "1.84467440737096e+19 + 7i  9.00719925474099e+15");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1518,7 +1857,8 @@ pub(crate) mod tests {
         .expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, format!("{} + 7i  9007199254740993", u64::MAX));
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1533,6 +1873,9 @@ pub(crate) mod tests {
         crate::builtins::common::env::set_var("RUNMAT_DECIMAL_SEPARATOR", ",");
         let out =
             num2str_builtin(Value::Num(0.5), vec![Value::String("local".into())]).expect("num2str");
+        crate::builtins::common::env::set_var("RUNMAT_DECIMAL_SEPARATOR", "\u{1F642}");
+        let supplementary = num2str_builtin(Value::Num(0.5), vec![Value::String("local".into())])
+            .expect("supplementary decimal separator");
         match previous {
             Some(value) => {
                 crate::builtins::common::env::set_var("RUNMAT_DECIMAL_SEPARATOR", &value)
@@ -1541,11 +1884,24 @@ pub(crate) mod tests {
         }
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "0,5");
             }
             other => panic!("expected char array, got {other:?}"),
         }
+        let Value::CharArray(supplementary) = supplementary else {
+            panic!("expected character output")
+        };
+        assert_eq!((supplementary.rows, supplementary.cols), (1, 4));
+        assert_eq!(
+            supplementary
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            [0x30, 0xD83D, 0xDE42, 0x35]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1555,7 +1911,8 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::LogicalArray(logical), Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid text fixture");
                 assert_eq!(text, "1  0  1");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1576,7 +1933,8 @@ pub(crate) mod tests {
                 .expect("num2str");
             match out {
                 Value::CharArray(ca) => {
-                    let text: String = ca.data().iter().collect();
+                    let text: String = runmat_value::decode_utf16_code_units(ca.data())
+                        .expect("valid text fixture");
                     assert_eq!(text, "10.5  20.5");
                 }
                 other => panic!("expected char array, got {other:?}"),

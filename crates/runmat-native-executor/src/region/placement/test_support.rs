@@ -13,7 +13,7 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct Probe {
-    pub requests: RefCell<Vec<PlacementPlanRequest>>,
+    pub requests: RefCell<Vec<WholeWorkPlacementRequest>>,
     pub feedback: RefCell<Vec<PlacementFeedback>>,
     pub vectorized: Cell<bool>,
     pub memory: Cell<Option<u64>>,
@@ -34,42 +34,38 @@ impl RuntimeParallelService for Probe {
 impl RuntimePlacementService for Probe {
     fn plan(
         &self,
-        request: PlacementPlanRequest,
+        _: PlacementPlanRequest,
     ) -> Result<runmat_execution::PlacementDecision, RuntimeError> {
+        Err(runmat_runtime::runtime_error::semantic_error(
+            "fixture",
+            "whole-work fixture does not select numeric graphs",
+        ))
+    }
+    fn select_whole_work(
+        &self,
+        request: WholeWorkPlacementRequest,
+    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, RuntimeError> {
+        request
+            .validate()
+            .map_err(|message| runmat_runtime::runtime_error::semantic_error("fixture", message))?;
         self.requests.borrow_mut().push(request.clone());
-        let node = &request.graph.nodes[0];
-        let vector = &node.candidates[1];
-        let admit = self.vectorized.get()
-            && request
-                .resources
-                .memory_available_bytes
-                .is_none_or(|bytes| {
-                    match (
-                        vector.resources.retained_bytes,
-                        vector.resources.scratch_bytes,
-                    ) {
-                        (
-                            runmat_execution::ResourceByteBound::Known(retained),
-                            runmat_execution::ResourceByteBound::Known(scratch),
-                        ) => retained
-                            .checked_add(scratch)
-                            .is_some_and(|required| required <= bytes),
-                        _ => false,
-                    }
-                });
-        let selected = &node.candidates[usize::from(admit)].descriptor;
-        Ok(runmat_execution::PlacementDecision {
-            signature: request.signature.clone(),
-            selections: vec![runmat_execution::SelectedExecutionCandidate {
-                node: node.identity.clone(),
-                candidate: selected.identity.clone(),
-                kind: selected.kind,
-            }],
-            predicted_total_ns: selected.cost.checked_total_ns().unwrap(),
-            from_cache: false,
-            used_local_fallback: false,
-            explored_states: 2,
-            pruned_states: 0,
+        let route = if self.vectorized.get() {
+            &request.candidates[1]
+        } else {
+            &request.candidates[0]
+        };
+        Ok(runmat_runtime::context::RuntimeWholeWorkSelection {
+            decision: WholeWorkDecision {
+                signature: request.signature.clone(),
+                selected: route.selected("native.numeric_region"),
+                kind: WholeWorkDecisionKind::Unmeasured,
+                predicted_total_ns: route
+                    .cost
+                    .estimate()
+                    .and_then(|cost| cost.checked_total_ns()),
+            },
+            probe: None,
+            observation_permit: None,
         })
     }
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
@@ -102,10 +98,14 @@ pub(crate) fn plan() -> OptimizedRegionPlan {
             phase: runmat_native_codegen::NativeSitePhase::Rvalue,
             ordinal: 0,
         },
-        exit: runmat_types::ProgramPointId {
-            function,
-            block: 0,
-            position: 1,
+        exit_site: SiteIdentity {
+            point: runmat_types::ProgramPointId {
+                function,
+                block: 0,
+                position: 1,
+            },
+            phase: runmat_native_codegen::NativeSitePhase::Terminator,
+            ordinal: 0,
         },
         traversal_sites: vec![SiteIdentity {
             point: runmat_types::ProgramPointId {
@@ -116,6 +116,7 @@ pub(crate) fn plan() -> OptimizedRegionPlan {
             phase: runmat_native_codegen::NativeSitePhase::Rvalue,
             ordinal: 0,
         }],
+        operation_sites: Vec::new(),
         inputs: vec![runmat_types::RegionValueId { function, local: 0 }],
         outputs: vec![crate::region::plan::RegionOutput {
             value: None,
@@ -142,4 +143,5 @@ pub(crate) fn choose(
         &inputs,
         runmat_runtime::numeric_region::workload(&inputs).unwrap(),
     )
+    .unwrap_or(RegionPlacement::Unavailable)
 }

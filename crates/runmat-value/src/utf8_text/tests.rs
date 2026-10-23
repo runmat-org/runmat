@@ -86,6 +86,38 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
     drop(alias);
     assert_eq!(live.load(Ordering::SeqCst), 0);
 
+    let mut adopted = String::with_capacity(37);
+    adopted.push_str("member");
+    let pointer = adopted.as_ptr();
+    let bytes = Utf8Text::requested_bytes_for_capacity(adopted.capacity()).unwrap();
+    let adopted = Utf8Text::try_adopt_string_exact(
+        adopted,
+        &Permit {
+            limit: bytes,
+            live: live.clone(),
+        },
+    )
+    .unwrap();
+    assert_eq!(adopted.as_str().as_ptr(), pointer);
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(adopted);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    let denied = String::from("member");
+    let pointer = denied.as_ptr();
+    let denied = Utf8Text::try_adopt_string_exact(
+        denied,
+        &Permit {
+            limit: 0,
+            live: live.clone(),
+        },
+    )
+    .unwrap_err()
+    .try_into_unclaimed_values()
+    .unwrap();
+    assert_eq!(denied.as_ptr(), pointer);
+    assert_eq!(denied, b"member");
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
     let source = "Aé𝄞";
     let staged_bytes = Utf8Text::requested_bytes_for_capacity(source.len()).unwrap();
     let staged_permit = Permit {
@@ -360,4 +392,53 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
         Err(crate::ExactArrayInitializationError::Element(()))
     ));
     assert_eq!(live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn exact_utf16_copy_decodes_pairs_and_rejects_unpaired_units_before_allocation() {
+    let live = Arc::new(AtomicUsize::new(0));
+    let units = crate::encode_utf16_code_units("A🙂é");
+    let (length, quoted) =
+        Utf8Text::requested_bytes_for_utf16_with(&units, |_| Ok::<(), ()>(())).unwrap();
+    assert_eq!(length, "A🙂é".len());
+    let permit = Permit {
+        limit: quoted,
+        live: live.clone(),
+    };
+    let output =
+        Utf8Text::try_copy_utf16_exact_with(&units, &permit, |_| Ok::<(), ()>(())).unwrap();
+    assert_eq!(output.as_str(), "A🙂é");
+    assert_eq!(live.load(Ordering::SeqCst), quoted);
+    drop(output);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let malformed = [crate::Utf16CodeUnit::from_raw(0xD83D)];
+    let error =
+        Utf8Text::requested_bytes_for_utf16_with(&malformed, |_| Ok::<(), ()>(())).unwrap_err();
+    assert!(matches!(
+        error,
+        crate::ExactArrayInitializationError::Element(crate::Utf16TextCopyError::Decode(
+            crate::Utf16DecodeError { index: 0, .. }
+        ))
+    ));
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn exact_utf16_quote_checkpoints_mixed_unit_widths() {
+    let mut units = vec![crate::Utf16CodeUnit::from_raw(u16::from(b'A'))];
+    units.extend(crate::encode_utf16_code_units(&"🙂".repeat(5_000)));
+    let mut visited = Vec::new();
+    Utf8Text::requested_bytes_for_utf16_with(&units, |offset| {
+        visited.push(offset);
+        Ok::<(), ()>(())
+    })
+    .unwrap();
+    assert_eq!(visited.first(), Some(&0));
+    assert_eq!(visited.last(), Some(&units.len()));
+    assert!(
+        visited.len() >= 4,
+        "mixed-width quote skipped checkpoints: {visited:?}"
+    );
+    assert!(visited.windows(2).all(|pair| pair[1] - pair[0] <= 4_097));
 }

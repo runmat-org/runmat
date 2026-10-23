@@ -19,7 +19,8 @@ impl RunMatSession {
                 self.runtime_context
                     .service_ports()
                     .timing()
-                    .command_thread_cpu_sampler(),
+                    .ok()
+                    .and_then(|timing| timing.command_thread_cpu_sampler()),
             )
         });
         let receipt = self

@@ -42,7 +42,7 @@ pub const MEAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,
-        fusion: BuiltinFusionPolicy::Boundary,
+        fusion: BuiltinFusionPolicy::Candidate,
         distributed: BuiltinDistributedPolicy::MaterializeArguments,
     },
     link: BuiltinLinkContract {

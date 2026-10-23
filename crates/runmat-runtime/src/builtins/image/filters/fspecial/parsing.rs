@@ -3,7 +3,7 @@ use runmat_value::{IntValue, NumericScalar, Value};
 use super::{fspecial_argument_error, fspecial_error, BuiltinResult, FilterKind};
 
 pub(super) fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
-    let text = value_to_string(value)
+    let text = value_to_string(value)?
         .ok_or_else(|| fspecial_argument_error("first argument must be a string filter name"))?;
     let lower = text.to_ascii_lowercase();
     FilterKind::from_name(&text).ok_or_else(|| {
@@ -206,13 +206,19 @@ pub(super) fn parse_unsharp_alpha(arg: Option<&Value>) -> BuiltinResult<f64> {
     }
 }
 
-fn value_to_string(value: &Value) -> Option<String> {
-    match value {
+fn value_to_string(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = fspecial_error(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 pub(super) fn parse_lengths_strict(value: &Value, err: &str) -> BuiltinResult<Vec<usize>> {

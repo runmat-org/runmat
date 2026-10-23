@@ -67,8 +67,8 @@ pub(super) fn string_property(object: &ObjectInstance, name: &str) -> BuiltinRes
         Some(Value::Cell(cell)) => cell
             .data()
             .iter()
-            .map(|value| {
-                scalar_text(value)
+            .map(|value| -> BuiltinResult<String> {
+                scalar_text(value)?
                     .map(std::borrow::Cow::into_owned)
                     .ok_or_else(|| {
                         predict_invalid(format!("predict: property '{name}' is invalid"))
@@ -246,22 +246,22 @@ pub(super) fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
-    match value {
+pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
         Value::String(text) => Some(std::borrow::Cow::Borrowed(text.as_str())),
-        Value::CharArray(chars) => Some(std::borrow::Cow::Owned(chars_to_string(chars))),
+        Value::CharArray(chars) => Some(std::borrow::Cow::Owned(chars_to_string(chars)?)),
         Value::StringArray(array) if array.data().len() == 1 => array
             .data()
             .first()
             .map(|text| std::borrow::Cow::Borrowed(text.as_str())),
         _ => None,
-    }
+    })
 }
 
 pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::CharArray(chars) => Ok(vec![chars_to_string(chars)]),
+        Value::CharArray(chars) => Ok(vec![chars_to_string(chars)?]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
@@ -271,7 +271,7 @@ pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>>
             .data()
             .iter()
             .map(|value| {
-                scalar_text(value)
+                scalar_text(value)?
                     .map(std::borrow::Cow::into_owned)
                     .ok_or_else(|| fitlm_invalid(format!("fitlm: {name} entries must be text")))
             })
@@ -282,8 +282,10 @@ pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>>
     }
 }
 
-fn chars_to_string(chars: &CharArray) -> String {
-    chars.data().iter().collect()
+fn chars_to_string(chars: &CharArray) -> BuiltinResult<String> {
+    crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+        fitlm_invalid("fitlm: character value is not valid UTF-16 text")
+    })
 }
 
 pub(super) fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {

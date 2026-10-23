@@ -1,20 +1,31 @@
 use super::*;
+use runmat_value::decode_utf16_code_units;
 
-pub(super) fn scalar_text(value: &Value) -> Option<String> {
+pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<String>> {
+    decode_scalar_text(value).map_err(fitctree_utf16_error)
+}
+
+pub(super) fn predict_scalar_text(value: &Value) -> BuiltinResult<Option<String>> {
+    decode_scalar_text(value).map_err(predict_utf16_error)
+}
+
+fn decode_scalar_text(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::CharArray(array) if array.rows == 1 => {
+            decode_utf16_code_units(array.data()).map(Some)
         }
-        _ => None,
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Some(array.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 
 pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::CharArray(array) => Ok(char_rows(array)),
+        Value::CharArray(array) => fit_char_rows(array),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
@@ -24,7 +35,7 @@ pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>>
             .data()
             .iter()
             .map(|value| {
-                scalar_text(value).ok_or_else(|| {
+                scalar_text(value)?.ok_or_else(|| {
                     fitctree_invalid(format!("fitctree: {name} entries must be text"))
                 })
             })
@@ -35,13 +46,47 @@ pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>>
     }
 }
 
-pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
+pub(super) fn char_rows(array: &CharArray) -> BuiltinResult<Vec<String>> {
+    decode_char_rows(array).map_err(predict_utf16_error)
+}
+
+fn fit_char_rows(array: &CharArray) -> BuiltinResult<Vec<String>> {
+    decode_char_rows(array).map_err(fitctree_utf16_error)
+}
+
+fn decode_char_rows(array: &CharArray) -> Result<Vec<String>, runmat_value::Utf16DecodeError> {
     let mut out = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        out.push(array.data()[start..start + array.cols].iter().collect());
+        out.push(decode_utf16_code_units(
+            &array.data()[start..start + array.cols],
+        )?);
     }
-    out
+    Ok(out)
+}
+
+fn predict_utf16_error(error: runmat_value::Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "predict: character value is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(PREDICT_NAME)
+    .with_source(error);
+    if let Some(identifier) = ERROR_PREDICT_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fitctree_utf16_error(error: runmat_value::Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "fitctree: character value is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(FITCTREE_NAME)
+    .with_source(error);
+    if let Some(identifier) = ERROR_FITCTREE_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 pub(super) fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {

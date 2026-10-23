@@ -26,17 +26,17 @@ enum Keyword {
 }
 
 impl Keyword {
-    fn parse(value: &Value, kind: ReductionKind) -> Option<Self> {
+    fn parse(value: &Value, kind: ReductionKind) -> BuiltinResult<Option<Self>> {
         let keyword = keyword_of(value)?;
-        match keyword.as_str() {
-            "all" => Some(Self::All),
-            "includenan" => Some(Self::Include),
-            "omitnan" => Some(Self::Omit),
-            "includemissing" if kind.allows_missing_synonyms() => Some(Self::Include),
-            "omitmissing" if kind.allows_missing_synonyms() => Some(Self::Omit),
-            "weights" if kind.allows_weights() => Some(Self::Weights),
+        Ok(match keyword.as_deref() {
+            Some("all") => Some(Self::All),
+            Some("includenan") => Some(Self::Include),
+            Some("omitnan") => Some(Self::Omit),
+            Some("includemissing") if kind.allows_missing_synonyms() => Some(Self::Include),
+            Some("omitmissing") if kind.allows_missing_synonyms() => Some(Self::Omit),
+            Some("weights") if kind.allows_weights() => Some(Self::Weights),
             _ => None,
-        }
+        })
     }
 }
 
@@ -58,7 +58,7 @@ pub(super) async fn parse(
     let mut index = 0;
     while index < args.len() {
         let value = &args[index];
-        match Keyword::parse(value, kind) {
+        match Keyword::parse(value, kind)? {
             Some(Keyword::All) if axes.is_none() => axes = Some(Axes::All),
             Some(Keyword::All) => {
                 return Err(invalid(kind, "only one operating dimension is allowed"))
@@ -78,7 +78,7 @@ pub(super) async fn parse(
                 weights = Some(weight.clone());
                 index += 1;
             }
-            None if keyword_of(value).is_some() => {
+            None if keyword_of(value)?.is_some() => {
                 return Err(invalid(kind, "unsupported reduction option"));
             }
             None if axes.is_none() => {

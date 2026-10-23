@@ -27,7 +27,9 @@ pub(super) fn text(
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Ok(array.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                descriptor_error(error, builtin)
+            })
         }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
@@ -86,7 +88,8 @@ mod tests {
         ] {
             for (shape, valid) in [(vec![1, 2, 1], true), (vec![1, 1, 2], false)] {
                 let value = Value::CharArray(
-                    runmat_value::CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap(),
+                    runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], shape)
+                        .unwrap(),
                 );
                 assert_eq!(text(&value, descriptor, builtin).is_ok(), valid);
             }

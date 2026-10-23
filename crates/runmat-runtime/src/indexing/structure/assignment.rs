@@ -23,6 +23,16 @@ pub fn assign_with_plan(
         }
         return deletion::delete_with_plan(base, plan);
     }
+    let context = crate::context::legacy::active();
+    assign_with_plan_in_context(context.as_ref(), base, plan, rhs)
+}
+
+pub fn assign_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    plan: &IndexPlan,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         return Ok(base);
     }
@@ -45,11 +55,13 @@ pub fn assign_with_plan(
         Replacement::Scalar(value) => Value::Struct(value),
         Replacement::Array(value) => Value::StructArray(value),
     };
-    crate::aggregate::structure::operations::assign(&base, &rhs, plan).map_err(|error| {
-        crate::aggregate::structure::operations::remap(error, |message| {
-            mex("StructAssignment", message)
-        })
-    })
+    crate::aggregate::structure::operations::assign_in_context(context, &base, &rhs, plan).map_err(
+        |error| {
+            crate::aggregate::structure::operations::remap(error, |message| {
+                mex("StructAssignment", message)
+            })
+        },
+    )
 }
 
 fn structure_schema(value: &Value) -> Result<(), RuntimeError> {

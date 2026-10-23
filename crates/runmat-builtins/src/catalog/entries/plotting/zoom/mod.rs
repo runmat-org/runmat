@@ -1,16 +1,14 @@
 mod contract;
 pub use contract::*;
 mod inference;
+mod documentation;
 use crate::*;
 pub const ZOOM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "zoom" },
     category: "plotting",
-    documentation: BuiltinDocumentation {
-        summary: "Control interactive and programmatic axes zooming.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &ZOOM_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

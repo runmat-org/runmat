@@ -48,15 +48,10 @@ async fn getfield_builtin(
     }
 }
 
-pub(crate) async fn getfield_internal_with_context(
+pub(crate) async fn getfield_internal_retained_with_context(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    let rest = match runtime {
-        Some(runtime) => crate::execution::RootedValues::in_context(rest, runtime)?,
-        None => crate::execution::RootedValues::new(rest)
-            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?,
-    };
-    execution::getfield(runtime, base, rest.into(), false).await
+    execution::getfield(runtime, base, rest, false).await
 }

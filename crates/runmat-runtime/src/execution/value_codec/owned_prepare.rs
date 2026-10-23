@@ -131,7 +131,7 @@ fn value_footprint(value: &Value, path: &str) -> Result<(u64, u64, u64), ValueCo
         ),
         Value::LogicalArray(array) => (len(array.data.len())?, 0, len(array.shape.len())?),
         Value::CharArray(array) => (
-            mul(len(array.data().len())?, 4)?,
+            mul(len(array.data().len())?, 2)?,
             0,
             len(array.shape.len())?,
         ),

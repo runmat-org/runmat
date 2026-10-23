@@ -228,6 +228,11 @@ impl Default for BaseWorkspaceOwner {
 }
 
 impl BaseWorkspaceOwner {
+    /// Whether two service ports retain the same canonical workspace owner.
+    pub fn same_owner(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.state, &other.state)
+    }
+
     pub(super) fn from_private_storage(storage: PrivateLiveStorage) -> Self {
         let revision = storage.revision();
         let mut journal = WorkspaceJournal::new(DEFAULT_HISTORY_CHANGE_LIMIT);

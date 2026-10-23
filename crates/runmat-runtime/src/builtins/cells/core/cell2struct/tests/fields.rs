@@ -4,7 +4,8 @@ use runmat_value::{CharArray, StringArray};
 #[test]
 fn accepts_character_string_and_column_major_cell_names() {
     let values = || CellArray::new(vec![1.0.into(), 2.0.into()], 2, 1).unwrap();
-    let character = Value::CharArray(CharArray::new(vec!['a', ' ', 'b', ' '], 2, 2).unwrap());
+    let character =
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['a', ' ', 'b', ' '], 2, 2).unwrap());
     let strings =
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap());
     let cells = Value::Cell(

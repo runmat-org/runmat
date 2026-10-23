@@ -74,7 +74,12 @@ fn empty_and_nd_constructor_boundaries_are_preserved() {
     let d = call_constructor(vec![tensor(&[], 0, 3)]).expect("empty rectangular matrix");
     let spec = object_to_spec(&d).unwrap();
     assert_eq!(matrix_dims(&spec.matrix), (0, 3));
-    let nd = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2, 1]).unwrap());
+    let trailing_singleton =
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2, 1]).unwrap());
+    let d = call_constructor(vec![trailing_singleton])
+        .expect("normalized matrix-compatible singleton tail");
+    assert_eq!(matrix_dims(&object_to_spec(&d).unwrap().matrix), (2, 2));
+    let nd = Value::Tensor(Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap());
     assert!(call_constructor(vec![nd])
         .unwrap_err()
         .message()

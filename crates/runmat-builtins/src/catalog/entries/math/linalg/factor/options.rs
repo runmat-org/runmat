@@ -14,14 +14,18 @@ pub enum FactorOption {
 
 impl FactorOption {
     pub fn parse(text: &str) -> Option<Self> {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "matrix" => Some(Self::Matrix),
-            "vector" => Some(Self::Vector),
-            "econ" | "economy" | "0" => Some(Self::Economy),
-            "full" => Some(Self::Full),
-            "balance" => Some(Self::Balance),
-            "nobalance" => Some(Self::NoBalance),
-            _ => None,
-        }
+        let text = text.trim();
+        [
+            ("matrix", Self::Matrix),
+            ("vector", Self::Vector),
+            ("econ", Self::Economy),
+            ("economy", Self::Economy),
+            ("0", Self::Economy),
+            ("full", Self::Full),
+            ("balance", Self::Balance),
+            ("nobalance", Self::NoBalance),
+        ]
+        .into_iter()
+        .find_map(|(name, option)| text.eq_ignore_ascii_case(name).then_some(option))
     }
 }

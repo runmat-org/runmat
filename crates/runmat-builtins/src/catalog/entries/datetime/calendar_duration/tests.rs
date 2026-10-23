@@ -57,6 +57,12 @@ fn extracted_declarations_keep_all_public_identity_and_extension_exports() {
             "calweeks",
             "calyears",
             "iscalendarduration",
+            "isdatetime",
+            "datetick",
+            "calendarDuration.plus",
+            "calendarDuration.minus",
+            "calendarDuration.eq",
+            "calendarDuration.ne",
         ]
     );
     assert_eq!(CALENDAR_DURATION_EXTENSIONS.len(), 3);

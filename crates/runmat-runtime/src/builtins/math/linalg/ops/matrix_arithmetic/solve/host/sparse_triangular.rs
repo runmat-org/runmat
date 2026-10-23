@@ -1,6 +1,7 @@
 //! Host CSC triangular left solve. The coefficient matrix is borrowed in its
 //! native precision; a general sparse system remains on the existing path.
 
+mod managed;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::math::linalg::ops::triangular_operator::{
@@ -24,7 +25,13 @@ fn internal(message: String) -> RuntimeError {
 }
 
 fn admission(error: HostAllocationError, context: &RuntimeContext) -> RuntimeError {
-    crate::builtin::builtin_control_error(Some(&context.cancellation_context()), "mldivide", error)
+    let mut error = crate::builtin::builtin_control_error(
+        Some(&context.cancellation_context()),
+        "mldivide",
+        error,
+    );
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
 }
 
 fn map_operator(error: TriangularOperatorError, context: &RuntimeContext) -> RuntimeError {
@@ -35,55 +42,64 @@ fn map_operator(error: TriangularOperatorError, context: &RuntimeContext) -> Run
                 source,
             ),
         ) => admission(source, context),
-        other => invalid(format!("mldivide: {other}")),
+        TriangularOperatorError::Execution(error) => {
+            let mut error = error.into_runtime_error_in_context(Some(context));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        }
+        other => {
+            let mut builder = crate::build_runtime_error(format!("mldivide: {other}"))
+                .with_builtin("mldivide")
+                .with_source(other)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+            if let Some(identifier) = runmat_builtins::MLDIVIDE_ERROR_INVALID_INPUT.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        }
     }
 }
 
-fn candidate<'a>(
-    lhs: &'a Value,
-    context: &RuntimeContext,
-) -> BuiltinResult<Option<TriangularLinearOperator<'a>>> {
-    let borrow = |triangle| {
-        TriangularLinearOperator::borrow_with_context(lhs, triangle, Diagonal::Explicit, context)
-    };
-    let lower = match borrow(Triangle::Lower) {
-        Ok(operator) => return Ok(Some(operator)),
-        Err(error @ TriangularOperatorError::Admission(_))
-        | Err(
-            error @ TriangularOperatorError::Operator(
-                crate::builtins::math::linalg::ops::sparse_operator::SparseOperatorError::Admission(
-                    _,
-                ),
-            ),
-        ) => return Err(map_operator(error, context)),
-        Err(error) => error,
-    };
-    match borrow(Triangle::Upper) {
-        Ok(operator) => Ok(Some(operator)),
-        Err(error @ TriangularOperatorError::Admission(_))
-        | Err(
-            error @ TriangularOperatorError::Operator(
-                crate::builtins::math::linalg::ops::sparse_operator::SparseOperatorError::Admission(
-                    _,
-                ),
-            ),
-        ) => Err(map_operator(error, context)),
-        Err(error) => {
-            if matches!(&lower, TriangularOperatorError::NonTriangular { .. }) {
-                if matches!(&error, TriangularOperatorError::NonTriangular { .. }) {
-                    Ok(None)
-                } else {
-                    Err(map_operator(error, context))
-                }
-            } else if matches!(&error, TriangularOperatorError::NonTriangular { .. }) {
-                // The lower probe can hit an invalid diagonal before a later
-                // upper entry proves the matrix general. Preserve the prior
-                // general-sparse path in that ambiguous case.
-                Ok(None)
-            } else {
-                Err(map_operator(lower, context))
-            }
-        }
+enum Candidate<'a> {
+    General,
+    Operator(TriangularLinearOperator<'a>),
+    Singular,
+}
+
+async fn candidate<'a>(lhs: &'a Value, context: &RuntimeContext) -> BuiltinResult<Candidate<'a>> {
+    match TriangularLinearOperator::borrow_cooperatively(
+        lhs,
+        Triangle::Lower,
+        Diagonal::Explicit,
+        context,
+    )
+    .await
+    {
+        Ok(operator) => return Ok(Candidate::Operator(operator)),
+        Err(TriangularOperatorError::NonTriangular { .. }) => {}
+        Err(
+            TriangularOperatorError::MissingDiagonal(_)
+            | TriangularOperatorError::SingularDiagonal(_),
+        ) => return Ok(Candidate::Singular),
+        // The canonical validator proves the complete finite triangle before
+        // its deferred diagonal result. Missing authority is never singularity.
+        Err(error) => return Err(map_operator(error, context)),
+    }
+    match TriangularLinearOperator::borrow_cooperatively(
+        lhs,
+        Triangle::Upper,
+        Diagonal::Explicit,
+        context,
+    )
+    .await
+    {
+        Ok(operator) => Ok(Candidate::Operator(operator)),
+        Err(TriangularOperatorError::NonTriangular { .. }) => Ok(Candidate::General),
+        Err(
+            TriangularOperatorError::MissingDiagonal(_)
+            | TriangularOperatorError::SingularDiagonal(_),
+        ) => Ok(Candidate::Singular),
+        Err(error) => Err(map_operator(error, context)),
     }
 }
 
@@ -118,7 +134,7 @@ macro_rules! solve_columns {
     }};
 }
 
-pub(in super::super) fn try_solve(
+pub(in super::super) async fn try_solve(
     lhs: &Value,
     rhs: &Value,
     context: &RuntimeContext,
@@ -148,11 +164,19 @@ pub(in super::super) fn try_solve(
     };
     let policy =
         HostAllocationReceipt::policy(Some(context)).map_err(|error| admission(error, context))?;
-    let Some(operator) = candidate(lhs, context)? else {
-        return Ok(None);
+    let operator = match candidate(lhs, context).await? {
+        Candidate::General => return Ok(None),
+        Candidate::Singular => {
+            return super::general_sparse::solve_singular(sparse, rhs, columns, context)
+                .await
+                .map(Some)
+        }
+        Candidate::Operator(operator) => operator,
     };
     if policy == HostAllocationPolicy::Managed {
-        return Err(admission(HostAllocationError::MissingManagedOwner, context));
+        return managed::solve(operator, rhs, columns, context)
+            .await
+            .map(Some);
     }
     let result = match (operator, rhs) {
         (TriangularLinearOperator::RealF32(operator), Value::Tensor(tensor)) => {

@@ -19,7 +19,9 @@ fn indexed_data(index: usize) -> Value {
     ObjectSubscriptPath::new(vec![
         ObjectSubscript::member("Data"),
         ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-            components: vec![ObjectIndexComponent::Value(Value::Num(index as f64))],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                ObjectIndexComponent::Value(Value::Num(index as f64)),
+            ]),
         }),
     ])
     .unwrap()
@@ -31,11 +33,15 @@ fn indexed_field(record: usize, field: &str, index: usize) -> Value {
     ObjectSubscriptPath::new(vec![
         ObjectSubscript::member("Data"),
         ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-            components: vec![ObjectIndexComponent::Value(Value::Num(record as f64))],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                ObjectIndexComponent::Value(Value::Num(record as f64)),
+            ]),
         }),
         ObjectSubscript::member(field),
         ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-            components: vec![ObjectIndexComponent::Value(Value::Num(index as f64))],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                ObjectIndexComponent::Value(Value::Num(index as f64)),
+            ]),
         }),
     ])
     .unwrap()

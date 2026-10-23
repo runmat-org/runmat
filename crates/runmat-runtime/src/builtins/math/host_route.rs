@@ -6,10 +6,38 @@ use runmat_value::{NumericDType, Value};
 
 pub(crate) enum NumericHostRoute {
     Vm(VmFusionHostRoute),
+    Native(crate::context::NativeRegionHostRoute),
     Prepared(crate::context::preparation::PreparedHostExecution),
 }
 
 impl NumericHostRoute {
+    pub(crate) fn take_intrinsic_numerical_output(
+        &self,
+        runtime: &RuntimeContext,
+        operator: runmat_types::OperatorKind,
+    ) -> crate::BuiltinResult<Option<crate::context::preparation::PreparedHostNumericalOutput>>
+    {
+        match self {
+            Self::Vm(route) => route.take_intrinsic_numerical_output(runtime, operator),
+            Self::Native(route) => route.take_intrinsic_numerical_output(runtime, operator),
+            Self::Prepared(_) => {
+                unreachable!("prepared named binding cannot grant intrinsic authority")
+            }
+        }
+    }
+    pub(crate) fn confirm_intrinsic_host(
+        &self,
+        runtime: &RuntimeContext,
+        operator: runmat_types::OperatorKind,
+    ) {
+        match self {
+            Self::Vm(route) => route.confirm_intrinsic_host(runtime, operator),
+            Self::Native(route) => route.confirm_intrinsic_host(runtime, operator),
+            Self::Prepared(_) => {
+                unreachable!("prepared named binding cannot grant intrinsic authority")
+            }
+        }
+    }
     pub(crate) fn take_numerical_output(
         &self,
         runtime: &RuntimeContext,
@@ -19,6 +47,7 @@ impl NumericHostRoute {
     {
         match self {
             Self::Vm(route) => route.take_numerical_output(runtime, instruction, binding),
+            Self::Native(route) => route.take_numerical_output(runtime, instruction, binding),
             Self::Prepared(_) => {
                 match crate::context::host_allocation::HostAllocationReceipt::policy(Some(runtime))
                 {
@@ -51,6 +80,7 @@ impl NumericHostRoute {
     ) {
         match self {
             Self::Vm(route) => route.confirm_host_branch(runtime, instruction),
+            Self::Native(route) => route.confirm_host_branch(runtime, instruction),
             Self::Prepared(route) => route.confirm_numerical(runtime, instruction, evidence),
         }
     }
@@ -61,6 +91,7 @@ impl NumericHostRoute {
     ) {
         match self {
             Self::Vm(route) => route.confirm_host_branch(runtime, instruction),
+            Self::Native(route) => route.confirm_host_branch(runtime, instruction),
             Self::Prepared(route) => route.confirm(runtime, instruction),
         }
     }
@@ -70,6 +101,22 @@ pub(crate) fn real_floating_host(value: &Value) -> bool {
     matches!(value, Value::Num(_))
         || matches!(value, Value::Tensor(tensor)
         if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
+}
+
+pub(crate) fn intrinsic(
+    runtime: &RuntimeContext,
+    operator: runmat_types::OperatorKind,
+) -> Option<NumericHostRoute> {
+    if let Some(route) = runtime
+        .native_region_host_route()
+        .filter(|route| route.allows_intrinsic_host(runtime, operator))
+    {
+        return Some(NumericHostRoute::Native(route.clone()));
+    }
+    runtime
+        .vm_fusion_host_route()
+        .filter(|route| route.allows_intrinsic_host(runtime, operator))
+        .map(|route| NumericHostRoute::Vm(route.clone()))
 }
 
 pub(crate) fn real_floating_shape(value: &Value) -> Option<&[usize]> {
@@ -121,6 +168,12 @@ pub(crate) fn selected(
     runtime: &RuntimeContext,
     instruction: VmFusionHostInstruction,
 ) -> Option<NumericHostRoute> {
+    if let Some(route) = runtime
+        .native_region_host_route()
+        .filter(|route| route.allows_host_preparation(runtime, instruction))
+    {
+        return Some(NumericHostRoute::Native(route.clone()));
+    }
     if let Some(route) = runtime
         .vm_fusion_host_route()
         .filter(|route| route.allows_host_preparation(runtime, instruction))

@@ -1,4 +1,5 @@
 mod inference;
+mod documentation;
 use crate::*;
 pub const DETECT_IMPORT_OPTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
@@ -7,10 +8,7 @@ pub const DETECT_IMPORT_OPTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCata
         name: "detectImportOptions",
     },
     category: "io/tabular",
-    documentation: BuiltinDocumentation {
-        summary: "Inspect a text or spreadsheet file and create import options.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &DETECT_IMPORT_OPTIONS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

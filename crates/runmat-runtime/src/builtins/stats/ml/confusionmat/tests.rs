@@ -6,7 +6,9 @@ use runmat_value::IntegerStorage;
 #[test]
 fn scalar_text_rejects_multirow_and_nd_labels_and_option_names() {
     for shape in [vec![2, 1], vec![1, 1, 2]] {
-        let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap());
+        let chars = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], shape).unwrap(),
+        );
         let cell = Value::Cell(CellArray::new(vec![chars.clone()], 1, 1).unwrap());
         let error = block_on(confusionmat_builtin(
             None,
@@ -75,7 +77,9 @@ fn discarded_outputs_still_validate_labels_and_options() {
 
 #[test]
 fn character_pages_are_not_silently_ignored() {
-    let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    let chars = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+    );
     let error = block_on(confusionmat_builtin(
         None,
         chars.clone(),
@@ -462,23 +466,28 @@ fn supports_categorical_labels_in_category_order() {
         )
         .unwrap(),
     );
-    let group = crate::builtins::table::categorical_from_args(vec![
-        Value::StringArray(
-            StringArray::new(vec!["high".into(), "low".into(), "high".into()], vec![3, 1]).unwrap(),
-        ),
-        categories.clone(),
-    ])
+    let group = crate::builtins::table::categorical_from_args(
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::StringArray(
+                StringArray::new(vec!["high".into(), "low".into(), "high".into()], vec![3, 1])
+                    .unwrap(),
+            ),
+            categories.clone(),
+        ]),
+    )
     .unwrap();
-    let predicted = crate::builtins::table::categorical_from_args(vec![
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "medium".into(), "high".into()],
-                vec![3, 1],
-            )
-            .unwrap(),
-        ),
-        categories,
-    ])
+    let predicted = crate::builtins::table::categorical_from_args(
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "medium".into(), "high".into()],
+                    vec![3, 1],
+                )
+                .unwrap(),
+            ),
+            categories,
+        ]),
+    )
     .unwrap();
 
     let values = confusionmat(group, predicted, Vec::new(), 2);

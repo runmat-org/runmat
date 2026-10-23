@@ -79,13 +79,13 @@ fn chol_lower_flag_uses_lower_triangle_as_hermitian_matrix() {
 }
 
 #[test]
-fn sparse_inputs_are_rejected_until_sparse_solves_exist() {
+fn sparse_inputs_construct_reusable_factors_for_the_public_solve() {
     let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 2.0])
         .expect("sparse");
 
-    let err = call_constructor(vec![Value::SparseTensor(sparse)]).expect_err("sparse reject");
-
-    assert!(err.message().contains("sparse coefficient matrices"));
+    let factor = call_constructor(vec![Value::SparseTensor(sparse)]).expect("sparse factor");
+    let answer = call_mldivide(factor, tensor(&[3.0, 8.0], 2, 1)).expect("sparse solve");
+    assert_eq!(approx_vec(answer), vec![3.0, 4.0]);
 }
 
 #[test]

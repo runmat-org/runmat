@@ -1,6 +1,11 @@
 use crate::ir::{NativeAssembly, NativeRequirements};
 use crate::{NativeCodegenError, NativeCodegenResult, NativeTarget, NATIVE_IR_SCHEMA_VERSION};
 
+#[path = "assembly/analysis.rs"]
+mod analysis;
+
+pub use analysis::verify_against_analysis;
+
 pub struct NativeLoweringInput<'a> {
     pub mir: &'a runmat_mir::MirAssembly,
     pub analysis: &'a runmat_mir::analysis::AnalysisStore,
@@ -119,8 +124,37 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
             ),
         ));
     }
+    let analysis_component = analysis::verify_analysis_component(input.analysis, input.manifest)?;
+    let analysis = analysis::project_analysis(input.analysis, input.mir)?;
     super::requirements::validate_requirements(input.mir, input.manifest)?;
-    super::requirements::reject_predeclared_capabilities(input.mir, input.analysis)?;
+    super::requirements::reject_predeclared_capabilities(input.mir, &analysis)?;
+
+    let mut expected_operation_sites = Vec::new();
+    for (function, body) in &input.mir.bodies {
+        let portable = analysis
+            .function_for_local(*function)
+            .ok_or_else(|| {
+                NativeCodegenError::new(
+                    "native.lowering.operation_contract_coverage",
+                    "MIR body has no canonical analysis function owner",
+                )
+                .at_function(*function)
+            })?
+            .function;
+        expected_operation_sites.extend(super::inventory::expected_sites(portable, body)?);
+    }
+    expected_operation_sites.sort();
+    if analysis
+        .operation_contracts
+        .iter()
+        .map(|contract| contract.site.clone())
+        .ne(expected_operation_sites)
+    {
+        return Err(NativeCodegenError::new(
+            "native.lowering.operation_contract_coverage",
+            "AnalysisStore operation contracts are missing, duplicated, or orphaned from MIR",
+        ));
+    }
 
     let mut functions = Vec::with_capacity(input.mir.bodies.len());
     for (function, body) in &input.mir.bodies {
@@ -144,6 +178,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
             function_id,
             entrypoint_body_digest(input.mir, function_id)?,
             &input,
+            &analysis,
             metadata,
             retained_callable_parent,
             body,
@@ -173,12 +208,15 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
         input.entrypoint.compiled(),
         &input.entrypoint.body_digest,
     )?;
+    let analysis_projection = analysis::analysis_digest(&analysis)?;
     let assembly = NativeAssembly {
         schema_version: NATIVE_IR_SCHEMA_VERSION,
         executable_identity: input.manifest.identity.clone(),
         program: input.manifest.identity.program.clone(),
         executable_cache_key,
         native_cache_key,
+        analysis_component,
+        analysis_projection,
         target: input.target,
         requirements: NativeRequirements {
             capabilities: input.manifest.capabilities.clone(),
@@ -216,6 +254,11 @@ pub fn verify_against_manifest(
         || assembly.requirements.regions != manifest.regions
         || assembly.requirements.interop != manifest.interop
         || assembly.requirements.parallel != manifest.parallel
+        || manifest
+            .components
+            .iter()
+            .find(|component| component.kind == runmat_execution::ExecutableComponentKind::Analysis)
+            .is_none_or(|component| component.digest != assembly.analysis_component)
     {
         return Err(NativeCodegenError::new(
             "native.ir.manifest_binding",
@@ -415,11 +458,13 @@ fn verify_statement_operations(
                 .at_point(point));
             }
             let expected_rvalue = match &statement.kind {
-                runmat_mir::MirStmtKind::Assign { value, .. }
+                runmat_mir::MirStmtKind::PreparedAssign { value, .. }
+                | runmat_mir::MirStmtKind::Assign { value, .. }
                 | runmat_mir::MirStmtKind::MultiAssign { value, .. }
                 | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
                 | runmat_mir::MirStmtKind::Expr(value) => Some(value),
-                runmat_mir::MirStmtKind::PlaceMutation(_)
+                runmat_mir::MirStmtKind::PrepareFixedAssignment(_)
+                | runmat_mir::MirStmtKind::PlaceMutation(_)
                 | runmat_mir::MirStmtKind::StatementOutput(_)
                 | runmat_mir::MirStmtKind::CaptureSequence { .. }
                 | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
@@ -442,6 +487,62 @@ fn verify_statement_operations(
                     .at_point(point));
                 }
             }
+        }
+        let terminator_point = runmat_types::ProgramPointId {
+            function: native.portable_id,
+            block: block_id.0,
+            position: u32::try_from(block.statements.len()).map_err(|_| {
+                NativeCodegenError::new(
+                    "native.ir.mir_operation",
+                    "MIR terminator position exceeds the Native IR schema",
+                )
+                .at_function(function)
+            })?,
+        };
+        let expected_values = runmat_mir::analysis::terminator_rvalues(&block.terminator.kind);
+        let actual_values = native_block
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                instruction.site.point == terminator_point
+                    && instruction.site.phase == crate::NativeSitePhase::TerminatorRvalue
+            })
+            .map(|instruction| match &instruction.operation {
+                crate::NativeOperation::Rvalue { value, .. } => Some((instruction, value)),
+                crate::NativeOperation::Statement(_) => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                NativeCodegenError::new(
+                    "native.ir.mir_terminator_operation",
+                    "terminator rvalue site contains a statement payload",
+                )
+                .at_point(terminator_point)
+            })?;
+        if actual_values.len() != expected_values.len()
+            || actual_values.iter().zip(&expected_values).enumerate().any(
+                |(ordinal, ((instruction, actual), expected))| {
+                    instruction.site.ordinal as usize != ordinal || *actual != expected
+                },
+            )
+        {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_terminator_operation",
+                "Native IR terminator operations differ from canonical MIR evaluation order",
+            )
+            .at_point(terminator_point));
+        }
+        if native_block.terminator.site.point != terminator_point
+            || native_block.terminator.site.phase != crate::NativeSitePhase::Terminator
+            || native_block.terminator.site.ordinal != 0
+            || native_block.terminator.site.construct
+                != runmat_mir::terminator_construct_kind(&block.terminator.kind)
+        {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_terminator_operation",
+                "Native IR terminator site differs from canonical MIR",
+            )
+            .at_point(terminator_point));
         }
     }
     Ok(())

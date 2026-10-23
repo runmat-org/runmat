@@ -2,7 +2,6 @@ use runmat_native_codegen::NativeEdge;
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, ExecutionServiceError, RootedValue, RootedValueSequence,
 };
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -230,23 +229,9 @@ fn normalize_outputs(
 }
 
 fn resolve_await_value(sequence: RootedValueSequence) -> Result<RootedValue, NativeExecutorError> {
-    sequence.try_map_owned(
-        |sequence| {
-            let values = sequence
-                .resolve(
-                    runmat_types::SequenceUse::RequireSingle,
-                    runmat_runtime::sequence::SequenceResolutionContext::default(),
-                )
-                .map_err(NativeExecutorError::from)?;
-            super::call_suspension::own_output_storage(values)?
-                .into_iter()
-                .next()
-                .ok_or_else(|| {
-                    NativeExecutorError::Host("await result lost its selected value".into())
-                })
-        },
-        execution_error,
-    )
+    sequence
+        .try_into_single()
+        .map_err(NativeExecutorError::from)
 }
 
 fn root_value(value: Value) -> NativeExecutorResult<RootedValue> {

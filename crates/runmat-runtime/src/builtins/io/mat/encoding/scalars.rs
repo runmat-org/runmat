@@ -34,14 +34,6 @@ pub(super) async fn char_array_to_utf16_cooperative(
     owner: MatEncodingOwner,
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u16>> {
-    if (chars.shape.len() != 2 || chars.rows != 1)
-        && chars.data().iter().any(|ch| ch.len_utf16() != 1)
-    {
-        return Err(owner.error(
-            MatEncodingFailure::Unsupported,
-            "non-BMP multidimensional MAT character arrays cannot retain rectangular UTF-16 geometry",
-        ));
-    }
     let mut data = Vec::new();
     let mut work = 0usize;
     let page_len = chars.rows.checked_mul(chars.cols).ok_or_else(|| {
@@ -77,25 +69,19 @@ pub(super) async fn char_array_to_utf16_cooperative(
         let page_offset = page * page_len;
         for col in 0..chars.cols {
             for row in 0..chars.rows {
-                let mut units = [0; 2];
-                for &unit in chars.data()[page_offset + row * chars.cols + col]
-                    .encode_utf16(&mut units)
-                    .iter()
-                {
-                    if data.capacity() == data.len() {
-                        data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
-                            owner.error(
-                                MatEncodingFailure::Io,
-                                format!("MAT characters cannot be allocated: {error}"),
-                            )
-                        })?;
-                    }
-                    data.push(unit);
-                    work += 1;
-                    if work == TEXT_WORK_CHUNK {
-                        completed(cooperation, work).await?;
-                        work = 0;
-                    }
+                if data.capacity() == data.len() {
+                    data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
+                        owner.error(
+                            MatEncodingFailure::Io,
+                            format!("MAT characters cannot be allocated: {error}"),
+                        )
+                    })?;
+                }
+                data.push(chars.data()[page_offset + row * chars.cols + col].raw());
+                work += 1;
+                if work == TEXT_WORK_CHUNK {
+                    completed(cooperation, work).await?;
+                    work = 0;
                 }
             }
         }

@@ -24,6 +24,8 @@ pub(super) struct RejectedCpuFeedbackRequest<'a> {
     pub(super) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(super) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
+    pub(super) native_right:
+        Option<&'a runmat_runtime::numeric_region::service::NativeNumericRegionSelectionAuthority>,
     pub(super) query: &'a ProviderFeasibilityQuery,
     pub(super) code: ProviderRejectionCode,
     pub(super) cpu: &'a ExecutionCandidateDescriptor,
@@ -47,6 +49,7 @@ pub(super) fn rejected_cpu_feedback(
         request.observation_contract,
         request.prepared_authority,
         request.vm_right,
+        request.native_right,
         provider_digest,
         request.policy,
     )?;

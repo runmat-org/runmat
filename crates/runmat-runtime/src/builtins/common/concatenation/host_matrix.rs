@@ -76,8 +76,13 @@ fn host_literal_value(value: &Value) -> bool {
             .data()
             .iter()
             .copied()
-            .map(|ch| ch.to_ascii_lowercase())
-            .eq("like".chars()),
+            .map(|unit| unit.raw())
+            .map(|unit| {
+                u8::try_from(unit)
+                    .ok()
+                    .map(|byte| byte.to_ascii_lowercase())
+            })
+            .eq(b"like".iter().copied().map(Some)),
         _ => false,
     };
     !like_token

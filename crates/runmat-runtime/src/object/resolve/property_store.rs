@@ -106,7 +106,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
 pub(super) async fn store_value(
     context: Option<&crate::context::RuntimeContext>,
     mut obj: ObjectInstance,
-    field: String,
+    field: runmat_value::Utf8Text,
     rhs: Value,
     caller: Option<&str>,
     on_write: &mut impl FnMut(&Value, &Value),
@@ -146,6 +146,14 @@ fn invalid_handle() -> RuntimeError {
         "RunMat:setfield:InvalidHandle",
         "Invalid or deleted handle object.",
     )
+}
+
+pub(super) fn require_valid_handle(handle: &HandleRef) -> Result<(), RuntimeError> {
+    if handle.valid {
+        Ok(())
+    } else {
+        Err(invalid_handle())
+    }
 }
 
 fn target_object<'a>(
@@ -190,7 +198,7 @@ fn replace_stored_property(
 pub(super) async fn store_handle(
     context: Option<&crate::context::RuntimeContext>,
     handle: HandleRef,
-    field: String,
+    field: runmat_value::Utf8Text,
     rhs: Value,
     caller: Option<&str>,
 ) -> Result<RootedValue, RuntimeError> {

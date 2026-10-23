@@ -29,8 +29,11 @@ fn positional_integer_indices_keep_exact_wide_bits() {
 
 fn row(text: &str) -> Value {
     Value::CharArray(
-        CharArray::new_with_shape(text.chars().collect(), vec![1, text.chars().count(), 1])
-            .expect("effective row"),
+        CharArray::from_unicode_scalars_with_shape(
+            text.chars().collect(),
+            vec![1, text.chars().count(), 1],
+        )
+        .expect("effective row"),
     )
 }
 
@@ -52,7 +55,7 @@ fn strict_scalar_text_accepts_rows_and_scalar_strings_without_numeric_coercion()
         Value::Int(IntValue::I64(3)),
         Value::Bool(true),
         Value::String(String::new().into()),
-        Value::CharArray(CharArray::new(vec!['x', 'y'], 2, 1).unwrap()),
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['x', 'y'], 2, 1).unwrap()),
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
     ] {
         assert_eq!(

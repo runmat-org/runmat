@@ -47,23 +47,37 @@ impl<'a> TestInvocation<'a> {
         {
             return Err("target-test receiver has no admitted accelerator or placement-capability inventory".into());
         }
-        // The linked source-evaluation service has its own exact issuer. No
-        // generic filesystem/network/host-effect service is installed here.
-        // Upper bounds are not themselves effect requests; the runner checks
-        // the selected image artifact bound separately.
+        // This is a type-level receiver check, never a grant. The linked
+        // admission below still requires an exact factory and issuer for each
+        // reached service, then installs and rechecks its live port before
+        // native execution. Upper bounds are not effect requests.
         if header
             .binding
             .selected_product
             .services
             .iter()
             .any(|service| {
-                service.kind
-                    != runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+                !matches!(
+                    service.kind,
+                    runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+                        | runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch
+                        | runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                            runmat_types::EffectKind::Clock
+                                | runmat_types::EffectKind::Network
+                                | runmat_types::EffectKind::UserInterface
+                                | runmat_types::EffectKind::HostCallback
+                                | runmat_types::EffectKind::WorkspaceRead
+                                | runmat_types::EffectKind::WorkspaceWrite
+                                | runmat_types::EffectKind::EnvironmentRead
+                                | runmat_types::EffectKind::EnvironmentWrite
+                                | runmat_types::EffectKind::FilesystemRead
+                                | runmat_types::EffectKind::FilesystemWrite
+                                | runmat_types::EffectKind::Randomness
+                        )
+                )
             })
         {
-            return Err(
-                "target-test receiver has no admitted owner for selected host effects".into(),
-            );
+            return Err("target-test receiver cannot admit this selected service kind".into());
         }
         let function = header
             .binding

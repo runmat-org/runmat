@@ -62,7 +62,7 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
                 return Err(invalid_index("table2cell: char row out of bounds"));
             }
             let start = row * array.cols;
-            CharArray::new(
+            CharArray::from_code_units(
                 array.data()[start..start + array.cols].to_vec(),
                 1,
                 array.cols,

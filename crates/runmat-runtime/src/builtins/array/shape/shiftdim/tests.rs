@@ -304,7 +304,10 @@ fn logical_string_cell_and_char_arrays_follow_shape_contract() {
         panic!("expected chars")
     };
     assert_eq!(chars.shape, vec![1, 1, 3]);
-    assert_eq!(chars.data().iter().collect::<String>(), "abc");
+    assert_eq!(
+        runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture"),
+        "abc"
+    );
 }
 
 #[test]

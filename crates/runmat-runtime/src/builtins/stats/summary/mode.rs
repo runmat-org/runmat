@@ -193,7 +193,7 @@ async fn parse_arguments(
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
-    if let Some(text) = value_as_str(value) {
+    if let Some(text) = value_as_str(value)? {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(mode_error_with(
@@ -277,17 +277,22 @@ fn mode_dimension_error(message: String, scalar: bool) -> RuntimeError {
     mode_error_with(&MODE_ERROR_INVALID_DIMENSION, detail)
 }
 
-fn value_as_str(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
-    match value {
+fn value_as_str(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
         Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
         Value::StringArray(sa) if sa.data().len() == 1 => {
             Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(std::borrow::Cow::Owned(ca.data().iter().collect()))
-        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
+            crate::builtins::stats::decode_utf16_with_error(ca.data(), || {
+                mode_error_with(
+                    &MODE_ERROR_INVALID_ARGUMENT,
+                    "mode: dimension text is not valid UTF-16",
+                )
+            })?,
+        )),
         _ => None,
-    }
+    })
 }
 
 /// Evaluation artifact produced by `mode` carrying values, frequencies, and tied sets.

@@ -7,6 +7,7 @@ mod execution;
 mod fixtures;
 mod plugins;
 mod qualifications;
+mod testsuite;
 
 pub use self::constraints::*;
 pub use self::diagnostics::*;
@@ -14,6 +15,7 @@ pub use self::execution::*;
 pub use self::fixtures::*;
 pub use self::plugins::*;
 pub use self::qualifications::*;
+pub use self::testsuite::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(constraints::ENTRIES.iter().copied());
@@ -22,4 +24,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(fixtures::ENTRIES.iter().copied());
     plugins::extend_entries(values);
     values.extend(qualifications::ENTRIES.iter().copied());
+    values.extend(testsuite::ENTRIES.iter().copied());
 }

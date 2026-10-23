@@ -276,7 +276,11 @@ fn decode_pulse_selection(pulse: &Value) -> PulseSelection {
     if is_numeric_or_gpu(pulse) {
         return PulseSelection::Prototype;
     }
-    let name = text_scalar(pulse).or_else(|| match pulse {
+    let name = match text_scalar(pulse) {
+        Ok(text) => text,
+        Err(error) => return PulseSelection::Invalid(Box::new(error)),
+    }
+    .or_else(|| match pulse {
         Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
             Some(name.name().to_owned())
         }
@@ -510,15 +514,21 @@ fn is_numeric_or_gpu(value: &Value) -> bool {
     )
 }
 
-fn text_scalar(value: &Value) -> Option<String> {
-    match value {
+fn text_scalar(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error = pulstran_error(&PULSTRAN_ERROR_INVALID_PULSE);
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 fn normalize_pulse_name(name: &str) -> BuiltinResult<String> {

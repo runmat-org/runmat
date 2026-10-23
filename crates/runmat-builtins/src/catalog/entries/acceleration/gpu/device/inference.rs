@@ -4,7 +4,7 @@ use crate::{
 };
 use runmat_types::{
     CallInference, CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, ResidencyFact, StorageFact, StructFact, ValueFact, ValueKindFact,
+    NumericFact, ObjectFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -12,28 +12,37 @@ use super::selector::{
     gpu_device_index_from_float, gpu_device_index_from_integer, GPU_DEVICE_ACTIVE_INDEX,
 };
 
-fn numeric(class: NumericClass) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-        class,
-        domain: NumericDomain::Real,
-    }))
-}
-
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut fields = BTreeMap::new();
-    fields.insert("device_id".into(), numeric(NumericClass::UInt32));
-    fields.insert("index".into(), numeric(NumericClass::UInt32));
-    fields.insert("name".into(), ValueFact::scalar(ValueKindFact::String));
-    fields.insert("vendor".into(), ValueFact::scalar(ValueKindFact::String));
-    fields.insert("precision".into(), ValueFact::scalar(ValueKindFact::String));
-    fields.insert(
-        "supports_double".into(),
-        ValueFact::scalar(ValueKindFact::Logical),
-    );
-    // `backend` and `memory_bytes` are conditional on provider-reported metadata.
-    let mut output = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, false)));
-    output.storage = StorageFact::Dense;
+    for property in super::GpuDeviceProperty::ALL {
+        fields.insert(property.name().into(), property.fact());
+    }
+    let mut output = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(super::GPU_DEVICE_CLASS.owned()),
+        properties: fields,
+        properties_complete: false,
+        handle_semantics: Some(true),
+    }));
+    output.storage = StorageFact::Opaque;
     output.residency = ResidencyFact::Host;
+    if request.arguments.first().is_some_and(|selector| {
+        selector.shape.element_count() == Some(0)
+            && matches!(
+                selector.kind,
+                ValueKindFact::Numeric(_) | ValueKindFact::Logical
+            )
+    }) {
+        output = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::from(vec![Some(0), Some(0)]),
+            StorageFact::Dense,
+        );
+        output.residency = ResidencyFact::Host;
+    }
     let mut diagnostics = Vec::new();
     if request.arguments.len() > 1 {
         // This is a semantic arity diagnosis, not a promise about runtime error
@@ -61,8 +70,8 @@ fn validate_selector(
     if matches!(literal, Some(LiteralValue::Character(text) | LiteralValue::String(text) | LiteralValue::Keyword(text)) if text.trim().eq_ignore_ascii_case("reset"))
     {
         diagnostics.push(argument_error(
-            "RM.GPU_DEVICE.RESET_NOT_SUPPORTED",
-            "gpuDevice reset is unsupported",
+            "RM.GPU_DEVICE.UNSUPPORTED_ARGUMENT",
+            "Use reset(device), not a string selector",
             0,
         ));
         return;
@@ -76,11 +85,6 @@ fn validate_selector(
         && selector.storage != StorageFact::Sparse
         && !matches!(selector.residency, ResidencyFact::Device { .. })
     {
-        diagnostics.push(argument_error(
-            "RM.GPU_DEVICE.RESET_NOT_SUPPORTED",
-            "gpuDevice reset by empty array is unsupported",
-            0,
-        ));
         return;
     }
     match &selector.kind {
@@ -121,17 +125,11 @@ fn validate_selector(
         }),
         _ => None,
     };
-    match known {
-        Some(Err(_)) => diagnostics.push(argument_error(
+    if let Some(Err(_)) = known {
+        diagnostics.push(argument_error(
             "RM.GPU_DEVICE.INVALID_INDEX",
             "gpuDevice index must be a positive uint32-range integer",
             0,
-        )),
-        Some(Ok(index)) if index != GPU_DEVICE_ACTIVE_INDEX => diagnostics.push(argument_error(
-            "RM.GPU_DEVICE.DEVICE_NOT_AVAILABLE",
-            "only the active provider at index 1 is available",
-            0,
-        )),
-        _ => {}
+        ));
     }
 }

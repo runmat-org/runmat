@@ -1,7 +1,7 @@
 mod artifact;
+pub mod compile;
 #[cfg(feature = "native-accel")]
 mod fusion_effects;
-pub mod compile;
 #[cfg(feature = "native-accel")]
 pub(crate) mod fusion_private_temp;
 #[cfg(feature = "native-accel")]
@@ -22,7 +22,7 @@ mod subscript;
 /// verifier-derived operand-stack geometry; older payloads cannot default a
 /// managed capacity claim. Version 26 adds external deferred targets
 /// (`CreateExternalFuture`).
-pub const BYTECODE_SCHEMA_VERSION: u16 = 26;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 27;
 /// Portable schema for serialized [`FunctionRegistry`] payloads. Version 18
 /// carries the borrowed stochastic opcode in retained function bodies.
 /// Version 19 retains external deferred targets in function bodies.

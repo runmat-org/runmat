@@ -8,6 +8,6 @@ mod requirements;
 mod terminator;
 
 pub use assembly::{
-    lower_executable, verify_against_manifest, verify_against_mir, NativeEntrypointBinding,
-    NativeLoweringInput,
+    lower_executable, verify_against_analysis, verify_against_manifest, verify_against_mir,
+    NativeEntrypointBinding, NativeLoweringInput,
 };

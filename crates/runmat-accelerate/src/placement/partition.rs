@@ -562,7 +562,12 @@ fn transition_ns(
         // An original instruction region has no concrete graph-input
         // residency. Its whole-work placement must not acquire a fabricated
         // graph-edge transfer estimate, including a free same-device one.
-        (_, VmRegion { .. }) => return None,
+        (
+            _,
+            VmRegion { .. }
+            | CandidateExecutionLocation::NativeRegion { .. }
+            | CandidateExecutionLocation::NativeSource,
+        ) => return None,
         (Host, ExecuteHost) | (Mirrored { .. }, ExecuteHost) => 0,
         (Host, ExecuteProvider { .. }) => edge.host_to_provider_ns,
         (Provider { .. }, ExecuteHost) => edge.provider_to_host_ns,

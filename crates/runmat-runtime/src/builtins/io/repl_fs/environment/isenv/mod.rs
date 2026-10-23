@@ -12,5 +12,6 @@ use runmat_value::Value;
     builtin_path = "crate::builtins::io::repl_fs::environment::isenv"
 )]
 async fn isenv_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::env::require_read()?;
     execute::run(args)
 }

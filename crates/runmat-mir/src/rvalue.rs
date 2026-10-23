@@ -145,6 +145,7 @@ impl MirRvalue {
             }),
             MirRvalue::Index { indexing, .. } => indexing.components.iter().any(|component| {
                 matches!(component, crate::MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())
+                    || matches!(component, crate::MirIndexComponent::Expansion(region) if region.contains_contextual_end())
             }),
             MirRvalue::SubscriptChain(chain) => chain.contains_contextual_end(),
             MirRvalue::Call(call) => call.args.iter().any(MirCallArg::contains_contextual_end),
@@ -232,7 +233,11 @@ impl MirRvalue {
             MirRvalue::ShortCircuit { right_temps, .. } => {
                 for statement in right_temps {
                     match &statement.kind {
-                        crate::MirStmtKind::Assign { value, .. }
+                        crate::MirStmtKind::PrepareFixedAssignment(owner) => {
+                            owner.visit_preparation_steps_dyn(visitor);
+                        }
+                        crate::MirStmtKind::PreparedAssign { value, .. }
+                        | crate::MirStmtKind::Assign { value, .. }
                         | crate::MirStmtKind::MultiAssign { value, .. }
                         | crate::MirStmtKind::SequenceAssign { value, .. }
                         | crate::MirStmtKind::Expr(value) => {
@@ -476,6 +481,12 @@ pub(crate) fn visit_stmt_kind_operands(
     visitor: &mut dyn FnMut(&MirOperand),
 ) {
     match kind {
+        crate::MirStmtKind::PrepareFixedAssignment(preparation) => {
+            preparation.visit_operands(&mut *visitor)
+        }
+        crate::MirStmtKind::PreparedAssign { value, .. } => {
+            visit_rvalue_operands(value, visitor, true)
+        }
         crate::MirStmtKind::CaptureSequence { source, .. } => source.visit_operands(&mut *visitor),
         crate::MirStmtKind::Assign { place, value } => {
             visit_place_operands(place, visitor);
@@ -511,6 +522,13 @@ pub(crate) fn visit_stmt_kind_operands(
 
 fn visit_stmt_operands_mut(statement: &mut MirStmt, visitor: &mut dyn FnMut(&mut MirOperand)) {
     match &mut statement.kind {
+        crate::MirStmtKind::PrepareFixedAssignment(preparation) => {
+            preparation.visit_operands_mut(&mut *visitor)
+        }
+        crate::MirStmtKind::PreparedAssign { preparation, value } => {
+            preparation.visit_operands_mut(&mut *visitor);
+            visit_rvalue_operands_mut(value, visitor);
+        }
         crate::MirStmtKind::CaptureSequence { source, .. } => {
             source.visit_operands_mut(&mut *visitor)
         }
@@ -548,7 +566,7 @@ fn visit_stmt_operands_mut(statement: &mut MirStmt, visitor: &mut dyn FnMut(&mut
     }
 }
 
-fn visit_place_operands(place: &crate::MirPlace, visitor: &mut dyn FnMut(&MirOperand)) {
+pub(crate) fn visit_place_operands(place: &crate::MirPlace, visitor: &mut dyn FnMut(&MirOperand)) {
     match place {
         crate::MirPlace::Local(_) | crate::MirPlace::Binding(_) => {}
         crate::MirPlace::Member(base, _) => visit_place_operands(base, visitor),
@@ -563,7 +581,10 @@ fn visit_place_operands(place: &crate::MirPlace, visitor: &mut dyn FnMut(&MirOpe
     }
 }
 
-fn visit_place_operands_mut(place: &mut crate::MirPlace, visitor: &mut dyn FnMut(&mut MirOperand)) {
+pub(crate) fn visit_place_operands_mut(
+    place: &mut crate::MirPlace,
+    visitor: &mut dyn FnMut(&mut MirOperand),
+) {
     match place {
         crate::MirPlace::Local(_) | crate::MirPlace::Binding(_) => {}
         crate::MirPlace::Member(base, _) => visit_place_operands_mut(base, visitor),
@@ -625,6 +646,12 @@ fn visit_stmt_sequences(
     descend_regions: bool,
 ) {
     match &statement.kind {
+        crate::MirStmtKind::PrepareFixedAssignment(preparation) => {
+            preparation.visit_sequence_locals(visitor);
+        }
+        crate::MirStmtKind::PreparedAssign { value, .. } => {
+            visit_rvalue_sequences(value, visitor, descend_regions)
+        }
         crate::MirStmtKind::Assign { value, .. }
         | crate::MirStmtKind::Expr(value)
         | crate::MirStmtKind::MultiAssign { value, .. }

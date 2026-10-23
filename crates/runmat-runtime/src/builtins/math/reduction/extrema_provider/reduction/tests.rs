@@ -1,4 +1,5 @@
 use super::*;
+mod retirement;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocation, TestAllocationOwner},
     AccelDownloadFuture, AccelNumericDownloadFuture, GpuHandleProvenance, HostNumericDataOwned,
@@ -135,7 +136,15 @@ fn dimensional_values_and_hidden_index_cannot_share_one_allocation() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider.allocate(vec![2, 3], NumericElementType::F64, 0.0);
     let value_and_index = provider.allocate(vec![1, 3], NumericElementType::F64, 1.0);
-    let hidden_index = value_and_index.handle.clone();
+    let hidden_index = value_and_index
+        .handle
+        .with_view(value_and_index.handle.view().clone())
+        .unwrap();
+    assert_ne!(
+        hidden_index.view_identity(),
+        value_and_index.handle.view_identity()
+    );
+    assert!(hidden_index.shares_allocation_with(&value_and_index.handle));
     let error = futures::executor::block_on(ExtremaKind::Min.adopt_reduction_result(
         provider,
         &input.handle,

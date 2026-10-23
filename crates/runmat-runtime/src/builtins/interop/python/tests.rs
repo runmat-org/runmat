@@ -44,8 +44,11 @@ fn pyargs_constructs_local_bundle_without_foreign_service() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn pyargs_accepts_effective_character_rows_and_scalar_string_arrays() {
-    let row = runmat_value::CharArray::new_with_shape(vec!['n', 'a', 'm', 'e'], vec![1, 4, 1])
-        .expect("trailing singleton row");
+    let row = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        vec!['n', 'a', 'm', 'e'],
+        vec![1, 4, 1],
+    )
+    .expect("trailing singleton row");
     let scalar = runmat_value::StringArray::new(vec!["other".into()], vec![1, 1])
         .expect("scalar string array");
     let bundle = run_pyargs(vec![

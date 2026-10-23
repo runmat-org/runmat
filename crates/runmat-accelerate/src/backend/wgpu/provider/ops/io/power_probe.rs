@@ -21,12 +21,15 @@ pub(crate) fn power_probe_host_workspace_bytes() -> Result<u64> {
 /// The ticket travels with the actual staging buffer across async mapping,
 /// including cancellation, and retires only after the readback owner drops.
 pub(crate) struct ProbeStaging {
-    pub(crate) buffer: wgpu::Buffer,
+    pub(crate) buffer: runmat_accelerate_api::WgpuBufferOwner,
     ticket: Option<ProviderResourceTicket>,
 }
 
 impl ProbeStaging {
-    pub(crate) fn new(buffer: wgpu::Buffer, ticket: Option<ProviderResourceTicket>) -> Self {
+    pub(crate) fn new(
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        ticket: Option<ProviderResourceTicket>,
+    ) -> Self {
         Self { buffer, ticket }
     }
 
@@ -44,6 +47,16 @@ impl std::borrow::Borrow<wgpu::Buffer> for ProbeStaging {
 }
 
 impl super::super::core::ReadbackResourceOwner for ProbeStaging {
+    fn buffer_owner(&self) -> Option<&runmat_accelerate_api::WgpuBufferOwner> {
+        Some(&self.buffer)
+    }
+    fn validate_scope(&self) -> Result<()> {
+        self.buffer.validate_creation_scope()?;
+        Ok(())
+    }
+    fn resource_ticket(&self) -> Option<ProviderResourceTicket> {
+        self.ticket.clone()
+    }
     fn cleanup_failed(&self) {
         if let Some(ticket) = &self.ticket {
             ticket.fail_owner();

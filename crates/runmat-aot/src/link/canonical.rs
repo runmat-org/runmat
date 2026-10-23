@@ -8,6 +8,7 @@ use std::io::{self, Write};
 use runmat_execution::host::NativeSelectedProductBinding;
 use runmat_execution::{Digest, DigestStream};
 use runmat_execution_artifact::target_pack::NativeLinkInput;
+use runmat_native_codegen::aot::SelectedNativeProduct;
 
 use super::{LinkerFamily, NativeLinkBuildIdentity, NativeProgramLinkIdentity};
 use crate::{AotError, AotResult};
@@ -17,7 +18,7 @@ const MAX_CANONICAL_BYTES: usize = 16 * 1024 * 1024;
 
 /// Typed fixed options emitted by the selected linker adapter. Physical
 /// sysroot, tool and output locations remain only in the invocation record.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectedLinkOption {
     TargetTriple,
@@ -31,7 +32,8 @@ pub enum SelectedLinkOption {
     Output,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CanonicalSelectedLinkPlan {
     schema_version: u16,
     pub product: NativeSelectedProductBinding,
@@ -67,6 +69,12 @@ impl CanonicalSelectedLinkPlan {
     }
 
     pub fn identity(&self) -> AotResult<Digest> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(AotError::contract(
+                "aot.link.canonical",
+                "unsupported selected link plan schema",
+            ));
+        }
         self.product
             .validate()
             .map_err(|error| AotError::contract("aot.link.canonical", error.to_string()))?;
@@ -78,6 +86,101 @@ impl CanonicalSelectedLinkPlan {
             .map_err(|error| AotError::contract("aot.link.canonical", error.to_string()))?;
         Ok(writer.digest.finish())
     }
+}
+
+pub(super) fn selected_link_plan(
+    selected: &SelectedNativeProduct<'_>,
+    admission: &super::ExternalNativeLinkAdmission,
+    inputs: NativeProgramLinkIdentity,
+) -> AotResult<CanonicalSelectedLinkPlan> {
+    use super::NativeHostedDependency;
+    use runmat_execution::host::{NativeArchitecture, NativeOperatingSystem};
+
+    let manifest = selected.contents().manifest();
+    let target = &manifest.target.target;
+    let target_triple = manifest
+        .target
+        .triple()
+        .map_err(|error| AotError::contract("aot.link.canonical", error.to_string()))?;
+    let (family, mut options) = match &admission.adapter {
+        super::NativeLinkAdapter::ClangDriver { .. } => {
+            if target.operating_system == NativeOperatingSystem::Windows {
+                return Err(AotError::contract(
+                    "aot.link.canonical",
+                    "MSVC targets require the typed MSVC linker adapter",
+                ));
+            }
+            (
+                LinkerFamily::UnixCc,
+                vec![
+                    SelectedLinkOption::TargetTriple,
+                    SelectedLinkOption::Sysroot,
+                    SelectedLinkOption::CompanionLinker,
+                    SelectedLinkOption::NoStandardLibrary,
+                    SelectedLinkOption::NoStartFiles,
+                    SelectedLinkOption::NoDefaultLibraries,
+                ],
+            )
+        }
+        super::NativeLinkAdapter::MsvcLinker => {
+            if target.operating_system != NativeOperatingSystem::Windows
+                || !matches!(
+                    target.architecture,
+                    NativeArchitecture::X86_64 | NativeArchitecture::Aarch64
+                )
+            {
+                return Err(AotError::contract(
+                    "aot.link.canonical",
+                    "MSVC linker adapter requires a supported Windows target",
+                ));
+            }
+            (
+                LinkerFamily::Msvc,
+                vec![
+                    SelectedLinkOption::MsvcMachine,
+                    SelectedLinkOption::MsvcNoDefaultLibraries,
+                ],
+            )
+        }
+    };
+    let reached_hosted = selected
+        .contents()
+        .selection()
+        .link_inputs()
+        .iter()
+        .filter_map(|input| match input {
+            NativeLinkInput::HostedLibrary { name, .. } => {
+                Some(NativeHostedDependency::Library(name.clone()))
+            }
+            NativeLinkInput::HostedFramework { name, .. } => {
+                Some(NativeHostedDependency::Framework(name.clone()))
+            }
+            NativeLinkInput::Component { .. } => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    if !reached_hosted
+        .iter()
+        .eq(admission.hosted_dependencies.keys())
+    {
+        return Err(AotError::contract(
+            "aot.link.canonical",
+            "trusted hosted locator set differs from exact reached native dependencies",
+        ));
+    }
+    options.push(SelectedLinkOption::Output);
+    Ok(CanonicalSelectedLinkPlan::new(
+        selected
+            .product()
+            .selected()
+            .expect("selected constructor")
+            .clone(),
+        inputs,
+        admission.identity(),
+        target_triple,
+        family,
+        options,
+        selected.contents().selection().link_inputs().to_vec(),
+    ))
 }
 
 /// A checked recipe record and its identity. The private fields keep the
@@ -234,6 +337,23 @@ mod tests {
         changed = first.clone();
         changed.native_inputs.reverse();
         assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
+    }
+
+    #[test]
+    fn canonical_plan_rejects_unknown_wire_fields() {
+        let mut encoded = serde_json::to_value(fixture()).unwrap();
+        encoded
+            .as_object_mut()
+            .unwrap()
+            .insert("future_authority".into(), serde_json::json!(true));
+        assert!(serde_json::from_value::<CanonicalSelectedLinkPlan>(encoded).is_err());
+    }
+
+    #[test]
+    fn canonical_plan_rejects_future_schema() {
+        let mut plan = fixture();
+        plan.schema_version += 1;
+        assert!(plan.identity().is_err());
     }
 
     #[test]

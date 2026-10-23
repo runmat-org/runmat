@@ -6,6 +6,7 @@ use runmat_value::{ExactHostAllocationClaim, ExactHostAllocationPermit, Value};
 
 use super::super::prepared_write::PreparedWorkspaceWrite;
 use super::super::values::RootedWorkspaceEntry;
+use super::binding_tree::{BindingTree, BindingTreeValue};
 use crate::workspace::retained::{WorkspaceName, WorkspaceRetainedValue};
 use crate::workspace::{GlobalBindingTarget, WorkspaceSlotReadLease};
 
@@ -102,6 +103,75 @@ pub(super) enum WorkspaceOverlayLookup<'a> {
 }
 
 impl WorkspaceOverlay {
+    /// Replay only this overlay's actions, not the whole workspace, into an
+    /// independent persistent tree. This is exclusively the explicitly
+    /// unbounded direct-owner preparation route, never Managed publication.
+    /// Borrowed action scratch gives chronological order without recursion or
+    /// copying values; every surviving name/value/root keeps its original owner.
+    pub(super) fn prepare_unbounded_tree(
+        &self,
+        mut tree: BindingTree,
+    ) -> Result<BindingTree, HostAllocationError> {
+        let mut count = 0usize;
+        let mut next = self.latest.as_ref();
+        while let Some(node) = next {
+            let payload = node.0.get();
+            if matches!(payload.action, WorkspaceOverlayAction::Clear) {
+                tree = BindingTree::default();
+                break;
+            }
+            count = count.checked_add(1).ok_or(HostAllocationError::Overflow)?;
+            next = payload.previous.as_ref();
+        }
+        let mut actions =
+            runmat_value::exact_capacity_vec(count).map_err(HostAllocationError::Numeric)?;
+        let mut next = self.latest.as_ref();
+        for _ in 0..count {
+            let payload = next.expect("counted immutable overlay actions").0.get();
+            actions.push(&payload.action);
+            next = payload.previous.as_ref();
+        }
+        for action in actions.into_iter().rev() {
+            match action {
+                WorkspaceOverlayAction::Assign(write) => {
+                    tree = tree.prepare_set(
+                        None,
+                        write.name().clone(),
+                        BindingTreeValue::Local(RootedWorkspaceEntry::from_prepared(write)),
+                    )?;
+                }
+                WorkspaceOverlayAction::OwnedAssign { name, entry } => {
+                    tree = tree.prepare_set(
+                        None,
+                        name.clone(),
+                        BindingTreeValue::Local(entry.clone()),
+                    )?;
+                }
+                WorkspaceOverlayAction::Namespace {
+                    name,
+                    action,
+                    target,
+                } => match action {
+                    WorkspaceNamespaceAction::BindGlobal => {
+                        let target = target.as_ref().ok_or(HostAllocationError::StaleAuthority)?;
+                        tree = tree.prepare_set(
+                            None,
+                            name.clone(),
+                            BindingTreeValue::Global(target.clone()),
+                        )?;
+                    }
+                    WorkspaceNamespaceAction::Remove
+                        if tree.global_target(name.as_str()).is_some() => {}
+                    WorkspaceNamespaceAction::Remove | WorkspaceNamespaceAction::UnbindGlobal => {
+                        tree = tree.prepare_remove(None, name.as_str())?.unwrap_or(tree);
+                    }
+                },
+                WorkspaceOverlayAction::Clear => unreachable!("clear bounds the replay suffix"),
+            }
+        }
+        Ok(tree)
+    }
+
     pub(in crate::workspace::base) fn retained_bytes(
         name: &str,
         value: &Value,

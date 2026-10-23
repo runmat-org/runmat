@@ -33,4 +33,5 @@ pub(super) const ENTRY_GROUPS: &[&[&BuiltinCatalogEntry]] = &[
     super::super::uiputfile::ENTRIES,
     super::super::userpath::ENTRIES,
     super::super::filesystem::ENTRIES,
+    super::super::winqueryreg::ENTRIES,
 ];

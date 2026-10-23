@@ -1,17 +1,9 @@
 //! MATLAB-compatible `surfc` builtin (surface with contour).
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{SURFC_ERROR_INTERNAL, SURFC_ERROR_INVALID_ARGUMENT};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
-use runmat_value::Value;
 #[cfg(test)]
 use runmat_value::{IntegerStorage, Tensor};
 
@@ -22,188 +14,16 @@ use super::mesh::{
 };
 use super::op_common::surface_composite::contour_for_surface_axes_input;
 use super::op_common::surface_inputs::{
-    axis_sources_to_host,
-    parse_surface_source_call_args_matlab_xy as parse_surface_call_args_matlab_xy,
-    surface_axis_sources_from_xy_values,
+    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::{build_surface, build_surface_gpu_plot_with_bounds_async};
 use crate::build_runtime_error;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::RuntimeError;
 use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "surfc";
-
-const SURFC_INTEGER_X: [BuiltinIntegerInputCapability; 1] = [surfc_integer_input("X")];
-const SURFC_INTEGER_Y: [BuiltinIntegerInputCapability; 1] = [surfc_integer_input("Y")];
-const SURFC_INTEGER_Z: [BuiltinIntegerInputCapability; 1] = [surfc_integer_input("Z")];
-const fn surfc_integer_input(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "The compatibility target explicitly lists every native integer class for this surface coordinate role.",
-    }
-}
-const fn surfc_integer_capability(
-    form: &'static str,
-    inputs: &'static [BuiltinIntegerInputCapability],
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; surface rendering and projected-contour construction are explicit floating boundaries.",
-    }
-}
-pub const SURFC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    surfc_integer_capability("h = surfc(integer_X, Y, Z, ...)", &SURFC_INTEGER_X),
-    surfc_integer_capability("h = surfc(X, integer_Y, Z, ...)", &SURFC_INTEGER_Y),
-    surfc_integer_capability("h = surfc(X, Y, integer_Z, ...)", &SURFC_INTEGER_Z),
-];
-
-const SURFC_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered surface plot (with contour overlay).",
-}];
-
-const SURFC_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Surface height grid.",
-}];
-
-const SURFC_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X axis vector/meshgrid matrix matching Z columns.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y axis vector/meshgrid matrix matching Z rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Surface height grid.",
-    },
-];
-
-const SURFC_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Surface height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const SURFC_INPUTS_X_Y_Z_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X axis vector/meshgrid matrix matching Z columns.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y axis vector/meshgrid matrix matching Z rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Surface height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const SURFC_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = surfc(Z)",
-        inputs: &SURFC_INPUTS_Z,
-        outputs: &SURFC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = surfc(X, Y, Z)",
-        inputs: &SURFC_INPUTS_X_Y_Z,
-        outputs: &SURFC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = surfc(Z, Name, Value, ...)",
-        inputs: &SURFC_INPUTS_Z_PROPS,
-        outputs: &SURFC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = surfc(X, Y, Z, Name, Value, ...)",
-        inputs: &SURFC_INPUTS_X_Y_Z_PROPS,
-        outputs: &SURFC_OUTPUT_HANDLE,
-    },
-];
-
-pub const SURFC_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SURFC.INVALID_ARGUMENT",
-    identifier: Some("RunMat:surfc:InvalidArgument"),
-    when: "Surface/grid/axis inputs or style name/value arguments are invalid.",
-    message: "surfc: invalid argument",
-};
-
-pub const SURFC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SURFC.INTERNAL",
-    identifier: Some("RunMat:surfc:Internal"),
-    when: "Internal surface/contour construction or render preparation fails unexpectedly.",
-    message: "surfc: internal operation failed",
-};
-
-const SURFC_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [SURFC_ERROR_INVALID_ARGUMENT, SURFC_ERROR_INTERNAL];
-
-pub const SURFC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SURFC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SURFC_ERRORS,
-};
 
 fn surfc_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -221,29 +41,55 @@ fn map_surfc_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    surfc_error_with_detail(&SURFC_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = surfc_error_with_detail(&SURFC_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_surfc_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    surfc_error_with_detail(&SURFC_ERROR_INTERNAL, err.message)
+    let mapped = surfc_error_with_detail(&SURFC_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "surfc",
-    category = "plotting",
-    summary = "Create composite surface plots with projected contour overlays.",
-    keywords = "surfc,plotting,surface,contour",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::surfc::SURFC_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::surfc::SURFC_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::surfc"
 )]
-pub async fn surfc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn surfc_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "surfc: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "surfc")?;
+    let _arguments = args.fork();
+    work.finish(surfc_impl(args, &work).await)
+}
+
+async fn surfc_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)
         .map_err(map_surfc_invalid_argument)?;
     let source_x = numeric_plot_data_from_value(&x, BUILTIN_NAME)
@@ -270,7 +116,7 @@ pub async fn surfc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = Arc::new(
         parse_surface_style_args(
             "surfc",
-            crate::call::FunctionArgumentView::from_slice(&rest),
+            rest.view(),
             SurfaceStyleDefaults::new(
                 ColorMap::Parula,
                 ShadingMode::Smooth,
@@ -395,6 +241,7 @@ pub async fn surfc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface_opt.take().expect("surfc surface consumed once");
         let contour = contour_opt.take().expect("surfc contour consumed once");
@@ -420,10 +267,19 @@ pub async fn surfc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{SURFC_DESCRIPTOR, SURFC_INTEGER_CAPABILITIES};
+    use runmat_value::Value;
+    async fn surfc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::surfc_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -446,14 +302,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn surfc_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(
-                &[Type::tensor(), Type::tensor(), Type::tensor()],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Num
+    fn surfc_catalog_infers_host_double_handle() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(2)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 3],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::SURFC_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 
     #[test]

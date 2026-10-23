@@ -75,6 +75,23 @@ pub async fn with_callsite<F: Future>(
 ) -> Result<F::Output, crate::RuntimeError> {
     let info = admit_callsite(info)?;
     let mut future = Box::pin(future);
+    poll_function_input_callsite(info, future.as_mut()).await
+}
+
+/// Borrow an already pinned owner instead of allocating another Box for its
+/// carrier. Admission and scoped provenance still begin only on first poll.
+pub async fn with_function_input_callsite_pinned<F: Future + ?Sized>(
+    info: Option<CallsiteInfo>,
+    future: std::pin::Pin<&mut F>,
+) -> Result<F::Output, crate::RuntimeError> {
+    let info = admit_callsite(info)?;
+    poll_function_input_callsite(info, future).await
+}
+
+async fn poll_function_input_callsite<F: Future + ?Sized>(
+    info: Option<CallsiteInfo>,
+    mut future: std::pin::Pin<&mut F>,
+) -> Result<F::Output, crate::RuntimeError> {
     std::future::poll_fn(move |cx| {
         let guard = info
             .as_ref()

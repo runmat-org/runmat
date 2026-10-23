@@ -169,7 +169,17 @@ fn infer_comparison(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let shape = output_shape(request, &mut diagnostics);
     finish_fixed(entry, request, facts::logical(shape), diagnostics)
 }
-fn infer_arithmetic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+fn infer_plus(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_arithmetic(request, entry, BinaryArithmeticInferenceRule::Add)
+}
+fn infer_minus(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_arithmetic(request, entry, BinaryArithmeticInferenceRule::Subtract)
+}
+fn infer_arithmetic(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    operation: BinaryArithmeticInferenceRule,
+) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() != 2 {
         diagnostics.push(argument_error(
@@ -192,7 +202,7 @@ fn infer_arithmetic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         let rhs = &request.arguments[1];
         match &rhs.kind {
             runmat_types::ValueKindFact::Object(object)
-                if entry.identity.name == "duration.plus"
+                if operation == BinaryArithmeticInferenceRule::Add
                     && object.runtime_class.as_ref()
                         == Some(&runmat_types::standard::DATETIME.owned()) =>
             {
@@ -252,7 +262,7 @@ pub const DURATION_PLUS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "duration.plus",
     &DURATION_BINARY_DESCRIPTOR,
     PLUS_DOC,
-    infer_arithmetic,
+    infer_plus,
     true,
     &EXTENSIONS,
     &[],
@@ -261,7 +271,7 @@ pub const DURATION_MINUS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "duration.minus",
     &DURATION_BINARY_DESCRIPTOR,
     MINUS_DOC,
-    infer_arithmetic,
+    infer_minus,
     true,
     &EXTENSIONS,
     &[],

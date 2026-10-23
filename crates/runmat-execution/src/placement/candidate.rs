@@ -380,6 +380,9 @@ pub enum ExecutionCandidateKind {
     ProviderLibrary,
     ProviderGraph,
     ProviderFusion,
+    /// Original source-ordered native MIR sites. These may invoke their exact
+    /// provider; this is not a host CPU implementation or VM installation.
+    OriginalNativeRegion,
 }
 
 impl ExecutionCandidateKind {
@@ -396,6 +399,11 @@ impl ExecutionCandidateKind {
     pub const fn matches_location(self, location: CandidateExecutionLocation) -> bool {
         match (self, location) {
             (Self::OriginalVmRegion, CandidateExecutionLocation::VmRegion { .. }) => true,
+            (Self::OriginalNativeRegion, CandidateExecutionLocation::NativeRegion { .. }) => true,
+            (Self::OriginalNativeRegion, CandidateExecutionLocation::NativeSource) => true,
+            (_, CandidateExecutionLocation::NativeSource) => false,
+            (Self::OriginalNativeRegion, _)
+            | (_, CandidateExecutionLocation::NativeRegion { .. }) => false,
             (Self::OriginalVmRegion, _) | (_, CandidateExecutionLocation::VmRegion { .. }) => false,
             (kind, CandidateExecutionLocation::Provider { .. }) => kind.is_provider(),
             (kind, CandidateExecutionLocation::Host) => !kind.is_provider(),
@@ -415,6 +423,13 @@ pub enum CandidateExecutionLocation {
     VmRegion {
         device_id: u32,
     },
+    /// Original native MIR operations retain per-operation execution owners.
+    NativeRegion {
+        device_id: u32,
+    },
+    /// Native source operations with per-operation owners but no proved
+    /// single device/physical tail. Neither Host nor device completion.
+    NativeSource,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -499,6 +514,8 @@ pub enum CandidateOutputPresentation {
         /// gathered inputs must use `ProviderReadbackUpload` to budget each
         /// source owner's staging independently.
         provider_scratch_bytes: ResourceByteBound,
+        /// Physically required completion slots. Zero denotes a synchronous
+        /// upload, not an unknown queue demand; scratch is admitted separately.
         queue_slots: u32,
         preparation: CandidatePreparationState,
     },
@@ -512,6 +529,8 @@ pub enum CandidateOutputPresentation {
         host_result_bytes: Option<ResourceByteBound>,
         host_scratch_bytes: ResourceByteBound,
         provider_scratch_bytes: ResourceByteBound,
+        /// Upload completion slots; synchronous uploads require none. Input
+        /// readback stages retain their independently admitted queue demands.
         queue_slots: u32,
         preparation: CandidatePreparationState,
         readbacks: Box<ProviderReadbackDemands>,
@@ -576,14 +595,13 @@ impl CandidateOutputPresentation {
             (
                 Self::ProviderUpload {
                     device_id: upload,
-                    queue_slots,
                     preparation,
                     ..
                 },
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Provider { device_id: output }
                 | CandidateOutputResidency::Mirrored { device_id: output },
-            ) if *upload == output && *queue_slots > 0
+            ) if *upload == output
                 && !matches!(
                     preparation,
                     CandidatePreparationState::Preparing | CandidatePreparationState::Unknown
@@ -591,7 +609,6 @@ impl CandidateOutputPresentation {
             (
                 Self::ProviderReadbackUpload {
                     device_id: upload,
-                    queue_slots,
                     preparation,
                     readbacks,
                     ..
@@ -599,7 +616,7 @@ impl CandidateOutputPresentation {
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Provider { device_id: output }
                 | CandidateOutputResidency::Mirrored { device_id: output },
-            ) if *upload == output && *queue_slots > 0
+            ) if *upload == output
                 && !matches!(preparation, CandidatePreparationState::Preparing | CandidatePreparationState::Unknown)
                 && readbacks.is_canonical() && readbacks.iter().next().is_some() => Ok(()),
             (
@@ -608,7 +625,7 @@ impl CandidateOutputPresentation {
                 CandidateOutputResidency::Provider { device_id: output },
             ) if *upload == execution && *upload == output && *queue_slots > 0 => Ok(()),
             (Self::ProviderUpload { .. }, _, _) => {
-                Err("provider upload presentation needs a ready stage, queue slot, and matching host route and output device")
+                Err("provider upload presentation needs a ready stage and matching host route and output device")
             }
             (Self::ProviderReadbackUpload { .. }, _, _) => {
                 Err("provider readback/upload needs canonical input stages and a ready matching host-to-provider output")

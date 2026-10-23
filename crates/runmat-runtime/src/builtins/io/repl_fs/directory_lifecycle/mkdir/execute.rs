@@ -44,7 +44,8 @@ fn child_target(parent: &Value, child: &Value) -> BuiltinResult<PathBuf> {
 }
 
 fn folder_text(value: &Value) -> BuiltinResult<String> {
-    super::super::input::text_scalar(value).map_err(|_| error(&MKDIR_ERROR_FOLDER_TYPE))
+    super::super::input::text_scalar(value)
+        .map_err(|source| source.attach(error(&MKDIR_ERROR_FOLDER_TYPE)))
 }
 
 fn nonempty(value: &str) -> BuiltinResult<()> {

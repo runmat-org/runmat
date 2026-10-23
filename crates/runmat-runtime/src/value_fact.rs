@@ -11,6 +11,9 @@ use runmat_types::{
 };
 use runmat_value::{IntValue, NumericDType, Value};
 
+mod borrowed;
+pub use borrowed::BorrowedValueFacts;
+
 /// Adapt one live runtime value into the dependency-neutral static fact schema.
 ///
 /// This is deliberately owned by the runtime: `runmat-types` never imports or

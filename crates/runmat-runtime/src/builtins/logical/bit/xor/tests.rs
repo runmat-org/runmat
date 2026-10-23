@@ -182,8 +182,8 @@ fn xor_explicit_resident_integer_fallback_is_exact_and_stays_resident() {
 #[test]
 fn xor_char_arrays_are_available_in_matlab_compatibility_mode() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(false);
-    let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
-    let rhs = CharArray::new(vec!['R', '\0', 'n'], 1, 3).unwrap();
+    let lhs = CharArray::from_unicode_scalars(vec!['R', 'u', '\0'], 1, 3).unwrap();
+    let rhs = CharArray::from_unicode_scalars(vec!['R', '\0', 'n'], 1, 3).unwrap();
     let result = run_xor(Value::CharArray(lhs), Value::CharArray(rhs)).expect("xor char arrays");
     match result {
         Value::LogicalArray(arr) => {

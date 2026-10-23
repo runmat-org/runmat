@@ -136,12 +136,11 @@ pub(super) fn char_array_rows(ca: &CharArray, builtin: &'static str) -> BuiltinR
     }
     let mut out = Vec::with_capacity(ca.rows);
     for row in 0..ca.rows {
-        let mut text = String::with_capacity(ca.cols);
-        for col in 0..ca.cols {
-            text.push(ca.data()[row * ca.cols + col]);
-        }
+        let start = row * ca.cols;
+        let text = runmat_value::decode_utf16_code_units(&ca.data()[start..start + ca.cols])
+            .map_err(|source| map_error(format!("containers.Map: {source}"), builtin))?;
         let chars: Vec<char> = text.chars().collect();
-        let array = CharArray::new(chars.clone(), 1, chars.len())
+        let array = CharArray::from_unicode_scalars(chars, 1, text.encode_utf16().count())
             .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))?;
         out.push(Value::CharArray(array));
     }
@@ -354,7 +353,8 @@ pub(super) fn string_from_value(
     match value {
         Value::String(s) => Ok(s.to_string()),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_string()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
+            .map_err(|source| map_error(format!("containers.Map: {source}"), builtin)),
         _ => Err(map_error(context, builtin)),
     }
 }
@@ -367,12 +367,12 @@ pub(super) fn char_array_from_value(
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.clone()),
         Value::String(s) => {
             let chars: Vec<char> = s.chars().collect();
-            CharArray::new(chars.clone(), 1, chars.len())
+            CharArray::from_unicode_scalars(chars, 1, s.encode_utf16().count())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
         }
         Value::StringArray(sa) if sa.data().len() == 1 => {
             let chars: Vec<char> = sa.data()[0].chars().collect();
-            CharArray::new(chars.clone(), 1, chars.len())
+            CharArray::from_unicode_scalars(chars, 1, sa.data()[0].encode_utf16().count())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
         }
         _ => Err(map_error(
@@ -384,7 +384,7 @@ pub(super) fn char_array_from_value(
 
 pub(super) fn char_array_value(text: &str, builtin: &'static str) -> BuiltinResult<Value> {
     let chars: Vec<char> = text.chars().collect();
-    CharArray::new(chars.clone(), 1, chars.len())
+    CharArray::from_unicode_scalars(chars, 1, text.encode_utf16().count())
         .map(Value::CharArray)
         .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
 }

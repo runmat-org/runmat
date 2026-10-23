@@ -105,7 +105,7 @@ enum ConstantPayload<'a> {
     },
     CharArray {
         shape: &'a [usize],
-        data: &'a [char],
+        data: &'a [runmat_value::Utf16CodeUnit],
     },
     LogicalArray {
         shape: &'a [usize],

@@ -28,9 +28,10 @@ fn character_rows(array: &CharArray) -> crate::BuiltinResult<Vec<String>> {
     (0..array.rows)
         .map(|row| {
             let start = row * array.cols;
-            let mut name = array.data()[start..start + array.cols]
-                .iter()
-                .collect::<String>();
+            let mut name = crate::builtins::common::text::decode_utf16_with_error(
+                &array.data()[start..start + array.cols],
+                || super::super::error::invalid_name(format!("character row {}", row + 1)),
+            )?;
             while name.ends_with(' ') {
                 name.pop();
             }
@@ -40,8 +41,13 @@ fn character_rows(array: &CharArray) -> crate::BuiltinResult<Vec<String>> {
 }
 
 fn scalar(value: &Value, context: impl std::fmt::Display) -> crate::BuiltinResult<String> {
-    let name =
-        field_name::decode(value).map_err(|_| super::super::error::invalid_name(&context))?;
+    let name = field_name::decode(value).map_err(|source| {
+        let mut error = super::super::error::invalid_name(&context);
+        if let field_name::ExpectedScalarFieldName::Encoding(source) = source {
+            error.source = Some(Box::new(source));
+        }
+        error
+    })?;
     nonempty(name, context)
 }
 

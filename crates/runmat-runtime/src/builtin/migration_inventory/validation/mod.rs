@@ -64,7 +64,7 @@ pub(super) fn validate_inventory(
         gpu_specs,
         fusion_specs,
     );
-    placement::validate(&mut findings, gpu_specs, fusion_specs);
+    placement::validate(&mut findings, gpu_specs);
     constants::validate(&mut errors, runtime_constants);
     registration_manifest::validate(
         &mut errors,

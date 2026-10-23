@@ -102,7 +102,9 @@ pub(super) fn labels_to_value(
                 StringArray::new(category_values.clone(), vec![1, category_values.len()])
                     .map_err(|err| internal(name, format!("{name}: {err}")))?,
             );
-            crate::builtins::table::categorical_from_args(vec![value_array, categories])
+            crate::builtins::table::categorical_from_args(
+                crate::call::FunctionArgumentView::from_slice(&[value_array, categories]),
+            )
         }
     }
 }

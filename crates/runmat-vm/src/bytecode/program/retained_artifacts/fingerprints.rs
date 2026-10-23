@@ -7,7 +7,19 @@ use runmat_execution::executable::{
 use runmat_execution::{ExecutableSourceMapV2, FunctionBindingOrigin};
 use runmat_hir::FunctionId;
 
-use super::{function_remap, FunctionRegistry, RetainedCallableStageError};
+use super::{
+    function_remap, FunctionRegistry, RetainedCallableStageError, SelectedFingerprintInvariant,
+};
+
+fn selected_graph(
+    function: FunctionId,
+    invariant: SelectedFingerprintInvariant,
+) -> RetainedCallableStageError {
+    RetainedCallableStageError::SelectedFingerprintGraph {
+        function,
+        invariant,
+    }
+}
 
 #[path = "fingerprints/source_identity.rs"]
 mod source_identity;
@@ -54,10 +66,9 @@ pub(super) fn normalized_selected_bodies(
     let selected = FunctionRegistry::new(selected_bodies(registry)?);
     let mut fingerprints = HashMap::with_capacity(functions.len());
     for &function in functions {
-        let body = selected
-            .functions
-            .get(&function)
-            .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
+        let body = selected.functions.get(&function).ok_or_else(|| {
+            selected_graph(function, SelectedFingerprintInvariant::MissingSelectedBody)
+        })?;
         let origin = body
             .binding_origin
             .ok_or(RetainedCallableStageError::MissingOrigin { function })?;
@@ -66,7 +77,10 @@ pub(super) fn normalized_selected_bodies(
             .insert(function, (origin, fingerprint))
             .is_some()
         {
-            return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            return Err(selected_graph(
+                function,
+                SelectedFingerprintInvariant::RepeatedRequestedBody,
+            ));
         }
     }
     Ok(fingerprints)
@@ -78,7 +92,10 @@ fn selected_bodies(
     let mut bodies = HashMap::new();
     for body in registry.selected_execution_bodies() {
         if bodies.insert(body.function, body.clone()).is_some() {
-            return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            return Err(selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::DuplicateSelectedBody,
+            ));
         }
     }
     Ok(bodies)
@@ -139,10 +156,9 @@ pub(super) fn normalized_selected_bodies_with_imports(
     let selected = FunctionRegistry::new(selected_bodies(registry)?);
     let mut fingerprints = HashMap::with_capacity(functions.len());
     for &function in functions {
-        let body = selected
-            .functions
-            .get(&function)
-            .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
+        let body = selected.functions.get(&function).ok_or_else(|| {
+            selected_graph(function, SelectedFingerprintInvariant::MissingSelectedBody)
+        })?;
         let origin = body
             .binding_origin
             .ok_or(RetainedCallableStageError::MissingOrigin { function })?;
@@ -158,7 +174,10 @@ pub(super) fn normalized_selected_bodies_with_imports(
             .insert(function, (origin, fingerprint))
             .is_some()
         {
-            return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            return Err(selected_graph(
+                function,
+                SelectedFingerprintInvariant::RepeatedRequestedBody,
+            ));
         }
     }
     Ok(fingerprints)
@@ -252,34 +271,48 @@ fn fingerprint_body_with_imports(
     }
     let mut local_ids = HashSet::from([body.function]);
     if let Some(parent) = body.lexical_parent {
-        let parent_body = registry
-            .functions
-            .get(&parent)
-            .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
+        let parent_body = registry.functions.get(&parent).ok_or_else(|| {
+            selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::MissingLexicalParent(parent),
+            )
+        })?;
         let parent_origin = parent_body
             .binding_origin
             .ok_or(RetainedCallableStageError::MissingOrigin { function: parent })?;
         if body.portable_lexical_parent != Some(parent_origin.function)
             || origin.program != parent_origin.program
         {
-            return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            return Err(selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::MismatchedLexicalParent(parent),
+            ));
         }
         local_ids.insert(parent);
     } else if body.portable_lexical_parent.is_some() {
-        return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+        return Err(selected_graph(
+            body.function,
+            SelectedFingerprintInvariant::UnexpectedPortableLexicalParent,
+        ));
     }
     let mut imported_sites = HashMap::new();
     for import in &body_imports {
         if imported_sites.insert(import.site, *import).is_some() {
-            return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            return Err(selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::DuplicateImportSite(import.site),
+            ));
         }
     }
     let mut observed_imports = HashSet::new();
     for (pc, instruction) in body.instructions.iter().enumerate() {
-        for (site, function, kind) in
-            function_remap::instruction_reference_sites(instruction, pc)
-                .map_err(|_| RetainedCallableStageError::IncompleteDefinitionGraph)?
-        {
+        for (site, function, kind) in function_remap::instruction_reference_sites(instruction, pc)
+            .map_err(|_| {
+            selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::InvalidReferenceSites(pc),
+            )
+        })? {
             match imported_sites.get(&site) {
                 Some(import)
                     if (kind == function_remap::FunctionReferenceKind::External
@@ -294,20 +327,43 @@ fn fingerprint_body_with_imports(
                 {
                     observed_imports.insert(site);
                 }
-                Some(_) => return Err(RetainedCallableStageError::IncompleteDefinitionGraph),
+                Some(_) => {
+                    return Err(selected_graph(
+                        body.function,
+                        SelectedFingerprintInvariant::ImportKindMismatch(site),
+                    ))
+                }
                 None if kind == function_remap::FunctionReferenceKind::Local => {
                     local_ids.insert(function);
                 }
-                None => return Err(RetainedCallableStageError::IncompleteDefinitionGraph),
+                None => {
+                    return Err(selected_graph(
+                        body.function,
+                        SelectedFingerprintInvariant::UnimportedExternalReference(site),
+                    ))
+                }
             }
         }
     }
-    if observed_imports.len() != imported_sites.len()
-        || local_ids
-            .iter()
-            .any(|function| !registry.functions.contains_key(function))
+    if let Some(site) = imported_sites
+        .keys()
+        .filter(|site| !observed_imports.contains(*site))
+        .min()
     {
-        return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+        return Err(selected_graph(
+            body.function,
+            SelectedFingerprintInvariant::UnobservedImportSite(*site),
+        ));
+    }
+    if let Some(local) = local_ids
+        .iter()
+        .filter(|function| !registry.functions.contains_key(*function))
+        .min()
+    {
+        return Err(selected_graph(
+            body.function,
+            SelectedFingerprintInvariant::MissingLocalDefinition(*local),
+        ));
     }
     let mut local_ids = local_ids.into_iter().collect::<Vec<_>>();
     local_ids.sort_by_key(|function| {
@@ -333,21 +389,34 @@ fn fingerprint_body_with_imports(
         .map(|(ordinal, function)| (*function, FunctionId(ordinal)))
         .collect::<HashMap<_, _>>();
     let mut normalized = body.clone();
-    function_remap::remap_closed_function(&mut normalized, &remap)
-        .map_err(|_| RetainedCallableStageError::IncompleteDefinitionGraph)?;
+    function_remap::remap_closed_function(&mut normalized, &remap).map_err(|_| {
+        selected_graph(
+            body.function,
+            SelectedFingerprintInvariant::ClosedFunctionRemap,
+        )
+    })?;
     let replacements = body_imports
         .iter()
         .enumerate()
         .map(|(ordinal, import)| (import.site, FunctionId(local_ids.len() + ordinal)))
         .collect::<HashMap<_, _>>();
-    function_remap::remap_reference_sites(&mut normalized.instructions, &replacements)
-        .map_err(|_| RetainedCallableStageError::IncompleteDefinitionGraph)?;
+    function_remap::remap_reference_sites(&mut normalized.instructions, &replacements).map_err(
+        |_| {
+            selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::ImportedSiteRemap,
+            )
+        },
+    )?;
     #[cfg(feature = "native-accel")]
     {
         normalized.reseal_fusion_stage_after_owned_remap();
-        normalized
-            .validate_fusion_stage_projection()
-            .map_err(|_| RetainedCallableStageError::IncompleteDefinitionGraph)?;
+        normalized.validate_fusion_stage_projection().map_err(|_| {
+            selected_graph(
+                body.function,
+                SelectedFingerprintInvariant::FusionStageProjection,
+            )
+        })?;
     }
     let selected_domain = if selected {
         DefinitionSourceDomain::Selected(
@@ -440,8 +509,12 @@ fn fingerprint_body(
         return Err(RetainedCallableStageError::DuplicateOrigin);
     }
     let mut normalized = body.clone();
-    function_remap::remap_closed_function(&mut normalized, &portable_ids)
-        .map_err(|_| RetainedCallableStageError::IncompleteDefinitionGraph)?;
+    function_remap::remap_closed_function(&mut normalized, &portable_ids).map_err(|_| {
+        selected_graph(
+            body.function,
+            SelectedFingerprintInvariant::ClosedFunctionRemap,
+        )
+    })?;
     let selected_domain = if selected {
         DefinitionSourceDomain::Selected(
             body.selected_source_owner
@@ -476,13 +549,15 @@ fn direct_origin_ids(
     let body = registry
         .functions
         .get(&root)
-        .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
+        .ok_or_else(|| selected_graph(root, SelectedFingerprintInvariant::MissingRootBody))?;
     let mut referenced = HashSet::from([root]);
     if let Some(parent) = body.lexical_parent {
-        let parent_body = registry
-            .functions
-            .get(&parent)
-            .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
+        let parent_body = registry.functions.get(&parent).ok_or_else(|| {
+            selected_graph(
+                root,
+                SelectedFingerprintInvariant::MissingLexicalParent(parent),
+            )
+        })?;
         let child_origin = body
             .binding_origin
             .ok_or(RetainedCallableStageError::MissingOrigin { function: root })?;
@@ -492,22 +567,32 @@ fn direct_origin_ids(
         if body.portable_lexical_parent != Some(parent_origin.function)
             || child_origin.program != parent_origin.program
         {
-            return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            return Err(selected_graph(
+                root,
+                SelectedFingerprintInvariant::MismatchedLexicalParent(parent),
+            ));
         }
         referenced.insert(parent);
     } else if body.portable_lexical_parent.is_some() {
-        return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+        return Err(selected_graph(
+            root,
+            SelectedFingerprintInvariant::UnexpectedPortableLexicalParent,
+        ));
     }
     for instruction in &body.instructions {
         function_remap::visit_instruction(instruction, |dependency| {
             referenced.insert(dependency);
         });
     }
-    if referenced
+    if let Some(missing) = referenced
         .iter()
-        .any(|function| !registry.functions.contains_key(function))
+        .filter(|function| !registry.functions.contains_key(*function))
+        .min()
     {
-        return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+        return Err(selected_graph(
+            root,
+            SelectedFingerprintInvariant::MissingLocalDefinition(*missing),
+        ));
     }
     let mut referenced = referenced.into_iter().collect::<Vec<_>>();
     referenced.sort_by_key(|function| {
@@ -574,7 +659,10 @@ mod tests {
         ]));
         assert!(matches!(
             direct_origin_ids(&invalid, nested),
-            Err(RetainedCallableStageError::IncompleteDefinitionGraph)
+            Err(RetainedCallableStageError::SelectedFingerprintGraph {
+                function,
+                invariant: SelectedFingerprintInvariant::MismatchedLexicalParent(found),
+            }) if function == nested && found == parent
         ));
     }
 }

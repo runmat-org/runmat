@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use runmat_execution::resource::{
     AcceleratorAllocationDomainId, AcceleratorClass, AcceleratorDevice, AcceleratorDeviceId,
     AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId, AcceleratorProviderVersion,
@@ -53,7 +53,8 @@ pub fn execution_provider_contract(
 
 /// Builds a cluster-facing identity for a provider that explicitly opts in to
 /// remote execution inventory. Process-local provider and buffer identifiers
-/// never cross this boundary.
+/// never cross this boundary. Without a positive declared memory capacity,
+/// the provider remains available locally but supplies no schedulable device.
 pub fn execution_accelerator_device(
     provider: &(impl AccelProvider + ?Sized),
     provider_id: &str,
@@ -62,14 +63,16 @@ pub fn execution_accelerator_device(
     allocation_domain_selector: &str,
     device_selector: &str,
     inventory_epoch: u64,
-) -> Result<AcceleratorDevice> {
+) -> Result<Option<AcceleratorDevice>> {
     let info = provider.device_info_struct();
-    let max_allocation_bytes = provider
+    let Some(max_allocation_bytes) = provider
         .placement_resources()
         .capacity_bytes
         .or(info.memory_bytes)
         .filter(|memory| *memory > 0)
-        .context("provider does not declare schedulable accelerator memory")?;
+    else {
+        return Ok(None);
+    };
 
     let execution_provider = execution_provider_contract(provider_id, provider_version, contract)?;
     let allocation_domain_selector = AcceleratorAllocationDomainId::new(format!(
@@ -95,7 +98,7 @@ pub fn execution_accelerator_device(
         inventory_epoch,
     };
     device.validate()?;
-    Ok(device)
+    Ok(Some(device))
 }
 
 fn append_bytes(bytes: &mut Vec<u8>, value: &[u8]) {
@@ -114,6 +117,18 @@ mod tests {
 
     struct InventoryProvider {
         revision: u64,
+        capacity_bytes: Option<u64>,
+        memory_bytes: Option<u64>,
+    }
+
+    impl InventoryProvider {
+        fn new(revision: u64) -> Self {
+            Self {
+                revision,
+                capacity_bytes: Some(16_384),
+                memory_bytes: Some(16_384),
+            }
+        }
     }
 
     impl AccelProvider for InventoryProvider {
@@ -134,7 +149,7 @@ mod tests {
                 device_id: 72,
                 name: "Test Device".into(),
                 vendor: "RunMat".into(),
-                memory_bytes: Some(16_384),
+                memory_bytes: self.memory_bytes,
                 backend: Some("test".into()),
             }
         }
@@ -148,7 +163,7 @@ mod tests {
         fn placement_resources(&self) -> ProviderResourceSnapshot {
             ProviderResourceSnapshot {
                 device_id: 72,
-                capacity_bytes: Some(16_384),
+                capacity_bytes: self.capacity_bytes,
                 live_bytes: 0,
                 reclaimable_bytes: 0,
                 scratch_available_bytes: Some(16_384),
@@ -163,7 +178,7 @@ mod tests {
     #[test]
     fn provider_abi_is_stable_across_inventory_epochs_and_capability_revisions() {
         let first = execution_accelerator_device(
-            &InventoryProvider { revision: 1 },
+            &InventoryProvider::new(1),
             "runmat.test",
             "1.0.0",
             ExecutionProviderContract::GenericComputeV1,
@@ -171,9 +186,10 @@ mod tests {
             "test-device-0",
             10,
         )
-        .unwrap();
+        .unwrap()
+        .expect("declared capacity");
         let next_epoch = execution_accelerator_device(
-            &InventoryProvider { revision: 1 },
+            &InventoryProvider::new(1),
             "runmat.test",
             "1.0.0",
             ExecutionProviderContract::GenericComputeV1,
@@ -181,9 +197,10 @@ mod tests {
             "test-device-0",
             11,
         )
-        .unwrap();
+        .unwrap()
+        .expect("declared capacity");
         let next_contract = execution_accelerator_device(
-            &InventoryProvider { revision: 2 },
+            &InventoryProvider::new(2),
             "runmat.test",
             "1.0.0",
             ExecutionProviderContract::GenericComputeV1,
@@ -191,7 +208,8 @@ mod tests {
             "test-device-0",
             11,
         )
-        .unwrap();
+        .unwrap()
+        .expect("declared capacity");
 
         assert_eq!(first.id, next_epoch.id);
         assert_eq!(first.provider, next_epoch.provider);
@@ -200,7 +218,7 @@ mod tests {
         assert_eq!(first.max_allocation_bytes, 16_384);
 
         let other_device = execution_accelerator_device(
-            &InventoryProvider { revision: 1 },
+            &InventoryProvider::new(1),
             "runmat.test",
             "1.0.0",
             ExecutionProviderContract::GenericComputeV1,
@@ -208,7 +226,8 @@ mod tests {
             "test-device-1",
             10,
         )
-        .unwrap();
+        .unwrap()
+        .expect("declared capacity");
         assert_ne!(first.id, other_device.id);
         assert_ne!(first.allocation_domain, other_device.allocation_domain);
         assert_eq!(first.provider, other_device.provider);
@@ -234,7 +253,7 @@ mod tests {
     #[test]
     fn provider_views_share_only_the_explicit_physical_allocation_domain() {
         let generic = execution_accelerator_device(
-            &InventoryProvider { revision: 1 },
+            &InventoryProvider::new(1),
             "runmat.wgpu",
             "1.0.0",
             ExecutionProviderContract::GenericComputeV1,
@@ -242,9 +261,10 @@ mod tests {
             "wgpu-view-0",
             10,
         )
-        .unwrap();
+        .unwrap()
+        .expect("declared capacity");
         let cuda = execution_accelerator_device(
-            &InventoryProvider { revision: 1 },
+            &InventoryProvider::new(1),
             "runmat.cuda",
             "1.0.0",
             ExecutionProviderContract::CudaNativeV1,
@@ -252,10 +272,43 @@ mod tests {
             "cuda-view-0",
             10,
         )
-        .unwrap();
+        .unwrap()
+        .expect("declared capacity");
 
         assert_eq!(generic.allocation_domain, cuda.allocation_domain);
         assert_ne!(generic.id, cuda.id);
         assert_ne!(generic.provider, cuda.provider);
+    }
+
+    #[test]
+    fn remote_inventory_requires_declared_capacity_without_fabricating_a_budget() {
+        for (capacity_bytes, memory_bytes, expected) in [
+            (None, None, None),
+            (Some(0), Some(16_384), None),
+            (None, Some(16_384), Some(16_384)),
+            (Some(8192), None, Some(8192)),
+        ] {
+            let provider = InventoryProvider {
+                revision: 1,
+                capacity_bytes,
+                memory_bytes,
+            };
+            let device = execution_accelerator_device(
+                &provider,
+                "runmat.test",
+                "1.0.0",
+                ExecutionProviderContract::GenericComputeV1,
+                "test-device-0",
+                "test-device-0",
+                10,
+            )
+            .unwrap();
+            assert_eq!(device.map(|device| device.max_allocation_bytes), expected);
+            assert_eq!(provider.device_info_struct().memory_bytes, memory_bytes);
+            assert_eq!(
+                provider.placement_resources().capacity_bytes,
+                capacity_bytes
+            );
+        }
     }
 }

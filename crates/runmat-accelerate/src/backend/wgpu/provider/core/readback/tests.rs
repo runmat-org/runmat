@@ -54,6 +54,113 @@ fn completion_replaces_and_wakes_tasks_outside_state_lock() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn native_map_and_progress_both_gate_decode_and_preserve_failures() {
+    use std::future::Future;
+    use std::task::Context;
+
+    assert_eq!(
+        map_completion_host_upper_bytes(),
+        Some(
+            ExactShared::<MapCompletion>::requested_bytes() as u64
+                + super::super::super::allocation_state::mapped_stage_host_bytes().unwrap()
+                + std::mem::size_of::<ExactShared<MapCompletion>>() as u64
+        )
+    );
+
+    for map_first in [false, true] {
+        let completion = MapCompletion {
+            state: Mutex::new(MapCompletionState {
+                progress: MapProgress::Pending,
+                ..MapCompletionState::default()
+            }),
+        };
+        let mut wait = std::pin::pin!(completion.wait());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
+        if map_first {
+            completion.complete(Ok(()));
+        } else {
+            completion.complete_progress(Ok(()));
+        }
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
+        if map_first {
+            completion.complete_progress(Ok(()));
+        } else {
+            completion.complete(Ok(()));
+        }
+        assert!(matches!(wait.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+    }
+
+    for mapped in [false, true] {
+        let completion = MapCompletion {
+            state: Mutex::new(MapCompletionState {
+                progress: MapProgress::Pending,
+                ..MapCompletionState::default()
+            }),
+        };
+        if mapped {
+            completion.complete(Ok(()));
+        }
+        completion.complete_progress(Err(WgpuObservationProgressError::Stopped));
+        // A late successful map must not overwrite the physical driver's failure.
+        // A stopped driver must also fail promptly if mapping never completed.
+        if mapped {
+            completion.complete(Ok(()));
+        }
+        let error = futures::executor::block_on(completion.wait()).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<WgpuObservationProgressError>(),
+            Some(&WgpuObservationProgressError::Stopped)
+        );
+    }
+
+    let completion = MapCompletion {
+        state: Mutex::new(MapCompletionState {
+            progress: MapProgress::Pending,
+            ..MapCompletionState::default()
+        }),
+    };
+    completion.complete(Err(
+        std::io::Error::from(std::io::ErrorKind::InvalidData).into()
+    ));
+    completion.complete_progress(Err(WgpuObservationProgressError::Stopped));
+    let error = futures::executor::block_on(completion.wait()).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+
+    #[derive(Debug)]
+    struct Claim;
+    let claim = Arc::new(Claim);
+    let weak = Arc::downgrade(&claim);
+    let completion = FundedMapCompletion {
+        state: ExactShared::try_new(MapCompletion {
+            state: Mutex::new(MapCompletionState {
+                progress: MapProgress::Pending,
+                ..MapCompletionState::default()
+            }),
+        })
+        .ok()
+        .unwrap(),
+        _claim: Some(claim),
+    };
+    let mut physical_callback = completion.clone().progress_callback();
+    {
+        let mut wait = std::pin::pin!(completion.state.get().wait());
+        assert!(wait
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending());
+    }
+    drop(completion); // Cancel the logical waiter and its funding clone.
+    assert!(weak.upgrade().is_some());
+    physical_callback.finish(Ok(()));
+    assert!(weak.upgrade().is_none());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
 fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
     use crate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
@@ -85,6 +192,7 @@ fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
             buffer.clone(),
             "same staging remap",
             |bytes| Ok(bytemuck::cast_slice::<u8, f32>(bytes).to_vec()),
+            provider.observation_progress.clone(),
         ))
         .expect("production cleanup must permit remapping the same staging buffer");
         assert_eq!(actual, expected);
@@ -94,6 +202,7 @@ fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
         buffer.clone(),
         "unpolled",
         |_| -> Result<()> { panic!("unpolled decoder must not execute") },
+        provider.observation_progress.clone(),
     ));
     remap();
     let error = futures::executor::block_on(read_with(
@@ -104,6 +213,7 @@ fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
             assert_eq!(bytemuck::cast_slice::<u8, f32>(bytes), expected);
             Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "decode sentinel").into())
         },
+        provider.observation_progress.clone(),
     ))
     .expect_err("decoder error must survive cleanup");
     assert_eq!(
@@ -122,6 +232,7 @@ fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
                     assert_eq!(bytemuck::cast_slice::<u8, f32>(bytes), expected);
                     panic!("decoder unwind sentinel")
                 },
+                provider.observation_progress.clone(),
             ))
         }));
         assert!(unwind.is_err());

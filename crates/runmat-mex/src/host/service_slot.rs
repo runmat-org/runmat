@@ -67,14 +67,6 @@ impl BoundaryServiceSlot {
         Self::Concurrent(services)
     }
 
-    pub(super) fn is_concurrent(&self) -> bool {
-        #[cfg(not(target_family = "wasm"))]
-        if matches!(self, Self::Concurrent(_)) {
-            return true;
-        }
-        false
-    }
-
     pub(super) fn is_available(&self) -> bool {
         !matches!(self, Self::Unavailable)
     }

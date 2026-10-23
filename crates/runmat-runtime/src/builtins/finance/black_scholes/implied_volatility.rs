@@ -187,11 +187,20 @@ impl ClassInput {
             Value::CharArray(chars) => {
                 if chars.rows == 1 {
                     Ok(Self {
-                        values: vec![parse_class_text(&chars.data().iter().collect::<String>())?],
+                        values: vec![parse_class_text(
+                            &runmat_value::decode_utf16_code_units(chars.data()).map_err(
+                                |source| {
+                                    let mut error =
+                                        error(BLSIMPV, source.to_string(), &ERROR_INVALID_ARGUMENT);
+                                    error.source = Some(Box::new(source));
+                                    error
+                                },
+                            )?,
+                        )?],
                         is_scalar: true,
                     })
                 } else {
-                    let texts = char_rows(chars);
+                    let texts = char_rows(chars)?;
                     Self::from_texts(&texts, vec![len, 1], shape, len)
                 }
             }
@@ -287,9 +296,13 @@ fn class_from_bool(flag: bool) -> OptionClass {
 fn class_from_cell_value(value: &Value) -> BuiltinResult<OptionClass> {
     match value {
         Value::String(text) => parse_class_text(text),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            parse_class_text(&chars.data().iter().collect::<String>())
-        }
+        Value::CharArray(chars) if chars.rows == 1 => parse_class_text(
+            &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = error(BLSIMPV, source.to_string(), &ERROR_INVALID_ARGUMENT);
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         Value::Bool(flag) => Ok(class_from_bool(*flag)),
         Value::LogicalArray(logical) if logical.len() == 1 => {
             Ok(class_from_bool(logical.data[0] != 0))
@@ -318,16 +331,21 @@ fn string_array_shape(array: &StringArray) -> Vec<usize> {
     tensor_shape(&array.shape, array.rows, array.cols)
 }
 
-fn char_rows(chars: CharArray) -> Vec<String> {
+fn char_rows(chars: CharArray) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::with_capacity(chars.rows);
     for row in 0..chars.rows {
-        let mut text = String::new();
-        for col in 0..chars.cols {
-            text.push(chars.data()[row + col * chars.rows]);
-        }
-        rows.push(text);
+        rows.push(
+            runmat_value::decode_utf16_code_units(
+                &chars.data()[row * chars.cols..(row + 1) * chars.cols],
+            )
+            .map_err(|source| {
+                let mut error = error(BLSIMPV, source.to_string(), &ERROR_INVALID_ARGUMENT);
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        );
     }
-    rows
+    Ok(rows)
 }
 
 struct ImpvOptions {

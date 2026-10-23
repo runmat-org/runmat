@@ -105,7 +105,7 @@ fn sign_complex_tensor_handles_zero() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn sign_character_array() {
-    let ca = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
+    let ca = CharArray::from_unicode_scalars("RunMat".chars().collect(), 1, 6).unwrap();
     let result = sign_builtin(Value::CharArray(ca)).unwrap();
     match result {
         Value::Tensor(out) => {

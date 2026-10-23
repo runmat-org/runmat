@@ -46,6 +46,9 @@ impl AllocationState {
         logical: bool,
         admission: Option<&dyn ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
+        // The physical-creation stamp cannot be replaced by the registering
+        // task's newer session epoch after an asynchronous device reset.
+        entry.buffer.validate_creation_scope()?;
         self.register_produced_with(
             entry,
             logical,
@@ -67,6 +70,11 @@ impl AllocationState {
         after_insert: impl FnOnce(u64),
         cleanup: impl FnOnce(BufferEntry),
     ) -> Result<GpuTensorHandle> {
+        entry.buffer.validate_creation_scope()?;
+        let generation = entry
+            .buffer
+            .creation_scope()
+            .map_or(1, |scope| scope.epoch());
         if self.is_lost() {
             return Err(AllocationStateError::DeviceLost.into());
         }
@@ -151,6 +159,7 @@ impl AllocationState {
             let record = (
                 id,
                 Record {
+                    scope: entry.buffer.creation_scope(),
                     registration_slot,
                     phase: Phase::Registering(Stage::Registration),
                     retained_bytes: entry.buffer.size(),
@@ -169,7 +178,7 @@ impl AllocationState {
             }
         }
         after_insert(id);
-        let identity = AllocationIdentity::new(self.device_id, id, 1);
+        let identity = AllocationIdentity::new(self.device_id, id, generation);
         let lease = match AllocationLease::register_with_retained_metadata(
             identity,
             self.clone(),

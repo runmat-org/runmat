@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::value_codec::encode_durable_value;
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
@@ -263,15 +264,21 @@ fn admitted_character_ranks_and_dynamic_definition_names_survive_reopen() {
     let entries = vec![
         (
             "rank_one".into(),
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![2]).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![2]).unwrap(),
+            ),
         ),
         (
             "empty_rank".into(),
-            Value::CharArray(CharArray::new_with_shape(Vec::new(), Vec::new()).unwrap()),
+            Value::CharArray(
+                CharArray::from_code_units_with_shape(Vec::new(), Vec::new()).unwrap(),
+            ),
         ),
         (
             "paged".into(),
-            Value::CharArray(CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap(),
+            ),
         ),
         ("object".into(), Value::Object(object.finish())),
     ];

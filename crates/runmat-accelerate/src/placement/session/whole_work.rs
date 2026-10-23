@@ -60,6 +60,9 @@ pub(in crate::placement) const fn unobserved_admitted_record_bytes() -> usize {
 }
 
 enum SelectionDraft {
+    Unavailable {
+        insufficient_resource_evidence: bool,
+    },
     Direct {
         selected: CompactSelectedExecutionCandidate,
         kind: WholeWorkDecisionKind,
@@ -72,6 +75,39 @@ enum SelectionDraft {
 }
 
 impl PlacementSession {
+    pub fn try_select_whole_work(
+        &self,
+        request: WholeWorkPlacementRequest,
+    ) -> Result<Option<RuntimeWholeWorkSelection>, PlacementPlanError> {
+        let draft = self.select_whole_work_untracked(request.as_ref(), false)?;
+        if matches!(draft, SelectionDraft::Unavailable { .. }) {
+            return Ok(None);
+        }
+        self.finish_whole_work_selection(
+            draft,
+            request.signature,
+            || request.resources,
+            request.deterministic,
+            request.require_transactional_results,
+        )
+        .map(Some)
+    }
+
+    pub fn try_select_whole_work_borrowed_managed(
+        &self,
+        request: WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<Option<RuntimeManagedWholeWorkSelection>, PlacementPlanError> {
+        if self.managed_observations.is_none() {
+            return Ok(None);
+        }
+        let draft = self.select_whole_work_untracked(request, true)?;
+        if matches!(draft, SelectionDraft::Unavailable { .. }) {
+            return Ok(None);
+        }
+        self.finish_managed_whole_work_selection(draft, request)
+            .map(Some)
+    }
+
     pub fn select_whole_work(
         &self,
         request: WholeWorkPlacementRequest,
@@ -110,12 +146,27 @@ impl PlacementSession {
                 message: "managed observation backing is not installed".into(),
             });
         }
+        let draft = self.select_whole_work_untracked(request, true)?;
+        self.finish_managed_whole_work_selection(draft, request)
+    }
+
+    fn finish_managed_whole_work_selection(
+        &self,
+        draft: SelectionDraft,
+        request: WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeManagedWholeWorkSelection, PlacementPlanError> {
+        if let SelectionDraft::Unavailable {
+            insufficient_resource_evidence,
+        } = draft
+        {
+            return Err(no_resource_candidate(insufficient_resource_evidence));
+        }
         let SelectionDraft::Direct {
             selected,
             kind,
             predicted_total_ns,
             probe: None,
-        } = self.select_whole_work_untracked(request, true)?
+        } = draft
         else {
             unreachable!("managed admission requires exactly one physical route")
         };
@@ -180,6 +231,11 @@ impl PlacementSession {
         require_transactional_results: bool,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
         let (signature, selected_candidate, kind, predicted_total_ns, probe) = match draft {
+            SelectionDraft::Unavailable {
+                insufficient_resource_evidence,
+            } => {
+                return Err(no_resource_candidate(insufficient_resource_evidence));
+            }
             SelectionDraft::Compared { graph } => {
                 let plan = self.plan(PlacementPlanRequest {
                     signature,
@@ -239,12 +295,13 @@ impl PlacementSession {
         managed: bool,
     ) -> Result<SelectionDraft, PlacementPlanError> {
         // The managed lane's complete-call chooser is stack-backed for at
-        // most one host and one provider alternative. A larger request must
+        // most three ready alternatives. A larger request must
         // not make SmallVec spill before its finite owner can admit storage.
-        if managed && request.candidates.len() > 2 {
+        if managed && request.candidates.len() > 3 {
             return Err(PlacementPlanError {
                 code: "RunMat:Placement:InsufficientResourceEvidence",
-                message: "managed whole-work selection supports at most two physical routes".into(),
+                message: "managed whole-work selection supports at most three physical routes"
+                    .into(),
             });
         }
         request.validate().map_err(invalid_request)?;
@@ -266,7 +323,7 @@ impl PlacementSession {
         } else {
             self.drain_observations();
         }
-        let mut admitted: SmallVec<[Admitted<'_>; 2]> = SmallVec::new();
+        let mut admitted: SmallVec<[Admitted<'_>; 3]> = SmallVec::new();
         let mut insufficient_resource_evidence = false;
         for candidate in request.candidates {
             let demand = candidate.resources;
@@ -323,7 +380,9 @@ impl PlacementSession {
             });
         }
         if admitted.is_empty() {
-            return Err(no_resource_candidate(insufficient_resource_evidence));
+            return Ok(SelectionDraft::Unavailable {
+                insufficient_resource_evidence,
+            });
         }
 
         if managed {
@@ -581,10 +640,10 @@ fn no_legal_candidate() -> PlacementPlanError {
 }
 
 #[cfg(test)]
-mod tests;
+#[path = "whole_work/direct_call_tests.rs"]
+mod direct_call_tests;
 #[cfg(test)]
 #[path = "whole_work/host_effect_tests.rs"]
 mod host_effect_tests;
 #[cfg(test)]
-#[path = "whole_work/direct_call_tests.rs"]
-mod direct_call_tests;
+mod tests;

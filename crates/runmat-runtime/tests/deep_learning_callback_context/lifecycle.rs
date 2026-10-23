@@ -104,16 +104,24 @@ fn suspended_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
         .transpose();
     let input = match input {
         Ok(input) => input,
-        Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+        Err(error) => {
+            return runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
+                Err(error.into_runtime_error())
+            })
+        }
     };
-    Box::pin(SuspendedCallback {
-        origin: runtime.local_identity(),
-        runtime,
-        requested_outputs,
-        input,
-        outcome: OUTCOME.with(Cell::get),
-        first_poll: true,
-    })
+    runmat_runtime::builtin::admitted_builtin_future(
+        None,
+        "fixture",
+        SuspendedCallback {
+            origin: runtime.local_identity(),
+            runtime,
+            requested_outputs,
+            input,
+            outcome: OUTCOME.with(Cell::get),
+            first_poll: true,
+        },
+    )
 }
 
 struct PendingService;

@@ -4,8 +4,12 @@ use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPlan, HostAllocationPolicy, HostAllocationReceipt,
 };
 use crate::context::RuntimeContext;
-use runmat_value::{Utf8Text, Utf8TextExactCopy};
+use runmat_value::{Utf16CodeUnit, Utf8Text, Utf8TextExactCopy};
 use std::num::NonZeroUsize;
+
+#[path = "text_value/character.rs"]
+mod character;
+use character::ManagedCharacter;
 
 pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
     String {
@@ -20,8 +24,12 @@ pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
     },
     Character {
         shape: ShapeCopy<'a>,
-        source: &'a [u32],
-        chars: Vec<char>,
+        source: &'a [u16],
+        code_units: Vec<Utf16CodeUnit>,
+        path: ControlPath<'a>,
+    },
+    ManagedCharacter {
+        owner: ControlBox<ManagedCharacter<'a>>,
         path: ControlPath<'a>,
     },
     StringArray {
@@ -88,13 +96,18 @@ impl<'a> TextValueTask<'a> {
 
     pub(super) fn character(
         shape: &'a [u64],
-        source: &'a [u32],
+        source: &'a [u16],
         path: ControlPath<'a>,
+        runtime: Option<&'a RuntimeContext>,
     ) -> Result<Self, ValueCodecError> {
+        if let Some(owner) = ManagedCharacter::new(shape, source, runtime, &path)? {
+            let owner = path.owner().boxed(owner, &path)?;
+            return Ok(Self::ManagedCharacter { owner, path });
+        }
         Ok(Self::Character {
             shape: ShapeCopy::new(shape, path.try_clone()?),
             source,
-            chars: Vec::with_capacity(source.len()),
+            code_units: Vec::with_capacity(source.len()),
             path,
         })
     }
@@ -151,30 +164,27 @@ impl<'a> TextValueTask<'a> {
                     .unwrap_or_else(|_| unreachable!("completed UTF-8 copy"));
                 Ok((completed.max(1), Some(Value::string(text))))
             }
+            Self::ManagedCharacter { owner, path } => owner.advance(maximum_work, path),
             Self::Character {
                 shape,
                 source,
-                chars,
+                code_units,
                 path,
             } => {
                 if !shape.is_complete() {
                     let completed = shape.advance(maximum_work)?;
                     return Ok((completed, None));
                 }
-                let count = (source.len() - chars.len()).min(maximum_work);
-                for point in &source[chars.len()..chars.len() + count] {
-                    chars.push(
-                        char::from_u32(*point).ok_or_else(|| {
-                            ValueCodecError::invalid(path, "invalid Unicode scalar")
-                        })?,
-                    );
+                let count = (source.len() - code_units.len()).min(maximum_work);
+                for unit in &source[code_units.len()..code_units.len() + count] {
+                    code_units.push(Utf16CodeUnit::from_raw(*unit));
                 }
-                if chars.len() != source.len() {
+                if code_units.len() != source.len() {
                     return Ok((count.max(1), None));
                 }
                 let shape = shape.take_finished();
-                let chars = std::mem::take(chars);
-                let value = CharArray::new_with_shape(chars, shape)
+                let code_units = std::mem::take(code_units);
+                let value = CharArray::from_code_units_with_shape(code_units, shape)
                     .map(Value::CharArray)
                     .map_err(|error| ValueCodecError::invalid(path, error))?;
                 Ok((count.max(1), Some(value)))
@@ -214,6 +224,7 @@ impl<'a> TextValueTask<'a> {
             Self::String { path, .. }
             | Self::ManagedString { path, .. }
             | Self::Character { path, .. }
+            | Self::ManagedCharacter { path, .. }
             | Self::StringArray { path, .. } => path,
         }
     }

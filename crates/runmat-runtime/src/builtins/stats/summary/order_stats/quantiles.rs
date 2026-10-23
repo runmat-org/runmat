@@ -318,7 +318,7 @@ pub(super) async fn parse_quantile_args(
     let mut idx = 1usize;
     while idx < rest.len() {
         let arg = &rest[idx];
-        if let Some(keyword) = keyword_of(arg) {
+        if let Some(keyword) = keyword_of(arg)? {
             match OrderStatisticOption::parse(&keyword) {
                 Some(OrderStatisticOption::All) => {
                     axes = Some(ReductionAxes::All);
@@ -344,7 +344,7 @@ pub(super) async fn parse_quantile_args(
                             format!("{name}: Method option requires a value"),
                         ));
                     }
-                    let method_name = keyword_of(&rest[idx]).ok_or_else(|| {
+                    let method_name = keyword_of(&rest[idx])?.ok_or_else(|| {
                         order_error(
                             name,
                             format!("{name}: Method value must be a string scalar"),

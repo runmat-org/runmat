@@ -36,6 +36,10 @@ fn canonical_pulse_wave_bindings_observe_invocation_cancellation() {
         .expect_err("cancelled invocation must not publish a waveform");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"), "{name}");
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(
+            error.failure_origin,
+            crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
+        );
         assert!(matches!(
             error
                 .source

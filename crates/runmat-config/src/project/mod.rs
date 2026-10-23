@@ -26,7 +26,8 @@ pub use manifest::{
 };
 pub use source_index::{
     build_loose_source_index, build_loose_source_index_async, build_project_source_index,
-    build_project_source_index_async, project_source_file_from_path, ProjectSourceFile,
+    build_project_source_index_async, build_project_source_index_excluding,
+    build_project_source_index_excluding_async, project_source_file_from_path, ProjectSourceFile,
     ProjectSourceIndex, ProjectSourceIndexError,
 };
 pub use testing::{

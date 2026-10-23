@@ -341,7 +341,10 @@ fn stem_body_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
         Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         Value::GpuTensor(input.clone()),
     ];
-    let mut future = Box::pin(crate::builtins::plotting::stem::stem_builtin(args.to_vec()));
+    let mut future = Box::pin(crate::builtins::plotting::stem::stem_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args.to_vec()),
+    ));
     assert!(matches!(
         future.poll_unpin(&mut Context::from_waker(&noop_waker())),
         Poll::Pending
@@ -351,10 +354,18 @@ fn stem_body_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
     assert_eq!(count(), initial);
     assert!(provider.produced.lock().unwrap().is_empty());
     *provider.mode.lock().unwrap() = Mode::ErrorDownload;
-    assert!(block_on(crate::builtins::plotting::stem::stem_builtin(args.to_vec())).is_err());
+    assert!(block_on(crate::builtins::plotting::stem::stem_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args.to_vec())
+    ))
+    .is_err());
     assert_eq!(count(), initial);
     *provider.mode.lock().unwrap() = Mode::Ready;
-    block_on(crate::builtins::plotting::stem::stem_builtin(args.to_vec())).unwrap();
+    block_on(crate::builtins::plotting::stem::stem_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args.to_vec()),
+    ))
+    .unwrap();
     assert_eq!(count(), initial + 1);
     assert!(block_on(provider.inner.download(&input)).is_ok());
     assert!(provider.produced.lock().unwrap().is_empty());

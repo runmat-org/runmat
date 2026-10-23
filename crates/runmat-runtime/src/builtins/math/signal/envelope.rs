@@ -549,7 +549,14 @@ fn parse_positive_integer(label: &str, value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_method(value: &Value) -> BuiltinResult<EnvelopeMethod> {
-    match keyword(value).as_deref() {
+    match keyword(value)
+        .map_err(|source| {
+            let mut error = envelope_error(&ENVELOPE_ERROR_INVALID_METHOD);
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .as_deref()
+    {
         Some("analytic") => Ok(EnvelopeMethod::Analytic),
         Some("rms") => Ok(EnvelopeMethod::Rms),
         Some("peak") => Ok(EnvelopeMethod::Peak),

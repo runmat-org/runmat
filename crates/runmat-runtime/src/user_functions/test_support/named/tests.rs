@@ -32,12 +32,15 @@ fn exact_named_binding_rejects_wrong_and_ended_sessions_before_invocation() {
     let observed = Rc::clone(&calls);
     let entry = second.enter();
     let _invoker = super::super::super::install_local_bound_function_invoker(Rc::new(
-        move |_, _, _, _, _lexical_environment| {
+        move |bound_runtime, _, _, _, _lexical_environment| {
             observed.set(observed.get() + 1);
-            Box::pin(async {
-                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
-                    .map_err(|error| error.into_runtime_error())
-            })
+            crate::execution::admit_executable_sequence_with(
+                &bound_runtime.clone(),
+                move || async move {
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error())
+                },
+            )
         },
     ));
     drop(entry);

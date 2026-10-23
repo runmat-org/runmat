@@ -84,16 +84,23 @@ fn importdata_descriptor_covers_core_forms() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn paged_character_controls_reject_before_file_access() {
-    let paged_name = runmat_value::CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2])
-        .expect("paged filename");
-    let paged_delimiter =
-        runmat_value::CharArray::new_with_shape(",;".chars().collect(), vec![1, 1, 2])
-            .expect("paged delimiter");
+    let paged_name = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        "ab".chars().collect(),
+        vec![1, 1, 2],
+    )
+    .expect("paged filename");
+    let paged_delimiter = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        ",;".chars().collect(),
+        vec![1, 1, 2],
+    )
+    .expect("paged delimiter");
     assert!(resolve_path(&Value::CharArray(paged_name)).is_err());
     assert!(parse_delimiter_arg(&Value::CharArray(paged_delimiter)).is_err());
-    let trailing =
-        runmat_value::CharArray::new_with_shape("file.txt".chars().collect(), vec![1, 8, 1])
-            .expect("trailing singleton");
+    let trailing = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        "file.txt".chars().collect(),
+        vec![1, 8, 1],
+    )
+    .expect("trailing singleton");
     assert_eq!(
         resolve_path(&Value::CharArray(trailing)).expect("row"),
         PathBuf::from("file.txt")

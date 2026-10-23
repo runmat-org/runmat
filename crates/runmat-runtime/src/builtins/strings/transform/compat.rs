@@ -1,4 +1,5 @@
 //! MATLAB text transformation compatibility helpers.
+use runmat_builtins::REPLACE_BETWEEN_EXPLICIT_GPU_EXTENSION;
 
 use regex::Regex;
 
@@ -8,13 +9,7 @@ use super::{
     insertafter::insert_after_builtin, insertbefore::insert_before_builtin,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type, ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
     ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION, ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
     ERASE_PUNCTUATION_ERROR_INVALID_OPTION, ERASE_URLS_BROAD_CELL_EXTENSION,
     ERASE_URLS_CHAR_MATRIX_EXTENSION, ERASE_URLS_ERROR_INVALID_INPUT, EXTRACT_AFTER_ERRORS,
@@ -44,156 +39,6 @@ use crate::builtins::strings::text_analytics::documents::{
     erase_punctuation_tokenized_document, erase_urls_tokenized_document,
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
-
-const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Output value.",
-}];
-
-const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical result.",
-}];
-
-const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "text",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text.",
-}];
-
-const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "text",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional arguments.",
-    },
-];
-
-const NO_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-macro_rules! descriptor {
-    ($name:ident, $label:expr, $inputs:expr, $outputs:expr) => {
-        const $name: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &[BuiltinSignatureDescriptor {
-                label: $label,
-                inputs: $inputs,
-                outputs: $outputs,
-            }],
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &NO_ERRORS,
-        };
-    };
-}
-
-descriptor!(REVERSE_DESCRIPTOR, "s = reverse(text)", &IN_TEXT, &OUT_ANY);
-pub const REVERSE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "reverse accepts string arrays, character vectors, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
-descriptor!(
-    SPLITLINES_DESCRIPTOR,
-    "s = splitlines(text)",
-    &IN_TEXT,
-    &OUT_ANY
-);
-pub const SPLITLINES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "splitlines accepts host string, character, or cell text and returns a string or cell text container. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access.",
-    };
-descriptor!(
-    REPLACE_BETWEEN_DESCRIPTOR,
-    "s = replaceBetween(text, start, end, newText)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
-const REPLACE_BETWEEN_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "replacebetween-explicit-gpu-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "replaceBetween host fallback for explicit gpuArray input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ReplaceBetweenExplicitGpuInputExtension"),
-    };
-const REPLACE_BETWEEN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REPLACE_BETWEEN_EXPLICIT_GPU_EXTENSION];
-const REPLACE_BETWEEN_POSITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "startPos/endPos",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Documented numeric positions accept all eight integer classes and are read exactly as one-based inclusive boundaries.",
-    }];
-const REPLACE_BETWEEN_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "str/newText",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Source and replacement text reject integer and resident numeric values before gather or implicit formatting.",
-    }];
-pub const REPLACE_BETWEEN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = replaceBetween(str, integer_startPos, integer_endPos, newText)",
-        inputs: &REPLACE_BETWEEN_POSITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
-        notes: "Positions remain exact through range and ordering validation; output preserves the host text container. Automatic residency gathers transparently, while explicit gpuArray fallback is separately gated.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = replaceBetween(integer_str, start, end, integer_newText)",
-        inputs: &REPLACE_BETWEEN_TEXT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer data is outside the public text roles and is never converted to decimal text.",
-    },
-];
-descriptor!(
-    MATCHES_DESCRIPTOR,
-    "tf = matches(text, pattern)",
-    &IN_TEXT_REST,
-    &OUT_BOOL
-);
-pub const MATCHES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "matches accepts text or pattern inputs and a logical IgnoreCase option. Numeric and integer data has no documented role and rejects without implicit text conversion or provider access.",
-};
-
-fn any_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
 
 fn transform_error(name: &str, message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -307,8 +152,10 @@ fn append_text_items(
             for value in cell.data() {
                 match value {
                     Value::CharArray(array) if array.rows <= 1 || array.cols <= 1 => {
+                        let text = runmat_value::decode_utf16_code_units(array.data())
+                            .map_err(|e| transform_error("append", e.to_string()))?;
                         items.push(Some(runmat_value::Utf8Text::new(
-                            array.data().iter().collect::<String>(),
+                            text,
                         )));
                     }
                     _ => {
@@ -328,7 +175,8 @@ fn append_text_items(
             ))
         }
         Value::CharArray(array) if array.rows <= 1 || array.cols <= 1 => {
-            let text = array.data().iter().copied().collect::<String>();
+            let text = runmat_value::decode_utf16_code_units(array.data())
+                .map_err(|e| transform_error("append", e.to_string()))?;
             Ok((
                 text_items(Value::string(text), "append")?,
                 AppendOutputKind::Char,
@@ -370,20 +218,21 @@ fn append_output(
 
 #[runtime_builtin(
     name = "reverse",
-    category = "strings/transform",
-    summary = "Reverse characters in text values.",
-    keywords = "reverse,string,char,text",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::REVERSE_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::REVERSE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn reverse_builtin(text: Value) -> BuiltinResult<Value> {
-    if crate::dispatcher::value_contains_gpu(&text) {
-        return Err(transform_error(
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REVERSE_DESCRIPTOR,
+        &runmat_builtins::REVERSE_ERROR_TOO_MANY_OUTPUTS,
+        "reverse",
+    )?;
+    if !is_host_text_tree(&text)
+        || crate::builtins::strings::common::has_unsupported_character_pages(&text)
+    {
+        return Err(descriptor_transform_error(
             "reverse",
-            "reverse: expected string, character array, or cell array of character vectors",
+            &runmat_builtins::REVERSE_ERROR_INVALID_INPUT,
         ));
     }
     let text = gather_if_needed_async(&text)
@@ -449,20 +298,25 @@ async fn strjust_builtin(
 
 #[runtime_builtin(
     name = "splitlines",
-    category = "strings/transform",
-    summary = "Split text at newline boundaries.",
-    keywords = "splitlines,newline,string,text",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::SPLITLINES_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::SPLITLINES_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SPLITLINES_DESCRIPTOR,
+        &runmat_builtins::SPLITLINES_ERROR_TOO_MANY_OUTPUTS,
+        "splitlines",
+    )?;
     if contains_numeric_or_resident_text_input(&text) {
-        return Err(transform_error(
+        return Err(descriptor_transform_error(
             "splitlines",
-            "splitlines: expected host string, character array, or cell array of character vectors",
+            &runmat_builtins::SPLITLINES_ERROR_INVALID_INPUT,
+        ));
+    }
+    if crate::builtins::strings::common::has_unsupported_character_pages(&text) {
+        return Err(descriptor_transform_error(
+            "splitlines",
+            &runmat_builtins::SPLITLINES_ERROR_INVALID_INPUT,
         ));
     }
     let text = gather_if_needed_async(&text)
@@ -474,7 +328,9 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
             strings_from_lines(array.data()[0].as_str())
         }
         Value::CharArray(array) if array.rows <= 1 => {
-            strings_from_lines(&char_row_to_string_slice(array.data(), array.cols, 0))
+            let text = char_row_to_string_slice(array.data(), array.cols, 0)
+                .map_err(|e| transform_error("splitlines", e.to_string()))?;
+            strings_from_lines(&text)
         }
         other => {
             let list = text_items(other, "splitlines")?;
@@ -490,29 +346,40 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "replaceBetween",
-    category = "strings/transform",
-    summary = "Replace text between positions or boundary markers.",
-    keywords = "replaceBetween,string,text,boundary",
-    accel = "sink",
-    extensions(REPLACE_BETWEEN_EXTENSIONS),
-    integer_capabilities(REPLACE_BETWEEN_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::REPLACE_BETWEEN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
-async fn replace_between_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if rest.len() < 3 {
-        return Err(transform_error(
+async fn replace_between_builtin(
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REPLACE_BETWEEN_DESCRIPTOR,
+        &runmat_builtins::REPLACE_BETWEEN_ERROR_TOO_MANY_OUTPUTS,
+        "replaceBetween",
+    )?;
+    if rest.len() != 3 {
+        return Err(descriptor_transform_error(
             "replaceBetween",
-            "replaceBetween: expected start, end, and replacement text",
+            &runmat_builtins::REPLACE_BETWEEN_ERROR_ARGUMENT_COUNT,
+        ));
+    }
+    if crate::builtins::strings::common::has_unsupported_character_pages(&text)
+        || rest
+            .iter()
+            .any(crate::builtins::strings::common::has_unsupported_character_pages)
+    {
+        return Err(descriptor_transform_error(
+            "replaceBetween",
+            &runmat_builtins::REPLACE_BETWEEN_ERROR_INVALID_INPUT,
         ));
     }
     if contains_numeric_or_resident_text_input(&text)
         || contains_numeric_or_resident_text_input(&rest[2])
     {
-        return Err(transform_error(
+        return Err(descriptor_transform_error(
             "replaceBetween",
-            "replaceBetween: source and replacement must be text",
+            &runmat_builtins::REPLACE_BETWEEN_ERROR_INVALID_INPUT,
         ));
     }
     if crate::builtins::common::validation::value_contains_explicit_gpu(&text)
@@ -687,22 +554,24 @@ fn is_cellstr_element(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "matches",
-    category = "strings/search",
-    summary = "Return true when text fully matches a pattern.",
-    keywords = "matches,string pattern,text,regular expression",
-    accel = "sink",
-    type_resolver(bool_type),
-    descriptor(crate::builtins::strings::transform::compat::MATCHES_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::MATCHES_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn matches_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::MATCHES_DESCRIPTOR,
+        &runmat_builtins::MATCHES_ERROR_TOO_MANY_OUTPUTS,
+        "matches",
+    )?;
     if crate::dispatcher::value_contains_gpu(&text)
         || crate::dispatcher::value_contains_gpu(&pattern)
+        || [&text, &pattern]
+            .into_iter()
+            .any(crate::builtins::strings::common::has_unsupported_character_pages)
     {
-        return Err(transform_error(
+        return Err(descriptor_transform_error(
             "matches",
-            "matches: expected host text or pattern inputs",
+            &runmat_builtins::MATCHES_ERROR_INVALID_INPUT,
         ));
     }
     let text = gather_if_needed_async(&text)
@@ -714,13 +583,29 @@ async fn matches_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
     let pattern = pattern_regex(&pattern, "matches")?;
     let regex = Regex::new(&format!("^(?:{pattern})$"))
         .map_err(|e| transform_error("matches", e.to_string()))?;
-    let list = text_items(text, "matches")?;
-    let out = list
-        .items
-        .iter()
-        .map(|text| u8::from(text.as_ref().is_some_and(|text| regex.is_match(text))))
-        .collect::<Vec<_>>();
-    logical_value(out, list.shape, "matches")
+    let (out, shape) = match text {
+        // TextList's cell traversal serves physical cell outputs elsewhere.
+        // Logical storage instead requires MATLAB-visible column-major order.
+        Value::Cell(cell) => {
+            let out = cell
+                .iter_column_major()
+                .map(|value| {
+                    scalar_text(value, "matches").map(|text| u8::from(regex.is_match(&text)))
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            (out, cell.shape().to_vec())
+        }
+        other => {
+            let list = text_items(other, "matches")?;
+            let out = list
+                .items
+                .iter()
+                .map(|text| u8::from(text.as_ref().is_some_and(|text| regex.is_match(text))))
+                .collect::<Vec<_>>();
+            (out, list.shape)
+        }
+    };
+    logical_value(out, shape, "matches")
 }
 
 pub(super) async fn boundary_transform(
@@ -926,8 +811,11 @@ impl TextList {
                     vec![String::new()]
                 } else {
                     (0..array.rows)
-                        .map(|row| char_row_to_string_slice(array.data(), array.cols, row))
-                        .collect()
+                        .map(|row| {
+                            char_row_to_string_slice(array.data(), array.cols, row)
+                                .map_err(|e| transform_error(fn_name, e.to_string()))
+                        })
+                        .collect::<BuiltinResult<Vec<_>>>()?
                 };
                 Ok(Self {
                     data,
@@ -1022,9 +910,11 @@ impl BoundaryList {
                 } else {
                     (0..array.rows)
                         .map(|row| {
-                            Boundary::Text(char_row_to_string_slice(array.data(), array.cols, row))
+                            char_row_to_string_slice(array.data(), array.cols, row)
+                                .map(Boundary::Text)
+                                .map_err(|e| transform_error(fn_name, e.to_string()))
                         })
-                        .collect()
+                        .collect::<BuiltinResult<Vec<_>>>()?
                 };
                 Ok(Self {
                     data,
@@ -1254,10 +1144,9 @@ fn map_text_with_boundaries(
         Value::CharArray(array) => {
             let rows = (0..array.rows)
                 .map(|row| {
-                    map(
-                        &char_row_to_string_slice(array.data(), array.cols, row),
-                        boundaries.at(row),
-                    )
+                    let text = char_row_to_string_slice(array.data(), array.cols, row)
+                        .map_err(|e| transform_error(fn_name, e.to_string()))?;
+                    map(&text, boundaries.at(row))
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
             char_rows(rows, fn_name)
@@ -1352,8 +1241,10 @@ fn map_text_with_insertions(
         Value::CharArray(array) => {
             let rows = (0..array.rows)
                 .map(|row| {
+                    let text = char_row_to_string_slice(array.data(), array.cols, row)
+                        .map_err(|e| transform_error(fn_name, e.to_string()))?;
                     insert_one(
-                        &char_row_to_string_slice(array.data(), array.cols, row),
+                        &text,
                         boundaries.at(row),
                         replacements.at(row),
                         after,
@@ -1414,12 +1305,9 @@ fn map_text_with_replacements(
         Value::CharArray(array) => {
             let rows = (0..array.rows)
                 .map(|row| {
-                    replace_between_one(
-                        &char_row_to_string_slice(array.data(), array.cols, row),
-                        starts.at(row),
-                        stops.at(row),
-                        replacements.at(row),
-                    )
+                    let text = char_row_to_string_slice(array.data(), array.cols, row)
+                        .map_err(|e| transform_error("replaceBetween", e.to_string()))?;
+                    replace_between_one(&text, starts.at(row), stops.at(row), replacements.at(row))
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
             char_rows(rows, "replaceBetween")
@@ -1460,6 +1348,7 @@ fn map_text_cell_replacement(
                 String::new()
             } else {
                 char_row_to_string_slice(array.data(), array.cols, 0)
+                    .map_err(|e| transform_error("replaceBetween", e.to_string()))?
             };
             replace_between_one(&text, start, stop, replacement)
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
@@ -1515,6 +1404,7 @@ fn map_text_cell_insertion(
                 String::new()
             } else {
                 char_row_to_string_slice(array.data(), array.cols, 0)
+                    .map_err(|e| transform_error(fn_name, e.to_string()))?
             };
             insert_one(&text, boundary, replacement, after, fn_name)
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
@@ -1562,6 +1452,7 @@ fn map_text_cell_element(
                 String::new()
             } else {
                 char_row_to_string_slice(array.data(), array.cols, 0)
+                    .map_err(|e| transform_error(fn_name, e.to_string()))?
             };
             map(&text, boundary).map(|text| Value::CharArray(CharArray::new_row(&text)))
         }
@@ -1651,8 +1542,12 @@ fn map_text_preserve(
         Value::StringArray(array) => map_string_array(array, fn_name, |_, text| Ok(map(text))),
         Value::CharArray(array) => {
             let rows = (0..array.rows)
-                .map(|row| map(&char_row_to_string_slice(array.data(), array.cols, row)))
-                .collect::<Vec<_>>();
+                .map(|row| {
+                    char_row_to_string_slice(array.data(), array.cols, row)
+                        .map(|text| map(&text))
+                        .map_err(|e| transform_error(fn_name, e.to_string()))
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
             char_rows(rows, fn_name)
         }
         Value::Cell(cell) => {
@@ -1687,16 +1582,19 @@ fn char_rows(rows: Vec<String>, fn_name: &str) -> BuiltinResult<Value> {
     let row_count = rows.len();
     let cols = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(row_count * cols);
     for row in rows {
-        let mut chars = row.chars().collect::<Vec<_>>();
-        chars.resize(cols, ' ');
-        data.extend(chars);
+        let mut units = row
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        units.resize(cols, runmat_value::Utf16CodeUnit::from_raw(b' ' as u16));
+        data.extend(units);
     }
-    CharArray::new(data, row_count, cols)
+    CharArray::from_code_units(data, row_count, cols)
         .map(Value::CharArray)
         .map_err(|e| transform_error(fn_name, e))
 }

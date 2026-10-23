@@ -36,10 +36,12 @@ pub struct LegendCommand {
     pub style: LegendStyle,
 }
 
-pub fn value_as_text_lines(value: &Value) -> Option<Vec<String>> {
-    match value {
+pub fn value_as_text_lines(
+    value: &Value,
+) -> Result<Option<Vec<String>>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(text) => Some(vec![text.as_str().to_owned()]),
-        Value::CharArray(chars) => Some(vec![chars.data().iter().collect()]),
+        Value::CharArray(chars) => Some(vec![runmat_value::decode_utf16_code_units(chars.data())?]),
         Value::StringArray(arr) => Some(
             arr.data()
                 .iter()
@@ -51,17 +53,22 @@ pub fn value_as_text_lines(value: &Value) -> Option<Vec<String>> {
             for row in 0..cell.rows {
                 for col in 0..cell.cols {
                     let value = &cell.data()[row * cell.cols + col];
-                    lines.push(value_as_string(value)?);
+                    let Some(line) = value_as_string(value)? else {
+                        return Ok(None);
+                    };
+                    lines.push(line);
                 }
             }
             Some(lines)
         }
         _ => None,
-    }
+    })
 }
 
-pub fn value_as_text_string(value: &Value) -> Option<String> {
-    value_as_text_lines(value).map(|lines| lines.join("\n"))
+pub fn value_as_text_string(
+    value: &Value,
+) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(value_as_text_lines(value)?.map(|lines| lines.join("\n")))
 }
 
 pub fn current_axes_target() -> (FigureHandle, usize) {
@@ -109,7 +116,7 @@ pub fn parse_text_command(
         ));
     }
 
-    let text = value_as_text_string(&rest[0]).ok_or_else(|| {
+    let text = value_as_text_string(&rest[0]).map_err(|source| crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?.ok_or_else(|| {
         plotting_error(
             builtin,
             format!(
@@ -153,7 +160,7 @@ pub fn parse_numeric_text_command(
             format!("{builtin}: expected text input"),
         ));
     }
-    let text = value_as_text_string(&rest[0])
+    let text = value_as_text_string(&rest[0]).map_err(|source| crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?
         .or_else(|| format_numeric_text(&rest[0]))
         .ok_or_else(|| {
             plotting_error(
@@ -216,7 +223,13 @@ pub fn parse_legend_command(
     }
 
     if rest.len() == 1 {
-        if let Some(mode) = value_as_string(&rest[0]) {
+        if let Some(mode) = value_as_string(&rest[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })? {
             match mode.trim().to_ascii_lowercase().as_str() {
                 "on" | "show" => {
                     return Ok(LegendCommand {
@@ -329,15 +342,38 @@ fn collect_label_strings(
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {
                         let value = &cell.data()[row * cell.cols + col];
-                        labels.push(value_as_text_string(value).ok_or_else(|| {
-                            plotting_error(builtin, "legend: labels must be strings or char arrays")
-                        })?);
+                        labels.push(
+                            value_as_text_string(value)
+                                .map_err(|source| {
+                                    crate::builtins::plotting::plotting_error_with_source(
+                                        builtin,
+                                        source.to_string(),
+                                        source,
+                                    )
+                                })?
+                                .ok_or_else(|| {
+                                    plotting_error(
+                                        builtin,
+                                        "legend: labels must be strings or char arrays",
+                                    )
+                                })?,
+                        );
                     }
                 }
             }
-            _ => labels.push(value_as_text_string(arg).ok_or_else(|| {
-                plotting_error(builtin, "legend: labels must be strings or char arrays")
-            })?),
+            _ => labels.push(
+                value_as_text_string(arg)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, "legend: labels must be strings or char arrays")
+                    })?,
+            ),
         }
     }
     Ok(labels)

@@ -120,7 +120,13 @@ fn selector_labels(selector: &Value, pairs: &[(c64, c64)]) -> BuiltinResult<Clus
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
     };
     if let Some(keyword) = keyword {

@@ -56,9 +56,9 @@ use std::fs;
 use std::io;
 use std::io::Write;
 
+mod indexing_methods;
 #[cfg(not(target_arch = "wasm32"))]
 mod timetable_detection;
-mod indexing_methods;
 
 fn run_parquetread(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
@@ -511,7 +511,8 @@ fn variable_import_options_modify_real_table_columns_and_preserve_object_identit
 
 fn char_row(array: &CharArray, row: usize) -> String {
     let start = row * array.cols;
-    array.data()[start..start + array.cols].iter().collect()
+    runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+        .expect("valid UTF-16 fixture")
 }
 
 fn object(value: Value) -> ObjectInstance {
@@ -883,8 +884,11 @@ fn canonical_parquet_example_bytes_have_authentic_schema_and_selected_values() {
     let run = || {
         let text = path.to_string_lossy().to_string();
         let path_value = Value::CharArray(
-            CharArray::new_with_shape(text.chars().collect(), vec![1, 1, text.chars().count()])
-                .unwrap(),
+            CharArray::from_unicode_scalars_with_shape(
+                text.chars().collect(),
+                vec![1, 1, text.chars().count()],
+            )
+            .unwrap(),
         );
         let Value::Struct(info) = block_on(parquetinfo_builtin(path_value.clone())).unwrap() else {
             panic!("metadata struct");
@@ -2273,12 +2277,12 @@ fn groupsummary_canonicalizes_distinct_nan_payloads_and_empty_strings_as_missing
 
 #[test]
 fn groupsummary_places_undefined_categorical_and_nan_duration_groups_last() {
-    let categorical = categorical_from_args(vec![
+    let categorical = categorical_from_args(crate::call::FunctionArgumentView::from_slice(&[
         Value::StringArray(
             StringArray::new(vec!["b".into(), "missing".into(), "a".into()], vec![3, 1]).unwrap(),
         ),
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-    ])
+    ]))
     .unwrap();
     let values = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
     let table = table_from_columns(
@@ -2296,9 +2300,12 @@ fn groupsummary_places_undefined_categorical_and_nan_duration_groups_last() {
         .unwrap(),
     );
     let categorical_groups = table_member_get(&summary, &Value::from("G")).unwrap();
-    assert_eq!(cell_key_string(&categorical_groups, 0), "a");
-    assert_eq!(cell_key_string(&categorical_groups, 1), "b");
-    assert_eq!(cell_key_string(&categorical_groups, 2), "<undefined>");
+    assert_eq!(cell_key_string(&categorical_groups, 0).unwrap(), "a");
+    assert_eq!(cell_key_string(&categorical_groups, 1).unwrap(), "b");
+    assert_eq!(
+        cell_key_string(&categorical_groups, 2).unwrap(),
+        "<undefined>"
+    );
 
     let duration = crate::builtins::duration::duration_object_from_days_tensor(
         None,
@@ -2317,9 +2324,9 @@ fn groupsummary_places_undefined_categorical_and_nan_duration_groups_last() {
         .unwrap(),
     );
     let duration_groups = table_member_get(&summary, &Value::from("G")).unwrap();
-    assert_eq!(cell_key_string(&duration_groups, 0), "1");
-    assert_eq!(cell_key_string(&duration_groups, 1), "2");
-    assert_eq!(cell_key_string(&duration_groups, 2), "NaN");
+    assert_eq!(cell_key_string(&duration_groups, 0).unwrap(), "1");
+    assert_eq!(cell_key_string(&duration_groups, 1).unwrap(), "2");
+    assert_eq!(cell_key_string(&duration_groups, 2).unwrap(), "NaN");
 }
 
 #[test]
@@ -3219,12 +3226,15 @@ fn array2timetable_metadata_classifies_integer_and_gpu_forms() {
 
 #[test]
 fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
-    let duplicate = block_on(table_builtin(vec![
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-        Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
-        Value::from("VariableNames"),
-        Value::Cell(CellArray::new(vec![Value::from("A"), Value::from("A")], 1, 2).unwrap()),
-    ]));
+    let duplicate = block_on(table_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
+            Value::from("VariableNames"),
+            Value::Cell(CellArray::new(vec![Value::from("A"), Value::from("A")], 1, 2).unwrap()),
+        ]),
+    ));
     assert!(duplicate
         .unwrap_err()
         .message
@@ -3245,11 +3255,14 @@ fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
         vec!["1 bad".to_string(), "B".to_string()]
     );
     let whitespace = object(
-        block_on(table_builtin(vec![
-            Value::Tensor(Tensor::new(vec![9.0], vec![1, 1]).unwrap()),
-            Value::from("VariableNames"),
-            Value::from(" "),
-        ]))
+        block_on(table_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(Tensor::new(vec![9.0], vec![1, 1]).unwrap()),
+                Value::from("VariableNames"),
+                Value::from(" "),
+            ]),
+        ))
         .unwrap(),
     );
     match table_member_get(&whitespace, &Value::from(" ")).unwrap() {
@@ -3624,9 +3637,12 @@ fn head_wgpu_preserves_every_integer_class_exactly() {
 #[test]
 fn categorical_dictionary_and_selector_objects_materialize() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let categorical = block_on(categorical_builtin(vec![Value::StringArray(
-        StringArray::new(vec!["red".into(), "blue".into(), "red".into()], vec![3, 1]).unwrap(),
-    )]))
+    let categorical = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+            StringArray::new(vec!["red".into(), "blue".into(), "red".into()], vec![3, 1]).unwrap(),
+        )]),
+    ))
     .unwrap();
     assert!(matches!(
         block_on(iscategorical_builtin(categorical.clone())).unwrap(),
@@ -3640,10 +3656,13 @@ fn categorical_dictionary_and_selector_objects_materialize() {
         other => panic!("expected categories, got {other:?}"),
     }
 
-    let dictionary = block_on(dictionary_builtin(vec![
-        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-    ]))
+    let dictionary = block_on(dictionary_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        ]),
+    ))
     .unwrap();
     assert!(matches!(dictionary, Value::Object(obj) if obj.class_name().is(DICTIONARY_CLASS)));
     assert!(matches!(
@@ -3677,10 +3696,13 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         let handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(dictionary_builtin(vec![
-            Value::GpuTensor(handle),
-            Value::Int(runmat_value::IntValue::U8(1)),
-        ]))
+        let error = block_on(dictionary_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(handle),
+                Value::Int(runmat_value::IntValue::U8(1)),
+            ]),
+        ))
         .expect_err("resident dictionary input must be gated before gather");
         assert_eq!(
             error.identifier(),
@@ -3692,10 +3714,13 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
     let resident = Value::GpuTensor(allocation.handle.clone());
     let nested = crate::make_cell(vec![resident], 1, 1).unwrap();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(dictionary_builtin(vec![
-        nested,
-        Value::Int(runmat_value::IntValue::U8(1)),
-    ]))
+    let error = block_on(dictionary_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            nested,
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ]),
+    ))
     .expect_err("nested resident dictionary input must be gated before gather");
     assert_eq!(
         error.identifier(),
@@ -4109,14 +4134,211 @@ fn file_datastore_validates_option_pairs_and_modes() {
 }
 
 #[test]
-fn ordinal_constructor_sets_ordered_categorical_semantics() {
-    let default_ordered = block_on(ordinal_builtin(vec![Value::StringArray(
-        StringArray::new(
-            vec!["medium".into(), "low".into(), "high".into()],
-            vec![3, 1],
+fn file_datastore_requires_reader_but_never_resolves_or_invokes_it() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    for read_fcn in [None, Some(Value::from("readlines")), Some(Value::Num(7.0))] {
+        let mut args = vec![Value::from("missing/*.txt")];
+        if let Some(reader) = read_fcn {
+            args.extend([Value::from("ReadFcn"), reader]);
+        }
+        let error = block_on(file_datastore_builtin(args)).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::FILE_DATASTORE_METADATA_EXTENSION.error_identifier
+        );
+    }
+    // An unresolved handle is valid stored metadata; resolving or invoking it
+    // would fail. The missing path must not be opened or enumerated either.
+    let reader = Value::function_handle("file_datastore_reader_must_not_execute".into());
+    let value = block_on(file_datastore_builtin(vec![
+        Value::from("missing/*.txt"),
+        Value::from("ReadFcn"),
+        reader.clone(),
+    ]))
+    .unwrap();
+    let Value::Object(object) = value else {
+        panic!("descriptor")
+    };
+    assert_eq!(object.properties().get("ReadFcn"), Some(&reader));
+    assert_eq!(
+        object.properties().get("Files"),
+        Some(&Value::from("missing/*.txt"))
+    );
+}
+
+#[test]
+fn file_datastore_boolean_controls_and_runmat_payloads_are_explicit() {
+    {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (flag, expected) in [
+            (Value::Bool(true), true),
+            (Value::Num(1.0), true),
+            (
+                Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+                true,
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+                false,
+            ),
+        ] {
+            let value = block_on(file_datastore_builtin(vec![
+                Value::from("*.txt"),
+                Value::from("ReadFcn"),
+                Value::function_handle("unresolved_reader".into()),
+                Value::from("IncludeSubfolders"),
+                flag,
+            ]))
+            .unwrap();
+            let Value::Object(object) = value else {
+                panic!("descriptor")
+            };
+            assert_eq!(
+                object.properties().get("IncludeSubfolders"),
+                Some(&Value::Bool(expected))
+            );
+        }
+        for flag in [
+            Value::Num(2.0),
+            Value::from("yes"),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+        ] {
+            let error = block_on(file_datastore_builtin(vec![
+                Value::from("*.txt"),
+                Value::from("ReadFcn"),
+                Value::function_handle("reader".into()),
+                Value::from("IncludeSubfolders"),
+                flag,
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                runmat_builtins::FILE_DATASTORE_BOOLEAN_EXTENSION.error_identifier
+            );
+        }
+    }
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let payload = Value::Tensor(
+        Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2, 1],
         )
         .unwrap(),
-    )]))
+    );
+    let value = block_on(file_datastore_builtin(vec![
+        payload.clone(),
+        Value::from("ReadFcn"),
+        payload.clone(),
+        Value::from("IncludeSubfolders"),
+        Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+    ]))
+    .unwrap();
+    let Value::Object(object) = value else {
+        panic!("descriptor")
+    };
+    assert_eq!(object.properties().get("Files"), Some(&payload));
+    assert_eq!(object.properties().get("ReadFcn"), Some(&payload));
+    assert_eq!(
+        object.properties().get("IncludeSubfolders"),
+        Some(&Value::Bool(true))
+    );
+    let default = block_on(file_datastore_builtin(vec![Value::from("*.txt")])).unwrap();
+    let Value::Object(default) = default else {
+        panic!("descriptor")
+    };
+    assert_eq!(default.properties().get("ReadFcn"), Some(&Value::from("")));
+    assert_eq!(
+        default.properties().get("ReadMode"),
+        Some(&Value::from("file"))
+    );
+    assert_eq!(
+        default.properties().get("IncludeSubfolders"),
+        Some(&Value::Bool(false))
+    );
+    let Some(Value::StringArray(extensions)) = default.properties().get("FileExtensions") else {
+        panic!("default extensions")
+    };
+    assert_eq!(extensions.shape.as_slice(), &[0, 1]);
+    for flag in [
+        Value::Num(f64::NAN),
+        Value::Tensor(
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1]), vec![1, 1]).unwrap(),
+        ),
+    ] {
+        assert!(block_on(file_datastore_builtin(vec![
+            Value::from("*.txt"),
+            Value::from("IncludeSubfolders"),
+            flag
+        ]))
+        .is_err());
+    }
+}
+
+#[test]
+fn file_datastore_default_binding_enforces_fixed_outputs_and_validates_discarded_calls() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let args = [
+        Value::from("*.txt"),
+        Value::from("ReadFcn"),
+        Value::function_handle("unresolved_reader".into()),
+    ];
+    assert!(block_on(crate::call_builtin_async_with_outputs(
+        "fileDatastore",
+        &args,
+        1
+    ))
+    .is_ok());
+    assert!(block_on(crate::call_builtin_async_with_outputs(
+        "fileDatastore",
+        &args,
+        0
+    ))
+    .is_ok());
+    assert!(block_on(crate::call_builtin_async_with_outputs(
+        "fileDatastore",
+        &args,
+        2
+    ))
+    .is_err());
+    assert!(block_on(crate::call_builtin_async_with_outputs(
+        "fileDatastore",
+        &[],
+        0
+    ))
+    .is_err());
+    for name in [
+        "BlockSize",
+        "PreviewFcn",
+        "UniformRead",
+        "AlternateFileSystemRoots",
+        "CreateLocalCopy",
+    ] {
+        let invalid = [
+            args[0].clone(),
+            args[1].clone(),
+            args[2].clone(),
+            Value::from(name),
+            Value::Bool(false),
+        ];
+        assert!(
+            block_on(file_datastore_builtin(invalid.to_vec())).is_err(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn ordinal_constructor_sets_ordered_categorical_semantics() {
+    let default_ordered = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+            StringArray::new(
+                vec!["medium".into(), "low".into(), "high".into()],
+                vec![3, 1],
+            )
+            .unwrap(),
+        )]),
+    ))
     .unwrap();
     let Value::Object(default_cat) = default_ordered else {
         panic!("expected default ordinal categorical object");
@@ -4126,29 +4348,32 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         other => panic!("expected sorted categories, got {other:?}"),
     }
 
-    let ordinal = block_on(ordinal_builtin(vec![
-        Value::StringArray(
-            StringArray::new(
-                vec!["medium".into(), "low".into(), "high".into()],
-                vec![3, 1],
-            )
-            .unwrap(),
-        ),
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "medium".into(), "high".into()],
-                vec![1, 3],
-            )
-            .unwrap(),
-        ),
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "medium".into(), "high".into()],
-                vec![1, 3],
-            )
-            .unwrap(),
-        ),
-    ]))
+    let ordinal = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(
+                StringArray::new(
+                    vec!["medium".into(), "low".into(), "high".into()],
+                    vec![3, 1],
+                )
+                .unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "medium".into(), "high".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "medium".into(), "high".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+        ]),
+    ))
     .unwrap();
     assert!(matches!(
         block_on(iscategorical_builtin(ordinal.clone())).unwrap(),
@@ -4215,19 +4440,22 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         other => panic!("expected categorical codes, got {other:?}"),
     }
 
-    let renamed = block_on(categorical_builtin(vec![
-        Value::Tensor(Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap()),
-        Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
-        Value::StringArray(
-            StringArray::new(
-                vec!["child".into(), "adult".into(), "senior".into()],
-                vec![1, 3],
-            )
-            .unwrap(),
-        ),
-        Value::from("Ordinal"),
-        Value::Bool(true),
-    ]))
+    let renamed = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["child".into(), "adult".into(), "senior".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Value::from("Ordinal"),
+            Value::Bool(true),
+        ]),
+    ))
     .unwrap();
     assert!(matches!(
         block_on(isordinal_builtin(renamed.clone())).unwrap(),
@@ -4245,9 +4473,12 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         other => panic!("expected renamed codes, got {other:?}"),
     }
 
-    let nominal = block_on(categorical_builtin(vec![Value::StringArray(
-        StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
-    )]))
+    let nominal = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+            StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
+        )]),
+    ))
     .unwrap();
     assert!(matches!(
         block_on(isordinal_builtin(nominal)).unwrap(),
@@ -4272,9 +4503,11 @@ fn ordinal_constructor_preserves_adjacent_wide_integer_levels() {
     let levels = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]).unwrap(),
     );
-    let Value::Object(ordinal) =
-        block_on(ordinal_builtin(vec![source, labels, levels])).expect("ordinal")
-    else {
+    let Value::Object(ordinal) = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![source, labels, levels]),
+    ))
+    .expect("ordinal") else {
         panic!("ordinal object")
     };
     let categories = match ordinal.properties().get("Categories") {
@@ -4305,9 +4538,11 @@ fn ordinal_constructor_accepts_every_integer_level_class() {
         let labels = Value::StringArray(
             StringArray::new(vec!["second".into(), "first".into()], vec![1, 2]).unwrap(),
         );
-        let Value::Object(ordinal) =
-            block_on(ordinal_builtin(vec![source, labels, levels])).expect("ordinal")
-        else {
+        let Value::Object(ordinal) = block_on(ordinal_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![source, labels, levels]),
+        ))
+        .expect("ordinal") else {
             panic!("ordinal object")
         };
         assert_eq!(
@@ -4332,9 +4567,13 @@ fn ordinal_constructor_bins_adjacent_wide_integer_edges_exactly() {
     let edges = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(vec![lower, middle, upper]), vec![1, 3]).unwrap(),
     );
-    let Value::Object(ordinal) =
-        block_on(ordinal_builtin(vec![source, labels, empty, edges])).expect("ordinal")
-    else {
+    let Value::Object(ordinal) = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            source, labels, empty, edges,
+        ]),
+    ))
+    .expect("ordinal") else {
         panic!("ordinal object")
     };
     assert_eq!(
@@ -4345,10 +4584,13 @@ fn ordinal_constructor_bins_adjacent_wide_integer_edges_exactly() {
 
 #[test]
 fn categorical_compatibility_edges_match_matlab_surface() {
-    let option_word_category = block_on(categorical_builtin(vec![
-        Value::from("Ordinal"),
-        Value::from("Ordinal"),
-    ]))
+    let option_word_category = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Ordinal"),
+            Value::from("Ordinal"),
+        ]),
+    ))
     .unwrap();
     let Value::Object(option_word_category) = option_word_category else {
         panic!("expected option-word categorical");
@@ -4362,9 +4604,12 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         other => panic!("expected option-word codes, got {other:?}"),
     }
 
-    let whitespace = block_on(categorical_builtin(vec![Value::StringArray(
-        StringArray::new(vec!["a".into(), " a".into(), "a ".into()], vec![3, 1]).unwrap(),
-    )]))
+    let whitespace = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+            StringArray::new(vec!["a".into(), " a".into(), "a ".into()], vec![3, 1]).unwrap(),
+        )]),
+    ))
     .unwrap();
     let Value::Object(whitespace) = whitespace else {
         panic!("expected whitespace categorical");
@@ -4378,20 +4623,26 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         other => panic!("expected whitespace codes, got {other:?}"),
     }
 
-    let duplicate_valueset = block_on(categorical_builtin(vec![
-        Value::from("x"),
-        Value::StringArray(StringArray::new(vec!["x".into(), "x".into()], vec![1, 2]).unwrap()),
-        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-    ]));
+    let duplicate_valueset = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("x"),
+            Value::StringArray(StringArray::new(vec!["x".into(), "x".into()], vec![1, 2]).unwrap()),
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+        ]),
+    ));
     assert!(duplicate_valueset.is_err());
 
-    let merged_names = block_on(categorical_builtin(vec![
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-        Value::StringArray(
-            StringArray::new(vec!["same".into(), "same".into()], vec![1, 2]).unwrap(),
-        ),
-    ]))
+    let merged_names = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::StringArray(
+                StringArray::new(vec!["same".into(), "same".into()], vec![1, 2]).unwrap(),
+            ),
+        ]),
+    ))
     .unwrap();
     let Value::Object(merged_names) = merged_names else {
         panic!("expected merged categorical");
@@ -4405,9 +4656,12 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         other => panic!("expected merged codes, got {other:?}"),
     }
 
-    let rounded = block_on(categorical_builtin(vec![Value::Tensor(
-        Tensor::new(vec![1.0, 1.234_567_89], vec![1, 2]).unwrap(),
-    )]))
+    let rounded = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 1.234_567_89], vec![1, 2]).unwrap(),
+        )]),
+    ))
     .unwrap();
     let Value::Object(rounded) = rounded else {
         panic!("expected rounded numeric categories");
@@ -4417,18 +4671,24 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         other => panic!("expected rounded categories, got {other:?}"),
     }
 
-    assert!(block_on(categorical_builtin(vec![Value::Tensor(
-        Tensor::new(vec![1.0, 1.000_01], vec![1, 2]).unwrap(),
-    )]))
+    assert!(block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 1.000_01], vec![1, 2]).unwrap(),
+        )])
+    ))
     .is_err());
 
-    let protected_ordinal = block_on(categorical_builtin(vec![
-        Value::from("low"),
-        Value::from("Ordinal"),
-        Value::Bool(true),
-        Value::from("Protected"),
-        Value::Bool(false),
-    ]))
+    let protected_ordinal = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("low"),
+            Value::from("Ordinal"),
+            Value::Bool(true),
+            Value::from("Protected"),
+            Value::Bool(false),
+        ]),
+    ))
     .unwrap();
     let Value::Object(protected_ordinal) = protected_ordinal else {
         panic!("expected protected ordinal categorical");
@@ -4438,25 +4698,31 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         Some(&Value::Bool(true))
     );
 
-    let low_high = block_on(ordinal_builtin(vec![
-        Value::from("low"),
-        Value::StringArray(
-            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
-        ),
-        Value::StringArray(
-            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
-        ),
-    ]))
+    let low_high = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("low"),
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+            ),
+        ]),
+    ))
     .unwrap();
-    let high_low = block_on(ordinal_builtin(vec![
-        Value::from("low"),
-        Value::StringArray(
-            StringArray::new(vec!["high".into(), "low".into()], vec![1, 2]).unwrap(),
-        ),
-        Value::StringArray(
-            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
-        ),
-    ]))
+    let high_low = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("low"),
+            Value::StringArray(
+                StringArray::new(vec!["high".into(), "low".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+            ),
+        ]),
+    ))
     .unwrap();
     assert!(block_on(crate::call_builtin_async(
         "lt",
@@ -4464,16 +4730,19 @@ fn categorical_compatibility_edges_match_matlab_surface() {
     ))
     .is_err());
 
-    let extra_category = block_on(categorical_builtin(vec![
-        Value::from("low"),
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "medium".into(), "high".into()],
-                vec![1, 3],
-            )
-            .unwrap(),
-        ),
-    ]))
+    let extra_category = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("low"),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "medium".into(), "high".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+        ]),
+    ))
     .unwrap();
     assert!(block_on(crate::call_builtin_async("eq", &[low_high, extra_category])).is_err());
 }
@@ -4517,13 +4786,16 @@ fn categorical_integer_constructor_surface_is_exact_for_every_class() {
     for (source, valueset) in cases {
         let source = Value::Tensor(Tensor::new_integer(source, vec![1, 2]).unwrap());
         let valueset = Value::Tensor(Tensor::new_integer(valueset, vec![1, 2]).unwrap());
-        let Value::Object(result) = block_on(categorical_builtin(vec![
-            source,
-            valueset,
-            Value::StringArray(
-                StringArray::new(vec!["ten".into(), "small".into()], vec![1, 2]).unwrap(),
-            ),
-        ]))
+        let Value::Object(result) = block_on(categorical_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                source,
+                valueset,
+                Value::StringArray(
+                    StringArray::new(vec!["ten".into(), "small".into()], vec![1, 2]).unwrap(),
+                ),
+            ]),
+        ))
         .unwrap() else {
             panic!("expected categorical object");
         };
@@ -4547,13 +4819,17 @@ fn categorical_integer_constructor_surface_is_exact_for_every_class() {
         )
         .unwrap(),
     );
-    let Value::Object(wide) = block_on(categorical_builtin(vec![
-        source.clone(),
-        valueset,
-        Value::StringArray(
-            StringArray::new(vec!["maximum".into(), "flint-plus-one".into()], vec![1, 2]).unwrap(),
-        ),
-    ]))
+    let Value::Object(wide) = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            source.clone(),
+            valueset,
+            Value::StringArray(
+                StringArray::new(vec!["maximum".into(), "flint-plus-one".into()], vec![1, 2])
+                    .unwrap(),
+            ),
+        ]),
+    ))
     .unwrap() else {
         panic!("expected wide categorical object");
     };
@@ -4562,10 +4838,15 @@ fn categorical_integer_constructor_surface_is_exact_for_every_class() {
         other => panic!("expected wide categorical codes, got {other:?}"),
     }
 
-    let mismatched = block_on(categorical_builtin(vec![
-        source,
-        Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![1, 2]), vec![1, 2]).unwrap()),
-    ]));
+    let mismatched = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            source,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I64(vec![1, 2]), vec![1, 2]).unwrap(),
+            ),
+        ]),
+    ));
     assert!(mismatched.is_err());
 }
 
@@ -4614,11 +4895,14 @@ fn categorical_integer_flags_accept_only_exact_zero_or_one() {
         ),
     ];
     for (zero, one, two) in flags {
-        let Value::Object(nominal) = block_on(categorical_builtin(vec![
-            Value::from("x"),
-            Value::from("Ordinal"),
-            Value::Int(zero),
-        ]))
+        let Value::Object(nominal) = block_on(categorical_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("x"),
+                Value::from("Ordinal"),
+                Value::Int(zero),
+            ]),
+        ))
         .unwrap() else {
             panic!("expected nominal categorical");
         };
@@ -4627,11 +4911,14 @@ fn categorical_integer_flags_accept_only_exact_zero_or_one() {
             Some(&Value::Bool(false))
         );
 
-        let Value::Object(ordinal) = block_on(categorical_builtin(vec![
-            Value::from("x"),
-            Value::from("Ordinal"),
-            Value::Int(one),
-        ]))
+        let Value::Object(ordinal) = block_on(categorical_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("x"),
+                Value::from("Ordinal"),
+                Value::Int(one),
+            ]),
+        ))
         .unwrap() else {
             panic!("expected ordinal categorical");
         };
@@ -4639,11 +4926,14 @@ fn categorical_integer_flags_accept_only_exact_zero_or_one() {
             ordinal.properties().get("Ordinal"),
             Some(&Value::Bool(true))
         );
-        assert!(block_on(categorical_builtin(vec![
-            Value::from("x"),
-            Value::from("Protected"),
-            Value::Int(two),
-        ]))
+        assert!(block_on(categorical_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("x"),
+                Value::from("Protected"),
+                Value::Int(two),
+            ])
+        ))
         .is_err());
     }
 }
@@ -4660,8 +4950,13 @@ fn categorical_resident_integer_input_is_mode_gated_and_gathered_exactly() {
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(categorical_builtin(vec![Value::GpuTensor(handle.clone())]))
-                .expect_err("MATLAB mode must reject resident categorical input before gather");
+            let error = block_on(categorical_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
+            ))
+            .expect_err("MATLAB mode must reject resident categorical input before gather");
             assert_eq!(
                 error.identifier(),
                 CATEGORICAL_GPU_INPUT_EXTENSION.error_identifier
@@ -4669,9 +4964,13 @@ fn categorical_resident_integer_input_is_mode_gated_and_gathered_exactly() {
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-            let Value::Object(result) =
-                block_on(categorical_builtin(vec![Value::GpuTensor(handle)])).unwrap()
-            else {
+            let Value::Object(result) = block_on(categorical_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle,
+                )]),
+            ))
+            .unwrap() else {
                 panic!("expected resident categorical object");
             };
             match result.properties().get("Codes").unwrap() {
@@ -4682,11 +4981,14 @@ fn categorical_resident_integer_input_is_mode_gated_and_gathered_exactly() {
             let flag = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
             let flag_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &flag).unwrap();
-            let Value::Object(ordinal) = block_on(categorical_builtin(vec![
-                Value::from("x"),
-                Value::from("Ordinal"),
-                Value::GpuTensor(flag_handle),
-            ]))
+            let Value::Object(ordinal) = block_on(categorical_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("x"),
+                    Value::from("Ordinal"),
+                    Value::GpuTensor(flag_handle),
+                ]),
+            ))
             .unwrap() else {
                 panic!("expected resident-flag categorical object");
             };
@@ -4720,9 +5022,13 @@ fn categorical_wgpu_gathers_every_resident_integer_class_exactly() {
         let tensor = Tensor::new_integer(storage, vec![1, 2]).unwrap();
         let handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        let Value::Object(result) =
-            block_on(categorical_builtin(vec![Value::GpuTensor(handle)])).unwrap()
-        else {
+        let Value::Object(result) = block_on(categorical_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                handle,
+            )]),
+        ))
+        .unwrap() else {
             panic!("expected categorical object");
         };
         match result.properties().get("Codes").unwrap() {
@@ -4734,11 +5040,14 @@ fn categorical_wgpu_gathers_every_resident_integer_class_exactly() {
 
 #[test]
 fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
-    let ordinal_with_missing = block_on(ordinal_builtin(vec![
-        Value::StringArray(StringArray::new(vec!["x".into(), "z".into()], vec![2, 1]).unwrap()),
-        Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
-        Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
-    ]))
+    let ordinal_with_missing = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(StringArray::new(vec!["x".into(), "z".into()], vec![2, 1]).unwrap()),
+            Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
+            Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
+        ]),
+    ))
     .unwrap();
     let default_max = block_on(crate::call_builtin_async(
         "max",
@@ -4788,29 +5097,32 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         other => panic!("expected two-output list, got {other:?}"),
     }
 
-    let matrix = block_on(ordinal_builtin(vec![
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "high".into(), "medium".into(), "low".into()],
-                vec![2, 2],
-            )
-            .unwrap(),
-        ),
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "medium".into(), "high".into()],
-                vec![1, 3],
-            )
-            .unwrap(),
-        ),
-        Value::StringArray(
-            StringArray::new(
-                vec!["low".into(), "medium".into(), "high".into()],
-                vec![1, 3],
-            )
-            .unwrap(),
-        ),
-    ]))
+    let matrix = block_on(ordinal_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "high".into(), "medium".into(), "low".into()],
+                    vec![2, 2],
+                )
+                .unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "medium".into(), "high".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "medium".into(), "high".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+        ]),
+    ))
     .unwrap();
     let row_max = block_on(crate::call_builtin_async(
         "max",
@@ -4847,8 +5159,11 @@ fn writetable_and_readcell_cover_delimited_interop() {
     )
     .unwrap();
     let bytes = block_on(writetable_builtin(
+        None,
         table,
-        vec![Value::from(path.to_string_lossy().to_string())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+            path.to_string_lossy().to_string(),
+        )]),
     ))
     .unwrap();
     assert!(matches!(bytes, Value::Num(n) if n > 0.0));
@@ -5372,14 +5687,17 @@ fn table2struct_defaults_to_row_structs_and_to_scalar_preserves_columns() {
 
 #[test]
 fn categorical_categories_and_dictionary_lookup_have_semantics() {
-    let categorical = block_on(categorical_builtin(vec![
-        Value::StringArray(
-            StringArray::new(vec!["b".into(), "a".into(), "c".into()], vec![3, 1]).unwrap(),
-        ),
-        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-        Value::from("Ordinal"),
-        Value::Bool(true),
-    ]))
+    let categorical = block_on(categorical_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(
+                StringArray::new(vec!["b".into(), "a".into(), "c".into()], vec![3, 1]).unwrap(),
+            ),
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            Value::from("Ordinal"),
+            Value::Bool(true),
+        ]),
+    ))
     .unwrap();
     let Value::Object(cat) = categorical else {
         panic!("expected categorical");
@@ -5393,12 +5711,16 @@ fn categorical_categories_and_dictionary_lookup_have_semantics() {
         other => panic!("expected categorical codes, got {other:?}"),
     }
 
-    let dictionary = block_on(dictionary_builtin(vec![
-        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-        Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
-    ]))
+    let dictionary = block_on(dictionary_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+        ]),
+    ))
     .unwrap();
     let value = block_on(dictionary_subsref(
+        None,
         dictionary,
         crate::object::indexing::standard_substruct_fixture_from_parts(
             OBJECT_INDEX_PAREN,

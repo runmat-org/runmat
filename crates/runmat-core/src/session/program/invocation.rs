@@ -26,10 +26,11 @@ impl SessionProgramService {
                 .clone()
                 .unwrap_or_else(|| runtime.clone())
                 .inherit_same_session_environment();
-            Box::pin(async move {
+            let admission_runtime = runtime.clone();
+            user_functions::admit_user_function_with(Some(&admission_runtime), move || async move {
                 let Some(owner) = owner else {
                     return match previous {
-                        Some(previous) => previous(caller, call).await,
+                        Some(previous) => previous(caller, call)?.await,
                         None => Err(program_error(
                             "external function has no original compiler owner",
                         )),

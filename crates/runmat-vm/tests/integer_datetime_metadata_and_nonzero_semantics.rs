@@ -58,7 +58,7 @@ fn compiled_legacy_nargoutchk_integer_forms_return_text_and_structures() {
         );
         let values = execute_source(&source).expect("compiled legacy nargoutchk");
         assert!(values.iter().any(|value| {
-            matches!(value, Value::CharArray(array) if array.data().iter().collect::<String>().contains("Too many"))
+            matches!(value, Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture").contains("Too many"))
         }));
         assert!(values.iter().any(|value| {
             matches!(value, Value::Struct(structure) if structure.fields.contains_key("message") && structure.fields.contains_key("identifier"))

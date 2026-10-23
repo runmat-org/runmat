@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 mod activation;
-mod admitted_target;
 mod admission;
+mod admitted_target;
 mod completion;
 mod declaration;
 mod frame;
@@ -1128,10 +1128,29 @@ pub fn workspace_snapshot() -> Vec<(String, Value)> {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn capture_workspace_target(
     target: WorkspaceTarget,
 ) -> Result<(WorkspaceTargetIdentity, WorkspaceTargetSnapshot), String> {
-    let owner = current_owner();
+    capture_workspace_target_for_owner(current_owner(), target, None)
+}
+
+pub(crate) fn capture_workspace_target_in_context(
+    context: &runmat_runtime::context::RuntimeContext,
+    target: WorkspaceTarget,
+) -> Result<(WorkspaceTargetIdentity, WorkspaceTargetSnapshot), String> {
+    capture_workspace_target_for_owner(
+        WorkspaceOwner::Runtime(context.local_identity()),
+        target,
+        Some(context),
+    )
+}
+
+fn capture_workspace_target_for_owner(
+    owner: WorkspaceOwner,
+    target: WorkspaceTarget,
+    context: Option<&runmat_runtime::context::RuntimeContext>,
+) -> Result<(WorkspaceTargetIdentity, WorkspaceTargetSnapshot), String> {
     let (current, frame) = with_stack(owner, |stack| {
         let current = active_frame(owner).or_else(|| (stack.len() == 1).then(|| stack[0].id))?;
         let current_frame = stack.iter().find(|frame| frame.id == current)?;
@@ -1145,6 +1164,20 @@ pub(crate) fn capture_workspace_target(
         ))
     })
     .ok_or_else(|| "workspace state unavailable".to_string())?;
+    if let Some(context) = context {
+        // A canonical base mutation may have advanced the publishing frame's
+        // delegate since its last VM operation. Synchronize through that exact
+        // frame's existing service before capturing names, values and revision.
+        // Never call the service while holding the workspace stack borrow.
+        let service = with_frame_by_id(owner, frame, |frame| {
+            frame.service.as_ref().and_then(std::rc::Weak::upgrade)
+        })
+        .flatten()
+        .ok_or_else(|| "workspace target service unavailable".to_string())?;
+        service
+            .ensure_effect_authority_with_context(context)
+            .map_err(|error| error.to_string())?;
+    }
     let publication =
         capture_target_publication(owner, frame).map_err(|error| error.to_string())?;
     let snapshot = with_frame_by_id(owner, frame, |frame| WorkspaceTargetSnapshot {

@@ -61,22 +61,20 @@ impl RuntimeTimingService for TestClock {
         Duration::from_secs(1_700_000_000) + self.monotonic_elapsed()
     }
 
-    fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
-        let utc = local.and_utc();
-        Some(Duration::new(
-            u64::try_from(utc.timestamp()).ok()?,
-            utc.timestamp_subsec_nanos(),
+    fn local_datetime_to_instant(
+        &self,
+        local: chrono::NaiveDateTime,
+    ) -> Option<crate::context::RuntimeCalendarInstant> {
+        Some(crate::context::RuntimeCalendarInstant::from_naive_utc(
+            local,
         ))
     }
 
-    fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
-        Some(
-            chrono::DateTime::from_timestamp(
-                i64::try_from(epoch.as_secs()).ok()?,
-                epoch.subsec_nanos(),
-            )?
-            .naive_utc(),
-        )
+    fn local_datetime_at_instant(
+        &self,
+        instant: crate::context::RuntimeCalendarInstant,
+    ) -> Option<chrono::NaiveDateTime> {
+        instant.at_fixed_offset(0)
     }
 
     fn process_cpu_seconds(&self) -> Option<f64> {

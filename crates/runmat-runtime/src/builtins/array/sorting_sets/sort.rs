@@ -1,18 +1,20 @@
 //! MATLAB-compatible `sort` builtin with multi-output and GPU-aware semantics.
 
+#[cfg(test)]
+use super::type_resolvers::tensor_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    SORT_DESCRIPTOR, SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+    SORT_ERROR_COMPARISON_METHOD_UNKNOWN, SORT_ERROR_INTERNAL, SORT_ERROR_INVALID_ARGUMENT,
+    SORT_ERROR_INVALID_DIMENSION, SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+    SORT_ERROR_MISSINGPLACEMENT_UNKNOWN, SORT_INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, SortComparison as ProviderSortComparison, SortOrder as ProviderSortOrder,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor,
@@ -22,7 +24,6 @@ use runmat_value::{
 use super::{
     float_order::{ComplexSequence, SetFloat},
     integer_order,
-    type_resolvers::tensor_output_type,
 };
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
@@ -62,292 +63,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sort";
 
-const SORT_OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sorted values.",
-}];
-
-const SORT_OUTPUT_BI: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sorted values.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based index permutation for each sorted slice.",
-    },
-];
-
-const SORT_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const SORT_INPUTS_A_ARG1: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token ('ascend'/'descend').",
-    },
-];
-
-const SORT_INPUTS_A_ARG1_ARG2: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector, placeholder, or direction token.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token.",
-    },
-];
-
-const SORT_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ComparisonMethod\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Comparison method: 'auto', 'real', or 'abs'.",
-    },
-];
-
-const SORT_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"MissingPlacement\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "placement",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Missing-value placement: 'auto', 'first', or 'last'.",
-    },
-];
-
-const SORT_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A)",
-        inputs: &SORT_INPUTS_A,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, arg1)",
-        inputs: &SORT_INPUTS_A_ARG1,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, arg1, arg2)",
-        inputs: &SORT_INPUTS_A_ARG1_ARG2,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, ..., \"ComparisonMethod\", method)",
-        inputs: &SORT_INPUTS_COMPARISON_METHOD,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, ..., \"MissingPlacement\", placement)",
-        inputs: &SORT_INPUTS_MISSING_PLACEMENT,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A)",
-        inputs: &SORT_INPUTS_A,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, arg1)",
-        inputs: &SORT_INPUTS_A_ARG1,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, arg1, arg2)",
-        inputs: &SORT_INPUTS_A_ARG1_ARG2,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, ..., \"ComparisonMethod\", method)",
-        inputs: &SORT_INPUTS_COMPARISON_METHOD,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, ..., \"MissingPlacement\", placement)",
-        inputs: &SORT_INPUTS_MISSING_PLACEMENT,
-        outputs: &SORT_OUTPUT_BI,
-    },
-];
-
-const SORT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.INVALID_DIMENSION",
-    identifier: Some("RunMat:sort:InvalidDimension"),
-    when: "Dimension argument is non-positive, non-integer, or otherwise invalid.",
-    message: "sort: invalid dimension argument",
-};
-
-const SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.SORT.COMPARISON_METHOD_REQUIRES_STRING",
-        identifier: Some("RunMat:sort:ComparisonMethodRequiresString"),
-        when: "ComparisonMethod option value is not string-like.",
-        message: "sort: 'ComparisonMethod' requires a string value",
-    };
-
-const SORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.COMPARISON_METHOD_UNKNOWN",
-    identifier: Some("RunMat:sort:ComparisonMethodUnknown"),
-    when: "ComparisonMethod option value is not one of 'auto'/'real'/'abs'.",
-    message: "sort: unsupported ComparisonMethod",
-};
-
-const SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.SORT.MISSINGPLACEMENT_REQUIRES_STRING",
-        identifier: Some("RunMat:sort:MissingPlacementRequiresString"),
-        when: "MissingPlacement option value is not string-like.",
-        message: "sort: 'MissingPlacement' requires a string value",
-    };
-
-const SORT_ERROR_MISSINGPLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.MISSINGPLACEMENT_UNKNOWN",
-    identifier: Some("RunMat:sort:MissingPlacementUnknown"),
-    when: "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
-    message: "sort: unsupported MissingPlacement",
-};
-
-const SORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:sort:InvalidArgument"),
-    when: "Parser encounters invalid or unrecognized option/value arguments.",
-    message: "sort: invalid argument sequence",
-};
-
-const SORT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.INTERNAL",
-    identifier: Some("RunMat:sort:Internal"),
-    when: "Internal conversion, allocation, or provider result construction fails.",
-    message: "sort: internal operation failed",
-};
-
-const SORT_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    SORT_ERROR_INVALID_DIMENSION,
-    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-    SORT_ERROR_COMPARISON_METHOD_UNKNOWN,
-    SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
-    SORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
-    SORT_ERROR_INVALID_ARGUMENT,
-    SORT_ERROR_INTERNAL,
-];
-
-const SORT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented sortable input domain includes all eight real integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double.",
-    },
-];
-
-const SORT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[B, I] = sort(integer_A, integer_dim, direction, options)",
-        inputs: &SORT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider.",
-    }];
-
-pub const SORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SORT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SORT_ERRORS,
-};
-
 fn sort_error(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -369,18 +84,11 @@ fn sort_invalid_argument(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "sort",
-    category = "array/sorting_sets",
-    summary = "Sort array elements along a dimension with optional index outputs.",
-    keywords = "sort,ascending,descending,indices,comparisonmethod,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(tensor_output_type),
-    descriptor(crate::builtins::array::sorting_sets::sort::SORT_DESCRIPTOR),
-    integer_capabilities(SORT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
-async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn sort_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_view(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -401,6 +109,13 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 
 /// Evaluate the `sort` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
+    evaluate_view(value, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    value: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<SortEvaluation> {
     let args = SortArgs::parse(rest)?;
     match value {
         Value::GpuTensor(handle) => sort_gpu(handle, &args).await,
@@ -423,24 +138,25 @@ async fn sort_gpu(
         ));
     }
     let dim_len = dimension_length(&shape, dim);
-    let plain_real = runmat_accelerate_api::handle_integer_type(&handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&handle)
-        && runmat_accelerate_api::handle_storage(&handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real;
+    let plain_real = super::provider_result::plain_real(&handle);
     if dim_len > 1 && plain_real && matches!(args.missing, MissingPlacement::Auto) {
         if let Some(provider) = provider {
             let order = args.direction.to_provider();
             let comparison = args.comparison.to_provider();
             let zero_based = dim - 1;
-            if let Ok(result) = provider
-                .sort_dim(&handle, zero_based, order, comparison)
-                .await
+            if let Some(result) = super::provider_result::attempt(
+                provider.sort_dim(&handle, zero_based, order, comparison),
+                sort_internal,
+            )
+            .await?
             {
-                let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-                    .map_err(|e| sort_internal(format!("sort: {e}")))?;
+                let (sorted_tensor, indices_tensor) = super::provider_result::sort(
+                    result,
+                    &handle,
+                    super::provider_result::SortGeometry::Dimension(zero_based),
+                    sort_internal,
+                )?;
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);
-                let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-                    .map_err(|e| sort_internal(format!("sort: {e}")))?;
                 return upload_sort_evaluation(
                     provider,
                     SortEvaluation {
@@ -1081,7 +797,7 @@ struct SortArgs {
 }
 
 impl SortArgs {
-    fn parse(rest: &[Value]) -> crate::BuiltinResult<Self> {
+    fn parse(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<Self> {
         let mut args = SortArgs::default();
         let tokens = tokens_from_values(rest);
         let mut i = 0usize;
@@ -1207,7 +923,18 @@ impl SortArgs {
                                 std::borrow::Cow::Borrowed(sa.data()[0].as_str())
                             }
                             Value::CharArray(ca) if ca.rows == 1 => std::borrow::Cow::Owned(
-                                ca.data().iter().copied().collect::<String>(),
+                                runmat_value::decode_utf16_code_units(ca.data()).map_err(
+                                    |source| {
+                                        let mut error = sort_error(
+                                            &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+                                            format!(
+                                                "sort: invalid ComparisonMethod text: {source}"
+                                            ),
+                                        );
+                                        error.source = Some(Box::new(source));
+                                        error
+                                    },
+                                )?,
                             ),
                             _ => {
                                 return Err(sort_error(
@@ -1310,7 +1037,10 @@ pub(crate) mod tests {
     };
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::sort_builtin(value, rest))
+        block_on(super::sort_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {

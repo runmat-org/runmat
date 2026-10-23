@@ -58,6 +58,7 @@ pub fn selected_builtin_binding(
             return None;
         };
         if selected.identity != identity
+            || selected.provenance != compiled.provenance
             || !std::ptr::fn_addr_eq(selected.implementation, compiled.implementation)
         {
             return None;

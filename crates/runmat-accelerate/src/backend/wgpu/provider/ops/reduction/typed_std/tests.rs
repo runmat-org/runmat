@@ -313,9 +313,9 @@ async fn actual_std_allocation_faults_retire_unpublished_outputs() {
     let fault = |buffer: &runmat_accelerate_api::WgpuBufferOwner| -> Result<()> {
         observed_bytes.set(buffer.size());
         #[cfg(not(target_arch = "wasm32"))]
-        let observed = std::sync::Arc::downgrade(buffer);
+        let observed = runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer);
         #[cfg(target_arch = "wasm32")]
-        let observed = std::rc::Rc::downgrade(buffer);
+        let observed = runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer);
         *weak.borrow_mut() = Some(observed);
         Err(anyhow::Error::new(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,

@@ -79,6 +79,8 @@ pub struct NativeTerminator {
     pub site: NativeMirSite,
     pub source: NativeSourceLocation,
     pub class: runmat_mir::NativeLoweringClass,
+    pub effects: runmat_types::EffectSet,
+    pub capabilities: runmat_types::CapabilitySet,
     pub safepoint: Option<super::NativeSafepointId>,
     pub kind: NativeTerminatorKind,
     pub frame_state: NativeFrameState,

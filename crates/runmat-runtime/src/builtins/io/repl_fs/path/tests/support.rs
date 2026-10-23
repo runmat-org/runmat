@@ -23,6 +23,6 @@ impl PathGuard {
 
 impl Drop for PathGuard {
     fn drop(&mut self) {
-        set_path_string(&self.previous);
+        set_path_string(&self.previous).expect("test search path update");
     }
 }

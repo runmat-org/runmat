@@ -77,7 +77,7 @@ fn le_vector_broadcast() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn le_char_array_against_numeric() {
-    let chars = CharArray::new(vec!['A', 'B', 'C'], 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars(vec!['A', 'B', 'C'], 1, 3).unwrap();
     let tensor = Tensor::new(vec![65.0, 66.0, 67.0], vec![1, 3]).unwrap();
     let result = run_le(Value::CharArray(chars), Value::Tensor(tensor)).expect("le");
     match result {

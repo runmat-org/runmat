@@ -128,7 +128,7 @@ fn parse_depth(
     let mut max_depth = None;
     let mut rest = args;
     loop {
-        let Some(option) = rest.first().and_then(text_scalar) else {
+        let Some(option) = rest.first().map(text_scalar).transpose()?.flatten() else {
             break;
         };
         if option.eq_ignore_ascii_case("flat") {
@@ -194,12 +194,14 @@ impl Expr {
             Ok(match self {
                 Expr::True => true,
                 Expr::HasProperty(prop) => property_value_async(handle, prop).await?.is_some(),
-                Expr::Equals(prop, expected) => property_value_async(handle, prop)
-                    .await?
-                    .is_some_and(|actual| values_match(prop, &actual, expected)),
-                Expr::Regex(prop, regexes) => property_value_async(handle, prop)
-                    .await?
-                    .is_some_and(|actual| value_matches_regex(&actual, regexes)),
+                Expr::Equals(prop, expected) => match property_value_async(handle, prop).await? {
+                    Some(actual) => values_match(prop, &actual, expected)?,
+                    None => false,
+                },
+                Expr::Regex(prop, regexes) => match property_value_async(handle, prop).await? {
+                    Some(actual) => value_matches_regex(&actual, regexes)?,
+                    None => false,
+                },
                 Expr::Not(expr) => !expr.matches(handle).await?,
                 Expr::And(left, right) => {
                     left.matches(handle).await? && right.matches(handle).await?
@@ -218,7 +220,7 @@ impl Expr {
 fn parse_expr(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<(Expr, usize)> {
     let (mut expr, mut consumed) = parse_factor(args)?;
     while consumed < args.len() {
-        let (op, op_len) = match args.get(consumed).and_then(text_scalar) {
+        let (op, op_len) = match args.get(consumed).map(text_scalar).transpose()?.flatten() {
             Some(text) if text.eq_ignore_ascii_case("-and") => (LogicalOp::And, 1),
             Some(text) if text.eq_ignore_ascii_case("-or") => (LogicalOp::Or, 1),
             Some(text) if text.eq_ignore_ascii_case("-xor") => (LogicalOp::Xor, 1),
@@ -260,7 +262,7 @@ fn parse_factor(
         return Ok((expr, 1));
     }
 
-    let Some(text) = text_scalar(first) else {
+    let Some(text) = text_scalar(first)? else {
         return Err(invalid_argument("expected a property name or operator"));
     };
 
@@ -269,13 +271,13 @@ fn parse_factor(
         return Ok((Expr::Not(Box::new(expr)), consumed + 1));
     }
     if text.eq_ignore_ascii_case("-property") {
-        let Some(prop) = args.get(1).and_then(text_scalar) else {
+        let Some(prop) = args.get(1).map(text_scalar).transpose()?.flatten() else {
             return Err(invalid_argument("-property requires a property name"));
         };
         return Ok((Expr::HasProperty(prop), 2));
     }
     if text.eq_ignore_ascii_case("-regexp") {
-        let Some(prop) = args.get(1).and_then(text_scalar) else {
+        let Some(prop) = args.get(1).map(text_scalar).transpose()?.flatten() else {
             return Err(invalid_argument("-regexp requires a property name"));
         };
         let Some(pattern_value) = args.get(2) else {
@@ -310,7 +312,7 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
                 .data()
                 .iter()
                 .map(|value| {
-                    text_scalar(value).ok_or_else(|| {
+                    text_scalar(value)?.ok_or_else(|| {
                         invalid_argument("-regexp cell patterns must contain text values")
                     })
                 })
@@ -320,7 +322,7 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
-            _ => vec![text_scalar(value)
+            _ => vec![text_scalar(value)?
                 .ok_or_else(|| invalid_argument("-regexp pattern must be text"))?],
         };
     if patterns.is_empty() {
@@ -480,47 +482,53 @@ fn property_value(handle: f64, property: &str) -> Option<Value> {
         .expect("property lookup should not fail operationally")
 }
 
-fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
-    let prop = property.trim();
-    if prop.eq_ignore_ascii_case("Color") || prop.to_ascii_lowercase().ends_with("color") {
-        if let (Some(left), Some(right)) = (color_from_value(actual), color_from_value(expected)) {
-            return (left - right).abs().max_element() <= 1e-6;
+fn values_match(property: &str, actual: &Value, expected: &Value) -> crate::BuiltinResult<bool> {
+    Ok({
+        let prop = property.trim();
+        if prop.eq_ignore_ascii_case("Color") || prop.to_ascii_lowercase().ends_with("color") {
+            if let (Some(left), Some(right)) =
+                (color_from_value(actual)?, color_from_value(expected)?)
+            {
+                return Ok((left - right).abs().max_element() <= 1e-6);
+            }
         }
-    }
 
-    if prop.eq_ignore_ascii_case("Type") {
-        if let (Some(left), Some(right)) = (single_text(actual), single_text(expected)) {
-            return left.eq_ignore_ascii_case(&right);
+        if prop.eq_ignore_ascii_case("Type") {
+            if let (Some(left), Some(right)) = (single_text(actual)?, single_text(expected)?) {
+                return Ok(left.eq_ignore_ascii_case(&right));
+            }
         }
-    }
 
-    if let Some(expected_bool) = on_off_bool(expected) {
-        if let Some(actual_bool) = on_off_bool(actual) {
-            return actual_bool == expected_bool;
+        if let Some(expected_bool) = on_off_bool(expected) {
+            if let Some(actual_bool) = on_off_bool(actual) {
+                return Ok(actual_bool == expected_bool);
+            }
         }
-    }
 
-    match (actual, expected) {
-        (Value::Num(left), Value::Num(right)) => numbers_equal(*left, *right),
-        (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
-        (Value::Bool(left), Value::Bool(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
-        (Value::CharArray(left), Value::CharArray(right)) => left.data() == right.data(),
-        (Value::String(left), Value::CharArray(right)) => {
-            left == &right.data().iter().collect::<String>()
+        match (actual, expected) {
+            (Value::Num(left), Value::Num(right)) => numbers_equal(*left, *right),
+            (Value::Int(left), Value::Int(right)) => left == right,
+            (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
+            (Value::Bool(left), Value::Bool(right)) => left == right,
+            (Value::String(left), Value::String(right)) => left == right,
+            (Value::CharArray(left), Value::CharArray(right)) => left.data() == right.data(),
+            (Value::String(left), Value::CharArray(right)) => left
+                .encode_utf16()
+                .eq(right.data().iter().map(|unit| unit.raw())),
+            (Value::CharArray(left), Value::String(right)) => left
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .eq(right.encode_utf16()),
+            (Value::Tensor(left), Value::Tensor(right)) => {
+                left.shape() == right.shape() && tensor_values_match(left, right)
+            }
+            (Value::StringArray(left), Value::StringArray(right)) => {
+                left.shape == right.shape && left.data() == right.data()
+            }
+            _ => false,
         }
-        (Value::CharArray(left), Value::String(right)) => {
-            &left.data().iter().collect::<String>() == right
-        }
-        (Value::Tensor(left), Value::Tensor(right)) => {
-            left.shape() == right.shape() && tensor_values_match(left, right)
-        }
-        (Value::StringArray(left), Value::StringArray(right)) => {
-            left.shape == right.shape && left.data() == right.data()
-        }
-        _ => false,
-    }
+    })
 }
 
 fn tensor_values_match(left: &Tensor, right: &Tensor) -> bool {
@@ -567,10 +575,13 @@ fn numbers_equal(left: f64, right: f64) -> bool {
     }
 }
 
-fn color_from_value(value: &Value) -> Option<glam::Vec4> {
-    parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)
-        .ok()
-        .or_else(|| single_text(value).and_then(|text| color_from_bracketed_text(&text)))
+fn color_from_value(value: &Value) -> crate::BuiltinResult<Option<glam::Vec4>> {
+    let text = single_text(value)?;
+    Ok(
+        parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)
+            .ok()
+            .or_else(|| text.and_then(|text| color_from_bracketed_text(&text))),
+    )
 }
 
 fn color_from_bracketed_text(text: &str) -> Option<glam::Vec4> {
@@ -591,41 +602,70 @@ fn color_from_bracketed_text(text: &str) -> Option<glam::Vec4> {
 fn on_off_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
-        _ => single_text(value).and_then(|text| match text.trim().to_ascii_lowercase().as_str() {
-            "on" | "true" => Some(true),
-            "off" | "false" => Some(false),
-            _ => None,
-        }),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            match array.data()[0].trim().to_ascii_lowercase().as_str() {
+                "on" | "true" => Some(true),
+                "off" | "false" => Some(false),
+                _ => None,
+            }
+        }
+        _ => {
+            let eq =
+                |key| crate::builtins::plotting::style::value_text_equals_ascii(value, key, true);
+            if eq("on") || eq("true") {
+                Some(true)
+            } else if eq("off") || eq("false") {
+                Some(false)
+            } else {
+                None
+            }
+        }
     }
 }
 
-fn value_matches_regex(value: &Value, regexes: &[Regex]) -> bool {
+fn value_matches_regex(value: &Value, regexes: &[Regex]) -> crate::BuiltinResult<bool> {
     let matches = |text: &str| regexes.iter().any(|regex| regex.is_match(text));
-    match value {
+    Ok(match value {
         Value::String(text) => matches(text.as_str()),
-        Value::CharArray(chars) => matches(&chars.data().iter().collect::<String>()),
+        Value::CharArray(chars) => matches(
+            &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         Value::StringArray(strings) => strings.data().iter().any(|text| matches(text.as_str())),
-        Value::Cell(cell) => cell
-            .data()
-            .iter()
-            .any(|child| value_matches_regex(child, regexes)),
+        Value::Cell(cell) => {
+            for child in cell.data() {
+                if value_matches_regex(child, regexes)? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
         _ => false,
-    }
+    })
 }
 
-fn single_text(value: &Value) -> Option<String> {
-    match value {
+fn single_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(chars) => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         Value::StringArray(strings) if strings.data().len() == 1 => {
             strings.data().first().map(|text| text.as_str().to_owned())
         }
         _ => None,
-    }
+    })
 }
 
-fn text_scalar(value: &Value) -> Option<String> {
-    single_text(value).map(|text| text.trim().to_string())
+fn text_scalar(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(single_text(value)?.map(|text| text.trim().to_string()))
 }
 
 fn handle_array(handles: Vec<f64>) -> Value {
@@ -789,19 +829,30 @@ mod tests {
                 .unwrap(),
         );
 
-        assert!(!values_match("UserData", &left, &right));
-        assert!(values_match("UserData", &left, &left));
+        assert!(!values_match("UserData", &left, &right).unwrap());
+        assert!(values_match("UserData", &left, &left).unwrap());
+        let raw = Value::CharArray(
+            runmat_value::CharArray::from_code_units(
+                vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        assert!(values_match("UserData", &raw, &raw).unwrap());
+        assert!(value_matches_regex(&raw, &[Regex::new(".*").unwrap()]).is_err());
 
         let other_class = Value::Tensor(
             Tensor::new_integer(IntegerStorage::I64(vec![9_007_199_254_740_992]), vec![1, 1])
                 .unwrap(),
         );
-        assert!(!values_match("UserData", &left, &other_class));
+        assert!(!values_match("UserData", &left, &other_class).unwrap());
         assert!(!values_match(
             "UserData",
             &Value::Num(9_007_199_254_740_992.0),
             &Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
-        ));
+        )
+        .unwrap());
     }
 
     #[test]
@@ -959,7 +1010,7 @@ mod tests {
         assert!(not_axes.contains(&figure));
         assert!(!not_axes.iter().any(|handle| {
             property_value(*handle, "Type")
-                .and_then(|value| single_text(&value))
+                .and_then(|value| single_text(&value).unwrap())
                 .is_some_and(|text| text == "axes")
         }));
 

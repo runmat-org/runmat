@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use runmat_execution::executable::ExecutableStaticImport;
 use runmat_hir::FunctionId;
@@ -31,12 +32,12 @@ pub(crate) use draft::ExecutableUnitDraft;
 #[path = "unit/class_products.rs"]
 #[cfg(not(target_arch = "wasm32"))]
 mod class_products;
-#[path = "unit/selected_runtime.rs"]
-mod selected_runtime;
-#[path = "unit/function_identity.rs"]
-mod function_identity;
 #[path = "unit/code_cache.rs"]
 mod code_cache;
+#[path = "unit/function_identity.rs"]
+mod function_identity;
+#[path = "unit/selected_runtime.rs"]
+mod selected_runtime;
 
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
@@ -46,7 +47,7 @@ pub struct ExecutableUnit {
     source_map: Rc<ExecutableSourceMap>,
     coverage: Rc<CoveragePlan>,
     mir: Rc<runmat_mir::MirAssembly>,
-    analysis: Rc<runmat_mir::analysis::AnalysisStore>,
+    analysis: Arc<runmat_mir::analysis::AnalysisStore>,
     bytecode: Rc<runmat_vm::Bytecode>,
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
@@ -295,6 +296,10 @@ impl ExecutableUnit {
         &self.analysis
     }
 
+    pub(super) fn analysis_owner(&self) -> Arc<runmat_mir::analysis::AnalysisStore> {
+        Arc::clone(&self.analysis)
+    }
+
     /// Exact static facts for a function in this immutable executable revision.
     pub fn function_analysis(
         &self,
@@ -406,6 +411,11 @@ impl ExecutableUnit {
     /// Canonical analyzed MIR retained for native lowering and artifact production.
     pub fn mir(&self) -> &runmat_mir::MirAssembly {
         &self.mir
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn cached_native_compilation_digest(&self) -> Option<runmat_execution::Digest> {
+        self.native_compilation_digest.get().copied()
     }
 
     #[cfg(not(target_arch = "wasm32"))]

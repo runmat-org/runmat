@@ -5,7 +5,6 @@
 //! enforces the captured cancellation/resource authority and root lifetime.
 
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -17,19 +16,161 @@ use crate::context::host_allocation::{
 use crate::context::{RuntimeCancellationContext, RuntimeContext};
 use crate::RuntimeError;
 
-use super::{RootedValue, RootedValueSequence};
+use super::RootedValueSequence;
+
+#[cfg(test)]
+#[path = "rooted_continuation/native_metadata_tests.rs"]
+mod native_metadata_tests;
 
 /// An erased continuation returned by selected executable and VM admission.
 /// Runtime-owned entry points retain `RuntimeError` by default, while callers
 /// with a stronger domain error may preserve it through the same admitted
 /// continuation owner.
-pub type RuntimeContinuationFuture<'a, O, E = RuntimeError> =
-    Pin<Box<dyn Future<Output = Result<O, E>> + 'a>>;
+pub struct RuntimeContinuationFuture<'a, O, E = RuntimeError> {
+    body: ContinuationBody<'a, O, E>,
+}
+
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Keep the original child Box and its funding receipt inline so deallocation precedes refund without a second allocation"
+)]
+enum ContinuationBody<'a, O, E> {
+    Running {
+        future: Pin<Box<dyn Future<Output = Result<O, E>> + 'a>>,
+        cancellation: Option<RuntimeCancellationContext>,
+        label: &'static str,
+        map_error: ControlErrorMapper<E>,
+        completed: bool,
+        // Box destruction includes physical deallocation before this receipt
+        // retires. Rejection cannot own a receipt or a child allocation.
+        claim: Option<HostAllocationReceipt>,
+    },
+    // Admission failure needs neither a child allocation nor a funding receipt.
+    Rejected(Option<E>),
+}
+
+// The concrete future remains pinned in its Box. Moving this carrier never
+// moves that future, and none of the carrier's other fields is pinned.
+impl<O, E> Unpin for RuntimeContinuationFuture<'_, O, E> {}
+
+impl<'a, O: 'a, E: 'a> RuntimeContinuationFuture<'a, O, E> {
+    fn admitted<F>(
+        future: F,
+        claim: Option<HostAllocationReceipt>,
+        cancellation: Option<RuntimeCancellationContext>,
+        label: &'static str,
+        map_error: ControlErrorMapper<E>,
+    ) -> Self
+    where
+        F: Future<Output = Result<O, E>> + 'a,
+    {
+        Self::from_pinned(Box::pin(future), claim, cancellation, label, map_error)
+    }
+
+    fn from_pinned(
+        future: Pin<Box<dyn Future<Output = Result<O, E>> + 'a>>,
+        claim: Option<HostAllocationReceipt>,
+        cancellation: Option<RuntimeCancellationContext>,
+        label: &'static str,
+        map_error: ControlErrorMapper<E>,
+    ) -> Self {
+        Self {
+            body: ContinuationBody::Running {
+                future,
+                cancellation,
+                label,
+                map_error,
+                completed: false,
+                claim,
+            },
+        }
+    }
+
+    pub(crate) fn rejected(error: E) -> Self {
+        Self {
+            body: ContinuationBody::Rejected(Some(error)),
+        }
+    }
+
+    /// Pin a borrow of the carrier without moving its pinned concrete future.
+    pub fn as_mut(&mut self) -> Pin<&mut Self> {
+        Pin::new(self)
+    }
+}
+
+/// Only the legacy embedding adapters may adopt an opaque future, and only
+/// under the actual unbounded policy. This is not a concrete managed quote.
+/// Check before calling the embedding factory; retain its original Box with
+/// no extra allocation and no way to attach a fabricated finite receipt.
+pub(crate) fn adopt_unbounded_legacy_rooted_future<'a, O>(
+    runtime: Option<&RuntimeContext>,
+    factory: impl FnOnce() -> Pin<Box<dyn Future<Output = Result<O, RuntimeError>> + 'a>>,
+) -> Result<RuntimeContinuationFuture<'a, O>, RuntimeError>
+where
+    O: RootedCompletion + 'a,
+{
+    let cancellation = unbounded_callable_cancellation(runtime)?;
+    Ok(RuntimeContinuationFuture::from_pinned(
+        factory(),
+        None,
+        cancellation,
+        "legacy callable",
+        ControlErrorMapper::Contextual(semantic_control_error),
+    ))
+}
+
+/// A read-only guard, not an allocation grant or selected callback context.
+/// Also used before the new context-free concrete callable factories.
+pub(crate) fn unbounded_callable_cancellation(
+    runtime: Option<&RuntimeContext>,
+) -> Result<Option<RuntimeCancellationContext>, RuntimeError> {
+    // A legacy None is no selected reentry grant. An actually active finite
+    // scope must nevertheless not be bypassed by calling an opaque factory.
+    // Consult it only as a rejection/cancellation guard, never pass it on.
+    let active_guard = runtime
+        .is_none()
+        .then(crate::context::legacy::active)
+        .flatten();
+    let runtime = runtime.or(active_guard.as_ref());
+    let cancellation = runtime.map(RuntimeContext::cancellation_context);
+    let map = |cause| semantic_control_error(cancellation.as_ref(), "legacy callable", cause);
+    checkpoint(None, cancellation.as_ref()).map_err(map)?;
+    if HostAllocationReceipt::policy(runtime).map_err(map)?
+        != crate::context::host_allocation::HostAllocationPolicy::Unbounded
+    {
+        return Err(map(HostAllocationError::MissingManagedOwner));
+    }
+    Ok(cancellation)
+}
+
+/// A concrete context-free callable keeps the same read-only cancellation
+/// authority as the ordinary opaque embedding adapter. No ambient execution
+/// context is supplied to its factory and no managed grant is fabricated.
+pub(crate) fn admit_unbounded_callable_with<F, O>(
+    label: &'static str,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'static, O>, RuntimeError>
+where
+    F: Future<Output = Result<O, RuntimeError>> + 'static,
+    O: RootedCompletion + 'static,
+{
+    let cancellation = unbounded_callable_cancellation(None)?;
+    let map_error = ControlErrorMapper::Contextual(semantic_control_error);
+    let claim = admit_layout::<F, O, RuntimeError>(None)
+        .map_err(|cause| map_error.map(cancellation.as_ref(), label, cause))?;
+    Ok(RuntimeContinuationFuture::admitted(
+        make_future(),
+        claim,
+        cancellation,
+        label,
+        map_error,
+    ))
+}
 
 mod sealed {
     pub trait Sealed {}
     impl<T: runmat_gc::Trace> Sealed for super::super::RootedResult<T> {}
-    impl Sealed for Option<super::RootedValue> {}
+    impl<T: super::RootedCompletion> Sealed for Option<T> {}
     impl<A: super::RootedCompletion, B: super::RootedCompletion> Sealed
         for std::ops::ControlFlow<A, B>
     {
@@ -37,14 +178,20 @@ mod sealed {
     // VM stack mutations keep their Values in the instruction owner's rooted
     // stack; the continuation itself returns no unrooted Value.
     impl Sealed for () {}
+    // Every routing/supplied segment is an existing RootedValues owner and
+    // captures retain their original callable generation and root lease.
+    // Only this canonical carrier, not arbitrary control payloads, may leave
+    // a pre-selection miss without a second root forest or Value copy.
+    impl Sealed for crate::call::RootedFunctionArguments {}
 }
 
 /// Only canonical rooted completion carriers may leave this boundary.
 pub(crate) trait RootedCompletion: sealed::Sealed {}
 impl<T: Trace> RootedCompletion for super::RootedResult<T> {}
-impl RootedCompletion for Option<RootedValue> {}
+impl<T: RootedCompletion> RootedCompletion for Option<T> {}
 impl<A: RootedCompletion, B: RootedCompletion> RootedCompletion for std::ops::ControlFlow<A, B> {}
 impl RootedCompletion for () {}
+impl RootedCompletion for crate::call::RootedFunctionArguments {}
 
 pub(crate) type ContextualControlErrorMapper<E = RuntimeError> =
     fn(Option<&RuntimeCancellationContext>, &'static str, HostAllocationError) -> E;
@@ -68,59 +215,45 @@ impl<E> ControlErrorMapper<E> {
     }
 }
 
-pin_project_lite::pin_project! {
-    /// The result is produced before the input future can retire. Field order
-    /// drops the concrete future before its host allocation claim. Rooted
-    /// entrypoints separately constrain their result to RootedCompletion.
-    struct AdmittedContinuation<F, O, E> {
-        #[pin]
-        future: F,
-        claim: Option<HostAllocationReceipt>,
-        cancellation: Option<RuntimeCancellationContext>,
-        label: &'static str,
-        map_error: ControlErrorMapper<E>,
-        completed: bool,
-        _result: PhantomData<fn() -> (O, E)>,
-    }
-}
-
-impl<F, O, E> Future for AdmittedContinuation<F, O, E>
-where
-    F: Future<Output = Result<O, E>>,
-{
+impl<O, E> Future for RuntimeContinuationFuture<'_, O, E> {
     type Output = Result<O, E>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        assert!(
-            !*this.completed,
-            "admitted continuation polled after completion"
-        );
-        if let Err(error) = checkpoint(this.claim.as_ref(), this.cancellation.as_ref()) {
-            *this.completed = true;
-            return Poll::Ready(Err(this.map_error.map(
-                this.cancellation.as_ref(),
-                this.label,
-                error,
-            )));
+        let this = self.get_mut();
+        let (future, cancellation, label, map_error, completed, claim) = match &mut this.body {
+            ContinuationBody::Running {
+                future,
+                cancellation,
+                label,
+                map_error,
+                completed,
+                claim,
+            } => (future, cancellation, label, map_error, completed, claim),
+            ContinuationBody::Rejected(error) => {
+                return Poll::Ready(Err(error
+                    .take()
+                    .expect("admitted continuation polled after completion")))
+            }
+        };
+        assert!(!*completed, "admitted continuation polled after completion");
+        if let Err(error) = checkpoint(claim.as_ref(), cancellation.as_ref()) {
+            *completed = true;
+            return Poll::Ready(Err(map_error.map(cancellation.as_ref(), label, error)));
         }
-        match this.future.poll(context) {
+        match future.as_mut().poll(context) {
             Poll::Ready(Ok(output)) => {
-                // A rooted output cannot cross a cancellation or revocation
-                // that arrived during the final poll.
-                let checked = checkpoint(this.claim.as_ref(), this.cancellation.as_ref());
-                *this.completed = true;
+                // Preserve the exact original receipt's final publication check.
+                let checked = checkpoint(claim.as_ref(), cancellation.as_ref());
+                *completed = true;
                 match checked {
                     Ok(()) => Poll::Ready(Ok(output)),
-                    Err(error) => Poll::Ready(Err(this.map_error.map(
-                        this.cancellation.as_ref(),
-                        this.label,
-                        error,
-                    ))),
+                    Err(error) => {
+                        Poll::Ready(Err(map_error.map(cancellation.as_ref(), label, error)))
+                    }
                 }
             }
             Poll::Ready(Err(error)) => {
-                *this.completed = true;
+                *completed = true;
                 Poll::Ready(Err(error))
             }
             Poll::Pending => Poll::Pending,
@@ -135,7 +268,7 @@ pub(crate) fn admit_rooted_future<'a, F, O>(
     label: &'static str,
     map_error: ContextualControlErrorMapper,
     future: F,
-) -> Pin<Box<dyn Future<Output = Result<O, RuntimeError>> + 'a>>
+) -> RuntimeContinuationFuture<'a, O>
 where
     F: Future<Output = Result<O, RuntimeError>> + 'a,
     O: RootedCompletion + 'a,
@@ -143,22 +276,16 @@ where
     let cancellation = runtime.map(RuntimeContext::cancellation_context);
     let admission = admit_layout::<F, O, RuntimeError>(runtime);
     match admission {
-        Ok(claim) => Box::pin(AdmittedContinuation {
+        Ok(claim) => RuntimeContinuationFuture::admitted(
             future,
             claim,
             cancellation,
             label,
-            map_error: ControlErrorMapper::Contextual(map_error),
-            completed: false,
-            _result: PhantomData,
-        }),
+            ControlErrorMapper::Contextual(map_error),
+        ),
         Err(error) => {
             drop(future);
-            Box::pin(std::future::ready(Err(map_error(
-                cancellation.as_ref(),
-                label,
-                error,
-            ))))
+            RuntimeContinuationFuture::rejected(map_error(cancellation.as_ref(), label, error))
         }
     }
 }
@@ -171,28 +298,130 @@ pub(crate) fn admit_rooted_future_with<'a, F, O>(
     label: &'static str,
     map_error: ContextualControlErrorMapper,
     make_future: impl FnOnce(Option<RuntimeContext>) -> F,
-) -> Pin<Box<dyn Future<Output = Result<O, RuntimeError>> + 'a>>
+) -> RuntimeContinuationFuture<'a, O>
 where
     F: Future<Output = Result<O, RuntimeError>> + 'a,
     O: RootedCompletion + 'a,
 {
     let cancellation = runtime.as_ref().map(RuntimeContext::cancellation_context);
     match admit_layout::<F, O, RuntimeError>(runtime.as_ref()) {
-        Ok(claim) => Box::pin(AdmittedContinuation {
-            future: make_future(runtime),
+        Ok(claim) => RuntimeContinuationFuture::admitted(
+            make_future(runtime),
             claim,
             cancellation,
             label,
-            map_error: ControlErrorMapper::Contextual(map_error),
-            completed: false,
-            _result: PhantomData,
-        }),
-        Err(error) => Box::pin(std::future::ready(Err(map_error(
-            cancellation.as_ref(),
-            label,
-            error,
-        )))),
+            ControlErrorMapper::Contextual(map_error),
+        ),
+        Err(error) => {
+            RuntimeContinuationFuture::rejected(map_error(cancellation.as_ref(), label, error))
+        }
     }
+}
+
+/// Construct one native continuation inside the same exact, managed heap
+/// owner used by rooted executable work. The factory is invoked only after
+/// admission succeeds, so a large concrete executor future is never first
+/// materialized in its caller's recursive poll frame.
+#[inline(never)]
+pub fn admit_native_continuation_with<F, O>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'static, O>, RuntimeError>
+where
+    F: Future<Output = Result<O, RuntimeError>> + 'static,
+    O: 'static,
+{
+    let cancellation = Some(runtime.cancellation_context());
+    let label = "native execution";
+    let claim = admit_layout::<F, O, RuntimeError>(Some(runtime))
+        .map_err(|error| semantic_control_error(cancellation.as_ref(), label, error))?;
+    Ok(RuntimeContinuationFuture::admitted(
+        make_future(),
+        claim,
+        cancellation,
+        label,
+        ControlErrorMapper::Contextual(semantic_control_error),
+    ))
+}
+
+/// Native hostcall counterpart of the same admitted continuation owner.
+/// Preserve the caller's typed physical/control cause without an extra erased
+/// mapping future or an unquoted allocation before admission.
+#[inline(never)]
+pub fn admit_native_hostcall_with<F, O, E>(
+    runtime: &RuntimeContext,
+    map_error: fn(HostAllocationError) -> E,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'static, O, E>, E>
+where
+    F: Future<Output = Result<O, E>> + 'static,
+    O: 'static,
+    E: 'static,
+{
+    let claim = admit_layout::<F, O, E>(Some(runtime)).map_err(map_error)?;
+    Ok(RuntimeContinuationFuture::admitted(
+        make_future(),
+        claim,
+        Some(runtime.cancellation_context()),
+        "native hostcall",
+        ControlErrorMapper::Cause(map_error),
+    ))
+}
+
+/// Same exact owned hostcall boundary for an explicitly ordinary embedding.
+/// No selected context is permission only under the actual unbounded policy;
+/// the factory is never invoked on a missing finite owner or admission error.
+#[inline(never)]
+pub fn admit_optional_hostcall_with<F, O, E>(
+    runtime: Option<&RuntimeContext>,
+    map_error: fn(HostAllocationError) -> E,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'static, O, E>, E>
+where
+    F: Future<Output = Result<O, E>> + 'static,
+    O: 'static,
+    E: 'static,
+{
+    if runtime.is_none()
+        && HostAllocationReceipt::policy(None).map_err(map_error)?
+            != crate::context::host_allocation::HostAllocationPolicy::Unbounded
+    {
+        return Err(map_error(HostAllocationError::MissingManagedOwner));
+    }
+    let claim = admit_layout::<F, O, E>(runtime).map_err(map_error)?;
+    Ok(RuntimeContinuationFuture::admitted(
+        make_future(),
+        claim,
+        runtime.map(RuntimeContext::cancellation_context),
+        "owned hostcall",
+        ControlErrorMapper::Cause(map_error),
+    ))
+}
+
+/// Contextual diagnostic form of the same native hostcall owner. Admission
+/// and subsequent polls use one captured cancellation authority; the mapper
+/// is a function pointer, not an allocated capture or another future layer.
+/// A hostcall may borrow its caller's rooted frame rather than owning a
+/// static native request. The caller retains that domain's input/output roots;
+/// the sealed rooted-completion entrypoints remain separate and unchanged.
+#[inline(never)]
+pub fn admit_native_hostcall_with_contextual_error<'a, F, O, E>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'a, O, E>, E>
+where
+    F: Future<Output = Result<O, E>> + 'a,
+    O: 'a,
+    E: From<RuntimeError> + 'a,
+{
+    admit_selected_future_with_error_from(
+        runtime,
+        "native hostcall",
+        ControlErrorMapper::Contextual(|cancellation, label, cause| {
+            E::from(semantic_control_error(cancellation, label, cause))
+        }),
+        make_future,
+    )
 }
 
 fn admit_layout<F, O, E>(
@@ -218,8 +447,7 @@ fn rooted_future_layout_with_error<F, O, E>() -> Result<u64, HostAllocationError
 where
     F: Future<Output = Result<O, E>>,
 {
-    u64::try_from(std::mem::size_of::<AdmittedContinuation<F, O, E>>())
-        .map_err(|_| HostAllocationError::Overflow)
+    u64::try_from(std::mem::size_of::<F>()).map_err(|_| HostAllocationError::Overflow)
 }
 
 fn checkpoint(
@@ -264,6 +492,33 @@ where
     )
 }
 
+/// Admit the concrete dynamic selector before constructing its future. Only
+/// a genuine pre-selection miss returns the original rooted argument owner;
+/// selected invocation and control failures leave through the error channel.
+#[inline(never)]
+pub fn admit_dynamic_function_load_with<F>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F,
+) -> Result<crate::user_functions::DynamicFunctionLoadFuture, RuntimeError>
+where
+    F: Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'static,
+{
+    use futures::FutureExt;
+    admit_selected_future_with_error_from(
+        runtime,
+        "dynamic function load",
+        ControlErrorMapper::Contextual(semantic_control_error),
+        move || {
+            make_future().map(|attempt| match attempt {
+                std::ops::ControlFlow::Break(result) => result.map(std::ops::ControlFlow::Break),
+                std::ops::ControlFlow::Continue(arguments) => {
+                    Ok(std::ops::ControlFlow::Continue(arguments))
+                }
+            })
+        },
+    )
+}
+
 /// Admit a domain-specific canonical rooted result without teaching Runtime
 /// about its payload type. The `Trace` bound and sealed `RootedResult` owner
 /// preserve the same completion-root invariant as Value sequences.
@@ -279,6 +534,26 @@ where
     admit_selected_future_with_error_from(
         runtime,
         "rooted execution",
+        ControlErrorMapper::Contextual(semantic_control_error),
+        make_future,
+    )
+}
+
+/// Admit an optional canonical rooted completion at its selected concrete
+/// factory. Absence is a control outcome, not an unrooted language result.
+/// The same sealed rooted completion and original Box/receipt owner apply.
+#[inline(never)]
+pub fn admit_optional_rooted_result_with<'a, T, F>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'a, Option<super::RootedResult<T>>>, RuntimeError>
+where
+    T: Trace + 'a,
+    F: Future<Output = Result<Option<super::RootedResult<T>>, RuntimeError>> + 'a,
+{
+    admit_selected_future_with_error_from(
+        runtime,
+        "optional rooted execution",
         ControlErrorMapper::Contextual(semantic_control_error),
         make_future,
     )
@@ -400,18 +675,16 @@ where
     let claim = admit_layout::<F, O, E>(Some(runtime))
         .map_err(|error| map_error.map(cancellation.as_ref(), label, error))?;
     let future = make_future();
-    Ok(Box::pin(AdmittedContinuation {
+    Ok(RuntimeContinuationFuture::admitted(
         future,
         claim,
         cancellation,
         label,
         map_error,
-        completed: false,
-        _result: PhantomData,
-    }))
+    ))
 }
 
-fn semantic_control_error(
+pub(crate) fn semantic_control_error(
     cancellation: Option<&RuntimeCancellationContext>,
     label: &'static str,
     source: HostAllocationError,

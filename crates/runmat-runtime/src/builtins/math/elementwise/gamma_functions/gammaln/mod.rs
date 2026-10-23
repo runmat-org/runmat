@@ -274,7 +274,7 @@ fn gammaln_char_array(chars: CharArray) -> BuiltinResult<Value> {
     let data = chars
         .data()
         .iter()
-        .map(|&ch| gammaln_nonnegative_scalar(ch as u32 as f64))
+        .map(|&ch| gammaln_nonnegative_scalar(u32::from(ch.raw()) as f64))
         .collect::<Vec<_>>();
     let out = Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|detail| error_with_detail(&GAMMALN_ERROR_INTERNAL, detail))?;

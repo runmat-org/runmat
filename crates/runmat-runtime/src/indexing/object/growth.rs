@@ -1,16 +1,15 @@
 //! Scatter directly into one admitted final homogeneous generation.
 use crate::execution::object_array::{indices::Indices, Class, ObjectArrayConstruction};
-use crate::indexing::{plan::IndexPlan, shape::column_major_strides};
+use crate::indexing::{plan::IndexPlan, shape::column_major_strides_in_context};
 use crate::{runtime_error::semantic_error, RuntimeError};
 use runmat_value::{ObjectArray, Value};
 
 pub(super) fn assign(
+    runtime: Option<&crate::context::RuntimeContext>,
     array: &ObjectArray,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    let context = crate::context::legacy::active();
-    let runtime = context.as_ref();
     let source = Value::ObjectArray(array.clone());
     let _roots = match runtime {
         Some(runtime) => crate::execution::RootedValueLease::for_values_iterator_in_context(
@@ -20,8 +19,13 @@ pub(super) fn assign(
         None => crate::execution::RootedValueLease::for_values([&source, rhs].into_iter())
             .map_err(|e| e.into_runtime_error())?,
     };
-    let source_shape = crate::indexing::plan::effective_index_shape(array.shape(), plan.dims)?;
-    let target_shape = crate::indexing::plan::effective_index_shape(&plan.base_shape, plan.dims)?;
+    let source_shape =
+        crate::indexing::plan::effective_index_shape_in_context(runtime, array.shape(), plan.dims)?;
+    let target_shape = crate::indexing::plan::effective_index_shape_in_context(
+        runtime,
+        &plan.base_shape,
+        plan.dims,
+    )?;
     if source_shape
         .iter()
         .enumerate()
@@ -37,8 +41,8 @@ pub(super) fn assign(
         .iter()
         .try_fold(1usize, |n, &d| n.checked_mul(d))
         .ok_or_else(invalid_index)?;
-    let old_strides = column_major_strides(&source_shape)?;
-    let target_strides = column_major_strides(&target_shape)?;
+    let old_strides = column_major_strides_in_context(runtime, &source_shape)?;
+    let target_strides = column_major_strides_in_context(runtime, &target_shape)?;
     let mut positions = Indices::new(runtime, target_len)?;
     for start in (0..target_len).step_by(4096) {
         positions.checkpoint()?;

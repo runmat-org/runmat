@@ -1,14 +1,20 @@
 use runmat_value::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExpectedScalarFieldName;
+pub(crate) enum ExpectedScalarFieldName {
+    Type,
+    Encoding(runmat_value::Utf16DecodeError),
+}
 
 pub(crate) fn decode(value: &Value) -> Result<String, ExpectedScalarFieldName> {
     match value {
         Value::String(name) => Ok(name.to_string()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data())
+                .map_err(ExpectedScalarFieldName::Encoding)
+        }
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
-        _ => Err(ExpectedScalarFieldName),
+        _ => Err(ExpectedScalarFieldName::Type),
     }
 }
 
@@ -34,8 +40,8 @@ mod tests {
         let strings = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
         assert_eq!(
             decode(&Value::StringArray(strings)),
-            Err(ExpectedScalarFieldName)
+            Err(ExpectedScalarFieldName::Type)
         );
-        assert_eq!(decode(&Value::Num(1.0)), Err(ExpectedScalarFieldName));
+        assert_eq!(decode(&Value::Num(1.0)), Err(ExpectedScalarFieldName::Type));
     }
 }

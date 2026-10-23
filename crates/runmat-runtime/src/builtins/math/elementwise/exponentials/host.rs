@@ -68,7 +68,7 @@ pub(super) fn evaluate_tensor(
 fn evaluate_characters(operation: ExponentialOperation, chars: CharArray) -> BuiltinResult<Value> {
     let values = chars
         .iter_column_major()
-        .map(|value| operation.apply_f64(value as u32 as f64))
+        .map(|value| operation.apply_f64(f64::from(value.raw())))
         .collect();
     Tensor::new(values, chars.shape)
         .map(Value::Tensor)

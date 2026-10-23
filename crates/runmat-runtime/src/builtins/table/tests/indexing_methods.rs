@@ -26,11 +26,14 @@ fn table_methods_preserve_typed_variable_and_return_updated_value() {
         )
         .expect("typed column"),
     );
-    let table = block_on(table_builtin(vec![
-        values,
-        Value::from("VariableNames"),
-        Value::Cell(CellArray::new(vec![Value::from("Count")], 1, 1).expect("name")),
-    ]))
+    let table = block_on(table_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            values,
+            Value::from("VariableNames"),
+            Value::Cell(CellArray::new(vec![Value::from("Count")], 1, 1).expect("name")),
+        ]),
+    ))
     .expect("table");
     let selected =
         block_on(table_subsref(None, table.clone(), member("Count"))).expect("read variable");
@@ -75,12 +78,16 @@ fn table_methods_preserve_typed_variable_and_return_updated_value() {
 #[test]
 fn dictionary_methods_compare_wide_keys_and_keep_original_value() {
     let large_key = Value::Int(IntValue::U64(9_007_199_254_740_993));
-    let dictionary = block_on(dictionary_builtin(vec![
-        large_key.clone(),
-        Value::Int(IntValue::U64(u64::MAX)),
-    ]))
+    let dictionary = block_on(dictionary_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            large_key.clone(),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ]),
+    ))
     .expect("dictionary");
     let selected = block_on(dictionary_subsref(
+        None,
         dictionary.clone(),
         key(large_key.clone()),
     ))
@@ -94,12 +101,12 @@ fn dictionary_methods_compare_wide_keys_and_keep_original_value() {
     ))
     .expect("replace");
     assert_eq!(
-        block_on(dictionary_subsref(dictionary, key(large_key.clone()))).expect("original"),
+        block_on(dictionary_subsref(None, dictionary, key(large_key.clone()))).expect("original"),
         Value::Int(IntValue::U64(u64::MAX)),
     );
     assert_eq!(
         updated
-            .with_owned(|value| block_on(dictionary_subsref(value, key(large_key))))
+            .with_owned(|value| block_on(dictionary_subsref(None, value, key(large_key))))
             .expect("updated"),
         Value::Int(IntValue::U64(3)),
     );
@@ -110,7 +117,7 @@ fn method_receivers_reject_wrong_class_and_invalid_path() {
     let wrong = Value::Num(1.0);
     let valid_path = member("Count");
     assert!(block_on(table_subsref(None, wrong.clone(), valid_path.clone())).is_err());
-    assert!(block_on(dictionary_subsref(wrong.clone(), valid_path.clone())).is_err());
+    assert!(block_on(dictionary_subsref(None, wrong.clone(), valid_path.clone())).is_err());
     assert!(block_on(table_subsasgn(
         None,
         wrong.clone(),
@@ -126,6 +133,10 @@ fn method_receivers_reject_wrong_class_and_invalid_path() {
     ))
     .is_err());
 
-    let dictionary = block_on(dictionary_builtin(vec![])).expect("empty dictionary");
-    assert!(block_on(dictionary_subsref(dictionary, Value::Num(1.0))).is_err());
+    let dictionary = block_on(dictionary_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect("empty dictionary");
+    assert!(block_on(dictionary_subsref(None, dictionary, Value::Num(1.0))).is_err());
 }

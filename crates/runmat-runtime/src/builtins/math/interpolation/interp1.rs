@@ -100,7 +100,7 @@ async fn interp1_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let explicit = args.len() >= 3 && !third_arg_is_option(args.view());
+    let explicit = args.len() >= 3 && !third_arg_is_option(args.view())?;
     let sample_plan = if explicit {
         preflight_interp1_explicit_x(&args[0]).await?;
         Some(
@@ -219,7 +219,7 @@ async fn preflight_interp1_inputs(
     if args.len() < 2 {
         return Ok(());
     }
-    let explicit = args.len() >= 3 && !third_arg_is_option(args);
+    let explicit = args.len() >= 3 && !third_arg_is_option(args)?;
     let (samples, query) = if explicit {
         (args.range(..2).expect("interp1 samples"), &args[2])
     } else {
@@ -314,7 +314,7 @@ async fn try_interp1_gpu(
 
     let mut method = InterpMethod::Linear;
     let mut extrap = Extrapolation::Nan;
-    let (series, query_value, options) = if args.len() == 2 || third_arg_is_option(args) {
+    let (series, query_value, options) = if args.len() == 2 || third_arg_is_option(args)? {
         let Some(series) = implicit_gpu_series(&args[0])? else {
             return Ok(None);
         };
@@ -765,7 +765,7 @@ impl ParsedInterp1 {
         let mut method = InterpMethod::Linear;
         let mut extrap = Extrapolation::Nan;
         let mut explicit_extrapolation = false;
-        let (series, query) = if args.len() == 2 || third_arg_is_option(args.view()) {
+        let (series, query) = if args.len() == 2 || third_arg_is_option(args.view())? {
             let y = args.pop_front().expect("Y argument");
             let xq = args.pop_front().expect("Xq argument");
             let series = implicit_series_from_values(y, NAME).await?;
@@ -819,10 +819,13 @@ impl ParsedInterp1 {
     }
 }
 
-fn third_arg_is_option(args: crate::call::FunctionArgumentView<'_>) -> bool {
-    args.get(2)
-        .and_then(|value| crate::builtins::common::random_args::keyword_of(value))
-        .is_some()
+fn third_arg_is_option(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<bool> {
+    Ok(args
+        .get(2)
+        .map(crate::builtins::common::random_args::keyword_of)
+        .transpose()?
+        .flatten()
+        .is_some())
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ fn logical_sparse_complex_rejects_even_zero_imaginary_storage() {
 #[test]
 fn logical_empty_character_pages_preserve_geometry() {
     let shape = vec![0, 3, 2];
-    let chars = CharArray::new_with_shape(vec![], shape.clone()).unwrap();
+    let chars = CharArray::from_unicode_scalars_with_shape(vec![], shape.clone()).unwrap();
     let Value::LogicalArray(result) = logical_builtin(Value::CharArray(chars), vec![]).unwrap()
     else {
         panic!("logical array")
@@ -81,7 +81,7 @@ fn logical_symbolic_extension_gate_precedes_conversion() {
 #[test]
 fn logical_character_pages_preserve_shape_and_column_major_order() {
     let shape = vec![2, 2, 2];
-    let chars = CharArray::new_with_shape(
+    let chars = CharArray::from_unicode_scalars_with_shape(
         vec!['A', '\0', 'B', 'C', '\0', 'D', '\0', 'E'],
         shape.clone(),
     )
@@ -257,7 +257,7 @@ fn logical_rejects_typed_complex_integer_components() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_char_array_conversion() {
-    let chars = CharArray::new(vec!['A', '\0', 'C'], 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars(vec!['A', '\0', 'C'], 1, 3).unwrap();
     let result = logical_builtin(Value::CharArray(chars), Vec::new()).expect("logical");
     match result {
         Value::LogicalArray(array) => assert_eq!(array.data, vec![1, 0, 1]),

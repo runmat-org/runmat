@@ -218,11 +218,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fliplr_char_array() {
-        let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("runmat".chars().collect(), 2, 3).unwrap();
         let result = fliplr_builtin(Value::CharArray(chars)).expect("fliplr");
         match result {
             Value::CharArray(out) => {
-                let collected: String = out.data().iter().collect();
+                let collected: String = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(collected, "nurtam");
             }
             other => panic!("expected char array, got {other:?}"),

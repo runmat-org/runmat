@@ -111,15 +111,15 @@ pub struct Cli {
     #[arg(long, env = "RUNMAT_CONFIG")]
     pub config: Option<PathBuf>,
 
-    /// Disable JIT compilation (use interpreter only)
+    /// Disable native JIT compilation
     #[arg(long, value_parser = parse_bool_env)]
     pub no_jit: bool,
 
-    /// JIT compilation threshold (number of executions before JIT)
+    /// Accepted threshold setting (does not control native tiering)
     #[arg(long, default_value = "10")]
     pub jit_threshold: u32,
 
-    /// JIT optimization level (none, size, speed, aggressive)
+    /// Accepted optimization setting (not applied to the native compiler)
     #[arg(long, value_enum, default_value = "speed")]
     pub jit_opt_level: OptLevel,
 
@@ -408,6 +408,12 @@ pub enum Commands {
         /// Enable JIT for benchmark
         #[arg(long)]
         jit: bool,
+        /// Untimed warm-up invocations (report mode records them separately)
+        #[arg(long, default_value_t = 3)]
+        warmup: u32,
+        /// Create a new JSONL report including cold-first and raw warm samples
+        #[arg(long)]
+        report: Option<PathBuf>,
     },
     /// Configuration management
     Config {

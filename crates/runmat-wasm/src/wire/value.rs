@@ -73,13 +73,21 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             })
         }
         Value::CharArray(ca) => {
-            let s: String = ca.data.iter().copied().collect();
+            let (preview, truncated) = preview_slice(ca.data(), MAX_DATA_PREVIEW);
+            let code_units = preview.iter().map(|unit| unit.raw()).collect::<Vec<_>>();
+            let text = (!truncated)
+                .then(|| runmat_value::decode_utf16_code_units(ca.data()).ok())
+                .flatten();
             json!({
                 "kind": "char-array",
+                "encoding": "utf16-code-units-v1",
                 "rows": ca.rows,
                 "cols": ca.cols,
                 "shape": ca.shape.clone(),
-                "text": s,
+                "codeUnits": code_units,
+                "text": text,
+                "length": ca.data().len(),
+                "truncated": truncated,
             })
         }
         Value::Symbolic(expr) => json!({
@@ -525,6 +533,26 @@ mod tests {
         SparseTensor, StructArray, Tensor,
     };
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn character_wire_preserves_utf16_geometry_and_unpaired_units() {
+        let value = runmat_value::CharArray::from_code_units(
+            vec![
+                runmat_value::Utf16CodeUnit::from_raw(0xD83D),
+                runmat_value::Utf16CodeUnit::from_raw(0xDE42),
+                runmat_value::Utf16CodeUnit::from_raw(0xD800),
+            ],
+            1,
+            3,
+        )
+        .expect("raw UTF-16 character row");
+        let json = value_to_json(&Value::CharArray(value), 0);
+        assert_eq!(json["encoding"], "utf16-code-units-v1");
+        assert_eq!(json["shape"], json!([1, 3]));
+        assert_eq!(json["codeUnits"], json!([0xD83D, 0xDE42, 0xD800]));
+        assert!(json["text"].is_null());
+    }
 
     #[wasm_bindgen_test]
     fn integer_json_preserves_exact_64_bit_values_and_dtype() {

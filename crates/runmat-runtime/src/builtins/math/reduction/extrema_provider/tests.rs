@@ -121,6 +121,7 @@ fn scalar_extrema_use_native_single_storage_selection() {
 enum Fault {
     Execution,
     Unsupported,
+    UnsupportedFillAfterAttempt,
     UnsupportedAfterSubmission,
     Download,
 }
@@ -134,6 +135,67 @@ struct Provider {
 }
 
 impl Provider {
+    fn selected_extrema_estimate(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderResourceEstimate> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderExtremaDemand, ProviderExtremaKind, ProviderLayout,
+            ProviderOperationFamily, ProviderResidency, ProviderStorage,
+        };
+        if !matches!(self.fault, Fault::UnsupportedAfterSubmission) {
+            return None;
+        }
+        let route = query.workload.extrema.as_ref()?;
+        let [input] = query.inputs.as_slice() else {
+            return None;
+        };
+        let [output] = query.outputs.as_slice() else {
+            return None;
+        };
+        let identity = match route.kind {
+            ProviderExtremaKind::Minimum => runmat_builtins::MIN_CATALOG_ENTRY.identity.name,
+            ProviderExtremaKind::Maximum => runmat_builtins::MAX_CATALOG_ENTRY.identity.name,
+        };
+        if query.operation.0 != identity
+            || query.family != ProviderOperationFamily::Reduction
+            || query.workload.requested_outputs != Some(1)
+            || route.demand != ProviderExtremaDemand::ValuesOnly
+            || route.axis != 0
+            || input.shape != [2, 3]
+            || input.element_type != ProviderElementType::F64
+            || input.layout != ProviderLayout::ColumnMajorContiguous
+            || input.storage != ProviderStorage::DenseReal
+            || input.residency != ProviderResidency::Device
+        {
+            return None;
+        }
+        let backing = route
+            .input_backing
+            .filter(|backing| backing.matches_representation(input))?;
+        let backing_bytes = backing.live_requested_bytes()?;
+        if input.checked_byte_len()? != backing_bytes {
+            return None;
+        }
+        let mut expected_output = input.clone();
+        expected_output.shape[0] = 1;
+        if output != &expected_output {
+            return None;
+        }
+        let values = output.checked_byte_len()?;
+        // The dimensional hook keeps its borrowed input, both F64 outputs
+        // (including discarded indices), and its 16-byte uniform live.
+        Some(runmat_accelerate_api::ProviderResourceEstimate {
+            transient_bytes: Some(
+                backing_bytes
+                    .checked_add(values.checked_mul(2)?)?
+                    .checked_add(16)?,
+            ),
+            output_bytes: Some(values),
+            dispatches: Some(1),
+        })
+    }
+
     fn reject_execution<T>(&self) -> runmat_accelerate_api::ProviderExecutionResult<T> {
         self.reject().map_err(|error| {
             let error = runmat_accelerate_api::ProviderExecutionError::from(error);
@@ -163,7 +225,7 @@ impl Provider {
                     "dimensional reduction failed after a native submission",
                 ))
             }
-            Fault::Unsupported | Fault::Download => {
+            Fault::Unsupported | Fault::UnsupportedFillAfterAttempt | Fault::Download => {
                 Err(runmat_accelerate_api::unsupported_provider_operation(
                     "dimensional reduction unavailable",
                 ))
@@ -184,16 +246,8 @@ impl AccelProvider for Provider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        if matches!(self.fault, Fault::UnsupportedAfterSubmission)
-            && query.workload.extrema.is_some()
-        {
-            return runmat_accelerate_api::ProviderFeasibility::supported(
-                runmat_accelerate_api::ProviderResourceEstimate {
-                    transient_bytes: Some(64),
-                    output_bytes: Some(24),
-                    dispatches: Some(1),
-                },
-            );
+        if let Some(estimate) = self.selected_extrema_estimate(query) {
+            return runmat_accelerate_api::ProviderFeasibility::supported(estimate);
         }
         runmat_accelerate_api::ProviderFeasibility::rejected(
             runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
@@ -208,9 +262,7 @@ impl AccelProvider for Provider {
         use runmat_accelerate_api::observation::{
             ProviderObservationCapability, ProviderObservationOverhead,
         };
-        if matches!(self.fault, Fault::UnsupportedAfterSubmission)
-            && query.workload.extrema.is_some()
-        {
+        if self.selected_extrema_estimate(query).is_some() {
             ProviderObservationCapability::Supported(ProviderObservationOverhead {
                 submissions: 1,
                 requested_peak_buffer_bytes: 0,
@@ -230,9 +282,7 @@ impl AccelProvider for Provider {
         use runmat_accelerate_api::observation::{
             ProviderObservationSupport, ProviderOperationReceipt,
         };
-        if matches!(self.fault, Fault::UnsupportedAfterSubmission)
-            && query.workload.extrema.is_some()
-        {
+        if self.selected_extrema_estimate(query).is_some() {
             ProviderObservationSupport::Observed(ProviderOperationReceipt::new())
         } else {
             ProviderObservationSupport::Unsupported
@@ -301,6 +351,11 @@ impl AccelProvider for Provider {
         _: &GpuTensorHandle,
         _: f64,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // A pure optional-constructor decline is not an attempted failure.
+        // Keep the separate attempted Unsupported error below terminal.
+        if matches!(self.fault, Fault::Unsupported) {
+            return Ok(None);
+        }
         let result: anyhow::Result<GpuTensorHandle> = self.reject();
         result.map(Some).map_err(|source| {
             runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
@@ -338,7 +393,10 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
             assert_eq!(provider.reductions.load(Ordering::SeqCst), 1);
             match fault {
                 Fault::Unsupported => assert_eq!(result.unwrap(), Value::Num(0.0)),
-                Fault::Execution | Fault::Download | Fault::UnsupportedAfterSubmission => {
+                Fault::Execution
+                | Fault::Download
+                | Fault::UnsupportedAfterSubmission
+                | Fault::UnsupportedFillAfterAttempt => {
                     let error = result.unwrap_err();
                     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
                     let mut source = std::error::Error::source(&error);
@@ -557,7 +615,11 @@ fn dimensional_extrema_never_dispatch_unregistered_input_to_selected_provider() 
 fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback() {
     for name in ["min", "max"] {
         for form in 0..3 {
-            for fault in [Fault::Execution, Fault::Unsupported] {
+            for fault in [
+                Fault::Execution,
+                Fault::Unsupported,
+                Fault::UnsupportedFillAfterAttempt,
+            ] {
                 let provider = Box::leak(Box::new(Provider {
                     owner: TestAllocationOwner::new(),
                     fault,
@@ -583,21 +645,34 @@ fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback(
                     _ => vec![Value::Num(2.0), Value::GpuTensor(right.handle.clone())],
                 };
                 let result = futures::executor::block_on(call_extrema_owner(name, &args));
-                if matches!(fault, Fault::Execution) {
+                let attempted_fill = matches!(fault, Fault::UnsupportedFillAfterAttempt)
+                    && name == "max"
+                    && form != 0;
+                if matches!(fault, Fault::Execution) || attempted_fill {
                     let error = result.unwrap_err();
                     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
                     let source = error.source.as_ref().unwrap();
                     let source = source
                         .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
                         .unwrap();
-                    assert_eq!(
-                        std::error::Error::source(source)
+                    if attempted_fill {
+                        assert!(
+                            !source.is_unsupported(),
+                            "an attempted fill is not a capability decline"
+                        );
+                        assert!(std::error::Error::source(source)
                             .unwrap()
-                            .downcast_ref::<std::io::Error>()
-                            .unwrap()
-                            .kind(),
-                        std::io::ErrorKind::BrokenPipe,
-                    );
+                            .is::<runmat_accelerate_api::UnsupportedProviderOperation>());
+                    } else {
+                        assert_eq!(
+                            std::error::Error::source(source)
+                                .unwrap()
+                                .downcast_ref::<std::io::Error>()
+                                .unwrap()
+                                .kind(),
+                            std::io::ErrorKind::BrokenPipe,
+                        );
+                    }
                     assert_eq!(provider.reductions.load(Ordering::SeqCst), 1);
                     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
                 } else {
@@ -611,6 +686,7 @@ fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback(
                         provider.downloads.load(Ordering::SeqCst),
                         if form == 0 { 2 } else { 1 }
                     );
+                    assert_eq!(provider.reductions.load(Ordering::SeqCst), 1);
                 }
                 drop(args);
                 for input in [left, right] {

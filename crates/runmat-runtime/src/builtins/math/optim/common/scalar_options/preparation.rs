@@ -209,10 +209,14 @@ fn switch_value(name: &str, field: &str, value: &Value) -> BuiltinResult<()> {
             Value::StringArray(values) if values.data().len() == 1 => {
                 runmat_builtins::OptimSwitch::parse(&values.data()[0]).is_some()
             }
-            Value::CharArray(chars) if chars.rows == 1 => {
-                runmat_builtins::OptimSwitch::parse(&chars.data().iter().collect::<String>())
-                    .is_some()
-            }
+            Value::CharArray(chars) if chars.rows == 1 => runmat_builtins::OptimSwitch::parse(
+                &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                    let mut error = optim_error(name, source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?,
+            )
+            .is_some(),
             _ => false,
         }
     };

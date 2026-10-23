@@ -145,6 +145,9 @@ fn canonical_nonlinear_family_preflights_outputs_and_preserves_failed_transfer_c
         })
         .unwrap();
     let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    // This explicit invocation owns its policy; the ambient thread guard
+    // does not change a fresh RuntimeContext's compatibility profile.
+    runtime.set_runmat_extensions_enabled(true);
     for (entry, maximum, output_error) in [
         (
             &runmat_builtins::FMINUNC_CATALOG_ENTRY,
@@ -199,7 +202,7 @@ fn canonical_nonlinear_family_preflights_outputs_and_preserves_failed_transfer_c
         assert_eq!(
             provider.downloads.load(Ordering::SeqCst),
             before + 1,
-            "{}",
+            "{}: {failed:?}",
             entry.identity.name
         );
         assert_eq!(failed.identifier(), Some("RunMat:gather:DownloadFailed"));

@@ -1,9 +1,10 @@
 //! Query construction and the one pre-effect whole-work decision for bounded
 //! GPU integer batches. No child-stream range is committed here.
 
-use super::super::{gpu, gpu_query, gpu_upload::GpuChildHostCandidate};
+use super::super::gpu;
 use super::{error, provider_error};
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::gpu_helpers::{host_upload::GpuHostCandidate, query_metadata};
 use crate::context::host_allocation::{
     provider_registration_host_quote, HostAllocationError, HostAllocationPlan,
 };
@@ -123,7 +124,7 @@ pub(crate) fn select_initial_route(
     domain: GpuBoundedIntegerDomain,
     shape: &[usize],
     class: NumericElementType,
-    host: Option<&GpuChildHostCandidate>,
+    host: Option<&GpuHostCandidate>,
 ) -> BuiltinResult<Option<InitialIntegerRoute>> {
     if output_element(class).is_none() {
         return Ok(None);
@@ -176,15 +177,21 @@ pub(crate) fn select_initial_route(
         preparation_shape_ranks: &[],
         preparation_representation_slots: 0,
     };
-    let query_bytes = gpu_query::requested_bytes("randi", &footprint)?;
-    let _query_receipt = match gpu_query::admit(runtime.as_ref(), query_bytes) {
+    let query_bytes = query_metadata::requested_bytes("randi", &footprint)?;
+    let _query_receipt = match query_metadata::admit(runtime.as_ref(), query_bytes) {
         Ok(receipt) => receipt,
         Err(HostAllocationError::Resource(HostEffectAllocationError::ExceedsCapacity)) => {
             // Query preparation belongs to the optional native route. The
             // independently legal host candidate remains available.
             return Ok(None);
         }
-        Err(cause) => return Err(gpu_query::admission_error("randi", runtime.as_ref(), cause)),
+        Err(cause) => {
+            return Err(query_metadata::admission_error(
+                "randi",
+                runtime.as_ref(),
+                cause,
+            ))
+        }
     };
     let query = batch_query(shape, class, domain, reservation, 0, false)?;
     if !footprint.matches(&query) {

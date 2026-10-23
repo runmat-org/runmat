@@ -16,3 +16,5 @@ pub const SVD_CATALOG_ENTRY: crate::BuiltinCatalogEntry =
         residency: crate::BuiltinResidencyPolicy::GatherToHost,
         maturity: crate::BuiltinContractMaturity::Complete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&SVD_CATALOG_ENTRY];

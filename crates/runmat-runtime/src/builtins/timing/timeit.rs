@@ -229,7 +229,13 @@ fn prepare_callable(
                     &TIMEIT_ERROR_HANDLE_KIND,
                 ))
             } else {
-                let text: String = arr.data().iter().collect();
+                let text =
+                    crate::builtins::common::text::decode_utf16_with_error(arr.data(), || {
+                        timeit_error_with_message(
+                            "timeit: function text is not valid UTF-16",
+                            &TIMEIT_ERROR_HANDLE_KIND,
+                        )
+                    })?;
                 parse_handle_string(&text).map(|handle| TimeitCallable {
                     handle: canonicalize_text_handle(handle),
                     num_outputs,

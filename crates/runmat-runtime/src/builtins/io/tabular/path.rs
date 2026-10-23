@@ -9,7 +9,7 @@ use runmat_filesystem::{
     self as fs, CapturedFsResourceLease, FsProvider, FsStagedOutput, OpenOptions,
 };
 
-pub(super) struct TabularFsPath {
+pub(in crate::builtins) struct TabularFsPath {
     provider: Arc<dyn FsProvider>,
     path: PathBuf,
     lease: Option<CapturedFsResourceLease>,
@@ -160,7 +160,7 @@ impl Read for TabularReadSource {
     }
 }
 
-pub(super) struct TabularFsOwner {
+pub(in crate::builtins) struct TabularFsOwner {
     provider: Arc<dyn FsProvider>,
     cwd: Option<PathBuf>,
     lease: Option<CapturedFsResourceLease>,

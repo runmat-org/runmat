@@ -1,0 +1,36 @@
+use crate::*;
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "example-1",
+        title: "Read root graphics properties",
+        program: "close('all');\nr = groot();\n{get(r, 'Type'), isempty(get(r, 'CurrentFigure'))}",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(r==0); assert(strcmp(get(r,'Type'),'root')); assert(isempty(get(r,'CurrentFigure')));" },
+    },
+    BuiltinExample {
+        id: "example-2",
+        title: "Select a current figure through the root object",
+        program: "r = groot();\nf1 = figure(1);\nf2 = figure(2);\nset(r, 'CurrentFigure', f1);\ngcf()",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(r==0); assert(gcf()==f1); assert(f1==1 && f2==2);" },
+    },
+    BuiltinExample {
+        id: "example-3",
+        title: "Round-trip a root default graphics property",
+        program: "set(groot, 'defaultAxesTickLabelInterpreter', 'latex');\nget(groot, 'defaultAxesTickLabelInterpreter')",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(get(groot,'defaultAxesTickLabelInterpreter'),'latex'));" },
+    },
+];

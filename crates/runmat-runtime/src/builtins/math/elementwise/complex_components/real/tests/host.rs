@@ -142,7 +142,7 @@ fn real_logical_array_to_numeric() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn real_char_array_codes() {
-    let chars = CharArray::new("AZ".chars().collect(), 1, 2).expect("char array");
+    let chars = CharArray::from_unicode_scalars("AZ".chars().collect(), 1, 2).expect("char array");
     let result = real_builtin(Value::CharArray(chars)).expect("real");
     match result {
         Value::Tensor(t) => {

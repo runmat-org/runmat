@@ -9,9 +9,6 @@ use std::{cell::Cell, rc::Rc};
 
 struct Recorder(Rc<Cell<usize>>);
 impl RuntimeAccelerationService for Recorder {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

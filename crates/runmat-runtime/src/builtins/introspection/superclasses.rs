@@ -45,7 +45,11 @@ fn requested_class_name(value: &Value) -> BuiltinResult<runmat_types::ClassIdent
     let source = match value {
         Value::String(class_name) => class_name.as_str().to_owned(),
         Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str().to_owned(),
-        Value::CharArray(ca) if ca.rows <= 1 => ca.data().iter().collect::<String>(),
+        Value::CharArray(ca) if ca.rows <= 1 => {
+            super::text::decode_utf16_with_error(ca.data(), || {
+                superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)
+            })?
+        }
         Value::ClassRef(class_name) => return Ok(class_name.as_identity().clone()),
         Value::ObjectArray(_)
         | Value::Object(_)

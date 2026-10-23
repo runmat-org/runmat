@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 #[path = "body/expression_region_validation/mod.rs"]
 mod expression_region_validation;
+#[path = "body/prepared_assignment_validation.rs"]
+mod prepared_assignment_validation;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirBody {
@@ -60,6 +62,11 @@ impl MirBody {
             let mut previous_expression = None;
             for statement in &block.statements {
                 match &statement.kind {
+                    MirStmtKind::PreparedAssign { preparation, .. } => {
+                        assignment_roots = root(&preparation.mutation.place).into_iter().collect();
+                        assignment_span = Some(statement.span);
+                        previous_expression = None;
+                    }
                     MirStmtKind::Assign { place, .. } => {
                         assignment_roots = root(place).into_iter().collect();
                         assignment_span = Some(statement.span);
@@ -156,6 +163,7 @@ impl MirBody {
     /// they may not be defined or observed by the surrounding control-flow
     /// graph.
     pub fn validate_expression_regions(&self) -> Result<(), String> {
+        prepared_assignment_validation::validate(self)?;
         expression_region_validation::validate(self)
     }
 }

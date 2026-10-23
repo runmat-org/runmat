@@ -173,6 +173,41 @@ impl ExactHostComplexTensorAllocation {
         Ok(())
     }
 
+    /// Borrow uniquely owned, initialized native single-complex output.
+    pub fn as_complex_f32_slice_mut(&mut self) -> Option<&mut [ComplexElement<f32>]> {
+        if self.dtype != NumericDType::F32 {
+            return None;
+        }
+        // SAFETY: new checked this class, allocation layout and length, and
+        // zero-initialized every element. The mutable borrow excludes aliases
+        // and cannot outlive this owner or its allocation/retained claim.
+        Some(unsafe {
+            std::slice::from_raw_parts_mut(
+                self.allocation
+                    .pointer()
+                    .as_ptr()
+                    .cast::<ComplexElement<f32>>(),
+                self.len,
+            )
+        })
+    }
+    /// Borrow uniquely owned, initialized native double-complex output.
+    pub fn as_complex_f64_slice_mut(&mut self) -> Option<&mut [ComplexElement<f64>]> {
+        if self.dtype != NumericDType::F64 {
+            return None;
+        }
+        // SAFETY: same exact ownership/layout invariant as the single view;
+        // the class gate prevents reinterpreting single storage as double.
+        Some(unsafe {
+            std::slice::from_raw_parts_mut(
+                self.allocation
+                    .pointer()
+                    .as_ptr()
+                    .cast::<ComplexElement<f64>>(),
+                self.len,
+            )
+        })
+    }
     pub fn into_tensor(self) -> Result<ComplexTensor, ExactHostNumericAllocationError> {
         let storage = match self.dtype {
             NumericDType::F32 => ComplexStorage::F32(

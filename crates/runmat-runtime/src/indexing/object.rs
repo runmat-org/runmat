@@ -22,6 +22,15 @@ pub fn shape(value: &Value) -> Option<Vec<usize>> {
 }
 
 pub fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
+    let context = crate::context::legacy::active();
+    read_with_plan_in_context(context.as_ref(), value, plan)
+}
+
+pub fn read_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
     if plan
         .output_shape
         .iter()
@@ -33,18 +42,17 @@ pub fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeE
             "Object-array index shape differs from its selection count",
         ));
     }
-    let array = as_array(value.clone())?;
+    let array = as_array_in_context(context, value.clone())?;
     if let [index] = plan.indices.as_slice() {
         return array.get_linear(*index as usize).cloned().ok_or_else(|| {
             semantic_error("IndexOutOfBounds", "Object array index is out of bounds")
         });
     }
-    let context = crate::context::legacy::active();
     crate::execution::object_array::select(
         &array,
         plan.indices.iter().map(|&index| index as usize),
         &plan.output_shape,
-        context.as_ref(),
+        context,
     )
     .map(|output| output.with_owned(|value| value))
 }
@@ -55,30 +63,104 @@ pub fn assign_scalar_indices(
     rhs: Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let array = as_array(base)?;
+    let context = crate::context::legacy::active();
+    if delete {
+        return delete_scalar_indices_in_context(context.as_ref(), base, indices, &rhs);
+    }
+    assign_scalar_indices_in_context(context.as_ref(), base, indices, rhs)
+}
+
+/// Scalar geometry is borrowed from the original receiver. Only the existing
+/// assignment owner constructs a destination; no scalar ObjectArray mirror
+/// or heap selector vector is needed to prepare the canonical plan.
+pub fn assign_scalar_indices_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    indices: &[usize],
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    let shape = crate::object::indexing::class_name_from_base(&base)
+        .and_then(|_| crate::indexing::value::shape_borrowed(&base))
+        .ok_or_else(|| semantic_error("ObjectArrayIndexing", "value is not an object array"))?;
     if !matches!(indices.len(), 1 | 2) {
         return Err(semantic_error(
             "UnsupportedAssignmentRank",
             "Object assignment supports one or two scalar subscripts",
         ));
     }
-    if delete && indices.len() == 2 {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let _roots = match context {
+        Some(context) => crate::execution::RootedValueLease::for_values_iterator_in_context(
+            [&base, &rhs].into_iter(),
+            context,
+        )?,
+        None => crate::execution::RootedValueLease::for_values([&base, &rhs].into_iter())
+            .map_err(|error| error.into_runtime_error())?,
+    };
+    // The preceding rank gate is the authoritative bound for these slots.
+    let selectors = [
+        crate::indexing::selectors::SliceSelector::Scalar(indices[0]),
+        crate::indexing::selectors::SliceSelector::Scalar(indices.get(1).copied().unwrap_or(1)),
+    ];
+    let selectors = &selectors[..indices.len()];
+    let plan = match context {
+        Some(context) => crate::indexing::plan::build_assignment_plan_in_context(
+            context,
+            selectors,
+            indices.len(),
+            shape.as_slice(),
+        )?,
+        None => crate::indexing::plan::build_assignment_plan(
+            selectors,
+            indices.len(),
+            shape.as_slice(),
+        )?,
+    };
+    owner.check()?;
+    let result = assign_with_plan_in_context(context, base, &plan, rhs)?;
+    owner.check()?;
+    Ok(result)
+}
+
+pub fn delete_scalar_indices_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    indices: &[usize],
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let shape = crate::object::indexing::class_name_from_base(&base)
+        .and_then(|_| crate::indexing::value::shape_borrowed(&base))
+        .ok_or_else(|| semantic_error("ObjectArrayIndexing", "value is not an object array"))?;
+    if !matches!(indices.len(), 1 | 2) {
+        return Err(semantic_error(
+            "UnsupportedAssignmentRank",
+            "Object assignment supports one or two scalar subscripts",
+        ));
+    }
+    if indices.len() == 2 {
         return Err(semantic_error(
             "UnsupportedDeletion",
             "Object-array deletion with two scalar subscripts is not supported",
         ));
     }
-    let selectors = indices
-        .iter()
-        .copied()
-        .map(crate::indexing::selectors::SliceSelector::Scalar)
-        .collect::<Vec<_>>();
-    let plan = if delete {
-        crate::indexing::plan::build_index_plan(&selectors, indices.len(), array.shape())?
-    } else {
-        crate::indexing::plan::build_assignment_plan(&selectors, indices.len(), array.shape())?
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let _roots = crate::execution::structure::replacement::lease(&base, context)?;
+    let selectors = [crate::indexing::selectors::SliceSelector::Scalar(
+        indices[0],
+    )];
+    let plan = match context {
+        Some(context) => crate::indexing::plan::build_index_plan_in_context(
+            context,
+            &selectors,
+            1,
+            shape.as_slice(),
+        )?,
+        None => crate::indexing::plan::build_index_plan(&selectors, 1, shape.as_slice())?,
     };
-    assign_with_plan(Value::ObjectArray(array), &plan, rhs, delete)
+    owner.check()?;
+    let result = delete_with_plan_in_context(context, base, &plan, rhs)?;
+    owner.check()?;
+    Ok(result)
 }
 
 pub fn assign_with_plan(
@@ -87,18 +169,79 @@ pub fn assign_with_plan(
     rhs: Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let array = as_array(base)?;
+    let context = crate::context::legacy::active();
     if delete {
-        return delete_with_plan(array, plan, &rhs);
+        return delete_with_plan_in_context(context.as_ref(), base, plan, &rhs);
     }
-    growth::assign(&array, plan, &rhs)
+    assign_with_plan_in_context(context.as_ref(), base, plan, rhs)
 }
 
-fn delete_with_plan(
-    array: ObjectArray,
+pub fn assign_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    plan: &IndexPlan,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    let array = as_array_in_context(context, base)?;
+    growth::assign(context, &array, plan, &rhs)
+}
+
+pub fn delete_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let result = match base {
+        Value::ObjectArray(array) => delete_array(context, array, plan, rhs),
+        base @ (Value::Object(_) | Value::HandleObject(_)) => {
+            validate_delete(plan, rhs, 1, 1)?;
+            let _roots = crate::execution::structure::replacement::lease(&base, context)?;
+            for &index in &plan.indices {
+                owner.check()?;
+                if index != 0 {
+                    return Err(object_index_error());
+                }
+            }
+            if plan.indices.is_empty() {
+                owner.check()?;
+                return Ok(base);
+            }
+            let class = crate::object::indexing::class_name_owner_from_base(&base)
+                .expect("validated object receiver");
+            let mut output =
+                crate::execution::object_array::ObjectArrayConstruction::with_capacity(
+                    context,
+                    crate::execution::object_array::Class::Owner(class),
+                    0,
+                    &[1, 0],
+                    1,
+                    false,
+                )?;
+            match crate::object::protocol::selected_receiver_facts(&base)? {
+                Some(facts) => output.push_provenance(facts)?,
+                None => output.mark_unselected(),
+            }
+            let result = output.finish()?;
+            owner.check()?;
+            Ok(result.with_owned(|value| value))
+        }
+        _ => Err(semantic_error(
+            "ObjectArrayIndexing",
+            "value is not an object array",
+        )),
+    }?;
+    owner.check()?;
+    Ok(result)
+}
+
+fn validate_delete(
+    plan: &IndexPlan,
+    rhs: &Value,
+    rows: usize,
+    columns: usize,
+) -> Result<(), RuntimeError> {
     if plan.dims != 1 {
         return Err(semantic_error(
             "UnsupportedDeletion",
@@ -111,17 +254,31 @@ fn delete_with_plan(
             "Indexed deletion requires an empty right-hand side",
         ));
     }
-    let rows = array.shape().first().copied().unwrap_or(1);
-    let columns = array.shape().get(1).copied().unwrap_or(1);
     if rows != 1 && columns != 1 {
         return Err(semantic_error(
             "UnsupportedDeletion",
             "Linear object-array deletion is only defined for vectors",
         ));
     }
-    let context = crate::context::legacy::active();
-    let mut removed =
-        crate::execution::object_array::indices::Indices::new(context.as_ref(), array.len())?;
+    Ok(())
+}
+
+fn object_index_error() -> RuntimeError {
+    semantic_error("IndexOutOfBounds", "Object array index is out of bounds")
+}
+
+fn delete_array(
+    context: Option<&crate::context::RuntimeContext>,
+    array: ObjectArray,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let rows = array.shape().first().copied().unwrap_or(1);
+    let columns = array.shape().get(1).copied().unwrap_or(1);
+    validate_delete(plan, rhs, rows, columns)?;
+    let source = Value::ObjectArray(array.clone());
+    let _roots = crate::execution::structure::replacement::lease(&source, context)?;
+    let mut removed = crate::execution::object_array::indices::Indices::new(context, array.len())?;
     let mut count = 0usize;
     for (ordinal, &index) in plan.indices.iter().enumerate() {
         if ordinal % 4096 == 0 {
@@ -149,7 +306,7 @@ fn delete_with_plan(
             .enumerate()
             .filter_map(|(index, &removed)| (removed == 0).then_some(index)),
         &shape,
-        context.as_ref(),
+        context,
     )?;
     removed.checkpoint()?;
     Ok(selected.with_owned(|value| match value {
@@ -160,12 +317,14 @@ fn delete_with_plan(
     }))
 }
 
-fn as_array(value: Value) -> Result<ObjectArray, RuntimeError> {
+fn as_array_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: Value,
+) -> Result<ObjectArray, RuntimeError> {
     if let Value::ObjectArray(array) = value {
         return Ok(array);
     }
-    let context = crate::context::legacy::active();
-    let _roots = crate::execution::structure::replacement::lease(&value, context.as_ref())?;
+    let _roots = crate::execution::structure::replacement::lease(&value, context)?;
     let class = match &value {
         Value::Object(object) => object.class_name_owner(),
         Value::HandleObject(handle) => &handle.class_name,
@@ -177,7 +336,7 @@ fn as_array(value: Value) -> Result<ObjectArray, RuntimeError> {
         }
     };
     let mut output = crate::execution::object_array::ObjectArrayConstruction::new(
-        context.as_ref(),
+        context,
         crate::execution::object_array::Class::Owner(class),
         1,
         &[1, 1],

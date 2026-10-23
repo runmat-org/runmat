@@ -9,6 +9,7 @@ mod min_inference;
 mod max_inference;
 mod missing_policy;
 mod numeric_inference;
+mod product_inference;
 mod sum_inference;
 mod sum_options;
 
@@ -31,6 +32,7 @@ pub use min_options::{MinComparisonMethod, MinControl};
 pub use missing_policy::ReductionNaN;
 pub(super) use numeric_inference::LiteralReductionOutput;
 pub(super) use numeric_inference::{has_literal_zero_axis, is_empty_placeholder};
+pub(super) use product_inference::{admitted_product_controls, inferred_product_shape};
 pub(super) use sum_inference::{admitted_sum_controls, inferred_sum_shape};
 pub use sum_options::{SumControl, SumOutputClass};
 
@@ -174,7 +176,9 @@ macro_rules! define_logical_reduction_entry {
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::Host,
-                fusion: crate::BuiltinFusionPolicy::Candidate,
+                // The legacy shader template is not a typed logical-result
+                // fusion lowering. Provider reductions remain available.
+                fusion: crate::BuiltinFusionPolicy::Boundary,
                 distributed: crate::BuiltinDistributedPolicy::MaterializeArguments,
             },
             link: crate::BuiltinLinkContract {

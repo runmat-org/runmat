@@ -1,6 +1,6 @@
 use super::*;
 
-/// Inspect public argument positions without failing before compatibility gates run.
+/// Inspect public argument positions while preserving strict text decoding failures.
 pub(super) struct HeaderInspection {
     pub option_start: usize,
     slots: Vec<OptionSlot>,
@@ -29,8 +29,14 @@ pub(super) struct NamedOption {
 }
 
 impl HeaderInspection {
-    pub fn inspect(first: &Value, rest: crate::call::FunctionArgumentView<'_>) -> Self {
-        let first_name = rest.first().and_then(scalar_text);
+    pub fn inspect(
+        first: &Value,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
+        let first_name = match rest.first() {
+            Some(value) => scalar_text(value)?,
+            None => None,
+        };
         let first_identity = first_name
             .as_deref()
             .and_then(FitclinearOption::from_public_name);
@@ -41,11 +47,11 @@ impl HeaderInspection {
         };
         let slots = (option_start..rest.len())
             .step_by(2)
-            .map(|index| {
+            .map(|index| -> BuiltinResult<OptionSlot> {
                 let spelling = if index == 0 {
                     first_name.clone()
                 } else {
-                    scalar_text(&rest[index])
+                    scalar_text(&rest[index])?
                 };
                 let identity = if index == 0 {
                     first_identity
@@ -54,17 +60,17 @@ impl HeaderInspection {
                         .as_deref()
                         .and_then(FitclinearOption::from_public_name)
                 };
-                OptionSlot {
+                Ok(OptionSlot {
                     index,
                     spelling,
                     identity,
-                }
+                })
             })
-            .collect();
-        Self {
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        Ok(Self {
             option_start,
             slots,
-        }
+        })
     }
 
     pub fn known_options(&self) -> impl Iterator<Item = (usize, FitclinearOption)> + '_ {
@@ -160,7 +166,10 @@ pub(super) fn preflight_response_shape(
 ) -> BuiltinResult<()> {
     let response = if is_table_value(first) {
         if arguments.option_start == 1 {
-            rest.first().filter(|value| scalar_text(value).is_none())
+            match rest.first() {
+                Some(value) if scalar_text(value)?.is_none() => Some(value),
+                _ => None,
+            }
         } else {
             None
         }

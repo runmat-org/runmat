@@ -15,7 +15,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::random_args::keyword_of;
+use crate::builtins::common::arg_tokens::scalar_keyword_of;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -69,6 +69,14 @@ fn distance_descriptor_error(
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+fn distance_keyword(name: &'static str, value: &Value) -> BuiltinResult<Option<String>> {
+    scalar_keyword_of(value, name).map_err(|source| {
+        let mut error = distance_error(name, format!("{name}: text control is not valid UTF-16"));
+        error.source = Some(Box::new(source));
+        error
+    })
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -216,7 +224,7 @@ async fn strip_cache_size_option(
     let mut count = 0usize;
     let mut index = 0usize;
     while index < args.len() {
-        if keyword_of(&args[index])
+        if distance_keyword(name, &args[index])?
             .as_deref()
             .and_then(DistanceControlKind::from_keyword)
             .is_some()
@@ -227,7 +235,7 @@ async fn strip_cache_size_option(
                     format!("{name}: CacheSize requires a value"),
                 ));
             };
-            if keyword_of(value)
+            if distance_keyword(name, value)?
                 .as_deref()
                 .and_then(KnnCacheSizeKeyword::from_keyword)
                 == Some(KnnCacheSizeKeyword::Maximal)
@@ -254,16 +262,19 @@ async fn strip_cache_size_option(
     let mut cursor = 0usize;
     let metric_args = args
         .try_map_preserving_roots_async(count, runtime, |_| {
-            while keyword_of(&args[cursor])
-                .as_deref()
-                .and_then(DistanceControlKind::from_keyword)
-                .is_some()
-            {
-                cursor += 2;
-            }
-            let value = args[cursor].clone();
-            cursor += 1;
-            std::future::ready(Ok(value))
+            let value = (|| -> BuiltinResult<Value> {
+                while distance_keyword(name, &args[cursor])?
+                    .as_deref()
+                    .and_then(DistanceControlKind::from_keyword)
+                    .is_some()
+                {
+                    cursor += 2;
+                }
+                let value = args[cursor].clone();
+                cursor += 1;
+                Ok(value)
+            })();
+            std::future::ready(value)
         })
         .await?;
     Ok(metric_args)
@@ -286,11 +297,12 @@ async fn ensure_pdist_integer_boundaries(
         if !knn_typed_integer(value) {
             continue;
         }
-        let selector = index
-            .checked_sub(1)
-            .and_then(|previous| keyword_of(&rest[previous]))
-            .as_deref()
-            .and_then(DistanceSelectionKind::from_keyword);
+        let selector = match index.checked_sub(1) {
+            Some(previous) => distance_keyword(name, &rest[previous])?,
+            None => None,
+        }
+        .as_deref()
+        .and_then(DistanceSelectionKind::from_keyword);
         if matches!(builtin, PairwiseDistanceBuiltin::Pdist2) && selector.is_some() {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &PDIST2_INTEGER_SELECTION_EXTENSION,
@@ -523,7 +535,7 @@ fn ensure_knnsearch_extensions(
     let mut explicit_exhaustive = false;
     let mut idx = 0;
     while idx + 1 < rest.len() {
-        let Some(option) = keyword_of(&rest[idx])
+        let Some(option) = distance_keyword(KNNSEARCH_NAME, &rest[idx])?
             .as_deref()
             .and_then(KnnOption::from_keyword)
         else {
@@ -546,7 +558,7 @@ fn ensure_knnsearch_extensions(
                     )?;
                 }
                 KnnOption::Distance
-                    if keyword_of(value)
+                    if distance_keyword(KNNSEARCH_NAME, value)?
                         .as_deref()
                         .and_then(KnnMetric::from_keyword)
                         .is_some_and(|metric| metric.fast_alias) =>
@@ -581,7 +593,7 @@ fn ensure_knnsearch_extensions(
                 )?;
             }
             KnnOption::NsMethod => {
-                explicit_exhaustive = keyword_of(value)
+                explicit_exhaustive = distance_keyword(KNNSEARCH_NAME, value)?
                     .as_deref()
                     .and_then(KnnSearchMethod::from_keyword)
                     == Some(KnnSearchMethod::Exhaustive);
@@ -623,7 +635,7 @@ async fn ensure_knnsearch_exact_boundaries(
     }
     let mut idx = 0;
     while idx + 1 < rest.len() {
-        if keyword_of(&rest[idx])
+        if distance_keyword(KNNSEARCH_NAME, &rest[idx])?
             .as_deref()
             .and_then(KnnOption::from_keyword)
             .is_some_and(|option| {

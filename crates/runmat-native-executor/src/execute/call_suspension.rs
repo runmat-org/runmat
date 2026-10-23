@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use runmat_runtime::execution::{RootedValue, RootedValueSequence, RootedValues};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
@@ -14,32 +13,39 @@ mod argument_stage_tests;
 mod arguments;
 #[cfg(test)]
 mod catch_scope_tests;
+pub(super) mod numeric_region;
+pub(super) mod payload;
 mod prepared;
 mod publication;
 mod rooted;
-mod semantic_operation;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod roots_tests;
+mod semantic_operation;
 mod sequence;
 mod sequence_read;
-mod statement_output;
 mod short_circuit_truth;
+mod statement_output;
 mod subscript;
-mod terminator;
+pub(super) mod terminator;
 pub(super) use arguments::{begin_expanded_call_arguments, take_completed_expanded_call_arguments};
 pub(super) use prepared::{begin_prepared_receiver, take_completed_prepared_receiver};
 pub(super) use publication::publish;
-use rooted::{adopt_rooted_arguments, adopt_rooted_sequence};
+pub(super) use rooted::begin_selected_sequence;
+use rooted::{adopt_rooted_arguments, adopt_rooted_sequence, adopt_selected_sequence};
 pub(super) use rooted::{
     begin_lexical_call, begin_rooted_arguments, begin_rooted_sequence,
     begin_rooted_sequence_with_roots,
 };
 pub(in crate::execute) use semantic_operation::{
-    begin_semantic_operation, begin_semantic_value_operation, settle_completed_semantic_values,
+    begin_admitted_semantic_operation_with, begin_semantic_operation,
+    begin_semantic_value_operation, settle_completed_semantic_values,
     take_completed_semantic_operation, take_completed_semantic_value_operation,
     SemanticOperationKind,
 };
-pub(super) use sequence::{begin_sequence_stage, take_completed_sequence_stage, SequenceStage};
+pub(super) use sequence::{
+    begin_sequence_end_stage, begin_sequence_stage, take_completed_sequence_stage,
+    SequenceEndAdmission, SequenceStage,
+};
 pub(super) use sequence_read::{
     begin_sequence_read, take_completed_sequence_read, SequenceReadStage,
 };
@@ -49,32 +55,57 @@ pub(super) use short_circuit_truth::{
 };
 pub(super) use statement_output::{begin_statement_output, take_completed_statement_output};
 pub(super) use subscript::take_completed_subscript_path;
+#[cfg(test)]
+pub(super) use terminator::TerminatorCompletion;
 pub(super) use terminator::{
     begin_branch_truth, begin_for_capture, begin_for_next, begin_switch_equality,
-    begin_switch_truth, take_completed_terminator, TerminatorCompletion, TerminatorReady,
-    TerminatorReadyStage,
+    begin_switch_truth, take_completed_terminator, TerminatorReady, TerminatorReadyStage,
 };
 
-pub(super) type CompletionFuture =
-    Pin<Box<dyn Future<Output = NativeExecutorResult<CallCompletion>> + 'static>>;
+pub(super) type PendingCompletionFuture = runmat_runtime::execution::RuntimeContinuationFuture<
+    'static,
+    CallCompletion,
+    NativeExecutorError,
+>;
 
-pub(super) fn scope_completion(
+/// The selected concrete body and its catch scope share the original single
+/// continuation allocation. No already-erased child is admitted as its pointer.
+pub(super) fn admit_completion_with<F>(
     state: &HostState,
-    future: impl Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
-) -> CompletionFuture {
-    Box::pin(
-        state
-            .runtime
-            .scope_active_catch_shared(state.active_catch_exception(), future),
-    )
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<PendingCompletionFuture>
+where
+    F: Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
+{
+    let runtime = state.runtime.clone();
+    let catch = state.active_catch_exception();
+    admit_completion_in_context_with(&runtime, catch, make_future)
+}
+
+/// Prepared context permits an owned-stage transfer to occur only after
+/// admission invokes the factory, without borrowing HostState into the future.
+pub(super) fn admit_completion_in_context_with<F>(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    catch: Option<std::rc::Rc<runmat_value::MException>>,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<PendingCompletionFuture>
+where
+    F: Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
+{
+    runmat_runtime::execution::admit_native_hostcall_with_contextual_error(runtime, || {
+        runtime.scope_active_catch_unboxed_shared(catch, make_future())
+    })
 }
 
 pub(super) enum CallCompletion {
+    OriginalRegionObserved,
+    NumericRegion(numeric_region::NumericRegionCompletionOwner),
     RootedSequence {
         sequence: RootedValueSequence,
         requested_outputs: usize,
     },
     RootedArguments(RootedValues),
+    SelectedSequence(RootedValueSequence),
     RootedExpandedCallArguments(RootedValues),
     Lexical {
         result: runmat_runtime::call::lexical::RootedLexicalCallResult,
@@ -88,11 +119,13 @@ pub(super) enum CallCompletion {
         stage: SequenceReadStage,
         sequence: RootedValueSequence,
     },
-    PreparedReceiver(Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>),
-    SequenceStage(Box<SequenceStage>),
+    PreparedReceiver(
+        payload::PayloadBox<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
+    ),
+    SequenceStage(SequenceStage),
     ShortCircuitTruth(ShortCircuitTruthReady),
     StatementOutput,
-    Terminator(Box<TerminatorCompletion>),
+    Terminator(payload::PayloadBox<terminator::PendingTerminator>),
 }
 
 pub(super) struct PendingCall {
@@ -101,7 +134,7 @@ pub(super) struct PendingCall {
     pub(super) request: NativeSiteRequest,
     pub(super) embedded: Option<super::state::EmbeddedOperationIdentity>,
     pub(super) retained_roots: Vec<NativeValueRef>,
-    pub(super) future: CompletionFuture,
+    pub(super) future: PendingCompletionFuture,
 }
 
 pub(super) struct CompletedCall {
@@ -123,21 +156,20 @@ pub(super) enum SemanticOperationOutput {
 }
 
 pub(super) enum CompletedPayload {
+    OriginalRegionObserved,
+    NumericRegion(numeric_region::NumericRegionCompletionOwner),
     Values(Vec<NativeValueRef>),
     ExpandedCallArguments(Vec<NativeValueRef>),
     SequenceRead(SequenceReadStage),
     PreparedReceiver {
-        prepared: Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
+        prepared: payload::PayloadBox<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
         receiver: NativeValueRef,
     },
-    SequenceStage {
-        stage: Box<SequenceStage>,
-        roots: Vec<NativeValueRef>,
-    },
+    SequenceStage(SequenceStage),
     ShortCircuitTruth(ShortCircuitTruthReady),
     StatementOutput,
     SemanticOperation(SemanticOperationKind),
-    Terminator(Box<TerminatorReady>),
+    Terminator(payload::PayloadBox<TerminatorReady>),
 }
 
 pub(super) fn own_output_storage(
@@ -182,6 +214,31 @@ impl CompletedCall {
                 "completed sequence read lost its rooted value".into(),
             )),
         }
+    }
+}
+
+/// Check source-operation precedence without taking its typed payload or
+/// weakening the exact embedded consumer's later adoption checks.
+pub(super) fn has_completed_operation_at(
+    state: &HostState,
+    request: NativeSiteRequest,
+) -> NativeExecutorResult<bool> {
+    let Some(completed) = &state.completed_call else {
+        return Ok(false);
+    };
+    if completed.request != request {
+        return Err(NativeExecutorError::Host(
+            "completed native call does not match the exact resumed operation".into(),
+        ));
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+pub(super) fn completed_value_refs(state: &HostState) -> Option<&[NativeValueRef]> {
+    match &state.completed_call.as_ref()?.payload {
+        CompletedPayload::Values(outputs) => Some(outputs),
+        _ => None,
     }
 }
 
@@ -249,21 +306,32 @@ pub(super) fn take_completed(
         .map(Some)
 }
 
+#[cfg(test)]
 pub(super) fn completed_roots(state: &HostState) -> impl Iterator<Item = NativeValueRef> + '_ {
-    state
-        .completed_call
-        .iter()
+    completed_roots_from(state.completed_call.as_ref())
+}
+
+pub(super) fn completed_roots_from(
+    completed: Option<&CompletedCall>,
+) -> impl Iterator<Item = NativeValueRef> + '_ {
+    completed
+        .into_iter()
         .flat_map(|completed| match &completed.payload {
-            CompletedPayload::Values(outputs) => outputs.clone(),
-            CompletedPayload::ExpandedCallArguments(arguments) => arguments.clone(),
-            CompletedPayload::SequenceRead(_) => Vec::new(),
-            CompletedPayload::PreparedReceiver { receiver, .. } => vec![*receiver],
-            CompletedPayload::SequenceStage { roots, .. } => roots.clone(),
-            CompletedPayload::ShortCircuitTruth(_) => Vec::new(),
-            CompletedPayload::StatementOutput => Vec::new(),
-            CompletedPayload::SemanticOperation(_) => Vec::new(),
+            CompletedPayload::OriginalRegionObserved => &[][..],
+            CompletedPayload::NumericRegion(completed) => &completed.completion().inputs[..],
+            CompletedPayload::Values(outputs) => outputs.as_slice(),
+            CompletedPayload::ExpandedCallArguments(arguments) => arguments.as_slice(),
+            CompletedPayload::SequenceRead(_) => &[],
+            CompletedPayload::PreparedReceiver { receiver, .. } => std::slice::from_ref(receiver),
+            // Runtime's builder/destination owns its exact canonical root
+            // leases. Do not mirror selectors into an arena-reference Vec.
+            CompletedPayload::SequenceStage(_) => &[],
+            CompletedPayload::ShortCircuitTruth(_) => &[],
+            CompletedPayload::StatementOutput => &[],
+            CompletedPayload::SemanticOperation(_) => &[],
             CompletedPayload::Terminator(stage) => stage.arena_roots(),
         })
+        .copied()
 }
 
 pub(super) async fn complete(
@@ -290,14 +358,22 @@ pub(super) async fn complete(
     let PendingCall {
         request,
         embedded,
-        future,
+        mut future,
         ..
     } = pending;
     let runtime = state.runtime.clone();
+    let audit = super::region::observation::active_audit(state);
     let completion =
         match runmat_runtime::context::run_selected_callback_continuation(&runtime, async move {
             let _retained_lease = retained_lease;
-            Ok::<_, runmat_runtime::RuntimeError>(future.await)
+            let completion = futures::future::poll_fn(|context| {
+                runmat_runtime::numeric_region::service::with_native_region_poll(
+                    audit.clone(),
+                    || future.as_mut().poll(context),
+                )
+            })
+            .await;
+            Ok::<_, runmat_runtime::RuntimeError>(completion)
         })
         .await
         {
@@ -312,16 +388,23 @@ pub(super) async fn complete(
     let payload = match completion {
         Ok(CallCompletion::Terminator(stage)) if stage.is_for_next() => {
             let reconciliation = state.reconcile_external_workspace();
-            let restored = stage.restore_for_next(state);
+            let restored = stage.into_inner().restore_for_next(state);
             reconciliation?;
-            let next = restored?.map_err(NativeExecutorError::from)?;
+            let (next, reservation) = restored?;
+            let next = next.map_err(NativeExecutorError::from)?;
             let next = next.map(|value| value.with_owned(|value| state.arena.insert(value)));
-            CompletedPayload::Terminator(Box::new(TerminatorReady::for_next(next)))
+            CompletedPayload::Terminator(
+                reservation.allocate(&state.runtime, TerminatorReady::for_next(next))?,
+            )
         }
         completion => {
             let completion =
                 super::operation_completion::CompletedOperation::new(completion).finish(state)?;
             match completion {
+                CallCompletion::OriginalRegionObserved => CompletedPayload::OriginalRegionObserved,
+                CallCompletion::NumericRegion(completed) => {
+                    CompletedPayload::NumericRegion(completed)
+                }
                 CallCompletion::RootedSequence {
                     sequence,
                     requested_outputs,
@@ -332,6 +415,9 @@ pub(super) async fn complete(
                 )?),
                 CallCompletion::RootedArguments(arguments) => {
                     CompletedPayload::Values(adopt_rooted_arguments(state, arguments)?)
+                }
+                CallCompletion::SelectedSequence(sequence) => {
+                    CompletedPayload::Values(adopt_selected_sequence(state, sequence)?)
                 }
                 CallCompletion::RootedExpandedCallArguments(arguments) => {
                     CompletedPayload::ExpandedCallArguments(adopt_rooted_arguments(
@@ -366,19 +452,13 @@ pub(super) async fn complete(
                     let receiver = state.arena.insert(prepared.receiver().clone());
                     CompletedPayload::PreparedReceiver { prepared, receiver }
                 }
-                CallCompletion::SequenceStage(stage) => {
-                    let mut roots = Vec::new();
-                    stage.visit_retained_values(&mut |value| {
-                        roots.push(state.arena.insert(value.clone()));
-                    });
-                    CompletedPayload::SequenceStage { stage, roots }
-                }
+                CallCompletion::SequenceStage(stage) => CompletedPayload::SequenceStage(stage),
                 CallCompletion::ShortCircuitTruth(truth) => {
                     CompletedPayload::ShortCircuitTruth(truth)
                 }
                 CallCompletion::StatementOutput => CompletedPayload::StatementOutput,
                 CallCompletion::Terminator(stage) => {
-                    CompletedPayload::Terminator(Box::new(stage.finish()?))
+                    CompletedPayload::Terminator(stage.into_inner().finish(&state.runtime)?)
                 }
             }
         }

@@ -352,7 +352,7 @@ pub(crate) mod tests {
 
     #[test]
     fn error_all_empty_inputs_do_not_throw() {
-        let empty = CharArray::new(Vec::new(), 1, 0).expect("empty char vector");
+        let empty = CharArray::from_code_units(Vec::new(), 1, 0).expect("empty char vector");
         assert_eq!(
             run_error(vec![Value::CharArray(empty)]).expect("all-empty error is a no-op"),
             Value::Num(0.0)

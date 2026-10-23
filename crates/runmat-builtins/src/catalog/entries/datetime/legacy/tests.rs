@@ -42,6 +42,12 @@ fn every_legacy_identity_has_one_catalog_binding_and_executable_docs() {
         .contract
         .effects
         .contains(&EffectKind::Clock));
+    assert!(contracts::DATESTR.signatures.iter().any(|signature| {
+        signature
+            .inputs
+            .get(1)
+            .is_some_and(|format| format.ty == BuiltinParamType::NumericScalar)
+    }));
     assert!(!EOMDAY_CATALOG_ENTRY
         .contract
         .effects
@@ -132,6 +138,68 @@ fn weekday_names_are_character_rows_and_isbetween_is_logical() {
 
 #[test]
 fn invalid_component_and_date_input_are_diagnosed() {
+    // Numeric datestr selectors are a typed overload, not arbitrary numeric text.
+    for (code, accepted) in [
+        (-1.0, true),
+        (0.0, true),
+        (31.0, true),
+        (-2.0, false),
+        (32.0, false),
+        (0.5, false),
+        (f64::NAN, false),
+        (f64::INFINITY, false),
+    ] {
+        let mut request = call(
+            vec![number(ShapeFact::Scalar), number(ShapeFact::Scalar)],
+            1,
+        );
+        request.literals =
+            LiteralContext::new(vec![LiteralValue::Unknown, LiteralValue::Number(code)]);
+        let inferred = inference::datestr(&request, &DATESTR_CATALOG_ENTRY);
+        assert_eq!(inferred.diagnostics.is_empty(), accepted, "code {code}");
+    }
+    let mut device = number(ShapeFact::Scalar);
+    device.residency = ResidencyFact::Device { provider: None };
+    let mut remote = number(ShapeFact::Scalar);
+    remote.residency = ResidencyFact::Remote { pool: None };
+    for selector in [
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        })),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Int64,
+            domain: NumericDomain::Real,
+        })),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })),
+        ValueFact::scalar(ValueKindFact::Logical),
+        number(ShapeFact::from(vec![Some(1), Some(2)])),
+        device,
+        remote,
+    ] {
+        let inferred = inference::datestr(
+            &call(vec![number(ShapeFact::Scalar), selector], 1),
+            &DATESTR_CATALOG_ENTRY,
+        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DATESTR-FORMAT"));
+    }
+    for selector in [
+        number(ShapeFact::Unknown),
+        ValueFact::unknown(DynamicReason::RuntimeValue),
+    ] {
+        assert!(inference::datestr(
+            &call(vec![number(ShapeFact::Scalar), selector], 1),
+            &DATESTR_CATALOG_ENTRY
+        )
+        .diagnostics
+        .is_empty());
+    }
     let complex = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
         domain: NumericDomain::Complex,

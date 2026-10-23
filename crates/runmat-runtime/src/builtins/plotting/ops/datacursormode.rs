@@ -86,7 +86,13 @@ pub fn datacursormode_builtin(
             }
         }
         (1, Some(single), _) => {
-            if let Some(option) = super::style::value_as_string(single) {
+            if let Some(option) = super::style::value_as_string(single).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "datacursormode",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 ensure_command_status_allowed()?;
                 apply_option(ensure_current_figure(), &option)?;
                 return command_status();
@@ -100,6 +106,13 @@ pub fn datacursormode_builtin(
         (2, Some(figure), Some(option)) => {
             let figure = existing_figure_handle(figure)?;
             let option = super::style::value_as_string(option)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "datacursormode",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| invalid("expected option string"))?;
             ensure_command_status_allowed()?;
             apply_option(figure, &option)?;
@@ -454,6 +467,13 @@ fn apply_property(
         }
         Some(DataCursorProperty::DisplayStyle) => {
             let style = super::style::value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "datacursormode",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| invalid("DisplayStyle must be 'datatip' or 'window'"))?;
             let normalized = match style.trim().to_ascii_lowercase().as_str() {
                 "datatip" => "datatip",
@@ -466,6 +486,13 @@ fn apply_property(
         Some(DataCursorProperty::UpdateFcn) => validate_update_fcn(value),
         Some(DataCursorProperty::Interpreter) => {
             let interpreter = super::style::value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "datacursormode",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| invalid("Interpreter must be 'tex', 'latex', or 'none'"))?;
             match interpreter.trim().to_ascii_lowercase().as_str() {
                 "tex" | "latex" | "none" => Ok(()),
@@ -564,7 +591,13 @@ fn parse_enable(value: &Value) -> BuiltinResult<bool> {
     if let Some(value) = strict_numeric_on_off(value) {
         return Ok(value);
     }
-    if let Some(text) = super::style::value_as_string(value) {
+    if let Some(text) = super::style::value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            "datacursormode",
+            source.to_string(),
+            source,
+        )
+    })? {
         match text.trim().to_ascii_lowercase().as_str() {
             "on" => return Ok(true),
             "off" => return Ok(false),
@@ -575,7 +608,13 @@ fn parse_enable(value: &Value) -> BuiltinResult<bool> {
 }
 
 fn parse_snap(value: &Value) -> BuiltinResult<bool> {
-    if let Some(text) = super::style::value_as_string(value) {
+    if let Some(text) = super::style::value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            "datacursormode",
+            source.to_string(),
+            source,
+        )
+    })? {
         match text.trim().to_ascii_lowercase().as_str() {
             "on" => return Ok(true),
             "off" => return Ok(false),

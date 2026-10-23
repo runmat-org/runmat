@@ -377,7 +377,7 @@ pub(crate) mod tests {
             panic!("expected cellstr");
         };
         assert!(
-            matches!(&cell.data()[0], Value::CharArray(value) if value.data().iter().collect::<String>() == "7")
+            matches!(&cell.data()[0], Value::CharArray(value) if runmat_value::decode_utf16_code_units(value.data()).expect("valid UTF-16 fixture") == "7")
         );
         assert!(matches!(
             compose_builtin(Value::from("%d"), vec![Value::Int(IntValue::I32(7))])

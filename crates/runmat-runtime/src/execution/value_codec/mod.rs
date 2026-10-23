@@ -4,13 +4,14 @@ mod encode;
 mod error;
 mod graph;
 mod immutable_class;
+mod object_output;
 mod outputs;
 mod owned_prepare;
-mod object_output;
-mod text_copy;
-mod shape_copy;
 mod path;
+mod shape_copy;
+mod text_copy;
 
+pub(crate) use decode::decode_durable_value_cooperatively_in_context;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use decode::decode_inline_value_rooted;
 pub use decode::{
@@ -18,7 +19,10 @@ pub use decode::{
     decode_inline_value_owned_with_limits, decode_inline_values_cooperatively,
     decode_inline_values_cooperatively_in_context, CooperativeValueCodecError,
 };
-pub use durable::{decode_durable_value, encode_durable_value, validate_durable_preparation};
+pub use durable::{
+    decode_durable_value, encode_durable_value, validate_durable_payload,
+    validate_durable_preparation,
+};
 pub use encode::{encode_inline_value, encode_inline_value_in_context};
 pub use error::ValueCodecError;
 pub use graph::{
@@ -114,7 +118,7 @@ mod tests {
     #[test]
     fn durable_nested_values_keep_character_pages_and_reject_context_bound_callables() {
         let chars = Value::CharArray(
-            CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1])
+            CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 2, 1])
                 .expect("character page"),
         );
         let value = Value::Cell(CellArray::new(vec![chars], 1, 1).unwrap());
@@ -128,6 +132,36 @@ mod tests {
         );
         let error = encode_durable_value(&context_bound).unwrap_err();
         assert!(matches!(error, ValueCodecError::Unsupported { ref path, .. } if path == "$[0]"));
+    }
+
+    #[test]
+    fn character_wire_preserves_utf16_geometry_and_unpaired_units() {
+        let source = Value::CharArray(
+            CharArray::from_code_units_with_shape(
+                vec![
+                    runmat_value::Utf16CodeUnit::from_raw(0xD83D),
+                    runmat_value::Utf16CodeUnit::from_raw(0xDE42),
+                    runmat_value::Utf16CodeUnit::from_raw(0xD800),
+                ],
+                vec![1, 3],
+            )
+            .unwrap(),
+        );
+        let encoded = encode_inline_value(&source).unwrap();
+        let ValuePayload::Inline(inline) = &encoded else {
+            panic!("expected inline UTF-16 character payload");
+        };
+        let InlineValue::Char {
+            encoding: runmat_execution::value::CharacterEncoding::Utf16CodeUnitsV1,
+            shape,
+            code_units,
+        } = inline.as_ref()
+        else {
+            panic!("expected inline UTF-16 character payload");
+        };
+        assert_eq!(shape, &[1, 3]);
+        assert_eq!(code_units, &[0xD83D, 0xDE42, 0xD800]);
+        assert_eq!(decode_inline_value(&encoded).unwrap(), source);
     }
 
     #[test]
@@ -361,7 +395,7 @@ mod tests {
         );
         structure.insert(
             "chars",
-            Value::CharArray(CharArray::new(vec!['a', 'β'], 2, 1).unwrap()),
+            Value::CharArray(CharArray::from_unicode_scalars(vec!['a', 'β'], 2, 1).unwrap()),
         );
         structure.insert(
             "error",
@@ -1204,3 +1238,7 @@ mod tests {
         .is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "numeric_factor_tests.rs"]
+mod numeric_factor_tests;

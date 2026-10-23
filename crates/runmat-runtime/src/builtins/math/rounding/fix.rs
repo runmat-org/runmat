@@ -257,7 +257,7 @@ fn fix_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .to_column_major()
         .iter()
-        .map(|&ch| fix_scalar(ch as u32 as f64))
+        .map(|&ch| fix_scalar(u32::from(ch.raw()) as f64))
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&FIX_ERROR_INTERNAL, e))?;
@@ -392,7 +392,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_char_array_returns_numeric_tensor() {
-        let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("ABC".chars().collect(), 1, 3).unwrap();
         let result = fix_builtin(Value::CharArray(chars)).expect("fix");
         match result {
             Value::Tensor(t) => {

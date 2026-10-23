@@ -11,14 +11,19 @@ fn graphics_mode_pages_reject_before_creating_or_mutating_a_figure() {
     for ((command, _), mode) in command_cases().into_iter().zip(modes) {
         for shape in [vec![mode.len(), 1], vec![1, 1, mode.len()]] {
             crate::builtins::plotting::state::reset_plot_state();
-            let chars =
-                runmat_value::CharArray::new_with_shape(mode.chars().collect(), shape).unwrap();
+            let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+                mode.chars().collect(),
+                shape,
+            )
+            .unwrap();
             assert!(command(vec![Value::CharArray(chars)]).is_err());
             assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
         }
-        let chars =
-            runmat_value::CharArray::new_with_shape(mode.chars().collect(), vec![1, mode.len(), 1])
-                .unwrap();
+        let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            mode.chars().collect(),
+            vec![1, mode.len(), 1],
+        )
+        .unwrap();
         command(vec![Value::CharArray(chars)]).expect("trailing singleton character row");
     }
 }

@@ -41,10 +41,11 @@ impl TextContainer {
                 if array.rows == 1
                     && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
             {
-                Ok(Self::scalar(
-                    TextRepresentation::Character,
-                    array.data().iter().take(array.cols).collect(),
-                ))
+                crate::builtins::io::utf16::decode_utf16_with_error(
+                    &array.data()[..array.cols],
+                    || super::error::catalog(error, identity),
+                )
+                .map(|text| Self::scalar(TextRepresentation::Character, text))
             }
             Value::Cell(array) => Self::decode_cell(array, identity, error),
             _ => Err(super::error::catalog(error, identity)),
@@ -72,7 +73,10 @@ impl TextContainer {
             if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2 {
                 return Err(super::error::catalog(error, identity));
             }
-            values.push(chars.data().iter().take(chars.cols).collect());
+            values.push(crate::builtins::io::utf16::decode_utf16_with_error(
+                &chars.data()[..chars.cols],
+                || super::error::catalog(error, identity),
+            )?);
         }
         Ok(Self {
             representation: TextRepresentation::Cell,

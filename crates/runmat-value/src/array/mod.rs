@@ -1,6 +1,5 @@
 use crate::aggregate::{shape_rows_cols, total_len};
 use crate::*;
-use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -33,15 +32,21 @@ pub use admission::{
     ComplexTensorAdmission, NumericTensorAdmission, ValidatedComplexTensorParts,
     ValidatedNumericTensorParts,
 };
-pub use character::CharArray;
-pub use complex::{ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage};
+pub use character::{
+    decode_utf16_code_units, encode_utf16_code_units, CharArray, CharArrayAdmission, Utf16CodeUnit,
+    Utf16DecodeError,
+};
+pub use complex::{
+    ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage, UniqueHostComplexMutation,
+};
 pub use copy_accounting::{host_copy_metrics, record_host_copy, HostCopyMetrics, HostCopyReason};
 pub use dense::Tensor;
 pub use exact_host_numeric::{
     ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostAllocationReservation,
-    ExactHostComplexTensorAllocation, ExactHostIntegerComplexTensorAllocation,
-    ExactHostLogicalTensorAllocation, ExactHostNumericAllocation, ExactHostNumericAllocationError,
-    ExactHostSparseClass, ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation,
+    ExactHostComplexTensorAllocation, ExactHostIndexBufferAllocation,
+    ExactHostIntegerComplexTensorAllocation, ExactHostLogicalTensorAllocation,
+    ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostSparseClass,
+    ExactHostSparsePublicationError, ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation,
     ExactHostTensorAllocation, PreparedExactSparseTensor,
 };
 pub use exact_vec::{exact_capacity_vec, exact_capacity_vec_from_slice, exact_capacity_vec_with};
@@ -50,9 +55,9 @@ pub use host_allocation::{AdoptedHostAllocation, HostAllocationProvenance, HostA
 pub use host_complex_buffer::HostComplexBuffer;
 pub use host_index_buffer::HostIndexBuffer;
 pub use host_logical_buffer::HostLogicalBuffer;
-pub use host_numeric_buffer::HostNumericBuffer;
+pub use host_numeric_buffer::{HostNumericBuffer, UniqueHostNumericMutation};
 pub use logical::LogicalArray;
 pub use shared_shape::{HostShapeInput, SharedShape, SharedShapeBuilder, SharedShapeIntoIter};
-pub use sparse::{SparseCscValidation, SparseTensor, ValidatedSparseCscParts};
+pub use sparse::{SparseCscMergeEvent, SparseCscValidation, SparseTensor, ValidatedSparseCscParts};
 pub use string::StringArray;
 pub use symbolic::SymbolicArray;

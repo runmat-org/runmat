@@ -14,7 +14,7 @@ pub(crate) fn label_columns(
         .iter()
         .copied()
         .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| "an empty group has no source label row".to_string())?;
+        .ok_or_else(|| super::VariableError::from("an empty group has no source label row"))?;
     columns
         .iter()
         .map(|column| select_group_rows(column.value(), &rows))
@@ -25,17 +25,19 @@ pub(crate) fn select_group_rows(value: &Value, rows: &[usize]) -> VariableResult
     if matches!(value, Value::Object(object) if object.is_class(runmat_types::standard::CALENDAR_DURATION))
     {
         let (months, days) = crate::builtins::datetime::calendar_duration_tensors_from_value(value)
-            .map_err(|error| error.to_string())?;
-        let months =
-            select_rows(&Value::Tensor(months), rows).map_err(|error| error.to_string())?;
-        let days = select_rows(&Value::Tensor(days), rows).map_err(|error| error.to_string())?;
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
+        let months = select_rows(&Value::Tensor(months), rows)
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
+        let days = select_rows(&Value::Tensor(days), rows)
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
         let (Value::Tensor(months), Value::Tensor(days)) = (months, days) else {
             return Err("calendarDuration row selection produced invalid storage".into());
         };
         return crate::builtins::datetime::calendar_duration_object_from_tensors(
             None, months, days,
         )
-        .map_err(|error| error.to_string());
+        .map_err(|error| super::VariableError::with_source(error.to_string(), error));
     }
-    select_rows(value, rows).map_err(|error| error.to_string())
+    select_rows(value, rows)
+        .map_err(|error| super::VariableError::with_source(error.to_string(), error))
 }

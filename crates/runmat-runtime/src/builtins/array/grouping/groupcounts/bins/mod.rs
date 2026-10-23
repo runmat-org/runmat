@@ -29,7 +29,7 @@ pub(super) fn apply(
         ));
     }
     let specification = unwrap_specification(&positional[0])?;
-    if scalar_text(specification).is_some_and(|text| text.eq_ignore_ascii_case("none")) {
+    if scalar_text(specification)?.is_some_and(|text| text.eq_ignore_ascii_case("none")) {
         return Ok(None);
     }
     let values = numeric_values(columns[0].value())?;
@@ -49,7 +49,9 @@ pub(super) fn apply(
     let values = Value::StringArray(
         StringArray::new(rows, vec![columns[0].rows, 1]).map_err(error::internal)?,
     );
-    columns[0].replace_value(values).map_err(error::internal)?;
+    columns[0]
+        .replace_value(values)
+        .map_err(|source| source.attach(error::internal("grouping replacement failed")))?;
     Ok(Some(BinLevels { labels }))
 }
 

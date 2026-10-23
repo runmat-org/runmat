@@ -17,7 +17,7 @@ fn setup_plot_tests() {
 
 fn run_scatterplot(x: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
     let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
-    block_on(super::scatterplot_builtin(x, rest))
+    block_on(super::scatterplot_builtin(None, x, rest))
 }
 
 fn complex_tensor(data: &[(f64, f64)]) -> ComplexTensor {

@@ -1,112 +1,36 @@
 //! MATLAB-compatible `onCleanup` handle object.
 pub(crate) mod lifecycle;
-use runmat_types::MemberAccess;
-
-use std::collections::HashMap;
-
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg(test)]
 use once_cell::sync::Lazy;
-#[cfg(test)]
-use std::sync::Mutex;
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ON_CLEANUP_ERROR_GC,
-    ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_INVALID_CALLBACK, ON_CLEANUP_ERROR_INVALID_OBJECT,
+    BuiltinErrorDescriptor, CANCEL_DESCRIPTOR, CANCEL_ERROR_EXECUTION_SERVICE,
+    CANCEL_ERROR_OUTPUTS, CANCEL_ERROR_RUNTIME_CONTEXT, ON_CLEANUP_DELETE_DESCRIPTOR,
+    ON_CLEANUP_DELETE_ERROR_OUTPUTS, ON_CLEANUP_ERROR_GC, ON_CLEANUP_ERROR_HOST,
+    ON_CLEANUP_ERROR_INVALID_CALLBACK, ON_CLEANUP_ERROR_INVALID_OBJECT,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::MemberAccess;
 #[cfg(test)]
 use runmat_value::ObjectInstance;
 use runmat_value::{HandleRef, Value};
-
-use crate::execution::RootedValue;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::Mutex;
 
 pub(crate) const ON_CLEANUP_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("onCleanup");
 const CALLBACK_PROPERTY: &str = "__oncleanup_callback";
 const ACTIVE_PROPERTY: &str = "__oncleanup_active";
-const CANCEL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "cancel accepts lifecycle and execution handles and returns a fixed double status; it has no integer data, control, or class-preserving form.",
-};
-
 #[cfg(test)]
 pub(crate) static ON_CLEANUP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-const CANCEL_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CANCEL.RUNTIME_CONTEXT",
-    identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
-    when: "A task, future, or job is cancelled without an active runtime context.",
-    message: "cancel: no active runtime context",
-};
-const CANCEL_ERROR_EXECUTION_SERVICE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CANCEL.EXECUTION_SERVICE",
-    identifier: Some("RunMat:cancel:ExecutionService"),
-    when: "The execution service rejects cancellation of a task, future, or job.",
-    message: "cancel: execution service failed",
-};
-const CANCEL_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    ON_CLEANUP_ERROR_INVALID_CALLBACK,
-    ON_CLEANUP_ERROR_INVALID_OBJECT,
-    ON_CLEANUP_ERROR_GC,
-    ON_CLEANUP_ERROR_HOST,
-    CANCEL_ERROR_RUNTIME_CONTEXT,
-    CANCEL_ERROR_EXECUTION_SERVICE,
-];
-const DELETE_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zero after the cleanup callback has been invoked or skipped.",
-}];
-const DELETE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "cleanupObj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "onCleanup object to execute and deactivate.",
-}];
-const CANCEL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "cleanupObj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "onCleanup object to deactivate without running its callback.",
-}];
-const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = delete(cleanupObj)",
-    inputs: &DELETE_INPUTS,
-    outputs: &DELETE_OUTPUTS,
-}];
-pub const ON_CLEANUP_DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DELETE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &runmat_builtins::ON_CLEANUP_ERRORS,
-};
-
-const CANCEL_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zero after the cleanup callback has been deactivated.",
-}];
-const CANCEL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = cancel(cleanupObj)",
-    inputs: &CANCEL_INPUTS,
-    outputs: &CANCEL_OUTPUTS,
-}];
-pub const ON_CLEANUP_CANCEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CANCEL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CANCEL_ERRORS,
-};
+fn operation_error(mut error: RuntimeError) -> RuntimeError {
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
 
 #[runtime_builtin(
     name = "onCleanup",
@@ -152,19 +76,33 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<RootedV
 
 #[runtime_builtin(
     name = "__runmat_oncleanup_delete",
-    execution_stack = "process",
-    category = "introspection",
-    summary = "Execute an onCleanup object callback once.",
-    keywords = "onCleanup,delete,cleanup",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::introspection::on_cleanup::ON_CLEANUP_DELETE_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
-pub(crate) async fn on_cleanup_delete_builtin(value: Value) -> BuiltinResult<Value> {
-    let cleanup_result = run_on_cleanup_value(&value).await;
+pub(crate) async fn on_cleanup_delete_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &ON_CLEANUP_DELETE_DESCRIPTOR,
+        &ON_CLEANUP_DELETE_ERROR_OUTPUTS,
+        "__runmat_oncleanup_delete",
+    )
+    .map_err(operation_error)?;
+    // A selected invocation may not invalidate a foreign session's handle.
+    // Once ownership is established, dispatch failure still invalidates this
+    // same handle, preserving the existing delete lifecycle semantics.
+    let invalidate_owned = match &value {
+        Value::HandleObject(handle) if is_on_cleanup_handle(handle) => runtime
+            .as_ref()
+            .and_then(RuntimeContext::cleanup_registry)
+            .is_some_and(|registry| registry.find(handle.target).is_some()),
+        _ => false,
+    };
+    let cleanup_result = run_on_cleanup_value(runtime.as_ref(), &value).await;
     let invalidation_result = match &value {
-        Value::HandleObject(handle) if is_on_cleanup_handle(handle) => {
+        Value::HandleObject(handle) if invalidate_owned => {
             if crate::set_handle_valid(handle, false) {
                 Ok(())
             } else {
@@ -176,25 +114,34 @@ pub(crate) async fn on_cleanup_delete_builtin(value: Value) -> BuiltinResult<Val
         }
         _ => Ok(()),
     };
-    cleanup_result?;
-    invalidation_result?;
+    cleanup_result.map_err(operation_error)?;
+    invalidation_result.map_err(operation_error)?;
     Ok(Value::Num(0.0))
 }
 
 #[runtime_builtin(
     name = "cancel",
-    category = "introspection",
-    summary = "Deactivate an onCleanup object without running its callback.",
-    keywords = "onCleanup,cancel,cleanup",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::introspection::on_cleanup::ON_CLEANUP_CANCEL_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::on_cleanup::CANCEL_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
-async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
-    if let Some(tasks) = crate::parallel::future::output_tasks(&value) {
-        let context = crate::context::legacy::active().ok_or_else(|| {
+async fn on_cleanup_cancel_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &CANCEL_DESCRIPTOR,
+        &CANCEL_ERROR_OUTPUTS,
+        "cancel",
+    )
+    .map_err(operation_error)?;
+    cancel_target(runtime.as_ref(), &value).map_err(operation_error)?;
+    Ok(Value::Num(0.0))
+}
+
+fn cancel_target(runtime: Option<&RuntimeContext>, value: &Value) -> BuiltinResult<()> {
+    if let Some(tasks) = crate::parallel::future::output_task_values(value) {
+        let context = runtime.ok_or_else(|| {
             cancel_error(
                 &CANCEL_ERROR_RUNTIME_CONTEXT,
                 CANCEL_ERROR_RUNTIME_CONTEXT.message,
@@ -203,20 +150,17 @@ async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
         for task in tasks {
             context
                 .execution()
-                .cancel(
-                    &Value::Task(task),
-                    runmat_execution::CancellationReason::User,
-                )
+                .cancel(task, runmat_execution::CancellationReason::User)
                 .map_err(|error| {
                     cancel_error(&CANCEL_ERROR_EXECUTION_SERVICE, format!("cancel: {error}"))
                 })?;
         }
-        return Ok(Value::Num(0.0));
+        return Ok(());
     }
-    let execution_value = crate::parallel::future::execution_value(&value).unwrap_or(&value);
+    let execution_value = crate::parallel::future::execution_value(value).unwrap_or(value);
     match execution_value {
         Value::Future(_) | Value::Task(_) | Value::Job(_) => {
-            let context = crate::context::legacy::active().ok_or_else(|| {
+            let context = runtime.ok_or_else(|| {
                 cancel_error(
                     &CANCEL_ERROR_RUNTIME_CONTEXT,
                     CANCEL_ERROR_RUNTIME_CONTEXT.message,
@@ -229,9 +173,9 @@ async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
                     cancel_error(&CANCEL_ERROR_EXECUTION_SERVICE, format!("cancel: {error}"))
                 })?;
         }
-        _ => cancel_on_cleanup_value(&value)?,
+        _ => cancel_on_cleanup_value(runtime, value)?,
     }
-    Ok(Value::Num(0.0))
+    Ok(())
 }
 
 pub(crate) async fn run_cleanup_after_detach(
@@ -314,10 +258,13 @@ fn canonicalize_cleanup_callback(callback: Value) -> BuiltinResult<Value> {
     }
 }
 
-async fn run_on_cleanup_value(value: &Value) -> BuiltinResult<()> {
+async fn run_on_cleanup_value(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_on_cleanup_handle(handle) => {
-            run_on_cleanup_handle(handle).await
+            run_on_cleanup_handle(runtime, handle).await
         }
         other => Err(on_cleanup_error(
             &ON_CLEANUP_ERROR_INVALID_OBJECT,
@@ -326,11 +273,14 @@ async fn run_on_cleanup_value(value: &Value) -> BuiltinResult<()> {
     }
 }
 
-async fn run_on_cleanup_handle(handle: &HandleRef) -> BuiltinResult<()> {
+async fn run_on_cleanup_handle(
+    runtime: Option<&RuntimeContext>,
+    handle: &HandleRef,
+) -> BuiltinResult<()> {
     if !is_on_cleanup_handle(handle) || !crate::is_handle_valid(handle) {
         return Ok(());
     }
-    let runtime = crate::context::legacy::active()
+    let runtime = runtime
         .ok_or_else(|| on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message))?;
     let registry = runtime
         .cleanup_registry()
@@ -344,7 +294,7 @@ async fn run_on_cleanup_handle(handle: &HandleRef) -> BuiltinResult<()> {
     if entry.phase() == lifecycle::registry::CleanupPhase::Active {
         deactivate_handle(handle)?;
         if registry.queue_explicit(&entry, runtime.command_profiling()) {
-            lifecycle::dispatch::start_queued(&runtime, &registry, entry.clone())?;
+            lifecycle::dispatch::start_queued(runtime, &registry, entry.clone())?;
             // A service may synchronously poll or destroy the submitted task
             // before returning its lease; report that exact terminal receipt.
             return lifecycle::dispatch::wait_queued(&registry, &entry).await;
@@ -360,13 +310,13 @@ async fn run_on_cleanup_handle(handle: &HandleRef) -> BuiltinResult<()> {
     }
 }
 
-fn cancel_on_cleanup_value(value: &Value) -> BuiltinResult<()> {
+fn cancel_on_cleanup_value(runtime: Option<&RuntimeContext>, value: &Value) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_on_cleanup_handle(handle) => {
             if !crate::is_handle_valid(handle) {
                 return Ok(());
             }
-            let runtime = crate::context::legacy::active().ok_or_else(|| {
+            let runtime = runtime.ok_or_else(|| {
                 on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message)
             })?;
             let registry = runtime.cleanup_registry().ok_or_else(|| {
@@ -639,7 +589,11 @@ mod tests {
         let delete_context = runtime.clone().with_command_profiling(delete.receipt());
         {
             let _selected = delete_context.enter();
-            drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("delete under B");
+            drive(
+                &supervisor,
+                run_on_cleanup_value(Some(&delete_context), cleanup.value()),
+            )
+            .expect("delete under B");
         }
         assert_eq!(*observed.lock().unwrap(), [true]);
         let created = create.seal();
@@ -720,8 +674,11 @@ mod tests {
         let selected = runtime.clone().with_command_profiling(command.receipt());
         let error = {
             let _selected = selected.enter();
-            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
-                .expect_err("synchronously dropped callback is abandoned")
+            drive(
+                &supervisor,
+                run_on_cleanup_value(Some(&selected), cleanup.value()),
+            )
+            .expect_err("synchronously dropped callback is abandoned")
         };
         assert_eq!(error.identifier(), Some("RunMat:onCleanup:Abandoned"));
         let work = command.seal().deferred_work.expect("valid deferred work");
@@ -749,12 +706,23 @@ mod tests {
         let selected = runtime.clone().with_command_profiling(command.receipt());
         let error = {
             let _selected = selected.enter();
-            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
-                .expect_err("exact rejection must retain original diagnostic")
+            drive(
+                &supervisor,
+                on_cleanup_delete_builtin(Some(selected.clone()), cleanup.value().clone()),
+            )
+            .expect_err("exact rejection must retain original diagnostic")
         };
         assert_eq!(
             error.identifier(),
             Some("RunMat:onCleanup:ExactRejectedPort")
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let Value::HandleObject(handle) = cleanup.value() else {
+            unreachable!()
+        };
+        assert!(
+            !crate::is_handle_valid(handle),
+            "failed delete still invalidates its existing handle"
         );
         let work = command.seal().deferred_work.expect("valid deferred work");
         assert_eq!((work.admitted, work.pending, work.failed), (1, 0, 1));
@@ -786,8 +754,11 @@ mod tests {
         let selected = runtime.clone().with_command_profiling(command.receipt());
         let error = {
             let _selected = selected.enter();
-            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
-                .expect_err("late port rejection remains the caller's exact error")
+            drive(
+                &supervisor,
+                run_on_cleanup_value(Some(&selected), cleanup.value()),
+            )
+            .expect_err("late port rejection remains the caller's exact error")
         };
         assert_eq!(
             error.identifier(),
@@ -796,8 +767,11 @@ mod tests {
         assert_eq!(*counter.lock().unwrap(), 1);
         {
             let _selected = selected.enter();
-            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
-                .expect("terminal cleanup object cannot replay callback");
+            drive(
+                &supervisor,
+                run_on_cleanup_value(Some(&selected), cleanup.value()),
+            )
+            .expect("terminal cleanup object cannot replay callback");
         }
         assert_eq!(*counter.lock().unwrap(), 1);
         let work = command.seal().deferred_work.expect("valid deferred work");
@@ -835,16 +809,19 @@ mod tests {
                 assert_eq!(requested_outputs, 0);
                 let entry = Rc::clone(&entry);
                 let counter = Arc::clone(&counter);
-                Box::pin(async move {
-                    entry
-                        .lease()
-                        .expect("task lease attached before poll")
-                        .cancel();
-                    *counter.lock().unwrap() += 1;
-                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
-                        0.0,
-                    ))
-                })
+                crate::user_functions::admit_user_function_with(
+                    _runtime.as_ref(),
+                    move || async move {
+                        entry
+                            .lease()
+                            .expect("task lease attached before poll")
+                            .cancel();
+                        *counter.lock().unwrap() += 1;
+                        crate::user_functions::test_support::rooted_single_value_sequence(
+                            Value::Num(0.0),
+                        )
+                    },
+                )
             }
         }))
         .expect("call-port scope");
@@ -853,8 +830,11 @@ mod tests {
         let selected = runtime.clone().with_command_profiling(command.receipt());
         let error = {
             let _selected = selected.enter();
-            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
-                .expect_err("same-poll cancellation must not complete successfully")
+            drive(
+                &supervisor,
+                run_on_cleanup_value(Some(&selected), cleanup.value()),
+            )
+            .expect_err("same-poll cancellation must not complete successfully")
         };
         assert_eq!(error.identifier(), Some("RunMat:onCleanup:Abandoned"));
         assert_eq!(*counter.lock().unwrap(), 1);
@@ -882,8 +862,16 @@ mod tests {
         ))
         .expect("create cleanup");
 
-        drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("first cleanup");
-        drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("second cleanup is no-op");
+        drive(
+            &supervisor,
+            run_on_cleanup_value(Some(&runtime), cleanup.value()),
+        )
+        .expect("first cleanup");
+        drive(
+            &supervisor,
+            run_on_cleanup_value(Some(&runtime), cleanup.value()),
+        )
+        .expect("second cleanup is no-op");
 
         assert_eq!(*counter.lock().unwrap(), 1);
     }
@@ -909,11 +897,49 @@ mod tests {
             panic!("expected cleanup handle");
         };
 
-        drive(
+        let error = drive(
             &supervisor,
-            on_cleanup_delete_builtin(cleanup.value().clone()),
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "__runmat_oncleanup_delete",
+                &[cleanup.value().clone()],
+                2,
+            ),
+        )
+        .expect_err("output preflight must precede callback admission and invalidation");
+        assert_eq!(error.identifier(), Some("RunMat:onCleanup:TooManyOutputs"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(crate::is_handle_valid(&handle));
+        assert_eq!(*counter.lock().unwrap(), 0);
+        let foreign = RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let error = block_on(on_cleanup_delete_builtin(
+            Some(foreign),
+            cleanup.value().clone(),
+        ))
+        .expect_err("selected foreign session must not use ambient lifecycle ownership");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:onCleanup:LifecycleHostUnavailable")
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(
+            crate::is_handle_valid(&handle),
+            "foreign invocation must not invalidate an unowned target"
+        );
+        assert_eq!(*counter.lock().unwrap(), 0);
+        let status = drive(
+            &supervisor,
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "__runmat_oncleanup_delete",
+                &[cleanup.value().clone()],
+                1,
+            ),
         )
         .expect("delete cleanup");
+        assert_eq!(status, Value::Num(0.));
 
         assert_eq!(*counter.lock().unwrap(), 1);
         assert!(
@@ -940,8 +966,41 @@ mod tests {
         ))
         .expect("create cleanup");
 
-        cancel_on_cleanup_value(cleanup.value()).expect("cancel cleanup");
-        drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("cleanup remains no-op");
+        let error = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "cancel",
+                &[cleanup.value().clone()],
+                2,
+            ),
+        )
+        .expect_err("output preflight must not deactivate cleanup");
+        assert_eq!(error.identifier(), Some("RunMat:cancel:TooManyOutputs"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let Value::HandleObject(handle) = cleanup.value() else {
+            unreachable!()
+        };
+        let entry = runtime
+            .cleanup_registry()
+            .unwrap()
+            .find(handle.target)
+            .unwrap();
+        assert_eq!(entry.phase(), lifecycle::registry::CleanupPhase::Active);
+        let status = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "cancel",
+                &[cleanup.value().clone()],
+                1,
+            ),
+        )
+        .expect("cancel cleanup");
+        assert_eq!(status, Value::Num(0.));
+        drive(
+            &supervisor,
+            run_on_cleanup_value(Some(&runtime), cleanup.value()),
+        )
+        .expect("cleanup remains no-op");
 
         assert_eq!(*counter.lock().unwrap(), 0);
     }
@@ -954,11 +1013,224 @@ mod tests {
             let err = block_on(on_cleanup_builtin(callback)).expect_err("expected error");
             assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidCallback"));
         }
-        let err = block_on(on_cleanup_cancel_builtin(Value::Int(
-            runmat_value::IntValue::U64(1),
-        )))
+        let err = block_on(on_cleanup_cancel_builtin(
+            None,
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ))
         .expect_err("integer is not an onCleanup handle");
         assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidObject"));
+        assert_eq!(err.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    }
+
+    fn cancellation_future(runtime: &RuntimeContext) -> runmat_execution::FutureHandle {
+        runtime
+            .execution()
+            .create_future(crate::execution::DeferredCall {
+                invocation: crate::execution::DeferredInvocation::callable(
+                    crate::call::descriptor::CallableDescriptor::resolved(
+                        runmat_types::CallableIdentity::Builtin(runmat_types::BuiltinId(
+                            "zeros".into(),
+                        )),
+                        Vec::new(),
+                        1,
+                        runmat_types::CallableFallbackPolicy::None,
+                        crate::call::descriptor::CallableCallKind::Direct,
+                    ),
+                ),
+                retry: runmat_execution::RetryPolicy::Never,
+                program_revision: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
+                capabilities: Default::default(),
+                program: crate::execution::DeferredProgram::Local,
+            })
+            .expect("existing execution owner creates the actual future")
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn canonical_cancel_uses_selected_execution_owner_and_preflights_outputs() {
+        let runtime = RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _process =
+            runtime.enter_execution_stack(crate::context::RuntimeExecutionStack::Process);
+        let ambient = RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _ambient = ambient.enter();
+        let future = cancellation_future(&runtime);
+        let target = Value::Future(future.clone().into());
+        let error = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "cancel",
+                std::slice::from_ref(&target),
+                2,
+            ),
+        )
+        .expect_err("no cancellation before output preflight");
+        assert_eq!(error.identifier(), Some("RunMat:cancel:TooManyOutputs"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(
+            runtime.execution().inspect_future(&future).unwrap().state,
+            runmat_execution::ExecutionHandleState::Deferred
+        );
+        let status = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "cancel",
+                std::slice::from_ref(&target),
+                1,
+            ),
+        )
+        .expect("selected context, not unrelated ambient owner");
+        assert_eq!(status, Value::Num(0.));
+        assert_eq!(
+            runtime.execution().inspect_future(&future).unwrap().state,
+            runmat_execution::ExecutionHandleState::Cancelled
+        );
+        let embedding_status = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "cancel",
+                std::slice::from_ref(&target),
+                0,
+            ),
+        )
+        .unwrap();
+        // The raw builtin embedding ABI preserves its fixed status value;
+        // zero-output discard belongs to the language callable boundary.
+        assert_eq!(embedding_status, Value::Num(0.));
+        let language_future = cancellation_future(&runtime);
+        let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
+            runmat_types::CallableIdentity::Builtin(runmat_types::BuiltinId("cancel".into())),
+            vec![Value::Future(language_future.clone().into())],
+            0,
+            runmat_types::CallableFallbackPolicy::None,
+            crate::call::descriptor::CallableCallKind::Direct,
+        );
+        let discarded = block_on(
+            crate::call::descriptor::execute_callable_descriptor_in_context(&runtime, descriptor),
+        )
+        .expect("language cancellation with zero requested outputs");
+        assert!(discarded.value().is_empty());
+        assert_eq!(
+            runtime
+                .execution()
+                .inspect_future(&language_future)
+                .unwrap()
+                .state,
+            runmat_execution::ExecutionHandleState::Cancelled
+        );
+        let future = cancellation_future(&runtime);
+        let task = runtime.execution().spawn(&future).unwrap();
+        let status = block_on(on_cleanup_cancel_builtin(
+            Some(runtime.clone()),
+            Value::Task(task.clone().into()),
+        ))
+        .unwrap();
+        assert_eq!(status, Value::Num(0.));
+        assert_eq!(
+            runtime.execution().inspect_task(&task).unwrap().state,
+            runmat_execution::ExecutionHandleState::Cancelled
+        );
+        let future = cancellation_future(&runtime);
+        let error = block_on(on_cleanup_cancel_builtin(
+            None,
+            Value::Future(future.clone().into()),
+        ))
+        .expect_err("absence of selected owner never falls back to ambient");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:parallel:RuntimeContextUnavailable")
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(
+            runtime.execution().inspect_future(&future).unwrap().state,
+            runmat_execution::ExecutionHandleState::Deferred
+        );
+        let error = block_on(on_cleanup_cancel_builtin(
+            Some(ambient.clone()),
+            Value::Future(future.into()),
+        ))
+        .expect_err("scope mismatch reaches exact selected service");
+        assert_eq!(error.identifier(), Some("RunMat:cancel:ExecutionService"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn canonical_cancel_borrows_validated_future_arrays_and_on_all_aggregates() {
+        let runtime = RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _process =
+            runtime.enter_execution_stack(crate::context::RuntimeExecutionStack::Process);
+        for on_all in [false, true] {
+            let first = cancellation_future(&runtime);
+            let second = cancellation_future(&runtime);
+            let tasks = vec![
+                runtime.execution().spawn(&first).unwrap(),
+                runtime.execution().spawn(&second).unwrap(),
+            ];
+            let targets = if on_all {
+                crate::parallel::future::wrap_on_all_tasks(tasks.clone()).unwrap()
+            } else {
+                crate::parallel::future::wrap_tasks(tasks.clone()).unwrap()
+            };
+            assert_eq!(
+                crate::parallel::future::output_task_values(&targets)
+                    .unwrap()
+                    .count(),
+                2
+            );
+            let status = block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &runtime,
+                    "cancel",
+                    &[targets],
+                    1,
+                ),
+            )
+            .unwrap();
+            assert_eq!(status, Value::Num(0.));
+            for task in tasks {
+                assert_eq!(
+                    runtime.execution().inspect_task(&task).unwrap().state,
+                    runmat_execution::ExecutionHandleState::Cancelled
+                );
+            }
+        }
+        let future = cancellation_future(&runtime);
+        let task = runtime.execution().spawn(&future).unwrap();
+        let malformed =
+            runmat_value::UnboundedObjectBuilder::new(crate::parallel::future::FEVAL_FUTURE_CLASS)
+                .finish();
+        let targets = Value::ObjectArray(
+            runmat_value::ObjectArray::new(
+                crate::parallel::future::FEVAL_FUTURE_CLASS,
+                vec![
+                    crate::parallel::future::wrap_task(task.clone()),
+                    Value::Object(malformed),
+                ],
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        assert!(crate::parallel::future::output_task_values(&targets).is_none());
+        let error = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                "cancel",
+                &[targets],
+                1,
+            ),
+        )
+        .expect_err("malformed second element must precede all task effects");
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_ne!(
+            runtime.execution().inspect_task(&task).unwrap().state,
+            runmat_execution::ExecutionHandleState::Cancelled
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1088,7 +1360,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn last_returned_root_retirement_wakes_idle_host_once() {
+    fn public_returned_root_retirement_wakes_idle_host_once() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
         let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let creation = CommandProfilingRoot::new();
@@ -1114,10 +1386,17 @@ mod tests {
             }
         }))
         .expect("observe synchronous producer allocation-root retirement");
-        let cleanup = block_on(on_cleanup_builtin(
-            crate::user_functions::test_support::exact_local_value("cleanup", binding),
-        ))
-        .expect("create cleanup");
+        let cleanup = block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &creation_runtime,
+                "onCleanup",
+                &[crate::user_functions::test_support::exact_local_value(
+                    "cleanup", binding,
+                )],
+                1,
+            ),
+        )
+        .expect("public onCleanup returns the producer root through canonical publication");
         let Value::HandleObject(handle) = cleanup.value() else {
             panic!("producer must return an onCleanup handle");
         };
@@ -1201,9 +1480,14 @@ mod tests {
                 )
                 .await
                 .expect("create browser cleanup");
-                on_cleanup_delete_builtin(cleanup.value().clone())
-                    .await
-                    .expect("browser delete");
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &runtime,
+                    "__runmat_oncleanup_delete",
+                    &[cleanup.value().clone()],
+                    1,
+                )
+                .await
+                .expect("browser delete");
             })
             .await;
         assert_eq!(*counter.lock().unwrap(), 1);

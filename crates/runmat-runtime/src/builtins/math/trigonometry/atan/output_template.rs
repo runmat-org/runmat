@@ -13,7 +13,7 @@ pub(super) fn parse_output_template(
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
-            if let Some(keyword) = keyword_of(&args[0]) {
+            if let Some(keyword) = keyword_of(&args[0])? {
                 if keyword.trim() == "like" {
                     return Err(atan_error_with_detail(
                         &ATAN_ERROR_INVALID_OPTION,
@@ -27,7 +27,7 @@ pub(super) fn parse_output_template(
             ))
         }
         len if len >= 2 => {
-            if let Some(keyword) = keyword_of(&args[0]) {
+            if let Some(keyword) = keyword_of(&args[0])? {
                 if keyword.trim() == "like" {
                     if len == 2 {
                         return Ok(OutputTemplate::Like(args[1].clone()));

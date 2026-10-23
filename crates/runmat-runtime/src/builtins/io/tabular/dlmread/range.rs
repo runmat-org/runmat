@@ -32,7 +32,12 @@ pub(super) fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
     match value {
         Value::String(s) => parse_range_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
+            let text = crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                dlmread_error_with(
+                    &DLMREAD_ERROR_RANGE,
+                    "dlmread: Range contains malformed UTF-16",
+                )
+            })?;
             parse_range_string(&text)
         }
         Value::StringArray(sa) => {

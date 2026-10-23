@@ -67,14 +67,17 @@ pub fn install(
     let loader: Rc<runmat_runtime::user_functions::DynamicFunctionLoader> = Rc::new(
         move |runtime, name, arguments, requested_outputs, phase, _input_callsite| {
             let mex_runtime = Rc::clone(&load_runtime);
-            Box::pin(async move {
-                if phase != DynamicFunctionLoadPhase::BeforeSemantic {
-                    return std::ops::ControlFlow::Continue(arguments);
-                }
-                mex_runtime
-                    .load_and_call(&name, arguments, requested_outputs, runtime)
-                    .await
-            })
+            runmat_runtime::execution::admit_dynamic_function_load_with(
+                &runtime.clone(),
+                move || async move {
+                    if phase != DynamicFunctionLoadPhase::BeforeSemantic {
+                        return std::ops::ControlFlow::Continue(arguments);
+                    }
+                    mex_runtime
+                        .load_and_call(&name, arguments, requested_outputs, runtime)
+                        .await
+                },
+            )
         },
     );
     runtime.set_dynamic_function_loader(Some(loader));
@@ -82,7 +85,10 @@ pub fn install(
     let clearer: Rc<runmat_runtime::user_functions::DynamicFunctionClearer> =
         Rc::new(move |runtime, request| {
             let mex_runtime = Rc::clone(&mex_runtime);
-            Box::pin(async move { mex_runtime.clear_gracefully(&request, runtime).await })
+            runmat_runtime::execution::admit_domain_continuation_with(
+                &runtime.clone(),
+                move || async move { mex_runtime.clear_gracefully(&request, runtime).await },
+            )
         });
     runtime.set_dynamic_function_clearer(Some(clearer));
     Ok(MexRuntimeGuard {

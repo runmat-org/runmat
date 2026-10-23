@@ -4,12 +4,13 @@
 //! calls, and future native/foreign/parallel adapters. Legacy ambient APIs are
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
-mod capability;
 mod cancellation_context;
+mod capability;
+pub(crate) mod gpu_device;
 pub(crate) use cancellation_context::RuntimeCancellationContext;
 pub use cancellation_context::RuntimeCancellationScope;
-mod cleanup_lifecycle;
 mod callable_artifacts;
+mod cleanup_lifecycle;
 mod current_class_product;
 mod graphics_presentation;
 #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
@@ -22,51 +23,56 @@ pub use runmat_plot::gui::host_loop::WindowOpenPort as NativeWindowOpenPort;
 pub use runmat_plot::gui::WindowConfig as NativeWindowConfig;
 mod graphics_callbacks;
 pub(crate) use graphics_callbacks::GraphicsCallbackMutationScope;
-#[cfg(not(target_arch = "wasm32"))]
-mod foreign_callback_lineage;
 mod arity;
-mod catch;
 pub(crate) mod call_projection;
-mod local_tasks;
-mod local_task_admission;
-mod native_continuation;
-mod preferences;
-pub(crate) mod poll_projection;
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod process_invocation;
-mod user_path;
-mod host_document;
-mod host_dialog;
-mod managed_observations;
-pub(crate) mod output_projection;
-pub(crate) mod overlay_storage;
-pub mod host_effect;
-pub mod host_allocation;
-pub(crate) mod host_presentation;
-pub(crate) mod provider_operation;
+mod catch;
 #[cfg(test)]
 pub(crate) mod document_test_support;
+mod environment;
+#[cfg(not(target_arch = "wasm32"))]
+mod foreign_callback_lineage;
+pub mod host_allocation;
+mod host_dialog;
+mod host_document;
+pub mod host_effect;
+pub(crate) mod host_presentation;
+mod local_task_admission;
+mod local_tasks;
+mod managed_observations;
+mod native_continuation;
+pub(crate) mod output_projection;
+pub(crate) mod overlay_storage;
 #[cfg(test)]
 pub(crate) mod physical_test_support;
-mod environment;
+pub(crate) mod poll_projection;
 mod portable_host;
+mod preferences;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod process_invocation;
+pub(crate) mod provider_operation;
+mod selected_random;
+mod user_path;
 pub(crate) use portable_host::{accepts_queued_interaction, check_active_host};
-pub use portable_host::{NonCapturingPortableHost, PortableConsoleHost, PortableConsoleSink};
+pub use portable_host::{
+    NonCapturingPortableHost, PortableConsoleHost, PortableConsoleSink,
+    PortableForwardingConsoleHost,
+};
 mod runtime;
 #[cfg(feature = "plot-core")]
 pub(crate) use runtime::BackgroundCallbackAuthority;
-mod super_constructor;
+mod native_region_host_route;
 mod scope;
-mod source_evaluation;
 mod services;
+mod source_evaluation;
 mod state;
-mod timing;
-mod timer;
+mod super_constructor;
 mod tcp;
+mod timer;
+mod timing;
 mod vm_fusion_completion;
-mod vm_fusion_host_route;
 mod vm_fusion_host_outputs;
 mod vm_fusion_host_resources;
+mod vm_fusion_host_route;
 pub use vm_fusion_host_resources::checked_single_add_min_host_scratch;
 #[cfg(test)]
 mod cancellation_tests;
@@ -83,7 +89,10 @@ pub use callable_artifacts::{
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use cleanup_lifecycle::RuntimeLifecycleHost;
-pub use current_class_product::{CurrentClassProductResolution, CurrentClassProductResolver};
+pub use current_class_product::{
+    admit_current_class_product_with, CurrentClassProductFuture, CurrentClassProductResolution,
+    CurrentClassProductResolver,
+};
 pub use graphics_callbacks::{
     GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackDriveError,
     GraphicsCallbackHandler, GraphicsCallbackHostEvent, GraphicsCallbackHostFailure,
@@ -124,11 +133,14 @@ pub use local_tasks::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use local_tasks::{RuntimeLocalTaskChildFactory, RuntimeLocalTaskSupervisor};
 pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use native_continuation::run_selected_callback_continuation_with;
 pub use native_continuation::{
-    run_native_continuation, run_owned_request_continuation,
+    run_native_continuation, run_native_continuation_with, run_owned_request_continuation,
     run_rooted_function_native_continuation, run_selected_callback_continuation,
     NativeContinuationPlacement,
 };
+pub use native_region_host_route::{NativeRegionHostOperation, NativeRegionHostRoute};
 #[cfg(target_arch = "wasm32")]
 pub use preferences::BrowserPreferenceService;
 #[cfg(not(target_arch = "wasm32"))]
@@ -153,7 +165,8 @@ pub(crate) use services::test_managed_selection;
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::RuntimeProcessService;
 pub use services::{
-    ForeignCall, ForeignCallCompletion, HostInteraction, NativeCapability, ParallelCapability,
+    ForeignCall, ForeignCallCompletion, HostInteraction, NativeCapability,
+    NativeLinkedCallbackPort, NativeLinkedDynamicPort, NativeLinkedHostPorts, ParallelCapability,
     RuntimeAccelerationService, RuntimeAnalysisService, RuntimeBaseWorkspaceService,
     RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
     RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedInvocation,
@@ -163,10 +176,10 @@ pub use services::{
     RuntimeHttpService, RuntimeManagedWholeWorkSelection, RuntimeNativeService,
     RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
     RuntimePlacementFeedbackDelivery, RuntimePlacementFeedbackSource, RuntimePlacementService,
-    RuntimeProgramCallable, RuntimeProgramService, RuntimeServiceFuture, RuntimeServicePorts,
-    RuntimeSignalMaterializationRequest, RuntimeSpmdAdmission, RuntimeSpmdGangLease,
-    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
-    RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
+    RuntimeProgramCallable, RuntimeProgramService, RuntimeSelectedLocalServices,
+    RuntimeServiceFuture, RuntimeServicePorts, RuntimeSignalMaterializationRequest,
+    RuntimeSpmdAdmission, RuntimeSpmdGangLease, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
+    RuntimeSpmdService, RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{
@@ -187,8 +200,8 @@ pub use tcp::{
     RuntimeTcpService,
 };
 pub(crate) use timer::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
-pub use timing::RuntimeTimingService;
 pub(crate) use timing::StopwatchToken;
+pub use timing::{DeterministicTimingService, RuntimeCalendarInstant, RuntimeTimingService};
 pub use user_path::{
     RuntimeUserPathService, UserPathMutation, UserPathServiceError, UserPathSetting,
     UserPathSnapshot,

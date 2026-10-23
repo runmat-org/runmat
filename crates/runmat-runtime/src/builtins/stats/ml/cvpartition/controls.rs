@@ -136,8 +136,10 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
         Value::String(text) => parse_stratify_boolean_alias(text).ok_or_else(|| {
             invalid_argument(format!("cvpartition: {label} must be logical scalar"))
         }),
-        Value::CharArray(chars) => {
-            let text = chars.data().iter().collect::<String>();
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            let text = runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
+                invalid_argument(format!("cvpartition: {label} contains {error}"))
+            })?;
             parse_stratify_boolean_alias(&text).ok_or_else(|| {
                 invalid_argument(format!("cvpartition: {label} must be logical scalar"))
             })
@@ -151,7 +153,11 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 pub(super) fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
         Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
-        Value::CharArray(chars) => Ok(Cow::Owned(chars.data().iter().collect())),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map(Cow::Owned)
+                .map_err(|error| invalid_argument(format!("cvpartition: {label} contains {error}")))
+        }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(Cow::Borrowed(array.data()[0].as_str()))
         }

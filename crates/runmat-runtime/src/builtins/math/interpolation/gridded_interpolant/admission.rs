@@ -17,7 +17,7 @@ pub(super) fn ensure_constructor_integer_extensions(
     let mut numeric_len = args.len();
     let mut methods = 0usize;
     while numeric_len > 0 && methods < 2 {
-        let Some(name) = text_from_value(&args[numeric_len - 1]) else {
+        let Some(name) = text_from_value(&args[numeric_len - 1])? else {
             break;
         };
         if MethodKeyword::parse(&name).is_none() {

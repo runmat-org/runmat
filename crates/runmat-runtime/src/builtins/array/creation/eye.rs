@@ -4,16 +4,12 @@ use runmat_builtins::{
 };
 
 use runmat_accelerate_api::GpuTensorHandle;
-#[cfg(test)]
-use runmat_builtins::{ResolveContext, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
     NumericScalar, SparseTensor, Tensor, Value,
 };
 
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -50,17 +46,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Identity tensors are materialised directly; fusion planner treats eye() as a standalone allocation.",
 };
 
-#[cfg(test)]
-fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    tensor_type_from_rank(args, ctx)
-}
-
 #[runtime_builtin(
     name = "eye",
     binding_variant = "default",
@@ -76,11 +61,13 @@ fn ensure_eye_extensions(args: crate::call::FunctionArgumentView<'_>) -> crate::
     let mut dimension_count = 0usize;
     let mut idx = 0usize;
     while idx < args.len() {
-        if keyword_of(&args[idx]).as_deref() == Some("like") {
+        if crate::builtins::common::arg_tokens::scalar_keyword_of(&args[idx], "eye")?.as_deref()
+            == Some("like")
+        {
             idx = idx.saturating_add(2);
             continue;
         }
-        if keyword_of(&args[idx]).is_some() {
+        if crate::builtins::common::arg_tokens::scalar_keyword_of(&args[idx], "eye")?.is_some() {
             idx += 1;
             continue;
         }
@@ -155,7 +142,7 @@ enum EyeTemplate {
 }
 
 impl ParsedEye {
-    async fn parse(args: crate::call::BuiltinArguments) -> Result<Self, String> {
+    async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -166,20 +153,23 @@ impl ParsedEye {
         let mut idx = 0;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(&arg, "eye")?
+            {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
                             return Err(
-                                "eye: multiple 'like' specifications are not supported".to_string()
+                                "eye: multiple 'like' specifications are not supported".into()
                             );
                         }
                         if class_override.is_some() {
-                            return Err("eye: cannot combine 'like' with other class specifiers"
-                                .to_string());
+                            return Err(
+                                "eye: cannot combine 'like' with other class specifiers".into()
+                            );
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("eye: expected prototype after 'like'".to_string());
+                            return Err("eye: expected prototype after 'like'".into());
                         };
                         ensure_eye_numeric_prototype(&proto)?;
                         like_proto = Some(proto.clone());
@@ -188,7 +178,7 @@ impl ParsedEye {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err("eye: cannot combine 'like' with 'logical'".to_string());
+                            return Err("eye: cannot combine 'like' with 'logical'".into());
                         }
                         class_override = Some(EyeTemplate::Logical);
                         idx += 1;
@@ -196,7 +186,7 @@ impl ParsedEye {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err("eye: cannot combine 'like' with 'double'".to_string());
+                            return Err("eye: cannot combine 'like' with 'double'".into());
                         }
                         class_override = Some(EyeTemplate::Double);
                         idx += 1;
@@ -204,7 +194,7 @@ impl ParsedEye {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err("eye: cannot combine 'like' with 'single'".to_string());
+                            return Err("eye: cannot combine 'like' with 'single'".into());
                         }
                         class_override = Some(EyeTemplate::Single);
                         idx += 1;
@@ -213,7 +203,9 @@ impl ParsedEye {
                     "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
                     | "uint64" => {
                         if like_proto.is_some() {
-                            return Err(format!("eye: cannot combine 'like' with '{keyword}'"));
+                            return Err(
+                                format!("eye: cannot combine 'like' with '{keyword}'").into()
+                            );
                         }
                         class_override = Some(EyeTemplate::Integer(
                             integer_storage_prototype_from_keyword(&keyword)
@@ -223,7 +215,7 @@ impl ParsedEye {
                         continue;
                     }
                     other => {
-                        return Err(format!("eye: unrecognised option '{other}'"));
+                        return Err(format!("eye: unrecognised option '{other}'").into());
                     }
                 }
             }
@@ -245,8 +237,7 @@ impl ParsedEye {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &EYE_IMPLICIT_PROTOTYPE_EXTENSION,
                 "eye",
-            )
-            .map_err(|error| error.to_string())?;
+            )?;
             if shape_source.is_none() {
                 shape_source = Some(shape_from_value(&arg)?);
             }
@@ -274,8 +265,7 @@ impl ParsedEye {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &EYE_ND_DIMENSIONS_EXTENSION,
                 "eye",
-            )
-            .map_err(|error| error.to_string())?;
+            )?;
         }
 
         let template = if let Some(proto) = like_proto {
@@ -610,18 +600,6 @@ fn identity_tensor(shape: &[usize]) -> Result<Tensor, String> {
     Tensor::new(data, shape_vec).map_err(|e| format!("eye: {e}"))
 }
 
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
 #[async_recursion::async_recursion(?Send)]
 async fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
     if matches!(value, Value::LogicalArray(_)) {
@@ -788,7 +766,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -799,21 +776,6 @@ pub(crate) mod tests {
         ))
         .expect("eye");
         assert_eq!(result, Value::Num(1.0));
-    }
-
-    #[test]
-    fn eye_type_defaults_to_num() {
-        assert_eq!(eye_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
-
-    #[test]
-    fn eye_type_infers_rank_from_scalar_dim() {
-        assert_eq!(
-            eye_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

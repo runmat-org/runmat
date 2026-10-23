@@ -264,6 +264,11 @@ pub(crate) async fn acquire(
     context: Option<&RuntimeContext>,
     label: &str,
 ) -> BuiltinResult<RandomTurn> {
+    if let Some(runtime) = context.cloned().or_else(crate::context::legacy::active) {
+        runtime
+            .service_ports()
+            .require_selected_local_effect(runmat_types::EffectKind::Randomness)?;
+    }
     let (owner, gate) = owner_and_gate(context);
     let generation = owner
         .as_ref()
@@ -324,6 +329,11 @@ pub(crate) fn try_acquire(
     context: Option<&RuntimeContext>,
     label: &str,
 ) -> BuiltinResult<RandomTurn> {
+    if let Some(runtime) = context.cloned().or_else(crate::context::legacy::active) {
+        runtime
+            .service_ports()
+            .require_selected_local_effect(runmat_types::EffectKind::Randomness)?;
+    }
     let (owner, gate) = owner_and_gate(context);
     let generation = owner
         .as_ref()

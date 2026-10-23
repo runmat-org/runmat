@@ -60,7 +60,7 @@ fn getfield_char_array_single_element() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 1);
-            assert_eq!(ca.data(), vec!['n']);
+            assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("n"));
         }
         other => panic!("expected 1x1 CharArray, got {other:?}"),
     }

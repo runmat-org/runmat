@@ -99,18 +99,20 @@ pub(crate) mod tests {
                 .iter()
                 .map(|value| match value {
                     Value::String(s) => s.to_string(),
-                    Value::CharArray(ca) if ca.rows == 1 => ca
-                        .data()
-                        .iter()
-                        .collect::<String>()
-                        .trim_end_matches([' ', '\0'])
-                        .to_string(),
+                    Value::CharArray(ca) if ca.rows == 1 => {
+                        runmat_value::decode_utf16_code_units(ca.data())
+                            .expect("valid UTF-16 fixture")
+                            .trim_end_matches([' ', '\0'])
+                            .to_string()
+                    }
                     other => panic!("expected string entry, got {other:?}"),
                 })
                 .collect(),
             Value::String(s) => vec![s.to_string()],
             Value::StringArray(sa) => sa.data().iter().map(ToString::to_string).collect(),
-            Value::CharArray(ca) => char_array_rows_as_strings(&ca),
+            Value::CharArray(ca) => {
+                char_array_rows_as_strings(&ca, WorkspaceQueryOwner::Who).unwrap()
+            }
             other => panic!("expected cell array result, got {other:?}"),
         }
     }

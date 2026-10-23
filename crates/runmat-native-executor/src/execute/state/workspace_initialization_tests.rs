@@ -364,6 +364,7 @@ fn local_state_with(
                 region_capacity: 16,
                 retained_input_capacity: 16,
             },
+        operation_contracts: vec![],
         expected_sites: vec![],
         blocks: vec![NativeBlock {
             id: NativeBlockId(0),
@@ -381,6 +382,8 @@ fn local_state_with(
                 },
                 source: source.clone(),
                 class: runmat_mir::NativeLoweringClass::NativeOperation,
+                effects: Default::default(),
+                capabilities: Default::default(),
                 safepoint: None,
                 kind: NativeTerminatorKind::Return { values: vec![] },
                 frame_state: NativeFrameState {
@@ -552,23 +555,27 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
                 request,
                 embedded: None,
                 retained_roots: Vec::new(),
-                future: Box::pin(async move {
-                    service.assign_with_context(&call_runtime, "x", Value::Num(42.0))?;
-                    if fail {
-                        Err(runmat_runtime::runtime_error::semantic_error(
-                            "WorkspaceCompletionFixture",
-                            "failure after workspace assignment",
-                        )
-                        .into())
-                    } else {
-                        Ok(
-                            crate::execute::call_suspension::CallCompletion::RootedArguments(
-                                runmat_runtime::execution::RootedValues::new(vec![])
-                                    .map_err(|error| error.into_runtime_error())?,
-                            ),
-                        )
-                    }
-                }),
+                future: crate::execute::call_suspension::admit_completion_with(
+                    &state,
+                    move || async move {
+                        service.assign_with_context(&call_runtime, "x", Value::Num(42.0))?;
+                        if fail {
+                            Err(runmat_runtime::runtime_error::semantic_error(
+                                "WorkspaceCompletionFixture",
+                                "failure after workspace assignment",
+                            )
+                            .into())
+                        } else {
+                            Ok(
+                                crate::execute::call_suspension::CallCompletion::RootedArguments(
+                                    runmat_runtime::execution::RootedValues::new(vec![])
+                                        .map_err(|error| error.into_runtime_error())?,
+                                ),
+                            )
+                        }
+                    },
+                )
+                .unwrap(),
             });
             let result = futures::executor::block_on(crate::execute::call_suspension::complete(
                 &mut state, 1, 1,
@@ -640,35 +647,39 @@ fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
                 request,
                 embedded: None,
                 retained_roots: Vec::new(),
-                future: Box::pin(async move {
-                    reached_call.set(true);
-                    gate.await.map_err(|_| {
-                        runmat_runtime::runtime_error::semantic_error(
-                            "WorkspaceRevisionFixture",
-                            "checkpoint gate was abandoned",
+                future: crate::execute::call_suspension::admit_completion_with(
+                    &state,
+                    move || async move {
+                        reached_call.set(true);
+                        gate.await.map_err(|_| {
+                            runmat_runtime::runtime_error::semantic_error(
+                                "WorkspaceRevisionFixture",
+                                "checkpoint gate was abandoned",
+                            )
+                        })?;
+                        runmat_runtime::call_builtin_async_in_context(
+                            &call_runtime,
+                            "plus",
+                            &[Value::Num(1.0), Value::Num(2.0)],
                         )
-                    })?;
-                    runmat_runtime::call_builtin_async_in_context(
-                        &call_runtime,
-                        "plus",
-                        &[Value::Num(1.0), Value::Num(2.0)],
-                    )
-                    .await?;
-                    if fail {
-                        Err(runmat_runtime::runtime_error::semantic_error(
-                            "WorkspaceRevisionFixture",
-                            "failure after canonical reconciliation",
-                        )
-                        .into())
-                    } else {
-                        Ok(
-                            crate::execute::call_suspension::CallCompletion::RootedArguments(
-                                runmat_runtime::execution::RootedValues::new(vec![])
-                                    .map_err(|error| error.into_runtime_error())?,
-                            ),
-                        )
-                    }
-                }),
+                        .await?;
+                        if fail {
+                            Err(runmat_runtime::runtime_error::semantic_error(
+                                "WorkspaceRevisionFixture",
+                                "failure after canonical reconciliation",
+                            )
+                            .into())
+                        } else {
+                            Ok(
+                                crate::execute::call_suspension::CallCompletion::RootedArguments(
+                                    runmat_runtime::execution::RootedValues::new(vec![])
+                                        .map_err(|error| error.into_runtime_error())?,
+                                ),
+                            )
+                        }
+                    },
+                )
+                .unwrap(),
             });
             let mut completion =
                 Box::pin(crate::execute::call_suspension::complete(&mut state, 1, 1));

@@ -121,7 +121,7 @@ pub(super) fn parse_assumed_type(name: &'static str, value: Value) -> BuiltinRes
             "assumedtype must be a character row or scalar string",
         ));
     }
-    let Some(keyword) = keyword_of(&value) else {
+    let Some(keyword) = keyword_of(&value)? else {
         return Err(error_with_detail(
             name,
             &ERROR_INVALID_INPUT,

@@ -13,7 +13,9 @@ fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
 
 fn text(value: &Value) -> String {
     match value {
-        Value::CharArray(chars) => chars.data().iter().collect(),
+        Value::CharArray(chars) => {
+            runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture")
+        }
         other => panic!("expected char array, got {other:?}"),
     }
 }
@@ -116,7 +118,8 @@ fn validates_arguments_and_output_count_before_dialog_or_provider_access() {
         assert_eq!(error.identifier(), Some("RunMat:uiputfile:TooManyOutputs"));
         assert!(request.lock().unwrap().is_none());
         let pages = Value::CharArray(
-            runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+                .unwrap(),
         );
         assert_eq!(
             call(vec![pages], Some(1)).unwrap_err().identifier(),

@@ -51,7 +51,11 @@ pub(super) fn value_text_preserve_case(value: &Value, label: &str) -> BuiltinRes
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            crate::builtins::stats::decode_utf16_with_error(array.data(), || {
+                invalid(format!("boxplot: {label} is not valid UTF-16 text"))
+            })
+        }
         _ => Err(invalid(format!("boxplot: {label} must be text"))),
     }
 }
@@ -64,7 +68,7 @@ pub(super) fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<Strin
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
-        Value::CharArray(array) => Ok(char_rows(array)),
+        Value::CharArray(array) => char_rows(array),
         Value::Cell(cell) => cell
             .data()
             .iter()
@@ -142,7 +146,11 @@ pub(super) fn parse_colors(value: &Value) -> BuiltinResult<Vec<Vec4>> {
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(
+            crate::builtins::stats::decode_utf16_with_error(array.data(), || {
+                invalid("boxplot: Colors must be valid UTF-16 text")
+            })?,
+        ),
         _ => None,
     } {
         let colors = text

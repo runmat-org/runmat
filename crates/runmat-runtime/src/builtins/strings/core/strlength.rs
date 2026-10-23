@@ -128,7 +128,7 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
     let mut end = cols;
     while end > 0 {
         let ch = array.data()[row * cols + end - 1];
-        if ch == ' ' {
+        if ch.raw() == u16::from(b' ') {
             end -= 1;
         } else {
             break;
@@ -188,7 +188,7 @@ pub(crate) mod tests {
     #[test]
     fn strlength_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
-        let array = CharArray::new(data, 2, 5).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 5).unwrap();
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
@@ -203,7 +203,7 @@ pub(crate) mod tests {
     #[test]
     fn strlength_char_vector_retains_explicit_spaces() {
         let data: Vec<char> = "hi   ".chars().collect();
-        let array = CharArray::new(data, 1, 5).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 1, 5).unwrap();
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         assert_eq!(result, Value::Num(5.0));
     }
@@ -278,7 +278,7 @@ pub(crate) mod tests {
     #[test]
     fn strlength_char_array_trims_padding() {
         let data: Vec<char> = vec!['d', 'o', 'g', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
-        let array = CharArray::new(data, 2, 5).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 5).unwrap();
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {

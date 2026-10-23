@@ -134,7 +134,11 @@ fn log_verbosity(level: &Value) -> BuiltinResult<u8> {
             .expect("a one-element numeric tensor has a scalar value"),
         Value::String(level) => return named_verbosity(level),
         Value::CharArray(chars) if chars.rows <= 1 => {
-            return named_verbosity(&chars.data().iter().collect::<String>());
+            let text =
+                crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                    testing_diagnostic_error("log: verbosity is not valid UTF-16 text")
+                })?;
+            return named_verbosity(&text);
         }
         _ => {
             return Err(testing_diagnostic_error(
@@ -170,7 +174,11 @@ fn named_verbosity(level: &str) -> BuiltinResult<u8> {
 fn diagnostic_message(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(message) => Ok(message.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                testing_diagnostic_error("log: diagnostic message is not valid UTF-16 text")
+            })
+        }
         Value::Object(object)
             if crate::class_registry::is_class_or_subclass(
                 object.class_name(),

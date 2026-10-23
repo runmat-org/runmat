@@ -1,5 +1,31 @@
 use super::*;
 
+fn char_row_to_string(array: &CharArray, row: usize) -> String {
+    let start = row * array.cols;
+    let units = &array.data()[start..start + array.cols];
+    let mut rendered = String::new();
+    let mut index = 0;
+    while index < units.len() {
+        let raw = units[index].raw();
+        if (0xD800..=0xDBFF).contains(&raw) && index + 1 < units.len() {
+            let low = units[index + 1].raw();
+            if (0xDC00..=0xDFFF).contains(&low) {
+                let scalar = 0x1_0000 + (((raw as u32 - 0xD800) << 10) | (low as u32 - 0xDC00));
+                rendered.push(char::from_u32(scalar).expect("validated UTF-16 surrogate pair"));
+                index += 2;
+                continue;
+            }
+        }
+        if let Some(character) = char::from_u32(raw as u32) {
+            rendered.push(character);
+        } else {
+            rendered.push_str(&format!("\\u{raw:04X}"));
+        }
+        index += 1;
+    }
+    rendered
+}
+
 pub(super) fn format_char_array(array: &CharArray, mode: RenderMode) -> Vec<String> {
     if array.rows == 0 || array.cols == 0 {
         return match mode {

@@ -54,9 +54,11 @@ fn text_scalar<'a>(
         Value::StringArray(strings) if strings.data().len() == 1 => {
             Ok(std::borrow::Cow::Borrowed(strings.data()[0].as_str()))
         }
-        Value::CharArray(chars) if chars.rows == 1 => {
-            Ok(std::borrow::Cow::Owned(chars.data().iter().collect()))
-        }
+        Value::CharArray(chars) if chars.rows == 1 => Ok(std::borrow::Cow::Owned(
+            super::text::decode_utf16_with_error(chars.data(), || {
+                input_parser_error(builtin, &INPUT_PARSER_ERROR_PARAMETER_NAME)
+            })?,
+        )),
         _ => Err(input_parser_error(
             builtin,
             &INPUT_PARSER_ERROR_PARAMETER_NAME,
@@ -68,7 +70,12 @@ fn validate_parameter_name(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::String(_) => Ok(()),
         Value::StringArray(strings) if strings.data().len() == 1 => Ok(()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            super::text::decode_utf16_with_error(chars.data(), || {
+                input_parser_error(PARSE_NAME, &INPUT_PARSER_ERROR_PARAMETER_NAME)
+            })?;
+            Ok(())
+        }
         _ => Err(input_parser_error(
             PARSE_NAME,
             &INPUT_PARSER_ERROR_PARAMETER_NAME,
@@ -82,7 +89,9 @@ fn parameter_name_matches(value: &Value, name: &str) -> bool {
         Value::StringArray(strings) if strings.data().len() == 1 => {
             strings.data()[0].as_str() == name
         }
-        Value::CharArray(chars) if chars.rows == 1 => chars.data().iter().copied().eq(name.chars()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).is_ok_and(|text| text == name)
+        }
         _ => false,
     }
 }

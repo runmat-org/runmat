@@ -24,6 +24,9 @@ impl FsPathNamespace {
 }
 
 fn snapshot_provider() -> (Arc<dyn FsProvider>, Option<PathBuf>) {
+    if let Some(selected) = crate::invocation::snapshot() {
+        return selected;
+    }
     let state = provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned");

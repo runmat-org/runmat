@@ -188,6 +188,7 @@ pub(super) fn solve(
             &GmresOptions {
                 restart,
                 side: PreconditionerSide::Right,
+                ..GmresOptions::default()
             },
             control(),
         )?;

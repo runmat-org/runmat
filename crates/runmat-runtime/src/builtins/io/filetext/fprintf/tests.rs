@@ -159,14 +159,16 @@ fn numeric_format_accepts_trailing_singletons_but_not_extra_pages() {
         .unwrap(),
     );
     assert!(coerce_to_format_string(&invalid).unwrap().is_none());
-    let char_row =
-        Value::CharArray(CharArray::new_with_shape(vec!['%', 'd'], vec![1, 2, 1]).unwrap());
+    let char_row = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['%', 'd'], vec![1, 2, 1]).unwrap(),
+    );
     assert!(matches!(
         coerce_to_format_string(&char_row),
         Ok(Some(Value::String(_)))
     ));
     let char_pages = Value::CharArray(
-        CharArray::new_with_shape(vec!['%', 'd', '%', 'd'], vec![1, 2, 2]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape(vec!['%', 'd', '%', 'd'], vec![1, 2, 2])
+            .unwrap(),
     );
     assert!(coerce_to_format_string(&char_pages).is_err());
 }

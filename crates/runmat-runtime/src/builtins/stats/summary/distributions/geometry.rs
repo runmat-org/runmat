@@ -9,7 +9,9 @@ pub(super) fn split_upper_tail(
 ) -> BuiltinResult<(crate::call::BuiltinArguments, DistributionTail)> {
     let tail = rest
         .last()
-        .and_then(crate::builtins::common::random_args::keyword_of)
+        .map(crate::builtins::common::random_args::keyword_of)
+        .transpose()?
+        .flatten()
         .and_then(|keyword| DistributionTail::from_keyword(&keyword))
         .unwrap_or(DistributionTail::Lower);
     let end = rest.len() - usize::from(tail == DistributionTail::Upper);

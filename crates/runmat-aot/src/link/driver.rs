@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::{AotError, AotResult};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LinkerFamily {
     UnixCc,

@@ -1,44 +1,5 @@
 use super::*;
 
-pub(super) fn spec_to_object(spec: &DecompositionSpec) -> BuiltinResult<ObjectInstance> {
-    let mut object = runmat_value::UnboundedObjectBuilder::new(CLASS_IDENTITY);
-    let public_matrix = oriented_matrix(spec)?;
-    object.insert(MATRIX_FIELD.to_string(), spec.matrix.clone());
-    object.insert(
-        TYPE_FIELD.to_string(),
-        Value::string(decomposition_type_name(spec.decomp_type).to_string()),
-    );
-    object.insert(
-        MATRIX_SIZE_FIELD.to_string(),
-        matrix_shape_value(&public_matrix)?,
-    );
-    object.insert(
-        CHECK_CONDITION_FIELD.to_string(),
-        Value::Bool(spec.check_condition),
-    );
-    object.insert(
-        DATATYPE_FIELD.to_string(),
-        Value::string(matrix_datatype(&spec.matrix).to_string()),
-    );
-    object.insert(
-        IS_CONJUGATE_TRANSPOSED_FIELD.to_string(),
-        Value::Bool(spec.is_conjugate_transposed),
-    );
-    object.insert(
-        IS_REAL_FIELD.to_string(),
-        Value::Bool(matrix_is_real(&public_matrix) && spec.scale.1 == 0.0),
-    );
-    object.insert(IS_SPARSE_FIELD.to_string(), Value::Bool(spec.is_sparse));
-    object.insert(
-        SCALE_FACTOR_FIELD.to_string(),
-        complex_scalar_to_value(spec.scale),
-    );
-    if let Some(tol) = spec.rank_tolerance {
-        object.insert(RANK_TOLERANCE_FIELD.to_string(), Value::Num(tol));
-    }
-    Ok(object.finish())
-}
-
 pub(super) fn public_property_value(object: &ObjectInstance, field: &str) -> BuiltinResult<Value> {
     match field {
         MATRIX_SIZE_FIELD
@@ -67,7 +28,9 @@ pub(super) fn object_to_spec(value: &Value) -> BuiltinResult<DecompositionSpec> 
     let decomp_type = object
         .properties()
         .get(TYPE_FIELD)
-        .and_then(text_from_value)
+        .map(text_from_value)
+        .transpose()?
+        .flatten()
         .map(|value| parse_decomposition_type(&value))
         .transpose()?
         .ok_or_else(|| internal("decomposition object is missing Type"))?;
@@ -108,6 +71,28 @@ pub(super) fn object_to_spec(value: &Value) -> BuiltinResult<DecompositionSpec> 
         is_conjugate_transposed,
         is_sparse,
         scale,
+        factor_data: object.numeric_factor_data().cloned(),
+        triangle: object
+            .properties()
+            .get(TRIANGLE_FIELD)
+            .map(|v| {
+                text_from_value(v)?
+                    .ok_or_else(|| invalid("decomposition triangle must be text"))
+                    .and_then(|s| {
+                        if s.is_empty() {
+                            Ok(None)
+                        } else {
+                            parse_triangular_flag(&s).map(Some)
+                        }
+                    })
+            })
+            .transpose()?
+            .flatten(),
+        source_is_real: object
+            .properties()
+            .get(SOURCE_REAL_FIELD)
+            .map(|v| bool_scalar(v, SOURCE_REAL_FIELD))
+            .transpose()?,
     })
 }
 

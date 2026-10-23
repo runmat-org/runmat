@@ -14,7 +14,7 @@ pub(super) fn parse_squareform_force(
             "squareform: accepts at most one force option",
         ));
     }
-    let text = keyword_of(&args[0]).ok_or_else(|| {
+    let text = distance_keyword(SQUAREFORM_NAME, &args[0])?.ok_or_else(|| {
         distance_error(
             SQUAREFORM_NAME,
             "squareform: force option must be 'tomatrix' or 'tovector'",

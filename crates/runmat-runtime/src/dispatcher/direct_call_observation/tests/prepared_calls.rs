@@ -78,10 +78,6 @@ struct AdmittedService {
 }
 
 impl RuntimeAccelerationService for AdmittedService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-
     fn prepare_admitted(
         &self,
         _context: RuntimeContext,

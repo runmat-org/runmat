@@ -66,32 +66,33 @@ pub(super) async fn strip_char_array(
             source.shape[axis]
         }
     };
-    let fill =
-        |output: &mut [char], receipt: Option<&HostAllocationReceipt>| -> BuiltinResult<()> {
-            for index in 0..row_count {
-                if let Some(receipt) = receipt {
-                    if index.is_multiple_of(CHECKPOINT_CHUNK) {
-                        let runtime = runtime
-                            .ok_or_else(|| invalid("Managed character receipt lacks runtime"))?;
-                        receipt
-                            .checkpoint(runtime)
-                            .map_err(|cause| strip_allocation_error(runtime, cause))?;
-                    }
-                } else {
-                    checkpoint(runtime, index)?;
+    let fill = |output: &mut [Utf16CodeUnit],
+                receipt: Option<&HostAllocationReceipt>|
+     -> BuiltinResult<()> {
+        for index in 0..row_count {
+            if let Some(receipt) = receipt {
+                if index.is_multiple_of(CHECKPOINT_CHUNK) {
+                    let runtime = runtime
+                        .ok_or_else(|| invalid("Managed character receipt lacks runtime"))?;
+                    receipt
+                        .checkpoint(runtime)
+                        .map_err(|cause| strip_allocation_error(runtime, cause))?;
                 }
-                let source_start = index * cols;
-                let (left, right) = trimmed_bounds(
-                    &source.data()[source_start..source_start + cols],
-                    direction,
-                    patterns.pattern_for_index(index % rows),
-                );
-                let target_start = index * width;
-                output[target_start..target_start + right - left]
-                    .copy_from_slice(&source.data()[source_start + left..source_start + right]);
+            } else {
+                checkpoint(runtime, index)?;
             }
-            Ok(())
-        };
+            let source_start = index * cols;
+            let (left, right) = trimmed_bounds(
+                &source.data()[source_start..source_start + cols],
+                direction,
+                patterns.pattern_for_index(index % rows),
+            );
+            let target_start = index * width;
+            output[target_start..target_start + right - left]
+                .copy_from_slice(&source.data()[source_start + left..source_start + right]);
+        }
+        Ok(())
+    };
     let policy = HostAllocationReceipt::policy(runtime).map_err(|cause| match runtime {
         Some(runtime) => strip_allocation_error(runtime, cause),
         None => invalid(format!("Character output policy: {cause}")),
@@ -112,10 +113,10 @@ pub(super) async fn strip_char_array(
         )?;
         return Ok(Value::CharArray(output));
     }
-    let mut data = vec![' '; count];
+    let mut data = vec![Utf16CodeUnit::from_raw(b' ' as u16); count];
     fill(&mut data, None)?;
     let shape = (0..source.shape.len()).map(output_shape).collect();
-    CharArray::new_with_shape(data, shape)
+    CharArray::from_code_units_with_shape(data, shape)
         .map(Value::CharArray)
         .map_err(invalid)
 }
@@ -147,16 +148,18 @@ fn publish_empty(runtime: Option<&RuntimeContext>, source: CharArray) -> Builtin
 }
 
 pub(super) fn trimmed_bounds(
-    row: &[char],
+    row: &[Utf16CodeUnit],
     direction: StripDirection,
     pattern: PatternRef<'_>,
 ) -> (usize, usize) {
-    let matches = |value: char| match pattern {
-        PatternRef::Default => crate::builtins::strings::common::trimmable_whitespace(
-            value,
-            !crate::compatibility::runmat_extensions_enabled(),
-        ),
-        PatternRef::CustomText(chars) => chars.contains(value),
+    let matches = |value: Utf16CodeUnit| match pattern {
+        PatternRef::Default => char::from_u32(value.raw() as u32).is_some_and(|value| {
+            crate::builtins::strings::common::trimmable_whitespace(
+                value,
+                !crate::compatibility::runmat_extensions_enabled(),
+            )
+        }),
+        PatternRef::CustomText(chars) => chars.encode_utf16().any(|unit| unit == value.raw()),
         PatternRef::CustomChars(chars) => chars.contains(&value),
     };
     let mut left = 0;

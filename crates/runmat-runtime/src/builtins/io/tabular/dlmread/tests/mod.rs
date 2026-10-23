@@ -2,11 +2,13 @@ use super::*;
 
 #[test]
 fn dlmread_path_requires_effective_scalar_text_geometry() {
-    let paged =
-        Value::CharArray(CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).unwrap());
+    let paged = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 1, 2]).unwrap(),
+    );
     assert!(resolve_path(&paged).is_err());
-    let singleton =
-        Value::CharArray(CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1]).unwrap());
+    let singleton = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 2, 1]).unwrap(),
+    );
     assert_eq!(resolve_path(&singleton).unwrap(), PathBuf::from("ab"));
 }
 use crate::builtins::common::test_support;
@@ -143,7 +145,8 @@ fn dlmread_char_array_filename() {
     let path = write_temp_file(&["1,2", "3,4"]);
     let path_string = path.to_string_lossy().to_string();
     let chars: Vec<char> = path_string.chars().collect();
-    let char_array = CharArray::new(chars, 1, path_string.chars().count()).expect("char array");
+    let char_array = CharArray::from_unicode_scalars(chars, 1, path_string.encode_utf16().count())
+        .expect("char array");
     let result = dlmread_builtin(Value::CharArray(char_array), Vec::new()).expect("dlmread");
     match result {
         Value::Tensor(t) => {
@@ -228,7 +231,7 @@ fn dlmread_empty_delimiter_placeholders_are_documented_strict_forms() {
     assert_eq!(comma.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
 
     let whitespace_path = write_temp_file(&["0 1 2", "3 4 5", "6 7 8"]);
-    let empty_char = CharArray::new(Vec::new(), 1, 0).expect("empty character vector");
+    let empty_char = CharArray::from_code_units(Vec::new(), 1, 0).expect("empty character vector");
     let whitespace = dlmread_builtin(
         Value::from(whitespace_path.to_string_lossy().to_string()),
         vec![

@@ -22,7 +22,7 @@ pub(super) fn decode_option(name: &NamedOption, value: &Value) -> BuiltinResult<
             FitctreeAction::PredictorNames(text_list(value, "PredictorNames")?)
         }
         FitctreeOption::ResponseName => FitctreeAction::ResponseName(
-            scalar_text(value)
+            scalar_text(value)?
                 .ok_or_else(|| fitctree_invalid("fitctree: ResponseName must be text"))?,
         ),
         FitctreeOption::MaxNumSplits => {
@@ -35,7 +35,7 @@ pub(super) fn decode_option(name: &NamedOption, value: &Value) -> BuiltinResult<
             FitctreeAction::MinParentSize(positive_integer(value, "MinParentSize")?)
         }
         FitctreeOption::SplitCriterion => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitctree_invalid("fitctree: SplitCriterion must be text"))?;
             let criterion = match text.to_ascii_lowercase().as_str() {
                 "gdi" => SplitCriterion::Gdi,
@@ -49,14 +49,14 @@ pub(super) fn decode_option(name: &NamedOption, value: &Value) -> BuiltinResult<
             FitctreeAction::SplitCriterion(criterion)
         }
         FitctreeOption::Weights => {
-            FitctreeAction::Weights(if let Some(name) = scalar_text(value) {
+            FitctreeAction::Weights(if let Some(name) = scalar_text(value)? {
                 WeightSpec::Variable(name)
             } else {
                 WeightSpec::Values(numeric_vector(value, "Weights")?)
             })
         }
         FitctreeOption::ScoreTransform => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitctree_invalid("fitctree: ScoreTransform must be text"))?;
             if !text.eq_ignore_ascii_case("none") {
                 return Err(fitctree_invalid(

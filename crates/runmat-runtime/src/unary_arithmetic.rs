@@ -37,6 +37,19 @@ pub async fn evaluate_in_context(
     let method = operator
         .overload_name()
         .expect("unary arithmetic has an overload method");
+    if let Some((runtime, route)) = context.and_then(|runtime| {
+        runtime
+            .native_region_host_route()
+            .map(|route| (runtime, route))
+    }) {
+        route.require_intrinsic_host(runtime, operator)?;
+        if !crate::builtins::math::host_route::real_floating_host(&value) {
+            return Err(crate::runtime_error::semantic_error(
+                "RunMat:Placement:InvalidNativeRegion",
+                "native host intrinsic received a non-host operand",
+            ));
+        }
+    }
     // Resolve registered object/handle methods before numeric fallback. Absence
     // permits fallback; a method's own error must propagate without replay.
     if let Some(result) = crate::dispatcher::try_call_registered_instance_method(
@@ -58,10 +71,10 @@ pub async fn evaluate_in_context(
         UnaryArithmeticOperation::Plus => {
             if crate::builtins::math::host_route::real_floating_host(&value) {
                 if let Some(context) = context {
-                    if let Some(route) = context.vm_fusion_host_route() {
-                        if route.allows_intrinsic_host(context, operator) {
-                            route.confirm_intrinsic_host(context, operator);
-                        }
+                    if let Some(route) =
+                        crate::builtins::math::host_route::intrinsic(context, operator)
+                    {
+                        route.confirm_intrinsic_host(context, operator);
                     }
                 }
             }
@@ -70,9 +83,7 @@ pub async fn evaluate_in_context(
         UnaryArithmeticOperation::Minus => {
             if crate::builtins::math::host_route::real_floating_host(&value) {
                 if let Some((context, route)) = context.and_then(|runtime| {
-                    runtime
-                        .vm_fusion_host_route()
-                        .filter(|route| route.allows_intrinsic_host(runtime, operator))
+                    crate::builtins::math::host_route::intrinsic(runtime, operator)
                         .map(|route| (runtime, route))
                 }) {
                     if let Some(output) =

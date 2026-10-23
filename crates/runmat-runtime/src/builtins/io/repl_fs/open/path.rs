@@ -9,7 +9,7 @@ pub(super) async fn resolve_open_path(name: &str) -> BuiltinResult<PathBuf> {
 
     let path = find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, BUILTIN_NAME)
         .await
-        .map_err(|err| open_error(&OPEN_ERROR_NOT_FOUND, err))?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
         .ok_or_else(|| {
             open_error(
                 &OPEN_ERROR_NOT_FOUND,
@@ -28,10 +28,13 @@ pub(super) async fn find_exact_open_file(name: &str) -> BuiltinResult<Option<Pat
         return Ok(None);
     };
     for dir in
-        search_directories(BUILTIN_NAME).map_err(|err| open_error(&OPEN_ERROR_NOT_FOUND, err))?
+        search_directories(BUILTIN_NAME).map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
     {
         let candidate = dir.join(candidate_name);
-        if path_is_file(&candidate).await {
+        if path_is_file(&candidate)
+            .await
+            .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
+        {
             return Ok(Some(candidate));
         }
     }

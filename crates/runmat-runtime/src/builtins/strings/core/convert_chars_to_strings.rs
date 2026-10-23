@@ -1,7 +1,7 @@
 //! Character and cellstr conversion to string values.
 
 use runmat_macros::runtime_builtin;
-use runmat_value::{StringArray, Value};
+use runmat_value::{decode_utf16_code_units, StringArray, Value};
 
 use crate::builtins::strings::common::char_row_to_string_slice;
 use crate::builtins::strings::core::conversion::convert_variadic;
@@ -24,12 +24,9 @@ pub(crate) async fn convert_chars_to_strings_builtin(
 fn convert_value(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => {
-            let mut text = String::with_capacity(array.data().len());
-            for col in 0..array.cols {
-                for row in 0..array.rows {
-                    text.push(array.data()[row * array.cols + col]);
-                }
-            }
+            let column_major = array.to_column_major();
+            let text = decode_utf16_code_units(&column_major)
+                .map_err(|error| conversion_error(format!("convertCharsToStrings: {error}")))?;
             Ok(Value::string(text))
         }
         Value::Cell(cell) => {
@@ -42,7 +39,9 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
                 .map(|value| match value {
                     Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
                     Value::CharArray(array) => {
-                        Ok(char_row_to_string_slice(array.data(), array.cols, 0))
+                        char_row_to_string_slice(array.data(), array.cols, 0).map_err(|error| {
+                            conversion_error(format!("convertCharsToStrings: {error}"))
+                        })
                     }
                     _ => Err(conversion_error(
                         "convertCharsToStrings: invalid cellstr element",

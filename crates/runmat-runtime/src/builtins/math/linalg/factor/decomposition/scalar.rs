@@ -21,32 +21,19 @@ pub(super) fn ensure_exact_integer_scalar_boundary(
     value: &Value,
     label: &str,
 ) -> BuiltinResult<()> {
-    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
-    let exact_values: Vec<IntValue> = match value {
-        Value::Int(value) => vec![value.clone()],
-        Value::Tensor(tensor) => tensor
-            .integer_storage()
-            .map_or_else(Vec::new, IntegerStorage::exact_values),
-        Value::ComplexTensor(tensor) => tensor.integer_storage().map_or_else(Vec::new, |storage| {
-            let mut values = storage.real().exact_values();
-            values.extend(storage.imag().exact_values());
-            values
+    let inexact = |value: IntValue| value.to_exact_f64().is_none();
+    let rejected = match value {
+        Value::Int(value) => inexact(value.clone()),
+        Value::Tensor(t) if t.len() == 1 => t
+            .numeric_value_at(0)
+            .and_then(runmat_value::NumericScalar::into_int_value)
+            .is_some_and(inexact),
+        Value::ComplexTensor(t) if t.len() == 1 => t.numeric_value_at(0).is_some_and(|(re, im)| {
+            re.into_int_value().is_some_and(inexact) || im.into_int_value().is_some_and(inexact)
         }),
-        _ => Vec::new(),
+        _ => false,
     };
-    if exact_values.into_iter().any(|value| {
-        let exact = match value {
-            IntValue::I8(value) => i128::from(value),
-            IntValue::I16(value) => i128::from(value),
-            IntValue::I32(value) => i128::from(value),
-            IntValue::I64(value) => i128::from(value),
-            IntValue::U8(value) => i128::from(value),
-            IntValue::U16(value) => i128::from(value),
-            IntValue::U32(value) => i128::from(value),
-            IntValue::U64(value) => i128::from(value),
-        };
-        !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact)
-    }) {
+    if rejected {
         return Err(invalid(format!(
             "decomposition: integer {label} must be exactly representable as double"
         )));
@@ -64,20 +51,8 @@ pub(super) fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, 
             Ok((tensor::tensor_value_f64(tensor, 0), 0.0))
         }
         Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
-            if let Some(storage) = tensor.integer_storage() {
-                let re = storage
-                    .real()
-                    .value_at(0)
-                    .expect("one-element complex integer real storage")
-                    .to_f64();
-                let im = storage
-                    .imag()
-                    .value_at(0)
-                    .expect("one-element complex integer imaginary storage")
-                    .to_f64();
-                return Ok((re, im));
-            }
-            Ok(tensor.materialize_f64()[0])
+            let (real, imag) = tensor.numeric_value_at(0).expect("one initialized scalar");
+            Ok((native::checked_double(real)?, native::checked_double(imag)?))
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok((if array.data[0] != 0 { 1.0 } else { 0.0 }, 0.0))
@@ -117,13 +92,19 @@ pub(super) fn bool_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
     }
 }
 
-pub(super) fn text_from_value(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn text_from_value(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 pub(super) fn complex_scalar_to_value(value: (f64, f64)) -> Value {
@@ -146,10 +127,12 @@ pub(super) fn logical_cols(array: &LogicalArray) -> usize {
     array.shape.get(1).copied().unwrap_or(1)
 }
 
+#[cfg(test)]
 pub(super) fn zero_int_like(storage: &IntegerStorage) -> IntValue {
     storage.cast_f64_assignment(0.0)
 }
 
+#[cfg(test)]
 pub(super) fn negate_int_saturating(value: &IntValue) -> IntValue {
     match value {
         IntValue::I8(value) => IntValue::I8(value.saturating_neg()),

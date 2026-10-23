@@ -130,8 +130,8 @@ fn numeric_shape_dispatch_preserves_low_rank_metadata() {
 fn repeated_scalar_reads_preserve_runtime_family_and_shape() {
     let plan = build_index_plan(
         &[SliceSelector::LinearIndices {
-            values: vec![1, 1, 1],
-            output_shape: vec![1, 3],
+            values: vec![1, 1, 1].into(),
+            output_shape: vec![1, 3].into(),
         }],
         1,
         &[1, 1],
@@ -156,6 +156,29 @@ fn character_and_logical_scalar_assignment_grow_through_shared_plan() {
     );
     assert!(
         matches!(block_on(assign_with_plan(Value::CharArray(CharArray::new_row("a")), &plan, Value::CharArray(CharArray::new_row("z")))).unwrap(), Value::CharArray(v) if v.row_string().as_deref() == Some("a z"))
+    );
+    assert!(
+        matches!(block_on(assign_with_plan(Value::String("a".into()),&plan,Value::String("z".into()))).unwrap(),Value::StringArray(value) if value.data()==["a","","z"])
+    );
+    let raw = CharArray::from_code_units_with_shape(
+        vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)],
+        vec![1, 1],
+    )
+    .unwrap();
+    let Value::CharArray(value) = block_on(assign_with_plan(
+        Value::CharArray(raw),
+        &plan,
+        Value::String("\0".into()),
+    ))
+    .unwrap() else {
+        panic!("raw character carrier")
+    };
+    assert_eq!(
+        value
+            .iter_column_major()
+            .map(runmat_value::Utf16CodeUnit::raw)
+            .collect::<Vec<_>>(),
+        [0xd800, 32, 0]
     );
 }
 

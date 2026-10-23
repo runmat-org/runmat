@@ -79,7 +79,7 @@ pub(super) fn char_array_to_tensor(
         chars
             .to_column_major()
             .iter()
-            .map(|&value| value as u32 as f64)
+            .map(|&value| f64::from(value.raw()))
             .collect(),
         chars.shape.clone(),
     )

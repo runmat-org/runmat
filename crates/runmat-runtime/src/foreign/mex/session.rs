@@ -14,7 +14,7 @@ use runmat_value::Value;
 use super::isolation::{in_isolated_callback, IsolatedMexRetirement};
 use super::RootedMexInvocation;
 use super::{
-    native_lane::{NativeMexLane, NativeModuleLoadError},
+    native_lane::{NativeLaneOwner, NativeMexLane, NativeModuleLoadError},
     IsolatedMexClient, MexBinaryTier, MexIsolationPolicy, MexLifecycleOutcome, MexWireError,
     RuntimeMexHostServices, UnmanifestedMexPolicy,
 };
@@ -22,8 +22,8 @@ use crate::context::ForeignCall;
 use crate::context::{LocalTaskCommandOrigin, RuntimeContext};
 use crate::user_functions::DynamicFunctionClearRequest;
 use crate::{build_runtime_error, RuntimeError};
-mod isolated_client_slot;
 mod artifact_catalog;
+mod isolated_client_slot;
 mod ordinary_admission;
 mod retained;
 mod token_root;
@@ -75,6 +75,9 @@ enum MexResolutionScope {
 pub struct MexRuntimeSession {
     installed_modules: RefCell<HashMap<String, InstalledMexArtifact>>,
     native_lane: RefCell<Option<Rc<NativeMexLane>>>,
+    native_lane_owner: NativeLaneOwner,
+    native_lane_owner_retired: Cell<bool>,
+    parent_native_lane: Option<MexNativeLaneChildFactory>,
     native_modules: RefCell<HashSet<PathBuf>>,
     native_values: RefCell<HashMap<PathBuf, Rc<RegisteredMxValueContext>>>,
     isolated: RefCell<HashMap<PathBuf, Rc<IsolatedClientSlot>>>,
@@ -87,6 +90,31 @@ pub struct MexRuntimeSession {
     abandoned: Cell<bool>,
     inflight_operations: RefCell<Vec<crate::context::RuntimeLocalTaskLease>>,
     process_group_placement: ProcessGroupPlacement,
+}
+
+/// A weak parent-lane authority for a nested test session. The child retains
+/// its own module, token and lifecycle owners while using the process-gate
+/// owner's native thread for callback reentry.
+#[derive(Clone)]
+pub struct MexNativeLaneChildFactory(std::rc::Weak<MexRuntimeSession>);
+
+impl MexNativeLaneChildFactory {
+    fn lane(&self) -> Result<Rc<NativeMexLane>, RuntimeError> {
+        let parent = self
+            .0
+            .upgrade()
+            .ok_or_else(|| runtime_error("MEX:NativeLane", "the parent MEX session has retired"))?;
+        if parent.abandoned.get() || parent.shutdown_in_progress.get() {
+            return Err(runtime_error(
+                "MEX:NativeLane",
+                "the parent MEX session is closing and cannot lend its native lane",
+            ));
+        }
+        // A live parent may not have needed a lane yet. Its owner issues
+        // that first lane here so both callback depths use one native thread.
+        // A closed parent never manufactures a replacement lane.
+        parent.native_lane()
+    }
 }
 
 /// Holds the MEX policy cell through a synchronous selected-owner publication.
@@ -140,6 +168,17 @@ impl MexSessionRetirement {
 }
 
 impl MexRuntimeSession {
+    pub fn native_lane_child_factory(self: &Rc<Self>) -> MexNativeLaneChildFactory {
+        MexNativeLaneChildFactory(Rc::downgrade(self))
+    }
+
+    pub fn new_on_parent_native_lane(parent: MexNativeLaneChildFactory) -> Self {
+        Self {
+            parent_native_lane: Some(parent),
+            ..Self::default()
+        }
+    }
+
     pub fn has_unretired_work(&self) -> bool {
         self.native_modules
             .try_borrow()
@@ -154,7 +193,7 @@ impl MexRuntimeSession {
                 .map_or(true, |clients| !clients.is_empty())
             || self.native_lane.try_borrow().map_or(true, |lane| {
                 lane.as_ref()
-                    .is_some_and(|lane| lane.has_pending_services())
+                    .is_some_and(|lane| lane.has_pending_services_for(&self.native_lane_owner))
             })
     }
 
@@ -166,8 +205,9 @@ impl MexRuntimeSession {
         }
         self.shutdown_in_progress.set(true);
         if let Some(lane) = self.native_lane.borrow().as_ref() {
-            lane.force_abandon();
+            lane.force_abandon_for(&self.native_lane_owner);
         }
+        self.retire_native_lane_owner();
         let clients = std::mem::take(&mut *self.isolated.borrow_mut());
         drop(clients);
         self.native_modules.borrow_mut().clear();
@@ -208,40 +248,50 @@ impl MexRuntimeSession {
         resolution: MexResolutionScope,
     ) -> Rc<crate::user_functions::NativeNameObserver> {
         let owner = Rc::clone(self);
-        Rc::new(move |name| {
+        Rc::new(move |runtime, name| {
             let owner = Rc::clone(&owner);
-            Box::pin(async move {
-                let selection = match resolution {
-                    MexResolutionScope::SearchPath => owner.observe_name(&name).await?,
-                    MexResolutionScope::InstalledOnly => owner.observe_installed_name(&name),
-                };
-                Ok(selection.map(|selection| match selection {
-                    MexNameSelection::Installed {
-                        path,
-                        identity,
-                        interop,
-                    } => crate::user_functions::NativeNameFact {
-                        path,
-                        origin: None,
-                        installed: true,
-                        installed_artifact: Some(
-                            crate::user_functions::InstalledNativeArtifactFact {
-                                identity,
-                                interop,
-                            },
-                        ),
-                    },
-                    MexNameSelection::SearchPath(candidate) => {
-                        let (path, origin) = candidate.into_parts();
-                        crate::user_functions::NativeNameFact {
-                            path,
-                            origin: Some(origin),
-                            installed: false,
-                            installed_artifact: None,
+            crate::user_functions::admit_native_name_observation_with(
+                &runtime,
+                move || async move {
+                    let selection = match resolution {
+                        MexResolutionScope::SearchPath => {
+                            owner.observe_name(&name).await.map_err(|error| {
+                                error.into_identified_runtime_error(
+                                    "MEX function resolution",
+                                    "RunMat:FunctionResolution",
+                                )
+                            })?
                         }
-                    }
-                }))
-            })
+                        MexResolutionScope::InstalledOnly => owner.observe_installed_name(&name),
+                    };
+                    Ok(selection.map(|selection| match selection {
+                        MexNameSelection::Installed {
+                            path,
+                            identity,
+                            interop,
+                        } => crate::user_functions::NativeNameFact {
+                            path,
+                            origin: None,
+                            installed: true,
+                            installed_artifact: Some(
+                                crate::user_functions::InstalledNativeArtifactFact {
+                                    identity,
+                                    interop,
+                                },
+                            ),
+                        },
+                        MexNameSelection::SearchPath(candidate) => {
+                            let (path, origin) = candidate.into_parts();
+                            crate::user_functions::NativeNameFact {
+                                path,
+                                origin: Some(origin),
+                                installed: false,
+                                installed_artifact: None,
+                            }
+                        }
+                    }))
+                },
+            )
         })
     }
 
@@ -259,7 +309,11 @@ impl MexRuntimeSession {
 
     /// Observe the exact installed-or-current-platform path selected by
     /// `load_and_call`, without loading, validating, or executing the module.
-    pub async fn observe_name(&self, name: &str) -> Result<Option<MexNameSelection>, String> {
+    pub async fn observe_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<MexNameSelection>, crate::builtins::common::path_search::PathSearchError>
+    {
         if let Some(installed) = self.observe_installed_name(name) {
             return Ok(Some(installed));
         }
@@ -269,7 +323,8 @@ impl MexRuntimeSession {
     async fn observe_search_path_name(
         &self,
         name: &str,
-    ) -> Result<Option<MexNameSelection>, String> {
+    ) -> Result<Option<MexNameSelection>, crate::builtins::common::path_search::PathSearchError>
+    {
         let Some(suffix) = runmat_mex::mex_suffix() else {
             return Ok(None);
         };
@@ -494,7 +549,10 @@ impl MexRuntimeSession {
                 Ok(Some(selection)) => Some(selection.path().to_path_buf()),
                 Ok(None) => None,
                 Err(error) => {
-                    return ControlFlow::Break(Err(runtime_error("FunctionResolution", error)))
+                    return ControlFlow::Break(Err(error.into_identified_runtime_error(
+                        "MEX function resolution",
+                        "RunMat:FunctionResolution",
+                    )))
                 }
             },
         };
@@ -642,7 +700,7 @@ impl MexRuntimeSession {
                 "MEX invocation was cancelled before native load",
             )));
         }
-        let metadata = match lane.load(&canonical).await {
+        let metadata = match lane.load_for(&self.native_lane_owner, &canonical).await {
             Ok(metadata) => metadata,
             Err(NativeModuleLoadError::IsolatedHostRequired) => {
                 if runtime.is_cancelled() {
@@ -709,7 +767,13 @@ impl MexRuntimeSession {
         ));
         let services = Rc::new(super::services::OriginMexBoundaryAdapter::new(host, codec));
         let result = lane
-            .invoke(&canonical, inputs, requested_outputs, services)
+            .invoke_for(
+                &self.native_lane_owner,
+                &canonical,
+                inputs,
+                requested_outputs,
+                services,
+            )
             .await;
         Some(match result {
             Ok(invocation) => decode_native_invocation(invocation, &values)
@@ -913,14 +977,18 @@ impl MexRuntimeSession {
             .native_lane
             .borrow()
             .as_ref()
-            .is_some_and(|lane| lane.has_pending_services())
+            .is_some_and(|lane| lane.has_pending_services_for(&self.native_lane_owner))
         {
             return Err(runtime_error(
                 "MEX:Lifecycle",
                 "native MEX work requires graceful settlement before session disposal",
             ));
         }
-        self.shutdown_native(runtime).await.into_result()
+        let retirement = self.shutdown_native(runtime).await;
+        if matches!(retirement, MexSessionRetirement::Retired(_)) {
+            self.retire_native_lane_owner();
+        }
+        retirement.into_result()
     }
 
     /// Complete isolated and in-process final lifecycle before session exit.
@@ -956,7 +1024,7 @@ impl MexRuntimeSession {
             .native_lane
             .borrow()
             .as_ref()
-            .is_some_and(|lane| lane.in_callback())
+            .is_some_and(|lane| lane.in_callback_for(&self.native_lane_owner))
         {
             return MexSessionRetirement::Retained(runtime_error(
                 "MEX:Lifecycle",
@@ -1122,6 +1190,7 @@ impl MexRuntimeSession {
             }))
         } else {
             self.ordinary_modules.borrow_mut().clear();
+            self.retire_native_lane_owner();
             MexSessionRetirement::Retired(first_error.map_or(Ok(()), Err))
         }
     }
@@ -1129,13 +1198,15 @@ impl MexRuntimeSession {
     async fn settle_native_pending(&self) -> Result<(), RuntimeError> {
         let lane = self.native_lane.borrow().as_ref().cloned();
         if let Some(lane) = lane {
-            lane.settle_pending().await.map_err(|error| {
-                native_runtime_error(
-                    "MexShutdown",
-                    format!("could not finish pending MEX native work: {error}"),
-                    error,
-                )
-            })?;
+            lane.settle_pending_for(&self.native_lane_owner)
+                .await
+                .map_err(|error| {
+                    native_runtime_error(
+                        "MexShutdown",
+                        format!("could not finish pending MEX native work: {error}"),
+                        error,
+                    )
+                })?;
         }
         Ok(())
     }
@@ -1143,13 +1214,15 @@ impl MexRuntimeSession {
     async fn settle_native_commands(&self) -> Result<(), RuntimeError> {
         let lane = self.native_lane.borrow().as_ref().cloned();
         if let Some(lane) = lane {
-            lane.settle_commands().await.map_err(|error| {
-                native_runtime_error(
-                    "MexShutdown",
-                    format!("could not finish pending MEX native command: {error}"),
-                    error,
-                )
-            })?;
+            lane.settle_commands_for(&self.native_lane_owner)
+                .await
+                .map_err(|error| {
+                    native_runtime_error(
+                        "MexShutdown",
+                        format!("could not finish pending MEX native command: {error}"),
+                        error,
+                    )
+                })?;
         }
         Ok(())
     }
@@ -1172,14 +1245,34 @@ impl MexRuntimeSession {
     }
 
     fn native_lane(&self) -> Result<Rc<NativeMexLane>, RuntimeError> {
+        if self.native_lane_owner_retired.get() || self.abandoned.get() {
+            return Err(runtime_error(
+                "MEX:NativeLane",
+                "the MEX session has retired",
+            ));
+        }
         if let Some(lane) = self.native_lane.borrow().as_ref() {
             return Ok(lane.clone());
         }
-        let lane = Rc::new(
-            NativeMexLane::spawn().map_err(|error| runtime_error("MEX:NativeLane", error))?,
-        );
+        let lane = if let Some(parent) = &self.parent_native_lane {
+            parent.lane()?
+        } else {
+            Rc::new(NativeMexLane::spawn().map_err(|error| runtime_error("MEX:NativeLane", error))?)
+        };
+        lane.register_session_owner(&self.native_lane_owner)
+            .map_err(|error| runtime_error("MEX:NativeLane", error.to_string()))?;
         *self.native_lane.borrow_mut() = Some(lane.clone());
         Ok(lane)
+    }
+
+    fn retire_native_lane_owner(&self) {
+        if self.native_lane_owner_retired.replace(true) {
+            return;
+        }
+        let lane = self.native_lane.borrow_mut().take();
+        if let Some(lane) = lane {
+            lane.retire_session_owner(&self.native_lane_owner);
+        }
     }
 
     /// Publish the token-table root before any input can create a token.
@@ -1302,7 +1395,7 @@ impl MexRuntimeSession {
                 });
                 continue;
             };
-            let metadata = match lane.load(&path).await {
+            let metadata = match lane.load_for(&self.native_lane_owner, &path).await {
                 Ok(metadata) => metadata,
                 Err(error) => {
                     first_error.get_or_insert_with(|| runtime_error("MexClear", error.to_string()));
@@ -1317,7 +1410,10 @@ impl MexRuntimeSession {
                 registration,
             ));
             let services = Rc::new(super::services::OriginMexBoundaryAdapter::new(host, codec));
-            match lane.clear(&path, services).await {
+            match lane
+                .clear_for(&self.native_lane_owner, &path, services)
+                .await
+            {
                 Ok(true) => {
                     self.native_modules.borrow_mut().remove(&path);
                     self.release_native_value_context(&path);
@@ -1364,7 +1460,7 @@ impl MexRuntimeSession {
                 });
                 continue;
             };
-            let metadata = match lane.load(&path).await {
+            let metadata = match lane.load_for(&self.native_lane_owner, &path).await {
                 Ok(metadata) => metadata,
                 Err(error) => {
                     retained = true;
@@ -1381,7 +1477,10 @@ impl MexRuntimeSession {
                 registration,
             ));
             let services = Rc::new(super::services::OriginMexBoundaryAdapter::new(host, codec));
-            match lane.shutdown_module(&path, services).await {
+            match lane
+                .shutdown_module_for(&self.native_lane_owner, &path, services)
+                .await
+            {
                 Ok(runmat_mex::MexModuleRetirement::Retired(result)) => {
                     self.native_modules.borrow_mut().remove(&path);
                     self.release_native_value_context(&path);

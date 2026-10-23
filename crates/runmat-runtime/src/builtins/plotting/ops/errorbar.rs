@@ -1,11 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::ERRORBAR_ERROR_INVALID_ARGUMENT;
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::errorbar::ErrorBarGpuInputs;
 use runmat_plot::gpu::line::{
@@ -20,7 +14,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 use super::gpu_helpers::axis_bounds_protecting;
@@ -40,331 +33,6 @@ type ErrorBarArgs = (
     Value,
     Vec<Value>,
 );
-
-const ERRORBAR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created error bar series.",
-}];
-
-const ERRORBAR_INPUTS_Y_ERR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Data values.",
-    },
-    BuiltinParamDescriptor {
-        name: "E",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Symmetric Y error magnitudes.",
-    },
-];
-
-const ERRORBAR_INPUTS_X_Y_ERR: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "E",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Symmetric Y error magnitudes.",
-    },
-];
-
-const ERRORBAR_INPUTS_X_Y_YNEG_YPOS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "YNeg",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Negative Y error magnitudes.",
-    },
-    BuiltinParamDescriptor {
-        name: "YPos",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive Y error magnitudes.",
-    },
-];
-
-const ERRORBAR_INPUTS_X_Y_YNEG_YPOS_XNEG_XPOS: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "YNeg",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Negative Y error magnitudes.",
-    },
-    BuiltinParamDescriptor {
-        name: "YPos",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive Y error magnitudes.",
-    },
-    BuiltinParamDescriptor {
-        name: "XNeg",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Negative X error magnitudes.",
-    },
-    BuiltinParamDescriptor {
-        name: "XPos",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive X error magnitudes.",
-    },
-];
-
-const ERRORBAR_INPUTS_AX_DATA_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Errorbar positional data arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Style and name/value properties.",
-    },
-];
-
-const ERRORBAR_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "h = errorbar(Y, E)",
-        inputs: &ERRORBAR_INPUTS_Y_ERR,
-        outputs: &ERRORBAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = errorbar(X, Y, E)",
-        inputs: &ERRORBAR_INPUTS_X_Y_ERR,
-        outputs: &ERRORBAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = errorbar(X, Y, YNeg, YPos)",
-        inputs: &ERRORBAR_INPUTS_X_Y_YNEG_YPOS,
-        outputs: &ERRORBAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = errorbar(X, Y, YNeg, YPos, XNeg, XPos)",
-        inputs: &ERRORBAR_INPUTS_X_Y_YNEG_YPOS_XNEG_XPOS,
-        outputs: &ERRORBAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = errorbar(ax, ...)",
-        inputs: &ERRORBAR_INPUTS_AX_DATA_PROPS,
-        outputs: &ERRORBAR_OUTPUT_HANDLE,
-    },
-];
-
-const ERRORBAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERRORBAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:errorbar:InvalidArgument"),
-    when: "Input vectors, error vectors, style arguments, or axes-target forms are malformed.",
-    message: "errorbar: invalid argument",
-};
-
-const ERRORBAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERRORBAR.INTERNAL",
-    identifier: Some("RunMat:errorbar:Internal"),
-    when: "Internal render preparation or GPU vertex generation fails.",
-    message: "errorbar: internal operation failed",
-};
-
-const ERRORBAR_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ERRORBAR_ERROR_INVALID_ARGUMENT, ERRORBAR_ERROR_INTERNAL];
-
-pub const ERRORBAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERRORBAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORBAR_ERRORS,
-};
-
-macro_rules! documented_integer_input {
-    ($name:literal, $notes:literal) => {
-        BuiltinIntegerInputCapability {
-            name: $name,
-            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-            availability: BuiltinIntegerInputAvailability::Documented,
-            scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-            notes: $notes,
-        }
-    };
-}
-
-const ERRORBAR_Y_ERR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    documented_integer_input!(
-        "Y",
-        "Y accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "E",
-        "E accepts every built-in integer class as symmetric error lengths."
-    ),
-];
-const ERRORBAR_X_Y_ERR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    documented_integer_input!(
-        "X",
-        "X accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "Y",
-        "Y accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "E",
-        "E accepts every built-in integer class as symmetric error lengths."
-    ),
-];
-const ERRORBAR_ASYMMETRIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    documented_integer_input!(
-        "X",
-        "X accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "Y",
-        "Y accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "YNeg",
-        "Negative error lengths accept every built-in integer class."
-    ),
-    documented_integer_input!(
-        "YPos",
-        "Positive error lengths accept every built-in integer class."
-    ),
-];
-const ERRORBAR_BOTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 6] = [
-    documented_integer_input!(
-        "X",
-        "X accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "Y",
-        "Y accepts every built-in integer class as coordinate data."
-    ),
-    documented_integer_input!(
-        "YNeg",
-        "Negative vertical lengths accept every built-in integer class."
-    ),
-    documented_integer_input!(
-        "YPos",
-        "Positive vertical lengths accept every built-in integer class."
-    ),
-    documented_integer_input!(
-        "XNeg",
-        "Negative horizontal lengths accept every built-in integer class."
-    ),
-    documented_integer_input!(
-        "XPos",
-        "Positive horizontal lengths accept every built-in integer class."
-    ),
-];
-
-pub const ERRORBAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = errorbar(integer_Y, integer_E)",
-        inputs: &ERRORBAR_Y_ERR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Authoritative integer storage crosses one explicit client graphics conversion boundary and returns opaque graphics handles.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = errorbar(integer_X, integer_Y, integer_E)",
-        inputs: &ERRORBAR_X_Y_ERR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Coordinate and error inputs remain exact until the client graphics conversion boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos)",
-        inputs: &ERRORBAR_ASYMMETRIC_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Asymmetric lengths remain exact until the client graphics conversion boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos, integer_XNeg, integer_XPos)",
-        inputs: &ERRORBAR_BOTH_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Both-direction integer lengths gather authoritatively before client graphics conversion.",
-    },
-];
 
 fn errorbar_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -418,17 +86,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "errorbar",
-    category = "plotting",
-    summary = "Create plots with symmetric or asymmetric error bars.",
-    keywords = "errorbar,plotting,uncertainty",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::errorbar::ERRORBAR_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::errorbar::ERRORBAR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::errorbar"
 )]
-pub async fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn errorbar_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::ERRORBAR_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "errorbar",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "errorbar")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(errorbar_impl(args, &work).await)
+}
+
+async fn errorbar_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(errorbar_invalid("too many output arguments"));
     }
@@ -529,6 +209,7 @@ pub async fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
         for plot in prepared.drain(..) {
@@ -719,21 +400,21 @@ fn errorbar_series_values(
     layout: ErrorBarSeriesLayout,
     series: usize,
 ) -> crate::BuiltinResult<Vec<f64>> {
-    let values = tensor.materialize_f64();
-    if values.is_empty() {
-        return Ok(Vec::new());
-    }
+    let value = |index| {
+        tensor
+            .numeric_value_at(index)
+            .map(runmat_value::NumericScalar::materialize_f64)
+            .ok_or_else(|| errorbar_invalid("coordinate/error storage index exceeds input length"))
+    };
     let is_matrix = tensor.rows() > 1 && tensor.cols() > 1;
     match layout {
-        ErrorBarSeriesLayout::Vector => Ok(values),
         ErrorBarSeriesLayout::MatrixColumns { rows, .. } if is_matrix => {
-            let start = series * rows;
-            Ok(values[start..start + rows].to_vec())
+            (series * rows..(series + 1) * rows).map(value).collect()
         }
         ErrorBarSeriesLayout::MatrixRows { rows, cols } if is_matrix => {
-            Ok((0..cols).map(|col| values[series + rows * col]).collect())
+            (0..cols).map(|col| value(series + rows * col)).collect()
         }
-        _ => Ok(values),
+        _ => (0..tensor.len()).map(value).collect(),
     }
 }
 
@@ -960,7 +641,13 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
     let mut orientation = runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical;
     let mut idx = 0usize;
     while idx < args.len() {
-        if let Some(key) = super::style::value_as_string(&args[idx]) {
+        if let Some(key) = super::style::value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "errorbar",
+                source.to_string(),
+                source,
+            )
+        })? {
             match (idx, key.trim().to_ascii_lowercase().as_str()) {
                 (0, "vertical") => {
                     orientation = runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical;
@@ -1004,7 +691,7 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
     })
 }
 
-fn parse_errorbar_args(args: Vec<Value>) -> crate::BuiltinResult<ErrorBarArgs> {
+fn parse_errorbar_args(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<ErrorBarArgs> {
     if args.len() < 2 {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -1024,7 +711,9 @@ fn parse_errorbar_args(args: Vec<Value>) -> crate::BuiltinResult<ErrorBarArgs> {
     } else {
         first
     };
-    let second = it.next().unwrap();
+    let second = it
+        .next()
+        .ok_or_else(|| errorbar_invalid("expected data and error inputs after axes handle"))?;
     let third = it.next();
     let fourth = it.next();
     match (third, fourth) {
@@ -1171,8 +860,13 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
 
 #[cfg(test)]
 mod tests {
+    use runmat_builtins::BuiltinIntegerInputAvailability;
+    use runmat_builtins::{ERRORBAR_DESCRIPTOR, ERRORBAR_INTEGER_CAPABILITIES};
     fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-        futures::executor::block_on(super::errorbar_builtin(args))
+        futures::executor::block_on(super::errorbar_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
@@ -1188,6 +882,21 @@ mod tests {
 
     fn vec_tensor(data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), vec![data.len()]).expect("errorbar test vector")
+    }
+
+    #[test]
+    fn axes_target_without_error_data_returns_diagnostic_instead_of_panicking() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let axes = state::current_axes_state();
+        let handle = state::encode_axes_handle(axes.handle, axes.active_index);
+        let error = errorbar_builtin(vec![Value::Num(handle), Value::Num(2.0)])
+            .expect_err("missing error data");
+        assert_eq!(
+            error.identifier(),
+            ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
+        );
     }
 
     #[test]
@@ -1577,7 +1286,7 @@ mod tests {
             errorbar_builtin(vec![Value::Num(1.0), Value::Num(0.2)]).expect_err("excess outputs");
         assert_eq!(
             error.identifier(),
-            ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
+            runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS.identifier
         );
         assert_unchanged();
     }

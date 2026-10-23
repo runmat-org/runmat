@@ -168,23 +168,32 @@ fn selected_native_route(
     let mex = host.selected_mex_runtime();
     let observed = mex.installed_name_observer();
     let observation_bytes = Rc::clone(materialized);
-    let observer: Rc<NativeNameObserver> = Rc::new(move |name| {
+    let observer: Rc<NativeNameObserver> = Rc::new(move |runtime, name| {
         let bytes = Rc::clone(&observation_bytes);
-        let future = observed(name);
-        Box::pin(async move {
-            let _bytes = bytes;
-            future.await
-        })
+        let observed = Rc::clone(&observed);
+        runmat_runtime::user_functions::admit_native_name_observation_with(
+            &runtime.clone(),
+            move || async move {
+                let _bytes = bytes;
+                runmat_runtime::user_functions::await_native_name_observation(observed(
+                    runtime, name,
+                ))
+                .await
+            },
+        )
     });
     let invocation_bytes = Rc::clone(materialized);
     let invoker: Rc<SelectedNativeInvoker> = Rc::new(move |runtime, name, arguments, outputs| {
         let mex = Rc::clone(&mex);
         let bytes = Rc::clone(&invocation_bytes);
-        Box::pin(async move {
-            let _bytes = bytes;
-            mex.load_installed_and_call(&name, arguments, outputs, runtime)
-                .await
-        })
+        runmat_runtime::execution::admit_dynamic_function_load_with(
+            &runtime.clone(),
+            move || async move {
+                let _bytes = bytes;
+                mex.load_installed_and_call(&name, arguments, outputs, runtime)
+                    .await
+            },
+        )
     });
     Rc::new(SelectedNativeRoute::new(observer, invoker))
 }
@@ -199,40 +208,58 @@ pub(in crate::session) fn ordinary_native_route(
 ) -> Rc<SelectedNativeRoute> {
     let ordinary_observer = mex.ordinary_name_observer();
     let observed_installed = installed.clone();
-    let observer: Rc<NativeNameObserver> = Rc::new(move |name| {
+    let observer: Rc<NativeNameObserver> = Rc::new(move |runtime, name| {
         let installed = observed_installed.clone();
         let ordinary = Rc::clone(&ordinary_observer);
-        Box::pin(async move {
-            if let Some(installed) = installed {
-                if let Some(fact) = installed.observe(name.clone()).await? {
-                    return Ok(Some(fact));
+        runmat_runtime::user_functions::admit_native_name_observation_with(
+            &runtime.clone(),
+            move || async move {
+                if let Some(installed) = installed {
+                    if let Some(fact) = installed.observe(runtime.clone(), name.clone()).await? {
+                        return Ok(Some(fact));
+                    }
                 }
-            }
-            ordinary(name).await
-        })
+                runmat_runtime::user_functions::await_native_name_observation(ordinary(
+                    runtime, name,
+                ))
+                .await
+            },
+        )
     });
     let invoker: Rc<SelectedNativeInvoker> = Rc::new(move |runtime, name, arguments, outputs| {
         let installed = installed.clone();
         let mex = Rc::clone(&mex);
         let source_owner = source_owner.clone();
-        Box::pin(async move {
-            if !source_owner.is_bound_in(&runtime) {
-                return std::ops::ControlFlow::Break(Err(selected_error(
-                    "ordinary MEX route differs from its issued source",
-                )));
-            }
-            if let Some(installed) = installed {
-                match installed.observe(name.clone()).await {
-                    Ok(Some(_)) => {
-                        return installed.invoke(runtime, name, arguments, outputs).await;
-                    }
-                    Ok(None) => {}
-                    Err(error) => return std::ops::ControlFlow::Break(Err(selected_error(error))),
+        runmat_runtime::execution::admit_dynamic_function_load_with(
+            &runtime.clone(),
+            move || async move {
+                if !source_owner.is_bound_in(&runtime) {
+                    return std::ops::ControlFlow::Break(Err(selected_error(
+                        "ordinary MEX route differs from its issued source",
+                    )));
                 }
-            }
-            mex.load_ordinary_admitted_and_call(&name, arguments, outputs, runtime, &source_owner)
+                if let Some(installed) = installed {
+                    match installed.observe(runtime.clone(), name.clone()).await {
+                        Ok(Some(_)) => {
+                            return runmat_runtime::user_functions::await_dynamic_function_load(
+                                installed.invoke(runtime, name, arguments, outputs),
+                            )
+                            .await;
+                        }
+                        Ok(None) => {}
+                        Err(error) => return std::ops::ControlFlow::Break(Err(error)),
+                    }
+                }
+                mex.load_ordinary_admitted_and_call(
+                    &name,
+                    arguments,
+                    outputs,
+                    runtime,
+                    &source_owner,
+                )
                 .await
-        })
+            },
+        )
     });
     Rc::new(SelectedNativeRoute::new(observer, invoker))
 }

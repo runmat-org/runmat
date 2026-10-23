@@ -1,17 +1,18 @@
 //! Krylov subspace methods: PCG, MINRES, GMRES(m)/FGMRES and BiCGStab, real and complex.
 //!
-//! Each method is written once as an `async fn` over [`KrylovOps`]. Operator and preconditioner
-//! applications, and a per-iteration checkpoint, are awaited, so:
+//! PCG ([`pcg`]) and GMRES ([`gmres`]) are the crate's caller-owned, resumable recurrences: the
+//! caller supplies every workspace region with checked geometry, implements the operations and a
+//! typed [`Control`], and receives its original operation/control error unchanged
+//! ([`KrylovFailure::Operation`]). The runtime's `pcg`/`gmres` builtins drive them directly on
+//! their cooperative executor. Synchronous callers (FEA) use the thin blocking drivers
+//! [`pcg_solve`] and [`gmres_solve`], which allocate the workspace, adapt a [`LinearOperator`] and
+//! [`Preconditioner`], and run the recurrence with ready futures.
 //!
-//! - synchronous callers (FEA) use the blocking drivers ([`pcg`], [`minres`], [`gmres`],
-//!   [`bicgstab`]) which run the method with ready futures on the calling thread;
-//! - asynchronous callers (the runtime's function-handle operators on a cooperative executor)
-//!   implement [`KrylovOps`] with genuinely asynchronous callbacks and await the method directly.
+//! MINRES and BiCGStab are written as `async fn`s over [`KrylovOps`] with blocking drivers
+//! ([`minres`], [`bicgstab`]).
 //!
-//! All vectors live in one caller-visible workspace whose exact length is quoted up front
-//! (`*_workspace_len`), so admission can charge it before any work starts. Stopping flags follow
-//! MATLAB's convention (0 converged, 1 iteration limit, 2 preconditioner failure, 3 stagnation,
-//! 4 breakdown).
+//! Stopping flags follow MATLAB's convention (0 converged, 1 iteration limit, 2 preconditioner
+//! failure, 3 stagnation, 4 breakdown).
 
 use std::future::Future;
 
@@ -21,24 +22,64 @@ use crate::operator::{LinearOperator, Preconditioner};
 use crate::scalar::Scalar;
 
 mod bicgstab;
-mod gmres;
+pub mod gmres;
 mod minres;
-mod pcg;
+pub mod pcg;
+mod sync;
 
 pub use bicgstab::{bicgstab_async, bicgstab_workspace_len};
-pub use gmres::{gmres_async, gmres_workspace_len, GmresOptions, PreconditionerSide};
+pub use gmres::{PreconditionerSide, ResidualCheck};
 pub use minres::{minres_async, minres_workspace_len};
-pub use pcg::{pcg_async, pcg_workspace_len};
+pub use sync::{
+    gmres_solve as gmres, gmres_workspace_len, pcg_solve as pcg, pcg_workspace_len, GmresOptions,
+    ScalarArithmetic,
+};
 
 /// Outcome of a callback application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApplyStatus {
     Applied,
     /// The callback produced a numerically unusable result (e.g. a singular preconditioner).
     NumericalFailure,
 }
 
-/// Operator, preconditioner and checkpoint hooks awaited by every Krylov method.
+/// Failure of a caller-owned recurrence: invalid input/workspace geometry, or the caller's
+/// original operation/control error, never stringified.
+#[derive(Debug)]
+pub enum KrylovFailure<E> {
+    Invalid(&'static str),
+    Operation(E),
+}
+impl<E: std::fmt::Display> std::fmt::Display for KrylovFailure<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) => f.write_str(message),
+            Self::Operation(original) => std::fmt::Display::fmt(original, f),
+        }
+    }
+}
+impl<E: std::error::Error + 'static> std::error::Error for KrylovFailure<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Operation(original) => Some(original),
+            Self::Invalid(_) => None,
+        }
+    }
+}
+
+/// The selected execution owner implements both original-authority checks and
+/// actual-work scheduling. Ready callers explicitly choose ready turns; async
+/// callers can suspend after each bounded vector/reduction block.
+pub trait Control {
+    type Error;
+    fn checkpoint(&mut self) -> Result<(), Self::Error>;
+    fn cooperate(
+        &mut self,
+        completed: u64,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
+}
+
+/// Operator, preconditioner and checkpoint hooks awaited by MINRES and BiCGStab.
 #[allow(async_fn_in_trait)]
 pub trait KrylovOps<T: Scalar> {
     /// `y = A x`.
@@ -75,13 +116,16 @@ pub struct KrylovOptions {
     /// Absolute floor on `‖b − A x‖`.
     pub atol: f64,
     pub max_iterations: usize,
-    /// Keep a copy of the minimum-residual iterate and return it on failure (MATLAB semantics).
+    /// MINRES/BiCGStab: keep a copy of the minimum-residual iterate and return it on failure.
+    /// PCG and GMRES always return their best certified iterate on failure (MATLAB semantics).
     pub return_best_iterate: bool,
     /// Record the residual norm at every iteration.
     pub record_history: bool,
-    /// Consecutive stagnant steps before flag 3.
+    /// MINRES/BiCGStab: consecutive stagnant steps before flag 3. PCG reports flag 3 when an
+    /// update leaves the iterate unchanged; GMRES when a new candidate equals the previous one.
     pub max_stagnation_steps: usize,
-    /// Extra true-residual verification rounds after the recursive residual converges.
+    /// MINRES/BiCGStab: extra true-residual verification rounds after the recursive residual
+    /// converges. PCG and GMRES certify convergence on a formed residual by construction.
     pub max_verification_rounds: usize,
 }
 
@@ -194,26 +238,6 @@ fn check_dims<T: Scalar>(op: &dyn LinearOperator<T>, b: &[T], x: &[T]) -> Solver
     Ok(())
 }
 
-/// Blocking PCG for Hermitian positive definite `A` with an HPD preconditioner. `x` holds the
-/// initial guess on entry and the solution on return.
-pub fn pcg<T: Scalar>(
-    operator: &dyn LinearOperator<T>,
-    preconditioner: Option<&dyn Preconditioner<T>>,
-    b: &[T],
-    x: &mut [T],
-    options: &KrylovOptions,
-    control: SolveControl<'_>,
-) -> SolverResult<KrylovReport> {
-    check_dims(operator, b, x)?;
-    let mut work = crate::par::try_zeros::<T>(pcg_workspace_len(b.len(), options))?;
-    let mut ops = SyncOps {
-        operator,
-        preconditioner,
-        control,
-    };
-    block_on(pcg_async(&mut ops, b, x, options, &mut work))
-}
-
 /// Blocking MINRES for Hermitian (possibly indefinite) `A` with an HPD preconditioner.
 pub fn minres<T: Scalar>(
     operator: &dyn LinearOperator<T>,
@@ -231,27 +255,6 @@ pub fn minres<T: Scalar>(
         control,
     };
     block_on(minres_async(&mut ops, b, x, options, &mut work))
-}
-
-/// Blocking restarted GMRES / FGMRES for general `A`.
-pub fn gmres<T: Scalar>(
-    operator: &dyn LinearOperator<T>,
-    preconditioner: Option<&dyn Preconditioner<T>>,
-    b: &[T],
-    x: &mut [T],
-    options: &KrylovOptions,
-    gmres_options: &GmresOptions,
-    control: SolveControl<'_>,
-) -> SolverResult<KrylovReport> {
-    check_dims(operator, b, x)?;
-    let mut work =
-        crate::par::try_zeros::<T>(gmres_workspace_len(b.len(), options, gmres_options))?;
-    let mut ops = SyncOps {
-        operator,
-        preconditioner,
-        control,
-    };
-    block_on(gmres_async(&mut ops, b, x, options, gmres_options, &mut work))
 }
 
 /// Blocking right-preconditioned BiCGStab for general `A`.

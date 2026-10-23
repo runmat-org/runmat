@@ -5,6 +5,16 @@
 //! reusable routines so each builtin can focus on user-facing semantics while
 //! sharing the platform-specific details for locating files, class folders,
 //! and packages.
+//!
+//! Provider access stays with the filesystem's selected provider/path owner.
+//! These helpers do not select an ambient RuntimeContext or create execution
+//! authority. Only missing paths are absence; other provider failures stop
+//! discovery before a later candidate can be selected.
+
+mod error;
+pub use error::PathSearchError;
+#[cfg(test)]
+mod failure_tests;
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -109,25 +119,25 @@ pub const KNOWN_FILE_EXTENSIONS: &[&str] = &[
 /// functions. The list begins with the current working directory followed by
 /// entries from `RUNMAT_PATH` and `MATLABPATH`. Duplicates are removed while
 /// preserving the first occurrence.
-pub fn search_directories(error_prefix: &str) -> Result<Vec<PathBuf>, String> {
+pub fn search_directories(error_prefix: &str) -> Result<Vec<PathBuf>, PathSearchError> {
     if !source_authority_current() {
-        return Err(format!(
-            "{error_prefix}: application user-path authority requires rehydration"
-        ));
+        return Err(PathSearchError::Control(Box::new(
+            crate::execution::ExecutionServiceError::Infrastructure(
+                "application user-path authority requires rehydration".into(),
+            )
+            .into_runtime_error(),
+        )));
     }
     let mut dirs = Vec::new();
     let mut seen = HashSet::new();
 
-    if let Ok(cwd) = vfs::current_dir() {
-        push_unique_dir(&mut dirs, &mut seen, cwd);
-    } else {
-        return Err(format!(
-            "{error_prefix}: unable to determine current directory"
-        ));
-    }
+    let cwd = vfs::current_dir()
+        .map_err(|source| PathSearchError::io("current directory", Path::new("."), source))?;
+    push_unique_dir(&mut dirs, &mut seen, cwd);
 
     for entry in current_path_segments() {
-        let expanded = expand_user_path(&entry, error_prefix)?;
+        let expanded =
+            expand_user_path(&entry, error_prefix).map_err(|_| PathSearchError::HomeUnavailable)?;
         push_unique_dir(&mut dirs, &mut seen, PathBuf::from(expanded));
     }
 
@@ -199,7 +209,7 @@ pub fn file_candidates(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, PathSearchError> {
     Ok(file_candidates_with_origin(name, extensions, error_prefix)?
         .into_iter()
         .map(|candidate| candidate.path)
@@ -246,7 +256,7 @@ pub fn file_candidates_with_origin(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<FileCandidate>, String> {
+) -> Result<Vec<FileCandidate>, PathSearchError> {
     if should_treat_as_path(name) {
         collect_direct_file_candidates(name, extensions, error_prefix)
     } else {
@@ -258,8 +268,9 @@ fn collect_direct_file_candidates(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<FileCandidate>, String> {
-    let expanded = expand_user_path(name, error_prefix)?;
+) -> Result<Vec<FileCandidate>, PathSearchError> {
+    let expanded =
+        expand_user_path(name, error_prefix).map_err(|_| PathSearchError::HomeUnavailable)?;
     let base = PathBuf::from(&expanded);
     let mut candidates = Vec::new();
     if matches_extension(&base, extensions) {
@@ -290,14 +301,13 @@ fn collect_package_file_candidates(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<FileCandidate>, String> {
+) -> Result<Vec<FileCandidate>, PathSearchError> {
     let (packages, base_name) = split_package_components(name);
     let prefix = packages_to_path(&packages);
     let mut candidates = Vec::new();
 
     for (ordinal, dir) in search_directories(error_prefix)?.into_iter().enumerate() {
-        let ordinal = u32::try_from(ordinal)
-            .map_err(|_| format!("{error_prefix}: search path has too many roots"))?;
+        let ordinal = u32::try_from(ordinal).map_err(|_| PathSearchError::TooManyRoots)?;
         let mut root = dir.clone();
         if !prefix.as_os_str().is_empty() {
             root.push(&prefix);
@@ -373,7 +383,7 @@ pub async fn find_file_with_extensions(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Option<PathBuf>, String> {
+) -> Result<Option<PathBuf>, PathSearchError> {
     Ok(
         find_file_with_extensions_with_origin(name, extensions, error_prefix)
             .await?
@@ -385,9 +395,9 @@ pub async fn find_file_with_extensions_with_origin(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Option<FileCandidate>, String> {
+) -> Result<Option<FileCandidate>, PathSearchError> {
     for candidate in file_candidates_with_origin(name, extensions, error_prefix)? {
-        if path_is_file(candidate.path()).await {
+        if path_is_file(candidate.path()).await? {
             return Ok(Some(candidate));
         }
     }
@@ -401,10 +411,10 @@ pub async fn find_all_files_with_extensions_with_origin(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<FileCandidate>, String> {
+) -> Result<Vec<FileCandidate>, PathSearchError> {
     let mut matches = Vec::new();
     for candidate in file_candidates_with_origin(name, extensions, error_prefix)? {
-        if path_is_file(candidate.path()).await {
+        if path_is_file(candidate.path()).await? {
             matches.push(candidate);
         }
     }
@@ -417,7 +427,7 @@ pub async fn find_all_files_with_extensions(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, PathSearchError> {
     Ok(
         find_all_files_with_extensions_with_origin(name, extensions, error_prefix)
             .await?
@@ -428,7 +438,10 @@ pub async fn find_all_files_with_extensions(
 }
 
 /// Return the list of candidate directories that could correspond to `name`.
-pub fn directory_candidates(name: &str, error_prefix: &str) -> Result<Vec<PathBuf>, String> {
+pub fn directory_candidates(
+    name: &str,
+    error_prefix: &str,
+) -> Result<Vec<PathBuf>, PathSearchError> {
     Ok(directory_candidates_with_origin(name, error_prefix)?
         .into_iter()
         .map(|candidate| candidate.path)
@@ -454,12 +467,15 @@ impl DirectoryCandidate {
 pub fn directory_candidates_with_origin(
     name: &str,
     error_prefix: &str,
-) -> Result<Vec<DirectoryCandidate>, String> {
+) -> Result<Vec<DirectoryCandidate>, PathSearchError> {
     folder_candidates_with_origin(name, error_prefix, false)
 }
 
 /// Return candidate class folders (`@ClassName`) for the provided symbol.
-pub fn class_folder_candidates(name: &str, error_prefix: &str) -> Result<Vec<PathBuf>, String> {
+pub fn class_folder_candidates(
+    name: &str,
+    error_prefix: &str,
+) -> Result<Vec<PathBuf>, PathSearchError> {
     Ok(class_folder_candidates_with_origin(name, error_prefix)?
         .into_iter()
         .map(|candidate| candidate.path)
@@ -469,7 +485,7 @@ pub fn class_folder_candidates(name: &str, error_prefix: &str) -> Result<Vec<Pat
 pub fn class_folder_candidates_with_origin(
     name: &str,
     error_prefix: &str,
-) -> Result<Vec<DirectoryCandidate>, String> {
+) -> Result<Vec<DirectoryCandidate>, PathSearchError> {
     folder_candidates_with_origin(name, error_prefix, true)
 }
 
@@ -477,9 +493,10 @@ fn folder_candidates_with_origin(
     name: &str,
     error_prefix: &str,
     class_folder: bool,
-) -> Result<Vec<DirectoryCandidate>, String> {
+) -> Result<Vec<DirectoryCandidate>, PathSearchError> {
     if should_treat_as_path(name) {
-        let expanded = expand_user_path(name, error_prefix)?;
+        let expanded =
+            expand_user_path(name, error_prefix).map_err(|_| PathSearchError::HomeUnavailable)?;
         return Ok(vec![DirectoryCandidate {
             path: PathBuf::from(expanded),
             origin: FileCandidateOrigin::Direct {
@@ -491,8 +508,7 @@ fn folder_candidates_with_origin(
     let prefix = packages_to_path(&packages);
     let mut candidates = Vec::new();
     for (index, dir) in search_directories(error_prefix)?.into_iter().enumerate() {
-        let ordinal = u32::try_from(index)
-            .map_err(|_| format!("{error_prefix}: search path has too many roots"))?;
+        let ordinal = u32::try_from(index).map_err(|_| PathSearchError::TooManyRoots)?;
         let mut relative = prefix.clone();
         relative.push(if class_folder {
             format!("@{base}")
@@ -524,9 +540,9 @@ pub async fn class_file_exists(
     class_extensions: &[&str],
     keyword: &str,
     error_prefix: &str,
-) -> Result<bool, String> {
+) -> Result<bool, PathSearchError> {
     if let Some(path) = find_file_with_extensions(name, class_extensions, error_prefix).await? {
-        if file_contains_keyword(&path, keyword).await {
+        if file_contains_keyword(&path, keyword).await? {
             return Ok(true);
         }
     }
@@ -539,7 +555,7 @@ pub async fn class_file_paths(
     class_extensions: &[&str],
     keyword: &str,
     error_prefix: &str,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, PathSearchError> {
     Ok(
         class_file_candidates_with_origin(name, class_extensions, keyword, error_prefix)
             .await?
@@ -555,7 +571,7 @@ pub async fn class_file_candidates_with_origin(
     class_extensions: &[&str],
     keyword: &str,
     error_prefix: &str,
-) -> Result<Vec<FileCandidate>, String> {
+) -> Result<Vec<FileCandidate>, PathSearchError> {
     collect_class_file_candidates_with_origin(name, class_extensions, keyword, error_prefix, true)
         .await
 }
@@ -565,7 +581,7 @@ pub async fn find_class_file_with_origin(
     class_extensions: &[&str],
     keyword: &str,
     error_prefix: &str,
-) -> Result<Option<FileCandidate>, String> {
+) -> Result<Option<FileCandidate>, PathSearchError> {
     Ok(collect_class_file_candidates_with_origin(
         name,
         class_extensions,
@@ -584,11 +600,11 @@ async fn collect_class_file_candidates_with_origin(
     keyword: &str,
     error_prefix: &str,
     all: bool,
-) -> Result<Vec<FileCandidate>, String> {
+) -> Result<Vec<FileCandidate>, PathSearchError> {
     let mut matches = Vec::new();
     for candidate in file_candidates_with_origin(name, class_extensions, error_prefix)? {
-        if path_is_file(candidate.path()).await
-            && file_contains_keyword(candidate.path(), keyword).await
+        if path_is_file(candidate.path()).await?
+            && file_contains_keyword(candidate.path(), keyword).await?
         {
             matches.push(candidate);
             if !all {
@@ -599,7 +615,7 @@ async fn collect_class_file_candidates_with_origin(
     Ok(matches)
 }
 
-async fn file_contains_keyword(path: &Path, keyword: &str) -> bool {
+async fn file_contains_keyword(path: &Path, keyword: &str) -> Result<bool, PathSearchError> {
     const MAX_BYTES: usize = 64 * 1024;
     match vfs::read_async(path).await {
         Ok(mut buffer) => {
@@ -607,10 +623,12 @@ async fn file_contains_keyword(path: &Path, keyword: &str) -> bool {
                 buffer.truncate(MAX_BYTES);
             }
             let text = String::from_utf8_lossy(&buffer);
-            text.to_ascii_lowercase()
-                .contains(&keyword.to_ascii_lowercase())
+            Ok(text
+                .to_ascii_lowercase()
+                .contains(&keyword.to_ascii_lowercase()))
         }
-        Err(_) => false,
+        Err(source) if missing(&source) => Ok(false),
+        Err(source) => Err(PathSearchError::io("read class source", path, source)),
     }
 }
 
@@ -620,18 +638,29 @@ fn push_unique_dir(vec: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, value: P
     }
 }
 
-pub async fn path_is_file(path: &Path) -> bool {
-    vfs::metadata_async(path)
-        .await
-        .map(|meta| meta.is_file())
-        .unwrap_or(false)
+/// A missing candidate is absence; an inaccessible candidate must not select
+/// a later, different source. NotADirectory is a missing path prefix.
+fn missing(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
 }
 
-pub async fn path_is_directory(path: &Path) -> bool {
-    vfs::metadata_async(path)
-        .await
-        .map(|meta| meta.is_dir())
-        .unwrap_or(false)
+pub async fn path_is_file(path: &Path) -> Result<bool, PathSearchError> {
+    match vfs::metadata_async(path).await {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(source) if missing(&source) => Ok(false),
+        Err(source) => Err(PathSearchError::io("inspect file", path, source)),
+    }
+}
+
+pub async fn path_is_directory(path: &Path) -> Result<bool, PathSearchError> {
+    match vfs::metadata_async(path).await {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(source) if missing(&source) => Ok(false),
+        Err(source) => Err(PathSearchError::io("inspect directory", path, source)),
+    }
 }
 
 #[cfg(test)]
@@ -650,6 +679,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn existing_candidates_keep_executable_first_match_and_shadowed_root_order() {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::tempdir().expect("temporary roots");
         let first = temporary.path().join("first");
         let second = temporary.path().join("second");

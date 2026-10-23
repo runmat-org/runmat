@@ -37,7 +37,7 @@ fn state() -> Rc<RefCell<State>> {
 }
 
 fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         let allocation = TestAllocationOwner::new()
             .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
             .unwrap();
@@ -76,7 +76,7 @@ fn consume(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         .receiver
         .take()
         .expect("single invocation");
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         let argument = argument?;
         if receiver.await.expect("test sender") {
             argument.try_map_owned(

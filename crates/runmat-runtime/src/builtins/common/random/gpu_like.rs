@@ -2,7 +2,7 @@
 //! Automatic residency is not an instruction to draw from the independent GPU
 //! stream. The caller still owns its output-class contract and presentation.
 
-use super::gpu_upload::GpuChildHostUpload;
+use crate::builtins::common::gpu_helpers::host_upload::GpuHostUpload;
 use crate::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
 use crate::context::host_presentation::{
     select_host_computed_result, ExactHostComputedResult, ExactHostComputedUpload,
@@ -54,7 +54,7 @@ pub(crate) enum GpuLikePresentation<'a> {
         Option<crate::context::RuntimeContext>,
     ),
     Upload(
-        ClaimedBox<GpuChildHostUpload<'a>>,
+        ClaimedBox<GpuHostUpload<'a>>,
         ExactHostRandomMode,
         Option<crate::context::RuntimeContext>,
     ),
@@ -352,7 +352,7 @@ pub(crate) fn select_presentation<'a>(
         return Ok(GpuLikePresentation::Host(None, host_mode, runtime));
     }
     let host_box_bytes = ClaimedBox::<HostSinkReceipt>::requested_bytes(label)?;
-    let upload_box_bytes = ClaimedBox::<GpuChildHostUpload<'a>>::requested_bytes(label)?;
+    let upload_box_bytes = ClaimedBox::<GpuHostUpload<'a>>::requested_bytes(label)?;
     let host_scratch = add_route_box_quote(label, host_scratch, host_box_bytes)?;
     let upload_scratch = add_route_box_quote(label, upload_scratch, upload_box_bytes)?;
     let quote = match (upload_scratch, host_result_bytes) {
@@ -392,9 +392,9 @@ pub(crate) fn select_presentation<'a>(
                     .build()
             })?;
             if output_class == GpuLikeClass::Logical {
-                GpuChildHostUpload::quote_logical_candidate(label, source, shape, scratch)?
+                GpuHostUpload::quote_logical_candidate(label, source, shape, scratch)?
             } else if let Some(class) = output_class.native_element() {
-                GpuChildHostUpload::quote_candidate_with_storage(
+                GpuHostUpload::quote_candidate_with_storage(
                     label,
                     source,
                     shape,
@@ -454,10 +454,10 @@ pub(crate) fn select_presentation<'a>(
             };
             let prepared_result = match output_class {
                 GpuLikeClass::Logical => {
-                    GpuChildHostUpload::prepare_borrowed_logical_host_output(label, source, shape)
+                    GpuHostUpload::prepare_borrowed_logical_host_output(label, source, shape)
                 }
                 _ if output_class.native_storage() == GpuTensorStorage::ComplexInterleaved => {
-                    GpuChildHostUpload::prepare_borrowed_complex_host_output(
+                    GpuHostUpload::prepare_borrowed_complex_host_output(
                         label,
                         source,
                         shape,
@@ -467,7 +467,7 @@ pub(crate) fn select_presentation<'a>(
                         scratch,
                     )
                 }
-                _ => GpuChildHostUpload::prepare_borrowed_host_output(
+                _ => GpuHostUpload::prepare_borrowed_host_output(
                     label,
                     source,
                     shape,
@@ -573,7 +573,7 @@ impl GpuLikePresentation<'_> {
         match result {
             Ok(value) => self
                 .publish(value, shape)
-                .map_err(|source| super::gpu_upload::after_stream_commit(label, source)),
+                .map_err(|source| super::gpu_effect::after_stream_commit(label, source)),
             Err(source) => {
                 if let Self::Host(Some(receipt), _, _) = self {
                     receipt.into_inner().finish(false);
@@ -689,7 +689,7 @@ impl GpuLikePresentation<'_> {
 }
 
 fn upload_scalar(
-    upload: &mut GpuChildHostUpload<'_>,
+    upload: &mut GpuHostUpload<'_>,
     data: HostNumericDataView<'_>,
     shape: &[usize],
 ) -> BuiltinResult<GpuTensorHandle> {

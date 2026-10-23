@@ -35,6 +35,7 @@ mod placement;
 mod provenance;
 mod registry;
 mod validation;
+pub(crate) use validation::valid_builtin_identity;
 
 #[cfg(test)]
 mod tests;

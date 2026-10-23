@@ -2,12 +2,13 @@ use super::*;
 
 fn shaped_text(text: &str, pages: bool) -> Value {
     let data = text.chars().collect::<Vec<_>>();
+    let unit_len = text.encode_utf16().count();
     let shape = if pages {
-        vec![1, 1, data.len()]
+        vec![1, 1, unit_len]
     } else {
-        vec![1, data.len(), 1]
+        vec![1, unit_len, 1]
     };
-    Value::CharArray(CharArray::new_with_shape(data, shape).unwrap())
+    Value::CharArray(CharArray::from_unicode_scalars_with_shape(data, shape).unwrap())
 }
 
 #[test]

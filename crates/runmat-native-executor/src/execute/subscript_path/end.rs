@@ -45,7 +45,7 @@ fn resolve_end_inner(
     let mut values = super::super::call_suspension::begin_rooted_sequence(
         state,
         embedded.cloned(),
-        Box::pin(async move {
+        move || async move {
             let _roots = roots;
             let value = runtime
                 .scope(
@@ -64,7 +64,7 @@ fn resolve_end_inner(
                 },
                 |error| error.into_runtime_error(),
             )
-        }),
+        },
         1,
     )?;
     if values.len() != 1 {

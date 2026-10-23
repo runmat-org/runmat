@@ -423,7 +423,8 @@ fn repmat_char_array(ca: &CharArray, reps: &[usize]) -> crate::BuiltinResult<Cha
         col_factor,
         "repmat",
     )?;
-    CharArray::new(data, rows, cols).map_err(|e| repmat_internal(format!("repmat: {e}")))
+    CharArray::from_code_units(data, rows, cols)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
 fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<CellArray> {
@@ -868,7 +869,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_array_replication_tiles_rows_and_cols() {
-        let ca = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
+        let ca = CharArray::from_unicode_scalars("hi".chars().collect(), 1, 2).unwrap();
         let result = repmat_builtin(
             Value::CharArray(ca),
             vec![Value::from(2.0), Value::from(3.0)],
@@ -878,7 +879,8 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 6);
-                let text: String = out.data().iter().collect();
+                let text = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(text, "hihihihihihi");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -888,7 +890,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_char_rejects_high_dim() {
-        let ca = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
+        let ca = CharArray::from_unicode_scalars("hi".chars().collect(), 1, 2).unwrap();
         let reps = Tensor::new(vec![2.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let err =
             repmat_builtin(Value::CharArray(ca), vec![Value::Tensor(reps)]).expect_err("repmat");

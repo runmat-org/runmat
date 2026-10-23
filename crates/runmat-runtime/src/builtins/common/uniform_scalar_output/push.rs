@@ -134,7 +134,7 @@ pub(super) fn integer_complex(
 }
 
 pub(super) fn character(
-    values: &mut Vec<char>,
+    values: &mut Vec<runmat_value::Utf16CodeUnit>,
     value: ClassifiedValue,
 ) -> Result<(), UniformScalarError> {
     let ClassifiedValue::Char(value) = value else {

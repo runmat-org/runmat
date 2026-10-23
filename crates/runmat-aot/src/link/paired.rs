@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use runmat_execution_artifact::target_test::{NativePairedBuildBinding, NativePairedProductHeader};
 use runmat_native_codegen::aot::SelectedNativeProduct;
 
+use super::persisted::CompletedImageCommitment;
 use super::{
     link_selected_standalone, ExternalNativeLinkAdmission, HostedNativeBuildTrees, LinkRequest,
-    LinkedProgram, NativeProgramLinkIdentity,
+    LinkedProgram, NativeProgramLinkIdentity, PersistedSelectedImage,
 };
 use crate::archive::RuntimeArchive;
 use crate::object::PairedNativeObjects;
@@ -18,6 +19,17 @@ use crate::{AotError, AotResult};
 pub struct PairedLinkRequests<'a> {
     pub application: &'a LinkRequest,
     pub tests: &'a LinkRequest,
+}
+
+pub(crate) struct PersistedPairReopenRequest<'a> {
+    pub application_header: NativePairedProductHeader,
+    pub test_header: NativePairedProductHeader,
+    pub application_receipt: &'a PersistedSelectedImage,
+    pub test_receipt: &'a PersistedSelectedImage,
+    pub application_path: PathBuf,
+    pub test_path: PathBuf,
+    pub application_commitment: CompletedImageCommitment,
+    pub test_commitment: CompletedImageCommitment,
 }
 
 /// Issued only when both qualified selected links have completed and their
@@ -135,6 +147,70 @@ pub fn link_selected_native_pair(
         binding: pair.binding().clone(),
         application_header: pair.application_header().clone(),
         test_header: pair.test_header().clone(),
+        application,
+        tests,
+    })
+}
+
+/// Reopen a durable pair only while the independently verified selected pack,
+/// original native objects, runtime archive and host admission are available.
+/// The persisted records alone never authorize execution.
+pub(crate) fn reopen_selected_native_pair(
+    selected: &SelectedNativeProduct<'_>,
+    pair: &PairedNativeObjects,
+    runtime: &RuntimeArchive,
+    admission: &ExternalNativeLinkAdmission,
+    request: PersistedPairReopenRequest<'_>,
+) -> AotResult<LinkedNativePair> {
+    let PersistedPairReopenRequest {
+        application_header,
+        test_header,
+        application_receipt,
+        test_receipt,
+        application_path,
+        test_path,
+        application_commitment,
+        test_commitment,
+    } = request;
+    pair.validate()?;
+    super::plan::validate_pair(pair.application(), runtime)?;
+    super::plan::validate_pair(pair.tests(), runtime)?;
+    if application_header != *pair.application_header()
+        || test_header != *pair.test_header()
+        || application_path == test_path
+    {
+        return Err(invalid(
+            "persisted paired headers or physical image paths differ from original objects",
+        ));
+    }
+    let application = LinkedProgram::reopen_selected(
+        application_path,
+        application_receipt,
+        selected,
+        admission,
+        &NativeProgramLinkIdentity::from_products(pair.application(), runtime),
+        application_commitment,
+    )?;
+    let tests = LinkedProgram::reopen_selected(
+        test_path,
+        test_receipt,
+        selected,
+        admission,
+        &NativeProgramLinkIdentity::from_products(pair.tests(), runtime),
+        test_commitment,
+    )?;
+    check_completed(
+        &application,
+        pair.application(),
+        runtime,
+        selected,
+        admission,
+    )?;
+    check_completed(&tests, pair.tests(), runtime, selected, admission)?;
+    Ok(LinkedNativePair {
+        binding: pair.binding().clone(),
+        application_header,
+        test_header,
         application,
         tests,
     })

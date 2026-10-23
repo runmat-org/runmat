@@ -3,7 +3,7 @@ use super::{
     MemmapFormatPresentation,
 };
 use crate::BuiltinResult;
-use runmat_value::{CharArray, IntegerStorage, NumericDType, Tensor, Value};
+use runmat_value::{CharArray, IntegerStorage, NumericDType, Tensor, Utf16CodeUnit, Value};
 
 impl MemmapFormat {
     pub(in crate::builtins::io::repl_fs::compat) fn decode(
@@ -33,7 +33,7 @@ impl MemmapFormat {
         if self.dtype == MemmapDataType::Character {
             let characters = bytes[..total_values]
                 .iter()
-                .map(|byte| char::from(*byte))
+                .map(|byte| Utf16CodeUnit::from_raw(u16::from(*byte)))
                 .collect();
             return Ok(Value::CharArray(
                 CharArray::from_column_major(characters, shape).map_err(format_error)?,

@@ -35,8 +35,8 @@ impl AccelProvider for Provider {
         input: &GpuTensorHandle,
         _: usize,
         _: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        match self.fault {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<_> = (|| match self.fault {
             Fault::Execution => {
                 Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "difference failed").into())
             }
@@ -50,7 +50,10 @@ impl AccelProvider for Provider {
                 self.outputs.lock().unwrap().push(allocation.probe);
                 Ok(allocation.handle)
             }
-        }
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 
@@ -67,8 +70,17 @@ fn rejected_difference_outputs_release_only_owned_result_and_keep_execution_sour
             .owner
             .allocate_zeroed(vec![3, 1], NumericElementType::F64, GpuTensorStorage::Real)
             .unwrap();
-        let error =
-            futures::executor::block_on(diff_gpu(input.handle.clone(), 1, Some(1))).unwrap_err();
+        let error = futures::executor::block_on(diff_gpu(
+            input.handle.clone(),
+            1,
+            Some(1),
+            &super::super::numerical_execution::NumericalCall::new(
+                runmat_builtins::NumericalReductionKind::Difference,
+                None,
+            )
+            .unwrap(),
+        ))
+        .unwrap_err();
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         if matches!(fault, Fault::Execution) {
             let source = error.source.as_ref().expect("provider source retained");
@@ -82,7 +94,7 @@ fn rejected_difference_outputs_release_only_owned_result_and_keep_execution_sour
             assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
             assert_eq!(cause.to_string(), "difference failed");
         } else {
-            assert!(error.message().contains("malformed or aliased"));
+            assert_eq!(error.identifier(), DIFF_ERROR_INTERNAL.identifier);
         }
         for output in provider.outputs.lock().unwrap().iter() {
             assert_eq!(output.retirements(), 1);

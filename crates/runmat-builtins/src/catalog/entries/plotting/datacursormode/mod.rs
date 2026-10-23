@@ -1,6 +1,7 @@
 mod contract;
 pub use contract::*;
 mod inference;
+mod documentation;
 use crate::*;
 pub const DATACURSORMODE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
@@ -9,10 +10,7 @@ pub const DATACURSORMODE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntr
         name: "datacursormode",
     },
     category: "plotting",
-    documentation: BuiltinDocumentation {
-        summary: "Control data cursor interaction mode.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &DATACURSORMODE_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

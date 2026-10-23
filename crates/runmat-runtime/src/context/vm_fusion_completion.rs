@@ -39,7 +39,7 @@ pub struct VmFusionRegionRegistration {
 pub struct VmFusionInstalledRegion {
     registration: VmFusionRegionRegistration,
     owner: RuntimeContextLocalId,
-    program: Option<ProgramRevision>,
+    program: Option<Arc<ProgramRevision>>,
     cancellation: CancellationToken,
     issuer_live: Arc<()>,
     feedback_live: Arc<()>,
@@ -49,7 +49,7 @@ pub struct VmFusionInstalledRegion {
 pub struct VmFusionCompletionRight {
     registration: VmFusionRegionRegistration,
     owner: RuntimeContextLocalId,
-    program: Option<ProgramRevision>,
+    program: Option<Arc<ProgramRevision>>,
     cancellation: CancellationToken,
     issuer_live: Weak<()>,
     feedback_live: Weak<()>,
@@ -62,7 +62,7 @@ pub struct VmFusionCompletionRight {
 pub struct VmFusionDeclineRight {
     registration: VmFusionRegionRegistration,
     owner: RuntimeContextLocalId,
-    program: Option<ProgramRevision>,
+    program: Option<Arc<ProgramRevision>>,
     cancellation: CancellationToken,
     issuer_live: Weak<()>,
 }
@@ -93,7 +93,7 @@ impl VmFusionInstalledRegion {
                 span_end,
             },
             owner: runtime.local_identity(),
-            program: runtime.program_revision().cloned(),
+            program: runtime.program_revision_owner().cloned(),
             cancellation: runtime.cancellation(),
             issuer_live: Arc::new(()),
             feedback_live: Arc::new(()),
@@ -108,7 +108,7 @@ impl VmFusionInstalledRegion {
 
     pub fn right(&self, runtime: &RuntimeContext) -> Option<VmFusionCompletionRight> {
         if runtime.local_identity() != self.owner
-            || runtime.program_revision() != self.program.as_ref()
+            || runtime.program_revision() != self.program.as_deref()
             || !runtime.cancellation().same_generation(&self.cancellation)
             || runtime.is_cancelled()
         {
@@ -116,7 +116,7 @@ impl VmFusionInstalledRegion {
         }
         let session = runtime.service_ports().placement().and_then(|service| {
             service.whole_work_vm_fusion_region_session_revision(
-                self.program.clone(),
+                self.program.as_deref().cloned(),
                 self.registration,
                 Arc::downgrade(&self.feedback_live),
             )
@@ -140,7 +140,7 @@ impl VmFusionInstalledRegion {
 
     pub fn decline_right(&self, runtime: &RuntimeContext) -> Option<VmFusionDeclineRight> {
         if runtime.local_identity() != self.owner
-            || runtime.program_revision() != self.program.as_ref()
+            || runtime.program_revision() != self.program.as_deref()
             || !runtime.cancellation().same_generation(&self.cancellation)
             || runtime.is_cancelled()
         {
@@ -160,7 +160,7 @@ impl VmFusionDeclineRight {
     pub fn is_current(&self, runtime: &RuntimeContext) -> bool {
         self.issuer_live.upgrade().is_some()
             && runtime.local_identity() == self.owner
-            && runtime.program_revision() == self.program.as_ref()
+            && runtime.program_revision() == self.program.as_deref()
             && runtime.cancellation().same_generation(&self.cancellation)
             && !runtime.is_cancelled()
     }
@@ -274,7 +274,7 @@ impl VmFusionCompletionRight {
     ) -> Option<&VmFusionSessionRegistration> {
         self.issuer_live.upgrade()?;
         if runtime.local_identity() != self.owner
-            || runtime.program_revision() != self.program.as_ref()
+            || runtime.program_revision() != self.program.as_deref()
             || !runtime.cancellation().same_generation(&self.cancellation)
             || runtime.is_cancelled()
         {
@@ -283,7 +283,7 @@ impl VmFusionCompletionRight {
         let selected = self.session.as_ref()?;
         let current = runtime.service_ports().placement().and_then(|service| {
             service.whole_work_vm_fusion_region_session_revision(
-                self.program.clone(),
+                self.program.as_deref().cloned(),
                 self.registration,
                 self.feedback_live.clone(),
             )

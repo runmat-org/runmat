@@ -515,7 +515,10 @@ mod tests {
     use runmat_value::IntegerStorage;
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tokenized_document_builtin(args))
+        futures::executor::block_on(tokenized_document_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_add_dependency(args: Vec<Value>) -> BuiltinResult<Value> {

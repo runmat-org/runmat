@@ -2,6 +2,7 @@ use crate::*;
 
 mod contract;
 mod inference;
+mod documentation;
 pub use contract::*;
 
 pub const FASTTEXT_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -11,12 +12,7 @@ pub const FASTTEXT_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCa
         name: "fastTextWordEmbedding",
     },
     category: "strings/text_analytics",
-    // Preserve docs/builtins/reference/fastTextWordEmbedding.json as the prose
-    // authority until the exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation {
-        summary: "Return a compact fastText-style word embedding compatibility model.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &FASTTEXT_WORD_EMBEDDING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

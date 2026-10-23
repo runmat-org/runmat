@@ -53,7 +53,7 @@ pub(super) fn character(
                 .ok_or_else(partition_error)?,
         );
     }
-    CharArray::new(data, rows, columns)
+    CharArray::from_code_units(data, rows, columns)
         .map(Value::CharArray)
         .map_err(internal)
 }

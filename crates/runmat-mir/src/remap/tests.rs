@@ -32,7 +32,7 @@ fn assembly() -> MirAssembly {
                     steps: vec![crate::MirSubscriptStep::DottedInvoke {
                         member: MemberName("helper".into()),
                         arguments: vec![],
-                        semantic_fallback: Some(external(source)),
+                        semantic_fallback: Some(std::sync::Arc::new(external(source))),
                     }],
                     sequence_use: SequenceUse::RequireSingle,
                     context: ObjectIndexingContext::Expression,
@@ -64,14 +64,17 @@ fn references(assembly: &MirAssembly, owner: FunctionId) -> [FunctionId; 3] {
         panic!("external root");
     };
     let crate::MirSubscriptStep::DottedInvoke {
-        semantic_fallback:
-            Some(CallableIdentity::ExternalFunction {
-                function: fallback, ..
-            }),
+        semantic_fallback: Some(fallback),
         ..
     } = &chain.steps[0]
     else {
         panic!("external dotted fallback");
+    };
+    let CallableIdentity::ExternalFunction {
+        function: fallback, ..
+    } = fallback.as_ref()
+    else {
+        panic!("external dotted fallback identity");
     };
     let MirTerminatorKind::Return(values) = &body.blocks[0].terminator.kind else {
         panic!("return");

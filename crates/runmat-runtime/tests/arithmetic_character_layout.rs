@@ -5,13 +5,13 @@ use runmat_value::{CharArray, Tensor, Value};
 fn character_operands_preserve_column_major_order_and_complete_shape() {
     let _mode = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for (shape, data) in [
-        (vec![2, 3], vec!['A', 'D', 'B', 'E', 'C', 'F']),
-        (vec![1, 1, 3], vec!['A', 'B', 'C']),
+        (vec![2, 3], runmat_value::encode_utf16_code_units("ADBECF")),
+        (vec![1, 1, 3], runmat_value::encode_utf16_code_units("ABC")),
         (vec![2, 0, 3], vec![]),
     ] {
         let chars = CharArray::from_column_major(data.clone(), shape.clone()).unwrap();
         let numeric = Tensor::new(
-            data.iter().map(|c| *c as u32 as f64).collect(),
+            data.iter().map(|c| f64::from(c.raw())).collect(),
             shape.clone(),
         )
         .unwrap();

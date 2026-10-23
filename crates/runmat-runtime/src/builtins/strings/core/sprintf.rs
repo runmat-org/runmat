@@ -122,9 +122,9 @@ async fn sprintf_builtin(
 
 fn char_row_value(text: &str) -> BuiltinResult<Value> {
     let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let array =
-        CharArray::new(chars, 1, len).map_err(|_| sprintf_error(&SPRINTF_ERROR_INTERNAL))?;
+    let len = text.encode_utf16().count();
+    let array = CharArray::from_unicode_scalars(chars, 1, len)
+        .map_err(|_| sprintf_error(&SPRINTF_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
 
@@ -154,7 +154,7 @@ pub(crate) mod tests {
 
     fn char_value_to_string(value: Value) -> String {
         match value {
-            Value::CharArray(ca) => ca.data().iter().copied().collect(),
+            Value::CharArray(ca) => runmat_value::decode_utf16_code_units(ca.data()).unwrap(),
             other => panic!("expected char output, got {other:?}"),
         }
     }
@@ -292,7 +292,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_format_spec_multirow_error() {
-        let chars = CharArray::new("hi!".chars().collect(), 3, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("hi!".chars().collect(), 3, 1).unwrap();
         let err = error_message(
             sprintf_builtin(Value::CharArray(chars), Vec::new()).expect_err("sprintf"),
         );

@@ -2,7 +2,7 @@
 
 use super::PreferenceServiceError;
 use crate::context::UserPathSetting;
-use crate::execution::value_codec::{decode_durable_value, ValueCodecError};
+use crate::execution::value_codec::{validate_durable_payload, ValueCodecError};
 use runmat_execution::value::ValuePayload;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -14,7 +14,9 @@ mod mutation;
 pub(super) use mutation::DocumentPrepared;
 pub(super) use mutation::{apply as apply_mutation, DocumentMutation, DocumentMutationError};
 
-pub(super) const PREFERENCE_DOCUMENT_VERSION: u32 = 1;
+// V2 makes native NumericFactor DATA a required, typed part of a durable
+// object rather than an ignorable JSON extension in an older reader.
+pub(super) const PREFERENCE_DOCUMENT_VERSION: u32 = 2;
 pub(super) type EncodedGroups = BTreeMap<String, BTreeMap<String, ValuePayload>>;
 
 /// Indices whose first occurrence is absent from the authoritative document.
@@ -95,7 +97,7 @@ impl PreferenceDocument {
         }
         for values in document.groups.values() {
             for payload in values.values() {
-                decode_durable_value(payload).map_err(PreferenceDocumentError::Value)?;
+                validate_durable_payload(payload).map_err(PreferenceDocumentError::Value)?;
             }
         }
         Ok(document)
@@ -169,9 +171,14 @@ mod tests {
     }
 
     #[test]
-    fn prior_version_one_document_defaults_only_the_distinct_user_setting() {
+    fn version_two_defaults_only_the_distinct_user_setting_and_rejects_prior_schema() {
         let old = br#"{"version":1,"groups":{"app":{}}}"#;
-        let decoded = PreferenceDocument::decode(old).unwrap();
+        assert!(matches!(
+            PreferenceDocument::decode(old),
+            Err(PreferenceDocumentError::Version(1))
+        ));
+        let current = br#"{"version":2,"groups":{"app":{}}}"#;
+        let decoded = PreferenceDocument::decode(current).unwrap();
         assert_eq!(decoded.user_path, UserPathSetting::Default);
         assert_eq!(decoded.user_path_revision, 0);
         assert!(decoded.groups.contains_key("app"));

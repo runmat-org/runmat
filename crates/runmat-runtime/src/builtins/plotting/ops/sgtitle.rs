@@ -54,7 +54,7 @@ pub(super) fn sgtitle_impl(
             plotting_error(builtin, format!("{builtin}: expected text input")),
         ));
     }
-    let text = super::op_common::value_as_text_string(&rest[0])
+    let text = super::op_common::value_as_text_string(&rest[0]).map_err(|source| crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?
         .or_else(|| super::op_common::format_numeric_text(&rest[0]))
         .ok_or_else(|| {
             annotation_error(builtin, invalid, plotting_error(
@@ -167,7 +167,11 @@ mod tests {
     #[test]
     fn sgtitle_accepts_explicit_figure_targets_and_properties() {
         let _guard = setup();
-        let fig = figure_builtin(vec![Value::Num(321.0)]).unwrap();
+        let fig = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(321.0)]),
+        )
+        .unwrap();
         sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
             vec![
                 Value::Num(fig),
@@ -224,7 +228,11 @@ mod tests {
         // Regression: sgtitle(42) must set the title to "42" on the current figure even when
         // figure 42 exists, rather than consuming 42 as a handle and erroring with "expected text".
         let _guard = setup();
-        let _ = figure_builtin(vec![Value::Num(42.0)]).unwrap();
+        let _ = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(42.0)]),
+        )
+        .unwrap();
         let current = current_figure_handle();
         sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
             vec![Value::Num(42.0)],
@@ -279,7 +287,11 @@ mod tests {
         // When there are 2+ args and the first is a valid figure handle, it is still treated as
         // the target figure — the pre-existing behaviour must be preserved.
         let _guard = setup();
-        let _ = figure_builtin(vec![Value::Num(7.0)]).unwrap();
+        let _ = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
+        )
+        .unwrap();
         sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
             vec![Value::Num(7.0), Value::String("Seven".into())],
         ))
@@ -293,7 +305,11 @@ mod tests {
         // Before sgtitle is invoked the Children array must contain only the axes handles,
         // not a spurious super-title text object.
         let _guard = setup();
-        let fig_handle = figure_builtin(vec![Value::Num(50.0)]).unwrap();
+        let fig_handle = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(50.0)]),
+        )
+        .unwrap();
         let children_before = figure_children_count(fig_handle);
         // Default figure has exactly one axes.
         assert_eq!(

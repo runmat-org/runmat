@@ -19,7 +19,7 @@ impl Invocation {
         let callable = Callable::parse(function)?;
         let mut uniform_output = true;
         let mut error_handler = None;
-        while let Some(option) = trailing_option(arguments.view()) {
+        while let Some(option) = trailing_option(arguments.view())? {
             let value = arguments
                 .pop()
                 .ok_or_else(|| error::invalid("cellfun: option requires a value"))?;
@@ -49,14 +49,23 @@ enum OptionName {
     Unknown(String),
 }
 
-fn trailing_option(arguments: crate::call::FunctionArgumentView<'_>) -> Option<OptionName> {
-    let index = arguments.len().checked_sub(2)?;
-    let name = extract_string(arguments.get(index)?)?;
-    Some(match name.trim().to_ascii_lowercase().as_str() {
+fn trailing_option(
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<OptionName>> {
+    let Some(index) = arguments.len().checked_sub(2) else {
+        return Ok(None);
+    };
+    let Some(value) = arguments.get(index) else {
+        return Ok(None);
+    };
+    let Some(name) = extract_string(value)? else {
+        return Ok(None);
+    };
+    Ok(Some(match name.trim().to_ascii_lowercase().as_str() {
         "uniformoutput" => OptionName::UniformOutput,
         "errorhandler" => OptionName::ErrorHandler,
         _ => OptionName::Unknown(name),
-    })
+    }))
 }
 
 pub(super) fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
@@ -84,11 +93,17 @@ fn invalid_uniform_output() -> crate::RuntimeError {
     error::uniform("cellfun: UniformOutput must be a logical scalar or double scalar 0 or 1")
 }
 
-pub(super) fn extract_string(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn extract_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(value) => Some(value.to_string()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
+        Value::CharArray(value) if value.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                let mut error = error::invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].to_string()),
         _ => None,
-    }
+    })
 }

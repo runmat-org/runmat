@@ -11,8 +11,8 @@ pub(super) fn find_timers(
     ensure_timer_class_registered();
     let filters: Vec<_> = args
         .into_iter()
-        .map(|pair| (pair.property, normalize_find_value(pair.value)))
-        .collect();
+        .map(|pair| normalize_find_value(pair.value).map(|value| (pair.property, value)))
+        .collect::<BuiltinResult<_>>()?;
     let mut matches = Vec::new();
     let handles = runtime.timer_session().borrow().handles();
     for handle in handles
@@ -42,21 +42,27 @@ pub(super) fn find_timers(
     handles_to_result(matches)
 }
 
-fn normalize_find_value(value: Value) -> Value {
+fn normalize_find_value(value: Value) -> BuiltinResult<Value> {
     if let Some(integer) = tensor::scalar_integer_value(&value) {
-        return Value::Int(integer);
+        return Ok(Value::Int(integer));
     }
     match value {
         Value::CharArray(chars) if chars.rows == 1 => {
-            Value::string(chars.data().iter().collect::<String>())
+            crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                timer_error(
+                    &TIMER_ERROR_INVALID_PROPERTY,
+                    "timer: find value is not valid UTF-16",
+                )
+            })
+            .map(Value::string)
         }
-        other => other,
+        other => Ok(other),
     }
 }
 
 fn filters_match(handle: &HandleRef, filters: &[(TimerProperty, Value)]) -> BuiltinResult<bool> {
     for (name, expected) in filters {
-        let actual = normalize_find_value(property(handle, name.name())?);
+        let actual = normalize_find_value(property(handle, name.name())?)?;
         if !timer_values_equal(&actual, expected) {
             return Ok(false);
         }

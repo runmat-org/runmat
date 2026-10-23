@@ -122,7 +122,8 @@ pub(super) fn value_ref_to_python(value: &Value) -> Result<PythonValue, RuntimeE
         Value::Int(value) => value_to_python_inner(Value::Int(value.clone())),
         Value::String(value) => Ok(PythonValue::String(value.as_str().to_owned())),
         Value::CharArray(value) => value
-            .row_string()
+            .try_row_string()
+            .map_err(|cause| invalid_conversion(format!("invalid UTF-16 character row: {cause}")))?
             .map(PythonValue::String)
             .ok_or_else(|| invalid_conversion("character conversion requires a row vector")),
         Value::StringArray(value) => Ok(PythonValue::List(
@@ -220,7 +221,8 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
         }),
         Value::String(value) => Ok(PythonValue::String(value.into_string_unbounded())),
         Value::CharArray(value) => value
-            .row_string()
+            .try_row_string()
+            .map_err(|cause| invalid_conversion(format!("invalid UTF-16 character row: {cause}")))?
             .map(PythonValue::String)
             .ok_or_else(|| invalid_conversion("character conversion requires a row vector")),
         Value::StringArray(value) => Ok(PythonValue::List(

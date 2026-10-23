@@ -57,6 +57,21 @@ pub(crate) struct HostAllocationCheckpoint {
     pub(super) owner: AllocationOwnerState,
 }
 
+/// Read-only original ledger/generation authority for a Send CPU job. This
+/// grants no bytes and contains no thread-affine Runtime context or service.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct HostAllocationWorkerCheckpoint(AllocationOwnerState);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl HostAllocationWorkerCheckpoint {
+    pub(crate) fn from_checkpoint(checkpoint: &HostAllocationCheckpoint) -> Self {
+        Self(checkpoint.owner.clone())
+    }
+    pub(crate) fn check(&self) -> Result<(), HostAllocationError> {
+        self.0.check()
+    }
+}
+
 impl HostAllocationCheckpoint {
     pub(crate) fn check(&self, runtime: &RuntimeContext) -> Result<(), HostAllocationError> {
         self.owner.check()?;

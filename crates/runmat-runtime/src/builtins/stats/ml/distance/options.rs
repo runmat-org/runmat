@@ -6,8 +6,10 @@ use runmat_builtins::{
 };
 use runmat_value::Value;
 
-use super::{distance_error, KnnOptions, Selection, EPS, KNNSEARCH_NAME, PDIST2_NAME};
-use crate::builtins::common::{random_args::keyword_of, tensor};
+use super::{
+    distance_error, distance_keyword, KnnOptions, Selection, EPS, KNNSEARCH_NAME, PDIST2_NAME,
+};
+use crate::builtins::common::tensor;
 use crate::builtins::stats::ml::pairwise_metric::{scalar_parameter, MetricCaller};
 use crate::BuiltinResult;
 
@@ -19,7 +21,7 @@ pub(super) async fn split_pdist2_options(
     let mut selection = None;
     let mut idx = 0usize;
     while idx < args.len() {
-        let selector = keyword_of(&args[idx])
+        let selector = distance_keyword(PDIST2_NAME, &args[idx])?
             .as_deref()
             .and_then(DistanceSelectionKind::from_keyword);
         if let Some(selector) = selector {
@@ -128,7 +130,7 @@ pub(super) fn parse_knnsearch_options(
     let mut ns_method: Option<KnnSearchMethod> = None;
     let mut idx = 0usize;
     while idx < args.len() {
-        let name = keyword_of(&args[idx]).ok_or_else(|| {
+        let name = distance_keyword(KNNSEARCH_NAME, &args[idx])?.ok_or_else(|| {
             distance_error(
                 KNNSEARCH_NAME,
                 "knnsearch: options must be supplied as name-value pairs",
@@ -152,7 +154,7 @@ pub(super) fn parse_knnsearch_options(
             KnnOption::IncludeTies => include_ties = parse_logical_scalar(&value, "IncludeTies")?,
             KnnOption::SortIndices => sort_indices = parse_logical_scalar(&value, "SortIndices")?,
             KnnOption::Distance => {
-                let distance = keyword_of(&value).ok_or_else(|| {
+                let distance = distance_keyword(KNNSEARCH_NAME, &value)?.ok_or_else(|| {
                     distance_error(KNNSEARCH_NAME, "knnsearch: Distance must be text")
                 })?;
                 metric = KnnMetric::from_keyword(&distance).ok_or_else(|| {
@@ -172,7 +174,7 @@ pub(super) fn parse_knnsearch_options(
                 metric_parameter = Some((option, value));
             }
             KnnOption::NsMethod => {
-                let method = keyword_of(&value).ok_or_else(|| {
+                let method = distance_keyword(KNNSEARCH_NAME, &value)?.ok_or_else(|| {
                     distance_error(KNNSEARCH_NAME, "knnsearch: NSMethod must be text")
                 })?;
                 ns_method = Some(KnnSearchMethod::from_keyword(&method).ok_or_else(|| {
@@ -183,7 +185,7 @@ pub(super) fn parse_knnsearch_options(
                 })?);
             }
             KnnOption::CacheSize => {
-                if keyword_of(&value)
+                if distance_keyword(KNNSEARCH_NAME, &value)?
                     .as_deref()
                     .and_then(KnnCacheSizeKeyword::from_keyword)
                     .is_none()

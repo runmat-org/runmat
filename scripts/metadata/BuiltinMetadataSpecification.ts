@@ -28,7 +28,7 @@ export interface Example {
   id?: string;
   description: string;
   input: string;
-  output?: string;
+  output?: string | null;
   compatibility?: "RunMat" | "Matlab" | "Strict";
   harness?:
     | "Portable"
@@ -52,6 +52,8 @@ export interface Example {
 export type BuiltinExampleFixture =
   | "None"
   | { Filesystem: BuiltinFilesystemFixture }
+  | { ApplicationSettings: { id: { local_name: string } } }
+  | { MailOutbox: { id: { local_name: string }; expected_message: string } }
   | { Loopback: BuiltinLoopbackFixture }
   | { ForeignAdapter: BuiltinForeignAdapterFixture }
   | { CliInteraction: BuiltinCliInteractionFixture }
@@ -208,10 +210,81 @@ export interface JsonEncodeOptions {
     description: string;
 }
 
-export interface BuiltinMetadata {
+/** JSON presentation emitted by documentation_export/projection.rs, not
+ * another semantic catalog. Legacy sidecar fields remain a separate variant. */
+export type BuiltinMetadata = CanonicalBuiltinMetadata | LegacyBuiltinMetadata;
+
+export interface BuiltinDocumentationSection {
+  heading: string;
+  paragraphs: string[];
+}
+
+export interface BuiltinDocumentationMedia {
+  kind: "Image" | "Video";
+  url: string;
+  alt: string;
+}
+
+/** Evidence implementation links retain Rust's externally tagged target.
+ * Public links/source/related are separately projected to { label, url }. */
+export interface BuiltinDocumentationEvidence {
+  implementation: Array<{
+    label: string;
+    target: { Builtin: string } | { Documentation: string } | { Source: string } | { External: string };
+  }>;
+  verification: Array<{
+    kind: "UnitTest" | "IntegrationTest" | "BrowserTest" | "ProviderTest" | "WgpuTest" | "ConformanceTest" | "Validation";
+    label: string;
+    location: string;
+  }>;
+  notes: string[];
+}
+
+/** Catalog semantics are opaque to example consumers. Preserve the exact JSON
+ * object rather than re-declaring descriptor/contract/placement authorities. */
+export type BuiltinCatalogJson = null | boolean | number | string | BuiltinCatalogJson[] | { [key: string]: BuiltinCatalogJson };
+
+/** Canonical rows always carry the explicit typed execution declarations. */
+export interface CanonicalBuiltinExample extends Example {
+  id: string;
+  output: string | null;
+  compatibility: NonNullable<Example["compatibility"]>;
+  harness: NonNullable<Example["harness"]>;
+  fixture: BuiltinExampleFixture;
+  requirements: BuiltinExampleRequirements;
+  verification: NonNullable<Example["verification"]>;
+}
+
+export interface CanonicalBuiltinMetadata {
+  key: string;
+  module_stem: string;
+  authority: "catalog";
+  title: string;
+  slug: string;
+  category: string;
+  keywords: string[];
+  summary: string;
+  description: string;
+  sections: BuiltinDocumentationSection[];
+  examples: CanonicalBuiltinExample[];
+  example_exemption: string | null;
+  faqs: FAQ[];
+  links: Link[];
+  related: Link[];
+  media: BuiltinDocumentationMedia[];
+  evidence: BuiltinDocumentationEvidence;
+  source?: Link;
+  introduced: string | null;
+  status: "Stable" | "Experimental" | "Partial" | "Deprecated" | null;
+  catalog: { [key: string]: BuiltinCatalogJson };
+}
+
+/** Historical sidecar projection remains supported during explicit transition.
+ * Do not require these legacy-only fields on canonical catalog documents. */
+export interface LegacyBuiltinMetadata {
   key?: string;
   module_stem?: string;
-  authority?: "catalog" | "legacy_sidecar";
+  authority?: "legacy_sidecar";
   title: string;
   category: string;
   keywords: string[];

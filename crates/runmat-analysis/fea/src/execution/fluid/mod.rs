@@ -43,8 +43,13 @@ const RESULT_PREFIX: &[u8] = b"runmat-steady-fluid-retained-result/v1\0";
 /// Codec limits of fluid workloads and retained results. They are structural sanity bounds, not
 /// size caps: a retained result grows with cells, faces and retained steps, and its memory is
 /// admitted by the phase resource plan before it is built or decoded.
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1 << 44, 1 << 36, 65_536, 64);
-const MAX_PAYLOAD_BYTES: usize = 1 << 44;
+const LIMITS: CanonicalLimits = CanonicalLimits::new(
+    MAX_PAYLOAD_BYTES,
+    crate::address_space_power_of_two(36),
+    65_536,
+    64,
+);
+const MAX_PAYLOAD_BYTES: usize = crate::address_space_power_of_two(44);
 
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(error.to_string())

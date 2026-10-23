@@ -22,7 +22,7 @@ pub(super) fn parse(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResul
     if rest.is_empty() {
         return Ok(parsed);
     }
-    if keyword_of(&rest[0]).is_some() {
+    if keyword_of(&rest[0])?.is_some() {
         parse_options(rest, 0, &mut parsed)?;
         return Ok(parsed);
     }
@@ -49,7 +49,7 @@ fn parse_options(
     }
     let options = rest.range(start..).expect("validated rescale option start");
     for pair in options.chunks_exact(2) {
-        let name = keyword_of(&pair[0])
+        let name = keyword_of(&pair[0])?
             .ok_or_else(|| error::invalid_argument("expected name-value option name"))?;
         match name.as_str() {
             "inputmin" => parsed.input_min = Some(pair[1].clone()),

@@ -296,6 +296,10 @@ fn dimension(value: &LiteralValue) -> Option<usize> {
 }
 
 #[cfg(test)]
+#[path = "constructor_facts/consumer_cutover_tests.rs"]
+mod consumer_cutover_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

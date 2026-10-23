@@ -22,7 +22,21 @@ pub(crate) fn admit_feval_target(value: &Value) -> BuiltinResult<()> {
     let text = match value {
         Value::String(text) => Some(text.as_str()),
         Value::CharArray(chars) if chars.rows == 1 => {
-            return admit_target_characters(chars.data().iter().copied());
+            let units = chars.data().iter().map(|unit| unit.raw());
+            for decoded in char::decode_utf16(units.clone()) {
+                if let Err(source) = decoded {
+                    let mut error = runtime_descriptor_error_with_detail(
+                        "feval",
+                        &FEVAL_ERROR_HANDLE_NAME_INVALID,
+                        "char target contains malformed UTF-16",
+                    );
+                    error.source = Some(Box::new(source));
+                    return Err(error);
+                }
+            }
+            return admit_target_characters(
+                char::decode_utf16(units).map(|decoded| decoded.expect("validated UTF-16 target")),
+            );
         }
         Value::StringArray(strings) if strings.data().len() == 1 => {
             Some(strings.data()[0].as_str())

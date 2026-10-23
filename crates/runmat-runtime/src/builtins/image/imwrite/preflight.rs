@@ -50,6 +50,14 @@ pub(super) fn preflight_option_text(
         }
         if option == Some(ImwriteOption::WriteMode) {
             append = crate::builtins::image::checked_text::scalar_text(&args[index + 1])
+                .map_err(|source| {
+                    let mut error = imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_OPTION,
+                        source.to_string(),
+                    );
+                    error.source = Some(Box::new(source));
+                    error
+                })?
                 .and_then(|mode| WriteMode::from_name(&mode))
                 == Some(WriteMode::Append);
         }

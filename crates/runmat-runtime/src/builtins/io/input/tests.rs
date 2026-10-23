@@ -296,15 +296,16 @@ fn input_integer_audit_is_explicitly_not_applicable() {
 
 #[test]
 fn paged_prompt_and_flag_reject_before_interaction_but_trailing_singleton_works() {
-    let paged =
-        CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).expect("paged char");
+    let paged = CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 1, 2])
+        .expect("paged char");
     let err = futures::executor::block_on(input_builtin(
         crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(paged)]),
     ))
     .expect_err("paged prompt must fail");
     assert_eq!(err.identifier(), INPUT_ERROR_PROMPT_ROW_VECTOR.identifier);
     let paged_flag =
-        CharArray::new_with_shape("ss".chars().collect(), vec![1, 1, 2]).expect("paged flag");
+        CharArray::from_unicode_scalars_with_shape("ss".chars().collect(), vec![1, 1, 2])
+            .expect("paged flag");
     let err = futures::executor::block_on(input_builtin(
         crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("Prompt: ".into()),
@@ -313,7 +314,7 @@ fn paged_prompt_and_flag_reject_before_interaction_but_trailing_singleton_works(
     ))
     .expect_err("paged flag must fail");
     assert_eq!(err.identifier(), INPUT_ERROR_INVALID_STRING_FLAG.identifier);
-    let trailing = CharArray::new_with_shape("s".chars().collect(), vec![1, 1, 1])
+    let trailing = CharArray::from_unicode_scalars_with_shape("s".chars().collect(), vec![1, 1, 1])
         .expect("trailing singleton");
     assert_eq!(
         futures::executor::block_on(parse_string_flag(&Value::CharArray(trailing)))

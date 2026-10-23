@@ -208,7 +208,7 @@ fn trace_char_array(ca: CharArray) -> BuiltinResult<Value> {
     for idx in 0..diag_len {
         let linear = idx * ca.cols + idx;
         if let Some(ch) = ca.data().get(linear) {
-            sum += *ch as u32 as f64;
+            sum += f64::from(ch.raw());
         }
     }
     Ok(Value::Num(sum))
@@ -485,7 +485,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_promotes_to_double() {
-        let chars = CharArray::new("a".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("a".chars().collect(), 1, 1).unwrap();
         let result = trace_builtin(Value::CharArray(chars)).expect("trace");
         match result {
             Value::Num(value) => assert!((value - ('a' as u32 as f64)).abs() < 1e-12),
@@ -496,11 +496,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_square_matrix_uses_diagonal() {
-        let chars = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [0xD800, 0x0042, 0x0043, 0xDC00]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .unwrap();
         let result = trace_builtin(Value::CharArray(chars)).expect("trace");
         match result {
             Value::Num(value) => {
-                let expected = ('a' as u32 as f64) + ('d' as u32 as f64);
+                let expected = 111616.0;
                 assert!((value - expected).abs() < 1e-12);
             }
             other => panic!("expected numeric result, got {other:?}"),

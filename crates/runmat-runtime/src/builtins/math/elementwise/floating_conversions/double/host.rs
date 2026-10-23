@@ -170,7 +170,7 @@ pub(super) fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
     let data: Vec<f64> = chars
         .to_column_major()
         .into_iter()
-        .map(|ch| ch as u32 as f64)
+        .map(|ch| f64::from(ch.raw()))
         .collect();
     let tensor = Tensor::new(data, chars.shape)
         .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;

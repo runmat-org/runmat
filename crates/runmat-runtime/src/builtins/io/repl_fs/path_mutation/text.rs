@@ -11,6 +11,7 @@ pub(in crate::builtins::io::repl_fs) enum NumericPolicy {
 
 pub(in crate::builtins::io::repl_fs) enum DecodeError {
     InvalidInput,
+    Encoding(runmat_value::Utf16DecodeError),
     Provider(crate::RuntimeError),
     Compatibility(crate::RuntimeError),
 }
@@ -64,7 +65,7 @@ fn admit(
         Value::CharArray(chars)
             if crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            collect_char_rows(chars, output)
+            collect_char_rows(chars, output)?;
         }
         Value::Tensor(tensor) => {
             admit_numeric(builtin, policy)?;
@@ -97,12 +98,17 @@ fn admit_numeric(builtin: &'static str, policy: NumericPolicy) -> Result<(), Dec
     }
 }
 
-fn collect_char_rows(chars: &CharArray, output: &mut Vec<AdmittedToken>) {
+fn collect_char_rows(
+    chars: &CharArray,
+    output: &mut Vec<AdmittedToken>,
+) -> Result<(), DecodeError> {
     for row in 0..chars.rows {
         let start = row * chars.cols;
-        let text: String = chars.data()[start..start + chars.cols].iter().collect();
+        let text = runmat_value::decode_utf16_code_units(&chars.data()[start..start + chars.cols])
+            .map_err(DecodeError::Encoding)?;
         output.push(AdmittedToken::Text(text.trim_end().to_owned()));
     }
+    Ok(())
 }
 
 fn decode_numeric_row(tensor: &Tensor) -> Result<String, DecodeError> {

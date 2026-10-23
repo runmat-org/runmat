@@ -7,10 +7,10 @@ use std::fs;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[path = "tests/publication.rs"]
-mod publication;
 #[path = "tests/admission.rs"]
 mod admission;
+#[path = "tests/publication.rs"]
+mod publication;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -49,11 +49,12 @@ fn cancellation_is_not_converted_to_spreadsheet_status() {
 
 #[test]
 fn scalar_text_geometry_rejects_paged_filename_before_file_access() {
-    let paged = CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2])
+    let paged = CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 1, 2])
         .expect("paged character array");
     assert!(resolve_path(&Value::CharArray(paged)).is_err());
-    let trailing_singleton = CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1])
-        .expect("trailing singleton character row");
+    let trailing_singleton =
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 2, 1])
+            .expect("trailing singleton character row");
     assert_eq!(
         value_to_string_scalar(&Value::CharArray(trailing_singleton)).expect("scalar text"),
         "ab"

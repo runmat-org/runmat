@@ -65,11 +65,11 @@ fn test_statement_output_is_ordered_and_uses_whole_assignment_binding() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
     let result = runmat_core::execute_text_request_for_testing(
         &mut engine,
-        "x = [1 2];\nx(2) = 3\n2 + 4\ny = 7;\ny",
+        "x = [1 2]\nx(2) = 3\n2 + 4\ny = 7;\ny\ndisp('after-y');",
     )
     .unwrap();
     let stdout = collect_stdout_texts(&result);
-    assert_eq!(stdout.len(), 4, "{stdout:?}");
+    assert_eq!(stdout.len(), 5, "{stdout:?}");
     assert!(stdout[0].starts_with("x ="), "{stdout:?}");
     assert!(
         stdout[1].starts_with("x =") && stdout[1].contains('3'),
@@ -77,6 +77,7 @@ fn test_statement_output_is_ordered_and_uses_whole_assignment_binding() {
     );
     assert_eq!(stdout[2], "ans = 6");
     assert_eq!(stdout[3], "y = 7");
+    assert_eq!(stdout[4], "after-y");
 }
 
 #[test]

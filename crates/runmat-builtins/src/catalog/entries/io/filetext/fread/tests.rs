@@ -189,6 +189,10 @@ fn typed_precision_spelling_preserves_exact_character_alias_policy() {
     }
     for label in ["char", "2*char"] {
         assert_eq!(
+            parse_fread_precision(label).unwrap().input,
+            FreadInputSource::EncodedCharacter
+        );
+        assert_eq!(
             parse_fread_precision(label).unwrap().output,
             FreadOutputKind::Char
         );
@@ -198,6 +202,10 @@ fn typed_precision_spelling_preserves_exact_character_alias_policy() {
         FreadOutputKind::Char
     );
     for label in ["uint8", "byte", "int8", "integer*1"] {
+        assert!(matches!(
+            parse_fread_precision(label).unwrap().input,
+            FreadInputSource::Numeric(_)
+        ));
         assert_eq!(
             parse_fread_precision(label).unwrap().output,
             FreadOutputKind::Numeric(NumericClass::Double),

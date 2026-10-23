@@ -166,15 +166,41 @@ pub(super) async fn select_sites(
             );
             continue;
         }
-        let Some(RuntimeNameCandidate::Source(candidate)) = observed.selected() else {
-            continue;
+        let selected = match observed.selected() {
+            Some(RuntimeNameCandidate::Semantic {
+                function,
+                definition_owner: Some(owner),
+                ..
+            }) => {
+                // A warmed source is already semantic, so reloading by name
+                // would discard the observation and could select a replacement.
+                // Prefer the exact inherited view (including retained private
+                // bodies); earlier eval effects may instead have published it
+                // in the session's current generation after eval entry.
+                let function = FunctionId(*function);
+                let binding = inherited.exact_bound_binding(function).filter(|binding| {
+                    binding
+                        .authority
+                        .local_definition()
+                        .is_some_and(|lease| lease.matches(owner))
+                });
+                Some(match binding {
+                    Some(binding) => binding,
+                    None => admission
+                        .host()
+                        .selected_semantic_source_binding(runtime, function, owner)?,
+                })
+            }
+            Some(RuntimeNameCandidate::Source(candidate)) => {
+                runmat_runtime::user_functions::select_observed_source_binding_in_context(
+                    runtime.clone(),
+                    name.to_owned(),
+                    candidate.clone(),
+                )
+                .await?
+            }
+            _ => continue,
         };
-        let selected = runmat_runtime::user_functions::select_observed_source_binding_in_context(
-            runtime.clone(),
-            name.to_owned(),
-            candidate.clone(),
-        )
-        .await?;
         if runtime.search_path().map(|path| path.generation()) != observed.captured_path_revision
             || runmat_runtime::class_registry::class_registry_generation()
                 != observed.captured_class_revision

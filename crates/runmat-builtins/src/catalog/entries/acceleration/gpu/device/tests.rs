@@ -14,32 +14,33 @@ fn request(arguments: Vec<ValueFact>) -> CallRequest {
 }
 
 #[test]
-fn device_is_a_host_struct_with_only_proven_provider_fields() {
+fn device_is_a_host_typed_handle_with_read_only_provider_property_types() {
     let result = inference::infer(&request(vec![]), &GPU_DEVICE_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
-    let ValueKindFact::Struct(fields) = &result.outputs[0].kind else {
-        panic!("gpuDevice should infer a struct")
+    let ValueKindFact::Object(fields) = &result.outputs[0].kind else {
+        panic!("gpuDevice should infer an object")
     };
-    assert!(!fields.fields_complete);
-    let known = &fields.fields;
+    assert!(!fields.properties_complete);
+    assert!(fields.runtime_class.as_ref().unwrap().is(GPU_DEVICE_CLASS));
+    assert_eq!(fields.handle_semantics, Some(true));
+    let known = &fields.properties;
     for name in [
-        "device_id",
-        "index",
-        "name",
-        "vendor",
-        "precision",
-        "supports_double",
+        "Index",
+        "Name",
+        "TotalMemory",
+        "AvailableMemory",
+        "SupportsDouble",
+        "DeviceAvailable",
+        "DeviceSelected",
     ] {
         assert!(known.contains_key(name), "missing {name}");
     }
     assert!(!known.contains_key("backend"));
     assert!(!known.contains_key("memory_bytes"));
+    assert!(matches!(&known["Name"].kind, ValueKindFact::Character));
     assert!(
-        matches!(&known["device_id"].kind, ValueKindFact::Numeric(fact) if fact.class == NumericClass::UInt32)
-    );
-    assert!(
-        matches!(&known["index"].kind, ValueKindFact::Numeric(fact) if fact.class == NumericClass::UInt32)
+        matches!(&known["Index"].kind, ValueKindFact::Numeric(fact) if fact.class == NumericClass::Double)
     );
 }
 
@@ -78,7 +79,7 @@ fn logical_first_selector_still_has_semantic_arity_diagnostic() {
 }
 
 #[test]
-fn selector_known_empty_invalid_and_unavailable_have_stable_diagnostics() {
+fn selector_empty_deselects_and_availability_remains_a_runtime_fact() {
     let numeric = ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
         domain: NumericDomain::Real,
@@ -89,10 +90,8 @@ fn selector_known_empty_invalid_and_unavailable_have_stable_diagnostics() {
         StorageFact::Dense,
     );
     let result = inference::infer(&request(vec![empty]), &GPU_DEVICE_CATALOG_ENTRY);
-    assert!(result
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM.GPU_DEVICE.RESET_NOT_SUPPORTED"));
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].shape.element_count(), Some(0));
     let mut invalid = request(vec![ValueFact::scalar(numeric.clone())]);
     invalid.literals = LiteralContext::new(vec![LiteralValue::Number(0.0)]);
     let result = inference::infer(&invalid, &GPU_DEVICE_CATALOG_ENTRY);
@@ -103,10 +102,10 @@ fn selector_known_empty_invalid_and_unavailable_have_stable_diagnostics() {
     let mut unavailable = request(vec![ValueFact::scalar(numeric)]);
     unavailable.literals = LiteralContext::new(vec![LiteralValue::Number(2.0)]);
     let result = inference::infer(&unavailable, &GPU_DEVICE_CATALOG_ENTRY);
-    assert!(result
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM.GPU_DEVICE.DEVICE_NOT_AVAILABLE"));
+    assert!(
+        result.diagnostics.is_empty(),
+        "device count is not a static literal 1"
+    );
     let text = request(vec![ValueFact::scalar(ValueKindFact::String)]);
     let result = inference::infer(&text, &GPU_DEVICE_CATALOG_ENTRY);
     assert!(result
@@ -146,15 +145,20 @@ fn unknown_selector_remains_dynamic_and_valid_index_is_admitted() {
     }]);
     let result = inference::infer(&valid, &GPU_DEVICE_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let mut tolerated = request(vec![ValueFact::scalar(ValueKindFact::Numeric(
+    let mut fractional = request(vec![ValueFact::scalar(ValueKindFact::Numeric(
         NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real,
         },
     ))]);
-    tolerated.literals = LiteralContext::new(vec![LiteralValue::Number(1.0 - 1e-10)]);
-    let result = inference::infer(&tolerated, &GPU_DEVICE_CATALOG_ENTRY);
-    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    for value in [1.0 - 1e-10, 1.0 + 1e-10] {
+        fractional.literals = LiteralContext::new(vec![LiteralValue::Number(value)]);
+        let result = inference::infer(&fractional, &GPU_DEVICE_CATALOG_ENTRY);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == GPU_DEVICE_ERROR_INVALID_INDEX.code));
+    }
 
     let mut represented_single = request(vec![ValueFact::scalar(ValueKindFact::Numeric(
         NumericFact {
@@ -187,10 +191,10 @@ fn unknown_selector_remains_dynamic_and_valid_index_is_admitted() {
         class: NumericClass::UInt64,
     }]);
     let result = inference::infer(&typed_hex, &GPU_DEVICE_CATALOG_ENTRY);
-    assert!(result
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM.GPU_DEVICE.DEVICE_NOT_AVAILABLE"));
+    assert!(
+        result.diagnostics.is_empty(),
+        "availability is checked against actual leased owners"
+    );
 
     typed_hex.literals = LiteralContext::new(vec![LiteralValue::Integer {
         text: "0xFFFFFFFFFFFFFFFFu64".into(),
@@ -204,11 +208,11 @@ fn unknown_selector_remains_dynamic_and_valid_index_is_admitted() {
 }
 
 #[test]
-fn device_contract_is_host_read_only_and_does_not_claim_kernels() {
+fn device_contract_is_host_stateful_suspending_and_does_not_claim_kernels() {
     let entry = &GPU_DEVICE_CATALOG_ENTRY;
     assert_eq!(
         entry.contract.async_behavior,
-        BuiltinAsyncBehavior::NeverSuspends
+        BuiltinAsyncBehavior::MaySuspend
     );
     assert_eq!(entry.placement.residency, BuiltinResidencyPolicy::Host);
     assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Boundary);
@@ -224,4 +228,44 @@ fn device_contract_is_host_read_only_and_does_not_claim_kernels() {
         .contract
         .effects
         .contains(&runmat_types::EffectKind::MayThrow));
+    assert!(entry
+        .contract
+        .effects
+        .contains(&runmat_types::EffectKind::EnvironmentWrite));
+    assert_eq!(entry.contract.maturity, BuiltinContractMaturity::Incomplete);
+    assert_eq!(
+        entry.extensions.len(),
+        1,
+        "the provider-info facade gate is retired"
+    );
+}
+
+#[test]
+fn executable_members_have_typed_inference_and_actual_effects() {
+    let device = inference::infer(&request(vec![]), &GPU_DEVICE_CATALOG_ENTRY)
+        .outputs
+        .remove(0);
+    // All property names/bindings come from the closed class-member enum.
+    assert_eq!(GpuDeviceProperty::ALL.len(), 7);
+    assert!(matches!(
+        GpuDeviceProperty::Name.fact().kind,
+        ValueKindFact::Character
+    ));
+    assert!(matches!(
+        GpuDeviceProperty::DeviceSelected.fact().kind,
+        ValueKindFact::Logical
+    ));
+    assert!(matches!(device.kind, ValueKindFact::Object(_)));
+    assert_eq!(
+        methods::RESET.contract.async_behavior,
+        BuiltinAsyncBehavior::MaySuspend
+    );
+    assert_eq!(
+        methods::NAME.contract.async_behavior,
+        BuiltinAsyncBehavior::NeverSuspends
+    );
+    assert_eq!(
+        methods::RESET.descriptor.completion_policy,
+        BuiltinCompletionPolicy::MethodOnly
+    );
 }
