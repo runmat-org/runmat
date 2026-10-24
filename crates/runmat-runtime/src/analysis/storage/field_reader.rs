@@ -31,6 +31,44 @@ pub(super) fn materialize_run(
         }
         run.run.observation_histories.push(restored);
     }
+    if let Some(balance) = &persisted.dynamic_balance {
+        let payload = read_numerical_payload(&balance.manifest, &mut read_chunk)?;
+        let values = decode_field_values(&payload)?;
+        let transient = run
+            .transient_results
+            .as_mut()
+            .ok_or("dynamic balance belongs to a run without transient results")?;
+        if transient.dynamic_balance_snapshots.len() != balance.dof_counts.len() {
+            return Err("dynamic balance differs from its accepted states".into());
+        }
+        let mut offset = 0usize;
+        for (snapshot, &dofs) in transient
+            .dynamic_balance_snapshots
+            .iter_mut()
+            .zip(&balance.dof_counts)
+        {
+            let dofs = usize::try_from(dofs).map_err(|_| "dynamic balance size overflow")?;
+            let mut take = || -> Result<Vec<f64>, String> {
+                let end = offset
+                    .checked_add(dofs)
+                    .filter(|end| *end <= values.len())
+                    .ok_or("dynamic balance payload is shorter than its inventory")?;
+                let vector = values[offset..end].to_vec();
+                offset = end;
+                Ok(vector)
+            };
+            *snapshot = runmat_analysis_fea::StructuralDynamicBalanceSnapshot {
+                applied_load: take()?,
+                inertia_force: take()?,
+                damping_force: take()?,
+                elastic_force: take()?,
+                equilibrium_residual: take()?,
+            };
+        }
+        if offset != values.len() {
+            return Err("dynamic balance payload is longer than its inventory".into());
+        }
+    }
     if let Some(index) = &persisted.render_tiles {
         run.render_topology = Some(render_tiles::reconstruct(index, |digest| {
             read_chunk(digest)

@@ -3139,3 +3139,72 @@ fn node_located_von_mises_binds_its_declared_transfer_and_interpolates() {
     let expected = 1.0e6 * position[0] + 3.0e6;
     assert!((value - expected).abs() <= 1e-9 * expected, "{value} vs {expected}");
 }
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a reaction-force resultant over a boundary face region is the discrete sum of the
+//   nodal reactions at the nodes of that region's faces, each node counted once, on a
+//   three-element Tet4 mesh. Constraint-group targets are witnessed separately.
+#[test]
+fn reaction_resultant_over_a_face_region_sums_its_nodes_once() {
+    use runmat_analysis_core::{
+        EntityDimension, ExcitationTarget, ExpectedTopology, RegionTarget, TargetCardinality,
+    };
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "structural.reaction_force",
+        ObservationQuantity::ReactionForce,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let values = (0..projection.nodes.len())
+        .flat_map(|node| [node as f64 + 1.0, 2.0 * node as f64, -1.0])
+        .collect::<Vec<_>>();
+    let fields = catalog(&projection, &definition, vec![projection.nodes.len(), 3], values.clone());
+    let entity = projection.boundary_faces[0].provenance[0].clone();
+    let mut region = RegionTarget::new(
+        "supports",
+        EntityDimension::Face,
+        ExpectedTopology::BoundaryFace,
+        TargetCardinality::OneOrMore,
+    );
+    region.bind_resolved_entities(vec![entity.clone()]).unwrap();
+    let nodes = projection
+        .boundary_faces
+        .iter()
+        .filter(|face| face.provenance.contains(&entity))
+        .flat_map(|face| face.node_indices.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected: [f64; 3] = std::array::from_fn(|axis| {
+        nodes.iter().map(|node| values[node * 3 + axis]).sum()
+    });
+    let mut request = spec("support_reaction", ObservationTarget::Spatial(ExcitationTarget::Region(region)));
+    request.quantity = ObservationQuantity::ReactionForce;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.source_location = FieldLocation::Node;
+    request.output_location = FieldLocation::Global;
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    request.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Reduction(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+    let value = result[0].field.as_host_f64().unwrap();
+    for axis in 0..3 {
+        assert!((value[axis] - expected[axis]).abs() < 1e-12, "{value:?} vs {expected:?}");
+    }
+}

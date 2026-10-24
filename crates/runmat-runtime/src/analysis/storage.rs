@@ -71,6 +71,18 @@ struct PersistedRunArtifact {
     observation_histories: Vec<PersistedObservationHistory>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     original_fields: Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
+    /// Transient dynamic-balance vectors (applied, inertia, damping, elastic, residual per
+    /// accepted state), stored as one chunked numerical object instead of inline JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dynamic_balance: Option<PersistedDynamicBalance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedDynamicBalance {
+    /// Degrees of freedom of each snapshot; each snapshot stores five vectors of that length.
+    dof_counts: Vec<u64>,
+    manifest: AnalysisObjectManifest,
 }
 
 /// Histories own sample-local field identities; they cannot be flattened into the
@@ -356,6 +368,7 @@ fn validate_persisted_run(
         persisted.render_tiles.as_ref(),
         &persisted.observation_histories,
         persisted.original_fields.as_ref(),
+        persisted.dynamic_balance.as_ref(),
     )? != persisted.run_digest
     {
         return Err("analysis run metadata differs from its content digest".into());

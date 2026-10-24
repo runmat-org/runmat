@@ -19,11 +19,17 @@ pub(super) fn visit_record_objects<E: From<String>>(
     match record {
         PersistedAnalysisArtifact::Standard(run) => {
             validate_persisted_run(run, &run.metadata.run_id)?;
-            for manifest in run.fields.iter().map(|field| &field.manifest).chain(
-                run.observation_histories
-                    .iter()
-                    .map(|history| &history.manifest),
-            ) {
+            for manifest in run
+                .fields
+                .iter()
+                .map(|field| &field.manifest)
+                .chain(
+                    run.observation_histories
+                        .iter()
+                        .map(|history| &history.manifest),
+                )
+                .chain(run.dynamic_balance.iter().map(|balance| &balance.manifest))
+            {
                 for chunk in &manifest.chunks {
                     visit(chunk.digest)?;
                 }
