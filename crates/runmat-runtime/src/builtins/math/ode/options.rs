@@ -19,6 +19,7 @@ pub(super) struct OdeOptionValues {
     initial_step: Option<Value>,
     max_step: Option<Value>,
     max_steps: Option<Value>,
+    refine: Option<Value>,
 }
 
 impl OdeOptionValues {
@@ -29,6 +30,7 @@ impl OdeOptionValues {
             OdeOptionField::InitialStep => &mut self.initial_step,
             OdeOptionField::MaxStep => &mut self.max_step,
             OdeOptionField::MaxSteps => &mut self.max_steps,
+            OdeOptionField::Refine => &mut self.refine,
         }
     }
 
@@ -39,9 +41,14 @@ impl OdeOptionValues {
             (OdeOptionField::InitialStep, self.initial_step.as_ref()),
             (OdeOptionField::MaxStep, self.max_step.as_ref()),
             (OdeOptionField::MaxSteps, self.max_steps.as_ref()),
+            (OdeOptionField::Refine, self.refine.as_ref()),
         ]
         .into_iter()
-        .filter_map(|(field, value)| value.map(|value| (field, value)))
+        .filter_map(|(field, value)| {
+            value
+                .filter(|value| !is_default_option(value))
+                .map(|value| (field, value))
+        })
     }
 
     async fn gather(self) -> BuiltinResult<Self> {
@@ -51,12 +58,14 @@ impl OdeOptionValues {
             initial_step: gather(self.initial_step).await?,
             max_step: gather(self.max_step).await?,
             max_steps: gather(self.max_steps).await?,
+            refine: gather(self.refine).await?,
         })
     }
 }
 
 async fn gather(value: Option<Value>) -> BuiltinResult<Option<Value>> {
     match value {
+        Some(value) if is_default_option(&value) => Ok(None),
         Some(Value::GpuTensor(handle)) => {
             crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle))
                 .await
@@ -64,6 +73,10 @@ async fn gather(value: Option<Value>) -> BuiltinResult<Option<Value>> {
         }
         other => Ok(other),
     }
+}
+
+fn is_default_option(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.is_empty())
 }
 
 pub(super) fn parse(name: &str, value: Option<Value>) -> BuiltinResult<OdeOptionValues> {
@@ -137,7 +150,7 @@ fn validate_host_class(name: &str, field: OdeOptionField, value: &Value) -> Buil
     let valid = match value {
         Value::Num(number) => number.is_finite(),
         Value::Int(_) => true,
-        Value::Tensor(tensor) if !field.is_floating_control() => tensor::is_scalar_tensor(tensor),
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::GpuTensor(_) => true,
         _ => false,
     };
@@ -156,8 +169,8 @@ fn validate_host_class(name: &str, field: OdeOptionField, value: &Value) -> Buil
 
 fn validate_host_semantics(name: &str, field: OdeOptionField, value: &Value) -> BuiltinResult<()> {
     match field {
-        OdeOptionField::MaxSteps => {
-            steps(name, Some(value))?;
+        OdeOptionField::MaxSteps | OdeOptionField::Refine => {
+            count(name, field, Some(value))?;
         }
         _ => {
             if optional_floating(name, field, Some(value))?.is_some_and(|number| number <= 0.0) {
@@ -207,13 +220,16 @@ fn decode(name: &str, fields: OdeOptionValues) -> BuiltinResult<OdeOptions> {
             ));
         }
     }
-    let max_steps = steps(name, fields.max_steps.as_ref())?.unwrap_or(DEFAULT_MAX_STEPS);
+    let max_steps = count(name, OdeOptionField::MaxSteps, fields.max_steps.as_ref())?
+        .unwrap_or(DEFAULT_MAX_STEPS);
+    let refine = count(name, OdeOptionField::Refine, fields.refine.as_ref())?;
     Ok(OdeOptions {
         rel_tol,
         abs_tol,
         initial_step,
         max_step,
         max_steps,
+        refine,
     })
 }
 
@@ -237,6 +253,17 @@ fn optional_floating(
     match value {
         Value::Num(number) if number.is_finite() => Ok(Some(*number)),
         Value::Int(integer) => Ok(Some(integer.to_f64())),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let number = tensor::tensor_value_f64(tensor, 0);
+            if number.is_finite() {
+                Ok(Some(number))
+            } else {
+                Err(ode_error(
+                    name,
+                    format!("{name}: option {} must be finite", field.public_name()),
+                ))
+            }
+        }
         other => Err(ode_error(
             name,
             format!(
@@ -247,7 +274,7 @@ fn optional_floating(
     }
 }
 
-fn steps(name: &str, value: Option<&Value>) -> BuiltinResult<Option<usize>> {
+fn count(name: &str, field: OdeOptionField, value: Option<&Value>) -> BuiltinResult<Option<usize>> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -256,7 +283,12 @@ fn steps(name: &str, value: Option<&Value>) -> BuiltinResult<Option<usize>> {
             .try_to_usize()
             .filter(|value| *value >= 1)
             .map(Some)
-            .ok_or_else(|| ode_error(name, format!("{name}: option MaxSteps must be at least 1")));
+            .ok_or_else(|| {
+                ode_error(
+                    name,
+                    format!("{name}: option {} must be at least 1", field.public_name()),
+                )
+            });
     }
     let parsed = match value {
         Value::Num(number) => *number,
@@ -266,7 +298,10 @@ fn steps(name: &str, value: Option<&Value>) -> BuiltinResult<Option<usize>> {
         other => {
             return Err(ode_error(
                 name,
-                format!("{name}: option MaxSteps must be numeric, got {other:?}"),
+                format!(
+                    "{name}: option {} must be numeric, got {other:?}",
+                    field.public_name()
+                ),
             ))
         }
     };
@@ -277,7 +312,10 @@ fn steps(name: &str, value: Option<&Value>) -> BuiltinResult<Option<usize>> {
     {
         return Err(ode_error(
             name,
-            format!("{name}: option MaxSteps must be a supported positive integer"),
+            format!(
+                "{name}: option {} must be a supported positive integer",
+                field.public_name()
+            ),
         ));
     }
     Ok(Some(parsed as usize))
@@ -289,6 +327,46 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuHandleProvenance, HostTensorView};
+
+    #[test]
+    fn scalar_single_controls_and_first_empty_defaults_keep_original_storage_semantics() {
+        let mut source = runmat_value::UnboundedStructValueBuilder::new();
+        source.insert(
+            "RelTol",
+            Value::Tensor(runmat_value::Tensor::from_f32(vec![0.002], vec![1, 1]).unwrap()),
+        );
+        source.insert(
+            "AbsTol",
+            Value::Tensor(runmat_value::Tensor::new(vec![1e-7], vec![1, 1]).unwrap()),
+        );
+        source.insert(
+            "Refine",
+            Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])),
+        );
+        source.insert("rEfInE", Value::Num(8.0));
+        let options = block_on(admit(
+            "ode45",
+            parse("ode45", Some(Value::Struct(source.finish()))).unwrap(),
+            super::super::ode45::ODE_COMPATIBILITY_EXTENSIONS,
+        ))
+        .unwrap();
+        assert_eq!(options.rel_tol, 0.002_f32 as f64);
+        assert_eq!(options.abs_tol, 1e-7);
+        assert_eq!(
+            options.refine, None,
+            "the original first empty field selects the method default"
+        );
+        for value in [Value::Num(0.0), Value::Num(1.5), Value::Num(f64::INFINITY)] {
+            let mut source = runmat_value::UnboundedStructValueBuilder::new();
+            source.insert("Refine", value);
+            assert!(block_on(admit(
+                "ode45",
+                parse("ode45", Some(Value::Struct(source.finish()))).unwrap(),
+                super::super::ode45::ODE_COMPATIBILITY_EXTENSIONS,
+            ))
+            .is_err());
+        }
+    }
 
     #[test]
     fn first_case_insensitive_option_wins_and_unknown_fields_are_ignored() {

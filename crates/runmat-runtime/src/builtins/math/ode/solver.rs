@@ -1,4 +1,5 @@
 mod math;
+mod dense;
 mod rhs;
 mod runge_kutta;
 mod stiff;
@@ -7,6 +8,7 @@ use runmat_value::Value;
 
 use crate::BuiltinResult;
 
+use self::dense::{RungeKuttaStep, StepInterpolant};
 use self::math::{clamp_step, remaining_distance, scaled_error_norm, scaled_next_step};
 use self::runge_kutta::{step_ode23, step_ode45};
 use self::stiff::step_ode15s;
@@ -24,12 +26,38 @@ pub(crate) async fn solve_ode(
     let end = input.tspan[input.tspan.len() - 1];
     let direction = if end >= start { 1.0 } else { -1.0 };
     let dense_output = input.tspan.len() == 2;
+    let refine = if dense_output {
+        options.refine.unwrap_or_else(|| method.default_refine())
+    } else {
+        1
+    };
+    if refine > 1 && method == OdeMethod::Ode15s {
+        let mut builder = crate::build_runtime_error(
+            format!("{name}: Refine greater than 1 requires a continuous extension not implemented for this solver"),
+        ).with_builtin(name).with_source(UnsupportedOutputRefinement);
+        if let Some(identifier) = runmat_builtins::ODE15S_ERROR_INVALID_ARGUMENT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        return Err(builder.build());
+    }
+    let scalars = input
+        .y0
+        .len()
+        .checked_mul(refine)
+        .ok_or_else(|| output_geometry_error(name, input))?;
+    std::alloc::Layout::array::<f64>(scalars)
+        .and_then(|_| std::alloc::Layout::array::<Vec<f64>>(refine))
+        .map_err(|_| output_geometry_error(name, input))?;
 
     let mut t = start;
     let mut y = input.y0.clone();
     let mut history_t = vec![t];
     let mut history_y = vec![y.clone()];
     let mut steps = 0usize;
+    let mut output_cooperation = input
+        .runtime
+        .as_ref()
+        .map(|runtime| runtime.cpu_cooperation());
     let mut h = options
         .initial_step
         .unwrap_or_else(|| ((end - start).abs() * 1.0e-2).max(1.0e-6))
@@ -59,9 +87,44 @@ pub(crate) async fn solve_ode(
                 ));
             }
 
+            let next_t = if h.abs() == max_h { end } else { t + h };
+            validate_output_times(name, t, next_t, h, refine, direction)?;
+
             let step = attempt_step(name, method, function, t, &y, h, input, options).await?;
             if step.accepted {
-                t += h;
+                reserve_rows(name, input, &mut history_t, &mut history_y, refine)?;
+                if refine > 1 {
+                    let interpolant = step
+                        .interpolant
+                        .as_ref()
+                        .expect("the selected RK method supplies its continuous extension");
+                    for sample in 1..refine {
+                        check_cancellation(name, input.runtime.as_ref())?;
+                        let theta = sample as f64 / refine as f64;
+                        let sample_t = t + h * theta;
+                        let previous_t =
+                            *history_t.last().expect("history contains the initial time");
+                        if (sample_t - previous_t) * direction <= 0.0
+                            || (next_t - sample_t) * direction <= 0.0
+                        {
+                            return Err(output_time_error(name));
+                        }
+                        let row = interpolant
+                            .evaluate(name, input.runtime.as_ref(), &y, &step.y_next, h, theta)
+                            .await?;
+                        history_t.push(sample_t);
+                        history_y.push(row);
+                        // Retain this budget across rows, including scalar
+                        // states whose individual evaluations never exhaust a
+                        // component quantum on their own.
+                        if let Some(cooperation) = &mut output_cooperation {
+                            cooperation.checkpoint(1).await.map_err(|source| {
+                                source.into_runtime_error_in_context(input.runtime.as_ref())
+                            })?;
+                        }
+                    }
+                }
+                t = next_t;
                 y = step.y_next;
                 history_t.push(t);
                 history_y.push(y.clone());
@@ -112,7 +175,7 @@ pub(crate) async fn solve_ode(
 
                 let step = attempt_step(name, method, function, t, &y, h, input, options).await?;
                 if step.accepted {
-                    t += h;
+                    t = if h.abs() == max_h { target_t } else { t + h };
                     y = step.y_next;
                     steps += 1;
                     h = scaled_next_step(
@@ -154,6 +217,7 @@ struct StepAttempt {
     accepted: bool,
     error_norm: f64,
     y_next: Vec<f64>,
+    interpolant: Option<StepInterpolant>,
 }
 
 async fn attempt_step(
@@ -166,18 +230,121 @@ async fn attempt_step(
     input: &OdeInput,
     options: &OdeOptions,
 ) -> BuiltinResult<StepAttempt> {
-    let (y_next, err) = match method {
-        OdeMethod::Ode45 => step_ode45(name, function, t, y, h, input).await?,
-        OdeMethod::Ode23 => step_ode23(name, function, t, y, h, input).await?,
-        OdeMethod::Ode15s => step_ode15s(name, function, t, y, h, input).await?,
+    let dense =
+        input.tspan.len() == 2 && options.refine.unwrap_or_else(|| method.default_refine()) > 1;
+    let step = match method {
+        OdeMethod::Ode45 => step_ode45(name, function, t, y, h, input, dense).await?,
+        OdeMethod::Ode23 => step_ode23(name, function, t, y, h, input, dense).await?,
+        OdeMethod::Ode15s => {
+            let (y_next, error) = step_ode15s(name, function, t, y, h, input).await?;
+            RungeKuttaStep {
+                y_next,
+                error,
+                interpolant: None,
+            }
+        }
     };
-    let error_norm = scaled_error_norm(y, &y_next, &err, options.rel_tol, options.abs_tol);
+    let error_norm = scaled_error_norm(
+        y,
+        &step.y_next,
+        &step.error,
+        options.rel_tol,
+        options.abs_tol,
+    );
     Ok(StepAttempt {
         accepted: error_norm <= 1.0 || error_norm == 0.0,
         error_norm,
-        y_next,
+        y_next: step.y_next,
+        interpolant: step.interpolant,
     })
 }
+
+#[derive(Debug)]
+pub(super) struct UnsupportedOutputRefinement;
+impl std::fmt::Display for UnsupportedOutputRefinement {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("this solver has no implemented continuous output extension")
+    }
+}
+impl std::error::Error for UnsupportedOutputRefinement {}
+
+#[derive(Debug)]
+struct OutputTimeResolution;
+impl std::fmt::Display for OutputTimeResolution {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("requested output times are not distinct at floating-point precision")
+    }
+}
+impl std::error::Error for OutputTimeResolution {}
+
+fn output_time_error(name: &str) -> crate::RuntimeError {
+    crate::build_runtime_error(format!(
+        "{name}: requested Refine output times are not representably distinct"
+    ))
+    .with_builtin(name)
+    .with_source(OutputTimeResolution)
+    .build()
+}
+
+fn validate_output_times(
+    name: &str,
+    start: f64,
+    end: f64,
+    h: f64,
+    refine: usize,
+    direction: f64,
+) -> BuiltinResult<()> {
+    // Reject impossible spacing before stage/output allocation. Every interior
+    // point is also checked when emitted; never duplicate, skip or perturb it.
+    if (end - start) * direction <= 0.0 {
+        return Err(output_time_error(name));
+    }
+    if refine > 1 {
+        let first = start + h / refine as f64;
+        let last = start + h * ((refine - 1) as f64 / refine as f64);
+        if (first - start) * direction <= 0.0 || (end - last) * direction <= 0.0 {
+            return Err(output_time_error(name));
+        }
+    }
+    Ok(())
+}
+
+fn output_geometry_error(name: &str, input: &OdeInput) -> crate::RuntimeError {
+    crate::context::host_allocation::host_allocation_runtime_error(
+        input.runtime.as_ref(),
+        "RunMat:Placement:ResourceOverflow",
+        format!("{name}: refined output geometry overflowed"),
+        crate::context::host_allocation::HostAllocationError::Overflow,
+    )
+}
+
+fn reserve_rows(
+    name: &str,
+    input: &OdeInput,
+    times: &mut Vec<f64>,
+    rows: &mut Vec<Vec<f64>>,
+    additional: usize,
+) -> BuiltinResult<()> {
+    times
+        .len()
+        .checked_add(additional)
+        .ok_or_else(|| output_geometry_error(name, input))?;
+    let allocation_error = |source| {
+        crate::build_runtime_error(format!("{name}: output history allocation failed"))
+            .with_builtin(name)
+            .with_identifier("RunMat:Placement:ResourceLimit")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_source(source)
+            .build()
+    };
+    times.try_reserve(additional).map_err(allocation_error)?;
+    rows.try_reserve(additional).map_err(allocation_error)?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "solver/refine_tests.rs"]
+mod refine_tests;
 
 #[cfg(test)]
 mod tests {

@@ -14,7 +14,7 @@ pub(crate) struct OdeCompatibilityExtensions {
     pub(crate) resident_input: &'static BuiltinExtensionDescriptor,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OdeMethod {
     Ode45,
     Ode23,
@@ -22,6 +22,12 @@ pub(crate) enum OdeMethod {
 }
 
 impl OdeMethod {
+    pub(super) fn default_refine(self) -> usize {
+        match self {
+            Self::Ode45 => 4,
+            Self::Ode23 | Self::Ode15s => 1,
+        }
+    }
     pub(super) fn embedded_error_order(self) -> f64 {
         match self {
             // Embedded RK error estimate uses the lower-order formula.
@@ -39,6 +45,7 @@ pub(crate) struct OdeOptions {
     pub initial_step: Option<f64>,
     pub max_step: Option<f64>,
     pub max_steps: usize,
+    pub refine: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -86,16 +93,12 @@ pub(crate) fn ode_error(name: &str, message: impl Into<String>) -> RuntimeError 
 }
 
 pub(crate) fn check_cancellation(
-    name: &str,
+    _name: &str,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<()> {
     if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
-        return Err(
-            build_runtime_error(format!("{name}: execution was cancelled"))
-                .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
-                .with_builtin(name)
-                .build(),
-        );
+        return Err(crate::execution::ExecutionServiceError::Cancelled
+            .into_runtime_error_in_context(Some(runtime)));
     }
     Ok(())
 }

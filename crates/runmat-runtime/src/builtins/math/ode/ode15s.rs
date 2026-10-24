@@ -122,6 +122,7 @@ async fn ode15s_in_runtime(
     y0: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    super::resource_ingress::require_unbounded(NAME, runtime)?;
     check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
         return Err(ode15s_error_with_detail(

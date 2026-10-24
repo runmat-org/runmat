@@ -1,4 +1,5 @@
 use super::super::common::OdeInput;
+use super::dense::{dormand_prince_correction, RungeKuttaStep, StepInterpolant};
 use super::math::lincomb;
 use super::rhs::eval_rhs;
 use crate::BuiltinResult;
@@ -11,7 +12,8 @@ pub(super) async fn step_ode45(
     y: &[f64],
     h: f64,
     input: &OdeInput,
-) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+    dense_output: bool,
+) -> BuiltinResult<RungeKuttaStep> {
     let k1 = eval_rhs(name, function, t, y, input).await?;
     let y2 = lincomb(y, h, &[(&k1, 1.0 / 5.0)]);
     let k2 = eval_rhs(name, function, t + h * (1.0 / 5.0), &y2, input).await?;
@@ -81,7 +83,27 @@ pub(super) async fn step_ode45(
         .zip(y_low.iter())
         .map(|(a, b)| a - b)
         .collect::<Vec<_>>();
-    Ok((y_high, err))
+    let interpolant = if dense_output {
+        let correction = dormand_prince_correction(
+            name,
+            input.runtime.as_ref(),
+            h,
+            [&k1, &k3, &k4, &k5, &k6, &k7],
+        )
+        .await?;
+        Some(StepInterpolant::DormandPrince {
+            first: k1,
+            last: k7,
+            correction,
+        })
+    } else {
+        None
+    };
+    Ok(RungeKuttaStep {
+        y_next: y_high,
+        error: err,
+        interpolant,
+    })
 }
 
 pub(super) async fn step_ode23(
@@ -91,7 +113,8 @@ pub(super) async fn step_ode23(
     y: &[f64],
     h: f64,
     input: &OdeInput,
-) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+    dense_output: bool,
+) -> BuiltinResult<RungeKuttaStep> {
     let k1 = eval_rhs(name, function, t, y, input).await?;
     let y2 = lincomb(y, h, &[(&k1, 0.5)]);
     let k2 = eval_rhs(name, function, t + h * 0.5, &y2, input).await?;
@@ -121,5 +144,13 @@ pub(super) async fn step_ode23(
         .zip(y_low.iter())
         .map(|(a, b)| a - b)
         .collect::<Vec<_>>();
-    Ok((y_high, err))
+    let interpolant = dense_output.then_some(StepInterpolant::BogackiShampine {
+        first: k1,
+        last: k4,
+    });
+    Ok(RungeKuttaStep {
+        y_next: y_high,
+        error: err,
+        interpolant,
+    })
 }

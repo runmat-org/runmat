@@ -72,7 +72,7 @@ macro_rules! define_ode_integer_contract {
                 classes: &crate::ALL_INTEGER_CLASSES,
                 availability: crate::BuiltinIntegerInputAvailability::RunMatOnly,
                 scalar_double: crate::BuiltinIntegerScalarDoubleRule::NotApplicable,
-                notes: "Recognized typed numeric ODE controls are gated before selective gather; floating controls convert only when exact and MaxSteps remains structural.",
+                notes: "Recognized typed numeric ODE controls are gated before selective gather; floating controls convert only when exact and MaxSteps/Refine remain structural.",
             }];
         const INTEGER_CALLBACK_INPUT: [crate::BuiltinIntegerInputCapability; 1] =
             [crate::BuiltinIntegerInputCapability {
