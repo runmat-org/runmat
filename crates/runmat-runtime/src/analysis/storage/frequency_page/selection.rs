@@ -39,6 +39,10 @@ pub(super) fn select_candidates<'a>(
     candidates: Vec<SelectedField<'a>>,
     selection: &AnalysisFieldSelection,
 ) -> Result<SelectedField<'a>, AnalysisFieldPageLookup> {
+    if selection.transient_sample_index.is_some() {
+        // Frequency publications have no retained transient states.
+        return Err(AnalysisFieldPageLookup::SampleNotFound);
+    }
     let mut candidates = candidates
         .into_iter()
         .filter(|candidate| {

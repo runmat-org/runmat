@@ -47,6 +47,7 @@ mod temperature_difference_celsius;
 mod temperature_difference_kelvin;
 mod temperature_kelvin;
 mod thermal_contact_resistance_square_meter_kelvin_per_watt;
+mod time_seconds;
 mod translation_meters;
 mod translation_millimeters;
 mod turbulence_intensity_ratio;
@@ -79,6 +80,7 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &thermal_contact_resistance_square_meter_kelvin_per_watt::ENTRY,
     &friction_coefficient_ratio::ENTRY,
     &frequency_hertz::ENTRY,
+    &time_seconds::ENTRY,
     &mass_density_kilograms_per_cubic_meter::ENTRY,
     &dynamic_viscosity_pascal_seconds::ENTRY,
     &turbulence_intensity_ratio::ENTRY,

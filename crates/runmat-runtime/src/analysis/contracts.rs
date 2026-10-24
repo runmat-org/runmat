@@ -955,12 +955,16 @@ pub struct AnalysisFieldRequestOptions {
 ///
 /// `field_id` names the produced quantity. `sample` selects its independent-domain coordinate;
 /// omitting it is valid only when the field has one unambiguous published sample.
+/// `transient_sample_index` names a retained transient state by its zero-based position in time
+/// order instead of by its time; the selected page reports that state's `TimeSeconds` sample.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnalysisFieldSelection {
     pub field_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transient_sample_index: Option<usize>,
 }
 
 impl AnalysisFieldSelection {
@@ -971,6 +975,16 @@ impl AnalysisFieldSelection {
         Self {
             field_id: field_id.into(),
             sample,
+            transient_sample_index: None,
+        }
+    }
+
+    /// Selects the retained transient state at zero-based position `index` in time order.
+    pub fn transient_index(field_id: impl Into<String>, index: usize) -> Self {
+        Self {
+            field_id: field_id.into(),
+            sample: None,
+            transient_sample_index: Some(index),
         }
     }
 }

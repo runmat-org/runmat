@@ -7,6 +7,7 @@ use super::constructor_inference::{
 use super::identities::{
     FEA_COMPARE_CLASS, FEA_FIELD_CLASS, FEA_FIELD_PAGE_CLASS, FEA_FIELD_SELECTOR_CLASSES,
     FEA_FREQUENCY_CLASS, FEA_RESULTS_CLASS, FEA_RUN_RESULT_CLASS, FEA_STEP_RUN_RESULT_CLASS,
+    FEA_TIME_CLASS,
 };
 use super::options::{FeaMeshOption, FeaPlotOption};
 use super::results_option::ResultsOption;
@@ -277,11 +278,14 @@ pub fn infer_result(
             }
             if arguments
                 .get(2)
-                .is_some_and(|value| !possible_object(value, &[FEA_FREQUENCY_CLASS]))
+                .is_some_and(|value| {
+                    !possible_object(value, &[FEA_FREQUENCY_CLASS, FEA_TIME_CLASS])
+                        && !possible_exact_scalar(value)
+                })
             {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-SAMPLE",
-                    "fea.field sample must be a fea.Frequency value",
+                    "fea.field sample must be a fea.Frequency, a fea.Time, or a one-based transient sample index",
                     2,
                 ));
             }

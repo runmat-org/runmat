@@ -5,7 +5,7 @@ use std::mem::size_of;
 
 use runmat_canonical_codec::{profile_serialized_shape, CanonicalLimits};
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
-use serde::{Serialize, Serializer};
+use serde::{ser::SerializeSeq, Serialize, Serializer};
 
 use super::{
     CanonicalSolidIntegrationElement, CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule,
@@ -90,11 +90,13 @@ pub(super) fn derivation_resident_bytes_estimate(
 struct ReferenceBits(CanonicalSolidIntegrationRule);
 impl Serialize for ReferenceBits {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(
-            self.0
-                .reference_points()
-                .map(|(position, weight)| (position.map(f64::to_bits), weight.to_bits())),
-        )
+        // The chained reference iterator has no exact size hint; declare the rule's point count
+        // so the projected header is the owned record's exact-length header.
+        let mut sequence = serializer.serialize_seq(Some(self.0.point_count()))?;
+        for (position, weight) in self.0.reference_points() {
+            sequence.serialize_element(&(position.map(f64::to_bits), weight.to_bits()))?;
+        }
+        sequence.end()
     }
 }
 

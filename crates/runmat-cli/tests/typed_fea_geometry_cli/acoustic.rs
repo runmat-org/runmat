@@ -361,12 +361,10 @@ fn field_values(
     field_id: &str,
     frequency: f64,
 ) -> Vec<f64> {
-    let selection = runmat_runtime::analysis::AnalysisFieldSelection {
-        field_id: field_id.into(),
-        sample: Some(
-            runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(frequency),
-        ),
-    };
+    let selection = runmat_runtime::analysis::AnalysisFieldSelection::new(
+        field_id,
+        Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(frequency)),
+    );
     let mut values = Vec::new();
     let mut offset = 0;
     let total = loop {

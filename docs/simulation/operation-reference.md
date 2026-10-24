@@ -65,7 +65,7 @@ Geometry/mesh display options affect rendering only; they do not alter exact geo
 | `fea.compare(baselineRunId, candidateRunId)` | compare persisted runs |
 | `fea.trends(Name, Value, ...)` | query bounded result trends |
 
-Selectors are typed objects such as `fea.OutputField.named("von_mises")`, structural field selectors, and independent-domain values such as `fea.Frequency.hertz(120)`. Field choice belongs to `fea.field`; it is not a string option to `plot`.
+Selectors are typed objects such as `fea.OutputField.named("von_mises")`, structural field selectors, and independent-domain values such as `fea.Frequency.hertz(120)` or `fea.Time.seconds(0.0122)`. A transient state can also be selected by its one-based position in time order: `fea.field(results, fea.StructuralField.displacement(), 123)`. A time selects the retained state within one part in 10^9 of the run's time span, and the returned field reports that state's exact time in `sample`; read its values with `fea.fieldPage`. Field choice belongs to `fea.field`; it is not a string option to `plot`.
 
 ## Programmatic Typed Objects
 

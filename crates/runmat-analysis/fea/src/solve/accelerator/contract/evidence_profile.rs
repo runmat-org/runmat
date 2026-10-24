@@ -2,7 +2,7 @@
 
 use runmat_accelerate_api::{SparseExecutionBinding, SparseOperationTimings};
 use runmat_canonical_codec::{
-    profile_serialized, CanonicalCodecError, CanonicalLimits, SerializedCanonicalProfile,
+    profile_serialized_shape, CanonicalCodecError, CanonicalLimits, SerializedCanonicalProfile,
 };
 use runmat_execution::identity::AttemptId;
 
@@ -19,7 +19,7 @@ impl AcceleratorSolveEvidence {
     /// No dummy arrays or evidence vectors are constructed. Typed ID serialization does allocate
     /// bounded temporary strings, so this traversal is deliberately not called allocation-free.
     pub(crate) fn completed_profile() -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
-        profile_serialized(&completed_shape(), PROFILE_LIMITS)
+        profile_serialized_shape(&completed_shape(), PROFILE_LIMITS)
     }
 
     #[cfg(test)]

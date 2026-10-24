@@ -456,25 +456,14 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
         ));
     }
     let field_id = field_selectors::from_value(FIELD_NAME, &args[1])?.field_id();
-    let sample = args
-        .get(2)
-        .map(|value| {
-            let hertz =
-                values::quantity_scalar(FIELD_NAME, value, values::FREQUENCY_CLASS, "hertz")?;
-            if !hertz.is_finite() || hertz <= 0.0 {
-                return Err(builtin_error(
-                    FIELD_NAME,
-                    &ERROR_INPUT,
-                    "frequency sample must be finite and positive",
-                ));
-            }
-            Ok(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(hertz))
-        })
-        .transpose()?;
+    let selection = match args.get(2) {
+        None => AnalysisFieldSelection::new(&field_id, None),
+        Some(value) => field_sample_selection(&field_id, value)?,
+    };
     let results = results_data_from_value(FIELD_NAME, &args[0])?;
+    let sampled = selection.sample.is_some() || selection.transient_sample_index.is_some();
     // A shell (declared shape, no values) is paged from the artifact rather than returned empty.
-    let inline_field = sample
-        .is_none()
+    let inline_field = (!sampled)
         .then(|| find_field(results.fields.into_iter(), &field_id))
         .flatten()
         .filter(|field| {
@@ -496,7 +485,7 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
         })?;
         let page = analysis_field_page_by_run_id_op(
             &run_id,
-            AnalysisFieldSelection::new(&field_id, sample),
+            selection,
             AnalysisFieldRequestOptions {
                 offset: Some(0),
                 limit: Some(0),
@@ -510,6 +499,66 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
     copy_study_context_property(&args[0], &mut object)?;
     copy_run_id_context_property(&args[0], &mut object)?;
     Ok(Value::Object(object))
+}
+
+/// The optional `fea.field` sample: a `fea.Frequency`, a `fea.Time`, or a one-based retained
+/// transient state index.
+fn field_sample_selection(field_id: &str, value: &Value) -> BuiltinResult<AnalysisFieldSelection> {
+    use runmat_analysis_fea::results::field::RecoveredFieldSample;
+    match value {
+        Value::Object(object) if object.class_name().is(identities::FEA_FREQUENCY_CLASS) => {
+            let hertz =
+                values::quantity_scalar(FIELD_NAME, value, values::FREQUENCY_CLASS, "hertz")?;
+            if !hertz.is_finite() || hertz <= 0.0 {
+                return Err(builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "frequency sample must be finite and positive",
+                ));
+            }
+            Ok(AnalysisFieldSelection::new(
+                field_id,
+                Some(RecoveredFieldSample::FrequencyHertz(hertz)),
+            ))
+        }
+        Value::Object(object) if object.class_name().is(identities::FEA_TIME_CLASS) => {
+            let seconds =
+                values::quantity_scalar(FIELD_NAME, value, values::TIME_CLASS, "seconds")?;
+            if !seconds.is_finite() {
+                return Err(builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "time sample must be finite",
+                ));
+            }
+            Ok(AnalysisFieldSelection::new(
+                field_id,
+                Some(RecoveredFieldSample::TimeSeconds(seconds)),
+            ))
+        }
+        Value::Object(_) => Err(builtin_error(
+            FIELD_NAME,
+            &ERROR_INPUT,
+            "fea.field sample must be a fea.Frequency, a fea.Time, or a positive integer state index",
+        )),
+        other => {
+            let index = usize_from_value(FIELD_NAME, other).map_err(|_| {
+                builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "fea.field sample must be a fea.Frequency, a fea.Time such as fea.Time.seconds(0.01), or a positive integer state index",
+                )
+            })?;
+            let index = index.checked_sub(1).ok_or_else(|| {
+                builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "transient state indices are one-based",
+                )
+            })?;
+            Ok(AnalysisFieldSelection::transient_index(field_id, index))
+        }
+    }
 }
 
 fn create_compare_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
@@ -984,6 +1033,9 @@ fn field_object(
     let sample = match descriptor.sample {
         Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(value)) => {
             values::quantity_to_value(FIELD_NAME, values::FREQUENCY_CLASS, "hertz", value)?
+        }
+        Some(runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(value)) => {
+            values::quantity_to_value(FIELD_NAME, values::TIME_CLASS, "seconds", value)?
         }
         Some(sample) => serializable_to_value_preserving_integers(
             FIELD_NAME,
@@ -4450,8 +4502,8 @@ mod tests {
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: runmat_analysis_fea::SolverMethod::MatrixFreePcg,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
+                solver_method: runmat_analysis_fea::SolverMethod::SparseDirectCholesky,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
@@ -4505,8 +4557,8 @@ mod tests {
                 solver_host_sync_count: 0,
                 precision_mode: "fp64".to_string(),
                 deterministic_mode: true,
-                solver_method: runmat_analysis_fea::SolverMethod::MatrixFreePcg,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
+                solver_method: runmat_analysis_fea::SolverMethod::SparseDirectCholesky,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
             },

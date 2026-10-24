@@ -6,7 +6,7 @@ fn representative_is_valid_completed_shape_and_uses_authoritative_serializer() {
     evidence.validate().unwrap();
     assert_eq!(
         AcceleratorSolveEvidence::completed_profile().unwrap(),
-        profile_serialized(&evidence, PROFILE_LIMITS).unwrap(),
+        runmat_canonical_codec::profile_serialized_shape(&evidence, PROFILE_LIMITS).unwrap(),
     );
     let AcceleratorSolveEvidence::Completed { provider, .. } = evidence else {
         panic!("projection must represent completed evidence");
@@ -69,7 +69,8 @@ fn completed_bound_covers_optional_preconditioner_and_extreme_scalars() {
         *independently_computed_relative_residual = f64::MAX;
         *required_relative_tolerance = f64::MIN_POSITIVE;
         evidence.validate().unwrap();
-        let actual = profile_serialized(&evidence, PROFILE_LIMITS).unwrap();
+        let actual =
+            runmat_canonical_codec::profile_serialized(&evidence, PROFILE_LIMITS).unwrap();
         assert!(actual.encoded_bytes_upper_bound <= bound.encoded_bytes_upper_bound);
         assert!(
             actual.materialization_resident_bytes_estimate
