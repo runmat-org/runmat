@@ -63,7 +63,7 @@ fn adjacent_values_remain_distinct_but_ambiguous_default_names_still_reject() {
         let keys = categorical_labels(&source).unwrap();
         assert_ne!(keys[0], keys[1], "lookup keys must not round together");
         assert!(
-            categorical(&[source.clone()]).is_err(),
+            categorical(std::slice::from_ref(&source)).is_err(),
             "five-digit default names remain ambiguous"
         );
         assert!(
