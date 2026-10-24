@@ -584,6 +584,7 @@ jobs:
           grep -Fx 'LICENSE.md' /tmp/runmat-clarabel-package.txt
           grep -Fx 'UPSTREAM.md' /tmp/runmat-clarabel-package.txt
           grep -Fx 'UPSTREAM-Cargo.toml' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM-vcs-info.json' /tmp/runmat-clarabel-package.txt
           grep -Fx 'src/solver/core/solver.rs' /tmp/runmat-clarabel-package.txt
 
       - name: Publish crates with cargo-workspaces

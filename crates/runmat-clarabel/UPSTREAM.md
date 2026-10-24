@@ -15,7 +15,10 @@ The downloaded archive was verified against the official sparse registry entry
 before extraction. The original upstream manifest is retained byte-for-byte as
 `UPSTREAM-Cargo.toml`, and the original upstream license is retained. Cargo reserves
 the filename `Cargo.toml.orig` for its own packaged manifest, so the upstream
-manifest uses a distinct name in this publishable derivative.
+manifest uses a distinct name in this publishable derivative. The upstream
+registry archive's VCS provenance is likewise retained as
+`UPSTREAM-vcs-info.json`; `.cargo_vcs_info.json` is reserved for Cargo's current
+package provenance.
 
 RunMat changes are limited to publishable package identity/workspace MSRV,
 truthful upstream version presentation, the cooperative solver API and its tests,
