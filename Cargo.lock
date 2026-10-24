@@ -7841,7 +7841,6 @@ dependencies = [
  "tracing",
  "wasm-bindgen-test",
  "web-sys",
- "webbrowser 0.8.15",
  "wgpu",
  "winit",
 ]

@@ -930,8 +930,6 @@ impl WebRenderer {
                         title: self.plot_renderer.overlay_title().cloned(),
                         x_label: self.plot_renderer.overlay_x_label().cloned(),
                         y_label: self.plot_renderer.overlay_y_label().cloned(),
-                        // Disable the heavyweight sidebar in IDE surfaces for now.
-                        show_sidebar: false,
                         ..Default::default()
                     };
                     let overlay_metrics = OverlayMetrics {

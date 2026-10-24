@@ -542,15 +542,6 @@ impl<'window> PlotWindow<'window> {
                                     route = false;
                                 }
                             }
-                            if let Some(sb) = self.plot_overlay.sidebar_rect() {
-                                if mx >= sb.min.x * ppp
-                                    && mx <= sb.max.x * ppp
-                                    && my >= sb.min.y * ppp
-                                    && my <= sb.max.y * ppp
-                                {
-                                    route = false;
-                                }
-                            }
                         }
                     }
                     if route {
@@ -753,7 +744,7 @@ impl<'window> PlotWindow<'window> {
         let _ = self.plot_renderer.calculate_data_bounds();
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
+            // Use PlotOverlay for plot controls and annotations.
             let has_per_axes_grid = self.plot_renderer.last_figure.as_ref().is_some_and(|fig| {
                 let (rows, cols) = fig.axes_grid();
                 let axes_count = (rows * cols).max(1);
