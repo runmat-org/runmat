@@ -101,8 +101,8 @@ fn definition(
         let Some(inspection) = inspection else {
             // The inspection diagnostic (missing file, undeclared length unit,
             // import failure) states the cause at the same declaration.
-            let file_span = imported_file(&declaration.statements)
-                .map_or(declaration.span, |file| file.span);
+            let file_span =
+                imported_file(&declaration.statements).map_or(declaration.span, |file| file.span);
             let message = format!(
                 "imported geometry `{}` could not be inspected; see the inspection diagnostic for its file",
                 declaration.key.name

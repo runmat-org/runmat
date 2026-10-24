@@ -115,7 +115,9 @@ geometry bracket {
         "{messages:#?}"
     );
     assert!(
-        !messages.iter().any(|message| message.contains("no inspection facts")),
+        !messages
+            .iter()
+            .any(|message| message.contains("no inspection facts")),
         "{messages:#?}"
     );
 }

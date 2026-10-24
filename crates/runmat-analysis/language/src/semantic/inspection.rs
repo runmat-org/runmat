@@ -92,28 +92,30 @@ fn imported_geometry_source(
     });
     let units = if !authored_units {
         Some(runmat_geometry_core::UnitSystem::Unspecified)
-    } else { declaration.body.statements.iter().find_map(|statement| {
-        let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
-            return None;
-        };
-        if target.segments.len() != 1 || target.segments[0].text != "units" {
-            return None;
-        }
-        let FeaExpressionKind::Reference(unit) = &value.kind else {
-            return None;
-        };
-        let [unit] = unit.segments.as_slice() else {
-            return None;
-        };
-        match unit.text.as_str() {
-            "m" | "meter" | "meters" => Some(runmat_geometry_core::UnitSystem::Meter),
-            "mm" | "millimeter" | "millimeters" => {
-                Some(runmat_geometry_core::UnitSystem::Millimeter)
+    } else {
+        declaration.body.statements.iter().find_map(|statement| {
+            let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
+                return None;
+            };
+            if target.segments.len() != 1 || target.segments[0].text != "units" {
+                return None;
             }
-            "in" | "inch" | "inches" => Some(runmat_geometry_core::UnitSystem::Inch),
-            _ => None,
-        }
-    }) }?;
+            let FeaExpressionKind::Reference(unit) = &value.kind else {
+                return None;
+            };
+            let [unit] = unit.segments.as_slice() else {
+                return None;
+            };
+            match unit.text.as_str() {
+                "m" | "meter" | "meters" => Some(runmat_geometry_core::UnitSystem::Meter),
+                "mm" | "millimeter" | "millimeters" => {
+                    Some(runmat_geometry_core::UnitSystem::Millimeter)
+                }
+                "in" | "inch" | "inches" => Some(runmat_geometry_core::UnitSystem::Inch),
+                _ => None,
+            }
+        })
+    }?;
     declaration.body.statements.iter().find_map(|statement| {
         let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
             return None;

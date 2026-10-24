@@ -297,14 +297,13 @@ fn source_identity(
 ) -> Result<(PathBuf, PathBuf, LogicalSourcePath), String> {
     if let Some(project) = project {
         let source_root = project.workspace_root.clone();
-        let physical_path =
-            if crate::diagnostic_path::host_path_is_absolute(requested_path)
-                || requested_path.starts_with(&source_root)
-            {
-                requested_path.to_path_buf()
-            } else {
-                source_root.join(requested_path)
-            };
+        let physical_path = if crate::diagnostic_path::host_path_is_absolute(requested_path)
+            || requested_path.starts_with(&source_root)
+        {
+            requested_path.to_path_buf()
+        } else {
+            source_root.join(requested_path)
+        };
         let logical_path =
             runmat_runtime::analysis::logical_source_path(&source_root, &physical_path)?;
         return Ok((source_root, physical_path, logical_path));

@@ -155,7 +155,12 @@ async fn exact_root_retains_deferred_intent_and_derives_mesh_bound_expectations(
         "[package]\nname = \"exact-deferred-input\"\n[sources]\nroots = [\"src\"]\n",
     )
     .unwrap();
-    let source_text = "function y = field(t)\narguments\n    t (:,1) double\nend\ny = reshape(t * [0,0,0,0,1,1,1,1,0,0,0,0], numel(t), 4, 3);\nend\n";
+    // Keep this transport-only callable genuinely admissible under Pure.
+    // reshape is cooperatively suspending and must not be relabeled pure by
+    // this fixture. The axis identity is intentionally not a numerical field
+    // generator: this test never invokes it or certifies its output shape.
+    // Deferred topology resolution and field-consumer execution are separate.
+    let source_text = "function y = field(t)\narguments\n    t (:,1) double\nend\ny = t;\nend\n";
     let source_path = directory.path().join("src/field.m");
     std::fs::write(&source_path, source_text).unwrap();
     let project = runmat_package::build_frozen_project(

@@ -431,6 +431,24 @@ fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
         digest("sampling"),
     )
     .unwrap();
+    // A new qualified label/function is a new compiled binding, not a
+    // permissible rewrite of the baseline admission's immutable authority.
+    assert!(
+        prepare_generator_program(
+            &generator_change,
+            executable(&generator_change),
+            chunks(),
+            &[],
+        )
+        .is_err(),
+        "changing the callable must not reuse the baseline compiled binding"
+    );
+    generator_change.compiled_binding = crate::named_callable::CompiledCallableBinding::fixture(
+        "loads.alternate",
+        "loads.alternate",
+        ProgramFunctionId(4),
+        generator_change.executable_source_digest,
+    );
     let generator_program = prepare_generator_program(
         &generator_change,
         executable(&generator_change),

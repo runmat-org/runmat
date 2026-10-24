@@ -147,9 +147,12 @@ fn declared_units(
     bytes: &[u8],
     logical_path: &str,
 ) -> Result<runmat_geometry_core::UnitSystem, SourceDiagnostic> {
-    let declared = matches!(detect_geometry_format(logical_path, bytes), GeometryFormat::Step)
-        .then(|| runmat_geometry_io::ap242::declared_length_unit(&String::from_utf8_lossy(bytes)))
-        .flatten();
+    let declared = matches!(
+        detect_geometry_format(logical_path, bytes),
+        GeometryFormat::Step
+    )
+    .then(|| runmat_geometry_io::ap242::declared_length_unit(&String::from_utf8_lossy(bytes)))
+    .flatten();
     declared.ok_or_else(|| {
         diagnostic(
             "fea.host.geometry_units_undeclared",
