@@ -7,6 +7,8 @@ const NOTICE_SOURCES = [
   resolve(__dirname, "../../crates/runmat-runtime/src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt"),
   resolve(__dirname, "../../crates/runmat-runtime/src/builtins/math/linalg/ops/sparse_factor/managed_lu/FAER-LICENSE.txt"),
   resolve(__dirname, "../../crates/runmat-runtime/licenses/UNICODE-LICENSE.txt"),
+  resolve(__dirname, "../../crates/runmat-runtime/licenses/CLARABEL-LICENSE.txt"),
+  resolve(__dirname, "../../crates/runmat-runtime/licenses/CLARABEL-DEPENDENCIES-NOTICES.txt"),
 ];
 
 function thirdPartyNoticeBytes() {

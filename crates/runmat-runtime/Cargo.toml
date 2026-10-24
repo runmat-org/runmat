@@ -11,6 +11,7 @@ build = "build.rs"
 links = "runmat_runtime_native"
 
 [dependencies]
+clarabel = { workspace = true }
 runmat-fea-source = { workspace = true }
 allocator-api2 = "=0.2.21"
 hashbrown = "=0.16.1"

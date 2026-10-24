@@ -16,8 +16,14 @@ test("distribution notices survive native and npm archives without changing pack
       readFileSync(join(runtime, "src/builtins/math/linalg/ops/sparse_factor/managed_lu/FAER-LICENSE.txt")),
       Buffer.from("\n"),
       readFileSync(join(runtime, "licenses/UNICODE-LICENSE.txt")),
+      Buffer.from("\n"),
+      readFileSync(join(runtime, "licenses/CLARABEL-LICENSE.txt")),
+      Buffer.from("\n"),
+      readFileSync(join(runtime, "licenses/CLARABEL-DEPENDENCIES-NOTICES.txt")),
     ]);
     assert.deepEqual(thirdPartyNoticeBytes(), expected);
+    assert.deepEqual(readFileSync(join(runtime, "licenses/CLARABEL-LICENSE.txt")),
+      readFileSync(resolve(runtime, "../runmat-clarabel/LICENSE.md")), "vendored upstream license must survive native/npm delivery byte-for-byte");
     // The native/AOT owner deliberately uses only literal include_str! and
     // newline concatenation. Check that exact assembly, not a second notice
     // inventory that can pass while the actual Rust payload silently drifts.

@@ -9,6 +9,10 @@ pub fn bytes() -> &'static [u8] {
         include_str!("builtins/math/linalg/ops/sparse_factor/managed_lu/FAER-LICENSE.txt"),
         "\n",
         include_str!("../licenses/UNICODE-LICENSE.txt"),
+        "\n",
+        include_str!("../licenses/CLARABEL-LICENSE.txt"),
+        "\n",
+        include_str!("../licenses/CLARABEL-DEPENDENCIES-NOTICES.txt"),
     )
     .as_bytes()
 }

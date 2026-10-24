@@ -27,6 +27,7 @@ members = [
     "crates/runmat-types",
     "crates/runmat-fea-source",
     "crates/runmat-runtime",
+    "crates/runmat-clarabel",
     "crates/runmat-sparse-solvers",
     "crates/runmat-runtime-integration-tests",
     "crates/runmat-gc-api",
@@ -80,6 +81,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+clarabel = { package = "runmat-clarabel", version = "=0.6.2", path = "crates/runmat-clarabel", default-features = false }
 runmat-build-identity = { version = "=0.6.2", path = "crates/runmat-build-identity" }
 runmat-cpu-execution = { version = "=0.6.2", path = "crates/runmat-cpu-execution" }
 # External dependencies used across multiple crates

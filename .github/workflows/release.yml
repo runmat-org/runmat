@@ -546,6 +546,13 @@ jobs:
           set -euxo pipefail
           while IFS= read -r toml; do
             d="${toml%/*}"
+            if [ "$d" = "crates/runmat-clarabel" ]; then
+              # This vendored dependency retains its upstream Apache license,
+              # not the RunMat workspace license copied into ordinary crates.
+              grep -Eq '^license[[:space:]]*=[[:space:]]*"Apache-2.0"' "$toml"
+              cmp "$d/LICENSE.md" crates/runmat-runtime/licenses/CLARABEL-LICENSE.txt
+              continue
+            fi
             if [ -f LICENSE ] || [ -f LICENSE.md ]; then
               cp -f LICENSE* "$d/" || true
               if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
@@ -573,6 +580,11 @@ jobs:
           cmp openapi/runmat-public.yaml crates/runmat-server-client/openapi/runmat-public.yaml
           cargo package -p runmat-server-client --allow-dirty --list | tee /tmp/runmat-server-client-package.txt
           grep -Fx 'openapi/runmat-public.yaml' /tmp/runmat-server-client-package.txt
+          cargo package -p runmat-clarabel --allow-dirty --list | tee /tmp/runmat-clarabel-package.txt
+          grep -Fx 'LICENSE.md' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM.md' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM-Cargo.toml' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'src/solver/core/solver.rs' /tmp/runmat-clarabel-package.txt
 
       - name: Publish crates with cargo-workspaces
         shell: bash
