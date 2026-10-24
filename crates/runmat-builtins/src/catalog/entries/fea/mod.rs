@@ -22,6 +22,7 @@ pub use self::field::FEA_FIELD_CATALOG_ENTRY;
 pub use self::material::FEA_MATERIAL_CATALOG_ENTRY;
 pub use self::material_assignment::FEA_MATERIAL_ASSIGNMENT_CATALOG_ENTRY;
 pub use self::model::FEA_MODEL_CATALOG_ENTRY;
+pub use self::model_types::*;
 pub use self::plan::FEA_PLAN_CATALOG_ENTRY;
 pub use self::policy_types::*;
 pub use self::results::FEA_RESULTS_CATALOG_ENTRY;

@@ -154,6 +154,22 @@ macro_rules! scalar_quantity_builtin {
     };
 }
 
+// Only these four already-public scalar constructors move to canonical metadata.
+// Keep the original scalar implementation expansion unchanged.
+macro_rules! canonical_scalar_quantity_builtin {
+    (
+        $function:ident, $descriptor:ident, $signatures:ident,
+        $builtin_name:literal, $label:literal, $summary:literal,
+        $class:expr, $field:literal, $scale:expr, $offset:expr
+    ) => {
+        #[runtime_builtin(name = $builtin_name, binding_variant = "default", builtin_path = "crate::builtins::fea::values")]
+        pub async fn $function(value: Value) -> BuiltinResult<Value> {
+            let value = finite_numeric_scalar($builtin_name, &value, "value")?;
+            quantity_to_value($builtin_name, $class, $field, value * $scale + $offset)
+        }
+    };
+}
+
 scalar_quantity_builtin!(
     displacement_meters_builtin,
     DISPLACEMENT_METERS_DESCRIPTOR,
@@ -190,7 +206,7 @@ scalar_quantity_builtin!(
     1.0,
     0.0
 );
-scalar_quantity_builtin!(
+canonical_scalar_quantity_builtin!(
     frequency_builtin,
     FREQUENCY_DESCRIPTOR,
     FREQUENCY_SIGNATURES,
@@ -202,7 +218,7 @@ scalar_quantity_builtin!(
     1.0,
     0.0
 );
-scalar_quantity_builtin!(
+canonical_scalar_quantity_builtin!(
     mass_density_builtin,
     MASS_DENSITY_DESCRIPTOR,
     MASS_DENSITY_SIGNATURES,
@@ -214,7 +230,7 @@ scalar_quantity_builtin!(
     1.0,
     0.0
 );
-scalar_quantity_builtin!(
+canonical_scalar_quantity_builtin!(
     dynamic_viscosity_builtin,
     DYNAMIC_VISCOSITY_DESCRIPTOR,
     DYNAMIC_VISCOSITY_SIGNATURES,
@@ -226,7 +242,7 @@ scalar_quantity_builtin!(
     1.0,
     0.0
 );
-scalar_quantity_builtin!(
+canonical_scalar_quantity_builtin!(
     turbulence_intensity_builtin,
     TURBULENCE_INTENSITY_DESCRIPTOR,
     TURBULENCE_INTENSITY_SIGNATURES,

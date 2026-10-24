@@ -5,13 +5,6 @@ use crate::builtins::fea::values::{
     THERMAL_CONTACT_RESISTANCE_CLASS,
 };
 
-const TYPED_INTERFACE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role.",
-    };
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct GeometryBoundInterface {
@@ -57,144 +50,6 @@ impl GeometryBoundInterface {
         Ok(())
     }
 }
-
-const REGION_PAIR_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Interface identifier.",
-    ),
-    required("primary", BuiltinParamType::Any, "Primary geometry.Region."),
-    required(
-        "secondary",
-        BuiltinParamType::Any,
-        "Secondary geometry.Region.",
-    ),
-];
-const FLUID_PAIR_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Interface identifier.",
-    ),
-    required(
-        "fluid_region",
-        BuiltinParamType::Any,
-        "Fluid-side geometry.Region.",
-    ),
-    required(
-        "structure_region",
-        BuiltinParamType::Any,
-        "Structure-side geometry.Region.",
-    ),
-];
-const CONTACT_FRICTION_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Interface identifier.",
-    ),
-    required("primary", BuiltinParamType::Any, "Primary geometry.Region."),
-    required(
-        "secondary",
-        BuiltinParamType::Any,
-        "Secondary geometry.Region.",
-    ),
-    required(
-        "friction",
-        BuiltinParamType::Any,
-        "Typed fea.FrictionCoefficient.",
-    ),
-];
-const CHT_VALUE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Interface identifier.",
-    ),
-    required(
-        "fluid_region",
-        BuiltinParamType::Any,
-        "Fluid-side geometry.Region.",
-    ),
-    required(
-        "structure_region",
-        BuiltinParamType::Any,
-        "Structure-side geometry.Region.",
-    ),
-    required(
-        "transfer_value",
-        BuiltinParamType::Any,
-        "Typed conductance or thermal contact resistance.",
-    ),
-];
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:ident) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &$inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-descriptor!(
-    CONTACT_FRICTIONLESS_DESCRIPTOR,
-    CONTACT_FRICTIONLESS_SIGNATURES,
-    "interface = fea.ContactInterface.frictionless(id, primary, secondary)",
-    REGION_PAIR_INPUTS
-);
-descriptor!(
-    CONTACT_COULOMB_DESCRIPTOR,
-    CONTACT_COULOMB_SIGNATURES,
-    "interface = fea.ContactInterface.coulomb(id, primary, secondary, friction)",
-    CONTACT_FRICTION_INPUTS
-);
-descriptor!(
-    FLUID_STRUCTURE_INTERFACE_DESCRIPTOR,
-    FLUID_STRUCTURE_INTERFACE_SIGNATURES,
-    "interface = fea.FluidStructureInterface.noSlip(id, fluidRegion, structureRegion)",
-    FLUID_PAIR_INPUTS
-);
-descriptor!(
-    CHT_PERFECT_DESCRIPTOR,
-    CHT_PERFECT_SIGNATURES,
-    "interface = fea.ConjugateHeatTransferInterface.perfect(id, fluidRegion, solidRegion)",
-    FLUID_PAIR_INPUTS
-);
-descriptor!(
-    CHT_CONDUCTANCE_DESCRIPTOR,
-    CHT_CONDUCTANCE_SIGNATURES,
-    "interface = fea.ConjugateHeatTransferInterface.conductance(id, fluidRegion, solidRegion, conductance)",
-    CHT_VALUE_INPUTS
-);
-descriptor!(
-    CHT_RESISTANCE_DESCRIPTOR,
-    CHT_RESISTANCE_SIGNATURES,
-    "interface = fea.ConjugateHeatTransferInterface.resistance(id, fluidRegion, solidRegion, resistance)",
-    CHT_VALUE_INPUTS
-);
 
 fn bound_interface(
     builtin: &'static str,
@@ -268,11 +123,7 @@ fn positive_quantity_scalar(
 
 #[runtime_builtin(
     name = "fea.ContactInterface.frictionless",
-    category = "fea",
-    summary = "Create a geometry-bound frictionless contact interface.",
-    keywords = "fea,interface,contact,frictionless,region,typed",
-    descriptor(crate::builtins::fea::interfaces::CONTACT_FRICTIONLESS_DESCRIPTOR),
-    integer_audit(TYPED_INTERFACE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::interfaces"
 )]
 pub async fn contact_interface_frictionless_builtin(
@@ -294,11 +145,7 @@ pub async fn contact_interface_frictionless_builtin(
 
 #[runtime_builtin(
     name = "fea.ContactInterface.coulomb",
-    category = "fea",
-    summary = "Create a geometry-bound Coulomb-friction contact interface.",
-    keywords = "fea,interface,contact,coulomb,friction,region,typed",
-    descriptor(crate::builtins::fea::interfaces::CONTACT_COULOMB_DESCRIPTOR),
-    integer_audit(TYPED_INTERFACE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::interfaces"
 )]
 pub async fn contact_interface_coulomb_builtin(
@@ -329,11 +176,7 @@ pub async fn contact_interface_coulomb_builtin(
 
 #[runtime_builtin(
     name = "fea.FluidStructureInterface.noSlip",
-    category = "fea",
-    summary = "Create a geometry-bound no-slip fluid-structure interface.",
-    keywords = "fea,interface,fluid,structure,no-slip,region,typed",
-    descriptor(crate::builtins::fea::interfaces::FLUID_STRUCTURE_INTERFACE_DESCRIPTOR),
-    integer_audit(TYPED_INTERFACE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::interfaces"
 )]
 pub async fn fluid_structure_interface_builtin(
@@ -355,11 +198,7 @@ pub async fn fluid_structure_interface_builtin(
 
 #[runtime_builtin(
     name = "fea.ConjugateHeatTransferInterface.perfect",
-    category = "fea",
-    summary = "Create a geometry-bound perfect conjugate heat-transfer interface.",
-    keywords = "fea,interface,fluid,thermal,perfect,region,typed",
-    descriptor(crate::builtins::fea::interfaces::CHT_PERFECT_DESCRIPTOR),
-    integer_audit(TYPED_INTERFACE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::interfaces"
 )]
 pub async fn conjugate_heat_transfer_interface_perfect_builtin(
@@ -381,11 +220,7 @@ pub async fn conjugate_heat_transfer_interface_perfect_builtin(
 
 #[runtime_builtin(
     name = "fea.ConjugateHeatTransferInterface.conductance",
-    category = "fea",
-    summary = "Create a conjugate heat-transfer interface with finite conductance.",
-    keywords = "fea,interface,fluid,thermal,conductance,region,typed",
-    descriptor(crate::builtins::fea::interfaces::CHT_CONDUCTANCE_DESCRIPTOR),
-    integer_audit(TYPED_INTERFACE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::interfaces"
 )]
 pub async fn conjugate_heat_transfer_interface_conductance_builtin(
@@ -414,11 +249,7 @@ pub async fn conjugate_heat_transfer_interface_conductance_builtin(
 
 #[runtime_builtin(
     name = "fea.ConjugateHeatTransferInterface.resistance",
-    category = "fea",
-    summary = "Create a conjugate heat-transfer interface with finite thermal resistance.",
-    keywords = "fea,interface,fluid,thermal,resistance,region,typed",
-    descriptor(crate::builtins::fea::interfaces::CHT_RESISTANCE_DESCRIPTOR),
-    integer_audit(TYPED_INTERFACE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::interfaces"
 )]
 pub async fn conjugate_heat_transfer_interface_resistance_builtin(

@@ -2,6 +2,7 @@ use crate::fea_contract::catalog_entry::{self, ConstructorDocumentationDefinitio
 use crate::*;
 
 mod contract;
+mod examples;
 mod inference;
 pub use contract::*;
 
@@ -61,7 +62,7 @@ const DIRECTION_DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentati
         keywords: &["fea", "direction", "axis", "frame", "typed"],
         related: &[],
         sections: &[],
-        examples: &[],
+        examples: examples::DIRECTION,
         faqs: &[],
         links: &[],
         implementation: &[],
@@ -77,7 +78,7 @@ const MATCHING_DOCUMENTATION: BuiltinDocumentation =
         keywords: &["fea", "periodic", "pairing", "matching", "typed"],
         related: &[],
         sections: &[],
-        examples: &[],
+        examples: examples::MATCHING,
         faqs: &[],
         links: &[],
         implementation: &[],
@@ -90,7 +91,7 @@ const GEOMETRIC_DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentati
         summary: "Pair periodic entities geometrically within a typed length tolerance.",
         description: "Creates the typed geometric periodic-pairing policy with a nonnegative fea.Length tolerance.",
         keywords: &["fea", "periodic", "pairing", "geometric", "tolerance", "typed"],
-        related: &[], sections: &[], examples: &[], faqs: &[], links: &[], implementation: &[], verification: &[], notes: &[],
+        related: &[], sections: &[], examples: examples::GEOMETRIC, faqs: &[], links: &[], implementation: &[], verification: &[], notes: &[],
     },
 );
 const IDENTITY_DOCUMENTATION: BuiltinDocumentation =
@@ -101,7 +102,7 @@ const IDENTITY_DOCUMENTATION: BuiltinDocumentation =
         keywords: &["fea", "periodic", "transform", "identity", "typed"],
         related: &[],
         sections: &[],
-        examples: &[],
+        examples: examples::IDENTITY,
         faqs: &[],
         links: &[],
         implementation: &[],
@@ -116,7 +117,7 @@ const TRANSLATION_DOCUMENTATION: BuiltinDocumentation =
         keywords: &["fea", "periodic", "transform", "translation", "typed"],
         related: &[],
         sections: &[],
-        examples: &[],
+        examples: examples::TRANSLATION,
         faqs: &[],
         links: &[],
         implementation: &[],
@@ -132,7 +133,7 @@ const ROTATION_DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentatio
         keywords: &["fea", "periodic", "transform", "rotation", "axis", "typed"],
         related: &[],
         sections: &[],
-        examples: &[],
+        examples: examples::ROTATION,
         faqs: &[],
         links: &[],
         implementation: &[],
