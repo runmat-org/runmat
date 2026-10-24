@@ -472,10 +472,15 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
         })
         .transpose()?;
     let results = results_data_from_value(FIELD_NAME, &args[0])?;
+    // A shell (declared shape, no values) is paged from the artifact rather than returned empty.
     let inline_field = sample
         .is_none()
         .then(|| find_field(results.fields.into_iter(), &field_id))
-        .flatten();
+        .flatten()
+        .filter(|field| {
+            field.shape.iter().product::<usize>() == 0
+                || field.as_host_f64().is_none_or(|values| !values.is_empty())
+        });
     let mut object = if let Some(field) = inline_field {
         let descriptor = find_descriptor(results.field_descriptors.iter(), &field_id)
             .cloned()
