@@ -79,9 +79,51 @@ impl<T: Scalar> BsrMatrix<T> {
     }
 
     pub fn spmv(&self, x: &[T], y: &mut [T]) {
-        let b = self.block;
         assert_eq!(x.len(), self.ncols());
         assert_eq!(y.len(), self.nrows());
+        match self.block {
+            2 => self.spmv_fixed::<2>(x, y),
+            3 => self.spmv_fixed::<3>(x, y),
+            _ => self.spmv_general(x, y),
+        }
+    }
+
+    /// Fixed block size: the block loops unroll and each block is loaded contiguously.
+    fn spmv_fixed<const B: usize>(&self, x: &[T], y: &mut [T]) {
+        let kernel = |node: usize, out: &mut [T]| {
+            let mut sums = [T::zero(); B];
+            for entry in self.row_ptr[node]..self.row_ptr[node + 1] {
+                let col = self.col_idx[entry] * B;
+                let block = &self.values[entry * B * B..(entry + 1) * B * B];
+                let xs: [T; B] = std::array::from_fn(|c| x[col + c]);
+                // Same summation order as the general kernel: each block row, then accumulate.
+                for r in 0..B {
+                    let mut sum = T::zero();
+                    for c in 0..B {
+                        sum += block[r * B + c] * xs[c];
+                    }
+                    sums[r] += sum;
+                }
+            }
+            out.copy_from_slice(&sums);
+        };
+        if par::threads() > 1 && self.node_rows >= 4 * NODES_PER_TASK {
+            y.par_chunks_mut(B * NODES_PER_TASK)
+                .enumerate()
+                .for_each(|(task, chunk)| {
+                    for (offset, out) in chunk.chunks_mut(B).enumerate() {
+                        kernel(task * NODES_PER_TASK + offset, out);
+                    }
+                });
+        } else {
+            for (node, out) in y.chunks_mut(B).enumerate() {
+                kernel(node, out);
+            }
+        }
+    }
+
+    fn spmv_general(&self, x: &[T], y: &mut [T]) {
+        let b = self.block;
         let kernel = |node: usize, out: &mut [T]| {
             out.iter_mut().for_each(|v| *v = T::zero());
             for entry in self.row_ptr[node]..self.row_ptr[node + 1] {
@@ -164,5 +206,30 @@ mod tests {
             assert!((p - q).abs() < 1e-14);
         }
         assert_eq!(bsr.to_csr(), a);
+    }
+}
+
+#[cfg(test)]
+mod fixed_block_tests {
+    use super::*;
+    use crate::testutil::elasticity::elasticity3d;
+
+    #[test]
+    fn fixed_size_block_kernels_match_csr_and_are_thread_invariant() {
+        let a = elasticity3d(9, 8, 7).matrix;
+        let x = par::seeded_vector::<f64>(a.nrows(), 4);
+        let mut reference = vec![0.0; a.nrows()];
+        a.as_ref().spmv(&x, &mut reference);
+        let bsr = BsrMatrix::from_csr(a.as_ref(), 3).unwrap();
+        let mut serial = vec![0.0; a.nrows()];
+        bsr.spmv(&x, &mut serial);
+        let scale = reference.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        assert!(reference.iter().zip(&serial).all(|(p, q)| (p - q).abs() <= 1e-13 * scale));
+        let mut general = vec![0.0; a.nrows()];
+        bsr.spmv_general(&x, &mut general);
+        assert!(general.iter().zip(&serial).all(|(p, q)| p.to_bits() == q.to_bits()));
+        let mut threaded = vec![0.0; a.nrows()];
+        par::with_threads(4, || bsr.spmv(&x, &mut threaded));
+        assert!(threaded.iter().zip(&serial).all(|(p, q)| p.to_bits() == q.to_bits()));
     }
 }

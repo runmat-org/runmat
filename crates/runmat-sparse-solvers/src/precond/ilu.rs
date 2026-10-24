@@ -3,7 +3,9 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+use super::schedule::LevelSchedule;
 use crate::csr::CsrRef;
+use crate::par;
 use crate::error::{SolverError, SolverResult};
 use crate::operator::Preconditioner;
 use crate::scalar::Scalar;
@@ -19,6 +21,8 @@ pub struct Ilu0<T> {
     diagonal: Vec<usize>,
     shift: f64,
     spd: bool,
+    pub(super) lower: LevelSchedule,
+    upper: LevelSchedule,
 }
 
 impl<T: Scalar> Ilu0<T> {
@@ -71,7 +75,10 @@ impl<T: Scalar> Ilu0<T> {
             }
             check(values[diagonal[i]], i)?;
         }
+        let (lower, upper) = Self::schedules(n, row_ptr, col_idx, &diagonal);
         Ok(Self {
+            lower,
+            upper,
             n,
             row_ptr: row_ptr.to_vec(),
             col_idx: col_idx.to_vec(),
@@ -95,6 +102,18 @@ impl<T: Scalar> Ilu0<T> {
         Ok(diagonal)
     }
 
+    fn schedules(
+        n: usize,
+        row_ptr: &[usize],
+        col_idx: &[usize],
+        diagonal: &[usize],
+    ) -> (LevelSchedule, LevelSchedule) {
+        (
+            LevelSchedule::build(n, true, |i| &col_idx[row_ptr[i]..diagonal[i]]),
+            LevelSchedule::build(n, false, |i| &col_idx[diagonal[i] + 1..row_ptr[i + 1]]),
+        )
+    }
+
     /// `symmetric_positive_definite` declares that `A` is HPD; pivots must then stay positive.
     pub fn new(matrix: CsrRef<'_, T>, symmetric_positive_definite: bool) -> SolverResult<Self> {
         let n = matrix.nrows();
@@ -107,7 +126,11 @@ impl<T: Scalar> Ilu0<T> {
         for _attempt in 0..12 {
             match Self::factor(matrix, &diagonal, shift, symmetric_positive_definite) {
                 Ok(values) => {
+                    let (lower, upper) =
+                        Self::schedules(n, matrix.row_ptr(), matrix.col_idx(), &diagonal);
                     return Ok(Self {
+                        lower,
+                        upper,
                         n,
                         row_ptr: matrix.row_ptr().to_vec(),
                         col_idx: matrix.col_idx().to_vec(),
@@ -200,6 +223,24 @@ impl<T: Scalar> Ilu0<T> {
 impl<T: Scalar> Preconditioner<T> for Ilu0<T> {
     fn apply(&self, r: &[T], z: &mut [T]) -> SolverResult<()> {
         let n = self.n;
+        if par::threads() > 1 {
+            // Same per-row arithmetic as below, independent rows of each level concurrently.
+            self.lower.solve(z, |i, done| {
+                let mut sum = r[i];
+                for e in self.row_ptr[i]..self.diagonal[i] {
+                    sum -= self.values[e] * done.get(self.col_idx[e]);
+                }
+                sum
+            });
+            self.upper.solve(z, |i, done| {
+                let mut sum = done.get(i);
+                for e in self.diagonal[i] + 1..self.row_ptr[i + 1] {
+                    sum -= self.values[e] * done.get(self.col_idx[e]);
+                }
+                sum / self.values[self.diagonal[i]]
+            });
+            return Ok(());
+        }
         // L y = r (unit lower)
         for i in 0..n {
             let mut sum = r[i];
@@ -254,6 +295,8 @@ pub struct Ilut<T> {
     u_ptr: Vec<usize>,
     u_idx: Vec<usize>,
     u_val: Vec<T>,
+    lower: LevelSchedule,
+    upper: LevelSchedule,
 }
 
 impl<T: Scalar> Ilut<T> {
@@ -350,7 +393,11 @@ impl<T: Scalar> Ilut<T> {
             }
             u_ptr.push(u_idx.len());
         }
+        let lower = LevelSchedule::build(n, true, |i| &l_idx[l_ptr[i]..l_ptr[i + 1]]);
+        let upper = LevelSchedule::build(n, false, |i| &u_idx[u_ptr[i] + 1..u_ptr[i + 1]]);
         Ok(Self {
+            lower,
+            upper,
             n,
             l_ptr,
             l_idx,
@@ -368,6 +415,23 @@ impl<T: Scalar> Ilut<T> {
 
 impl<T: Scalar> Preconditioner<T> for Ilut<T> {
     fn apply(&self, r: &[T], z: &mut [T]) -> SolverResult<()> {
+        if par::threads() > 1 {
+            self.lower.solve(z, |i, done| {
+                let mut sum = r[i];
+                for e in self.l_ptr[i]..self.l_ptr[i + 1] {
+                    sum -= self.l_val[e] * done.get(self.l_idx[e]);
+                }
+                sum
+            });
+            self.upper.solve(z, |i, done| {
+                let mut sum = done.get(i);
+                for e in self.u_ptr[i] + 1..self.u_ptr[i + 1] {
+                    sum -= self.u_val[e] * done.get(self.u_idx[e]);
+                }
+                sum / self.u_val[self.u_ptr[i]]
+            });
+            return Ok(());
+        }
         for i in 0..self.n {
             let mut sum = r[i];
             for e in self.l_ptr[i]..self.l_ptr[i + 1] {

@@ -115,6 +115,56 @@ pub fn dot_and_magnitude<T: Scalar>(x: &[T], y: &[T]) -> (T, f64) {
     (total.dot, total.magnitude)
 }
 
+/// `out[k] = Σ_i conj(V_k[i]) w[i]` for the `count` contiguous vectors `V_k` of `vectors`, in one
+/// pass over `w`: fixed blocks of rows, each block summed per vector sequentially, block partials
+/// summed in block order (bitwise identical for every thread count).
+pub fn multi_dot<T: Scalar>(vectors: &[T], count: usize, w: &[T]) -> Vec<T> {
+    let n = w.len();
+    debug_assert_eq!(vectors.len(), count * n);
+    let blocks = n.div_ceil(REDUCTION_BLOCK);
+    let block = |b: usize| {
+        let range = b * REDUCTION_BLOCK..((b + 1) * REDUCTION_BLOCK).min(n);
+        let wb = &w[range.clone()];
+        (0..count)
+            .map(|k| {
+                let vk = &vectors[k * n + range.start..k * n + range.end];
+                let mut sum = T::zero();
+                for (v, x) in vk.iter().zip(wb) {
+                    sum += v.conj() * *x;
+                }
+                sum
+            })
+            .collect::<Vec<T>>()
+    };
+    let partials: Vec<Vec<T>> = if parallel(n) {
+        (0..blocks).into_par_iter().map(block).collect()
+    } else {
+        (0..blocks).map(block).collect()
+    };
+    let mut out = vec![T::zero(); count];
+    for partial in partials {
+        for (o, p) in out.iter_mut().zip(partial) {
+            *o += p;
+        }
+    }
+    out
+}
+
+/// `w += alpha Σ_k c_k V_k` in one pass over `w` (per entry, vectors in order).
+pub fn multi_axpy<T: Scalar>(vectors: &[T], coefficients: &[T], w: &mut [T], alpha: f64) {
+    let n = w.len();
+    debug_assert_eq!(vectors.len(), coefficients.len() * n);
+    let scaled: Vec<T> = coefficients.iter().map(|c| c.scale(alpha)).collect();
+    for_each_chunk_mut(w, |start, chunk| {
+        for (k, c) in scaled.iter().enumerate() {
+            let vk = &vectors[k * n + start..k * n + start + chunk.len()];
+            for (value, v) in chunk.iter_mut().zip(vk) {
+                *value += *c * *v;
+            }
+        }
+    });
+}
+
 /// Bilinear (unconjugated) product `Σ x_i y_i`, used by complex-symmetric methods.
 pub fn dotu<T: Scalar>(x: &[T], y: &[T]) -> T {
     debug_assert_eq!(x.len(), y.len());

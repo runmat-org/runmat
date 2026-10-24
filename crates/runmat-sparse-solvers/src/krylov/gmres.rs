@@ -140,6 +140,18 @@ pub trait Arithmetic<T> {
     fn native_divide(_target: &mut [T], _source: &[T], _divisor: f64) -> bool {
         false
     }
+    /// One classical Gram–Schmidt pass against the `rows` contiguous basis vectors:
+    /// `coefficients[k] = ⟨v_k, w⟩` for all `k`, then `w −= Σ coefficients[k] v_k`. Returning
+    /// `false` (the default, or on a nonfinite coefficient) must leave `w` untouched and selects
+    /// the portable sequential projection.
+    fn native_project(
+        _basis: &[T],
+        _rows: usize,
+        _w: &mut [T],
+        _coefficients: &mut [Complex64],
+    ) -> bool {
+        false
+    }
 }
 
 /// Left-preconditioned GMRES with a true residual after every step.
@@ -463,32 +475,45 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 });
             };
             for pass in 0..2 {
-                for row in 0..=inner {
-                    let basis = &work.basis[row * n..(row + 1) * n];
-                    let Some(coefficient) =
-                        dot::<T, A, O>(basis, work.preconditioned, operations).await?
-                    else {
-                        return Ok(GmresOutcome {
-                            flag: 4,
-                            relres: best_residual.relative(denominator),
-                            outer: best_iteration.0,
-                            inner: best_iteration.1,
-                            residual_count,
-                            steps,
-                        });
-                    };
-                    work.hessenberg[h_index(row, inner, restart)] += coefficient;
-                    if !axpy::<T, A, O>(work.preconditioned, -coefficient, basis, operations)
-                        .await?
-                    {
-                        return Ok(GmresOutcome {
-                            flag: 4,
-                            relres: best_residual.relative(denominator),
-                            outer: best_iteration.0,
-                            inner: best_iteration.1,
-                            residual_count,
-                            steps,
-                        });
+                let rows = inner + 1;
+                if A::native_project(
+                    &work.basis[..rows * n],
+                    rows,
+                    work.preconditioned,
+                    &mut work.coefficients[..rows],
+                ) {
+                    operations.cooperate((2 * rows * n) as u64).await?;
+                    for row in 0..rows {
+                        work.hessenberg[h_index(row, inner, restart)] += work.coefficients[row];
+                    }
+                } else {
+                    for row in 0..=inner {
+                        let basis = &work.basis[row * n..(row + 1) * n];
+                        let Some(coefficient) =
+                            dot::<T, A, O>(basis, work.preconditioned, operations).await?
+                        else {
+                            return Ok(GmresOutcome {
+                                flag: 4,
+                                relres: best_residual.relative(denominator),
+                                outer: best_iteration.0,
+                                inner: best_iteration.1,
+                                residual_count,
+                                steps,
+                            });
+                        };
+                        work.hessenberg[h_index(row, inner, restart)] += coefficient;
+                        if !axpy::<T, A, O>(work.preconditioned, -coefficient, basis, operations)
+                            .await?
+                        {
+                            return Ok(GmresOutcome {
+                                flag: 4,
+                                relres: best_residual.relative(denominator),
+                                outer: best_iteration.0,
+                                inner: best_iteration.1,
+                                residual_count,
+                                steps,
+                            });
+                        }
                     }
                 }
                 if pass == 0

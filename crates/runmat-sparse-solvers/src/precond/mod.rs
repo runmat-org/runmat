@@ -15,6 +15,7 @@ mod amg;
 mod direct;
 mod ilu;
 mod jacobi;
+mod schedule;
 mod schwarz;
 
 pub use amg::{rigid_body_modes, Amg, AmgOptions, AmgStatistics, NearNullspace};

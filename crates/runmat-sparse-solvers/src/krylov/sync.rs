@@ -150,6 +150,26 @@ impl<T: Scalar> gmres::Arithmetic<T> for ScalarArithmetic {
         par::axpy(T::from_parts(scale.re, scale.im), source, target);
         true
     }
+    fn native_project(
+        basis: &[T],
+        rows: usize,
+        w: &mut [T],
+        coefficients: &mut [Complex64],
+    ) -> bool {
+        let n = w.len();
+        if basis.len() != rows * n || coefficients.len() != rows {
+            return false;
+        }
+        let dots = par::multi_dot(basis, rows, w);
+        if dots.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        for (target, value) in coefficients.iter_mut().zip(&dots) {
+            *target = Complex64::new(value.re(), value.im());
+        }
+        par::multi_axpy(basis, &dots, w, -1.0);
+        true
+    }
     fn native_divide(target: &mut [T], source: &[T], divisor: f64) -> bool {
         if !(divisor.is_finite() && divisor > 0.0) {
             return false;
