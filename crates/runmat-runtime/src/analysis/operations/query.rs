@@ -1297,6 +1297,9 @@ fn analysis_results_op_with_field_inventory(
     ))
 }
 
+/// Field payload a results object holds inline; larger runs page values through `fea.field`.
+const RESULTS_INLINE_FIELD_BYTES: u64 = 16 * 1024 * 1024;
+
 pub fn analysis_results_by_run_id_op(
     run_id: &str,
     query: AnalysisResultsQuery,
@@ -1320,6 +1323,27 @@ pub fn analysis_results_by_run_id_op(
         )
     })?;
     let run_id = resolved_run_id.as_str();
+    // A results object opens bounded: when a run's field payload exceeds the inline budget, it
+    // carries field descriptors and shells, and `fea.field` pages values from the artifact.
+    let mut query = query;
+    if query.include_field_values {
+        let inventory = storage::load_field_inventory(run_id).ok().flatten();
+        let payload = inventory.as_ref().map_or(0u64, |fields| {
+            fields
+                .iter()
+                .map(|field| {
+                    field
+                        .shape
+                        .iter()
+                        .try_fold(8u64, |bytes, extent| bytes.checked_mul(*extent as u64))
+                        .unwrap_or(u64::MAX)
+                })
+                .fold(0u64, u64::saturating_add)
+        });
+        if payload > RESULTS_INLINE_FIELD_BYTES {
+            query.include_field_values = false;
+        }
+    }
     let field_inventory = if query.include_field_values {
         None
     } else {
