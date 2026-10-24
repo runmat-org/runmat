@@ -1,3 +1,4 @@
+use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 use super::*;
 
 fn nodes(origin: [f64; 3], scale: f64) -> [[f64; 3]; 10] {

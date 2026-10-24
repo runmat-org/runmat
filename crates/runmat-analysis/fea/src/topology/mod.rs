@@ -44,6 +44,7 @@ pub fn visit_tetrahedron_volume_quadrature(
 ) -> Option<()> {
     quadrature::visit_volume_quadrature(order, coordinates, visit)
 }
+pub(crate) use solid_integration::curved_rule as solid_integration_curved_rule;
 pub use solid_integration::{
     CanonicalSolidIntegrationElement, CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule,
     SolidIntegrationPlanError,

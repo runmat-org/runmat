@@ -34,14 +34,15 @@ pub(super) fn derivation_resident_bytes_estimate(
     rule: CanonicalSolidIntegrationRule,
 ) -> Result<u64, SolidIntegrationPlanError> {
     let element_count = mesh.topology.volume_elements.len();
-    let total_points = element_count
-        .checked_mul(rule.point_count())
-        .ok_or(SolidIntegrationPlanError::CountOverflow)?;
+    let mut total_points = 0_usize;
     let mut total_point_nodes = 0_usize;
     for element in &mesh.topology.volume_elements {
         let nodes = node_count(element.order);
-        total_point_nodes = rule
-            .point_count()
+        let points = inventory_rule(mesh, element, rule).point_count();
+        total_points = total_points
+            .checked_add(points)
+            .ok_or(SolidIntegrationPlanError::CountOverflow)?;
+        total_point_nodes = points
             .checked_mul(nodes)
             .and_then(|count| total_point_nodes.checked_add(count))
             .ok_or(SolidIntegrationPlanError::CountOverflow)?;
@@ -108,15 +109,40 @@ impl Serialize for ElementInventory<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // The entire count was checked before this borrowed traversal.
         serializer.collect_seq(self.mesh.topology.volume_elements.iter().enumerate().map(
-            |(index, element)| CanonicalSolidIntegrationElement {
-                element_id: element.element_id,
-                stable_identity: element.stable_identity,
-                order: element.order,
-                node_count: node_count(element.order),
-                point_count: self.rule.point_count(),
-                point_offset: index * self.rule.point_count(),
+            |(index, element)| {
+                let rule = inventory_rule(self.mesh, element, self.rule);
+                CanonicalSolidIntegrationElement {
+                    element_id: element.element_id,
+                    stable_identity: element.stable_identity,
+                    order: element.order,
+                    rule,
+                    node_count: node_count(element.order),
+                    point_count: rule.point_count(),
+                    // Integer widths are value independent in the shape profile.
+                    point_offset: index * rule.point_count(),
+                }
             },
         ))
+    }
+}
+
+/// The rule bound for one element without running the shared quadrature: the requested rule for
+/// a straight-sided element, otherwise the sixteen-point tensor rule, the largest the shared
+/// Tet10 rule converges on (its encoding has the same width as the twelve-point rule).
+fn inventory_rule(
+    mesh: &SolverMeshArtifact,
+    element: &runmat_meshing_core::SolverVolumeElement,
+    requested: CanonicalSolidIntegrationRule,
+) -> CanonicalSolidIntegrationRule {
+    match super::tet10_coordinates(mesh, element) {
+        Ok(None) => requested,
+        Ok(Some(coordinates)) if runmat_meshing_core::tetrahedron10_is_affine(&coordinates) => {
+            requested
+        }
+        _ if requested.point_count() > CanonicalSolidIntegrationRule::Duffy16.point_count() => {
+            requested
+        }
+        _ => CanonicalSolidIntegrationRule::Duffy16,
     }
 }
 

@@ -119,7 +119,10 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
         assert!((fields.strain[0] - b).abs() < 1.0e-12);
     }
     // A positive but nearly singular map with reference-linear displacement
-    // has rational physical strain. Do not silently accept unresolved energy.
+    // has rational physical strain. Do not silently accept unresolved energy: the shared Tet10
+    // element-validity rule rejects the map for its vanishing Jacobian margin before any
+    // quadrature runs, and an element it admitted would still fail closed on unconverged
+    // thermal quadrature.
     let SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } = &mut elements[0].geometry
     else {
         unreachable!()
@@ -138,7 +141,11 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
             LocalExecutionPlan::serial(),
             true,
         ),
-        Err(StructuralFieldRecoveryError::UnconvergedThermalQuadrature { .. })
+        Err(StructuralFieldRecoveryError::UnconvergedThermalQuadrature { .. }
+            | StructuralFieldRecoveryError::Tetrahedron10 {
+                source: crate::assembly::elements::solid::Tetrahedron10ElementError::UncertifiedJacobian,
+                ..
+            })
     ));
 }
 

@@ -15,32 +15,8 @@ use super::{
     element::{cross, norm},
 };
 
-pub(crate) const TETRAHEDRON_FOUR_POINT_RULE: [[f64; 4]; 4] = [
-    [
-        0.585_410_196_624_968_5,
-        0.138_196_601_125_010_5,
-        0.138_196_601_125_010_5,
-        0.138_196_601_125_010_5,
-    ],
-    [
-        0.138_196_601_125_010_5,
-        0.585_410_196_624_968_5,
-        0.138_196_601_125_010_5,
-        0.138_196_601_125_010_5,
-    ],
-    [
-        0.138_196_601_125_010_5,
-        0.138_196_601_125_010_5,
-        0.585_410_196_624_968_5,
-        0.138_196_601_125_010_5,
-    ],
-    [
-        0.138_196_601_125_010_5,
-        0.138_196_601_125_010_5,
-        0.138_196_601_125_010_5,
-        0.585_410_196_624_968_5,
-    ],
-];
+// The four-point rule is owned by meshing core with the Tet10 element-validity rule.
+pub(crate) use runmat_meshing_core::TETRAHEDRON_FOUR_POINT_RULE;
 
 // Degree-four tetrahedral rule: exact for the cubic Tet10 Jacobian volume integral.
 const TETRAHEDRON_ELEVEN_A: f64 = 0.785_714_285_714_285_7;
