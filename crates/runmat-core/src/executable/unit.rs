@@ -20,6 +20,7 @@ pub struct ExecutableFunctionInterface {
     pub inputs: Vec<ExecutableFunctionParameter>,
     pub outputs: Vec<runmat_types::ValueFact>,
     pub effects: runmat_types::EffectSet,
+    pub cooperative_suspension: bool,
     pub capabilities: runmat_types::CapabilitySet,
 }
 
@@ -404,6 +405,7 @@ impl ExecutableUnit {
             inputs,
             outputs: analysis.outputs.clone(),
             effects: analysis.effects.clone(),
+            cooperative_suspension: analysis.cooperative_suspension,
             capabilities: analysis.capabilities.clone(),
         })
     }

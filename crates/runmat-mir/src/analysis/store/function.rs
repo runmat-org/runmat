@@ -19,6 +19,10 @@ pub struct FunctionAnalysis {
     pub callable: CallableFact,
     pub outputs: Vec<ValueFact>,
     pub effects: EffectSet,
+    /// Compiler proof that every suspension origin is deterministic data-local
+    /// work. Missing/old facts fail closed; MaySuspend remains in `effects`.
+    #[serde(default)]
+    pub cooperative_suspension: bool,
     pub capabilities: CapabilitySet,
     pub convergence: FunctionConvergence,
 }

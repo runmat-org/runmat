@@ -1,7 +1,9 @@
-mod call_graph;
 mod call_context;
+mod call_graph;
 mod flow;
 mod interprocedural;
+#[cfg(test)]
+mod numerical_suspension_tests;
 mod state;
 
 pub use call_context::{diagnose_call_contexts, CallContextDiagnostics};
@@ -16,6 +18,49 @@ use super::{
     AnalysisDependency, AnalysisStore, ClassAnalysis, ClassPropertyAnalysis, FunctionAnalysis,
     FunctionConvergence,
 };
+
+fn certify_numerical_suspension(
+    store: &mut AnalysisStore,
+    evidence: &std::collections::BTreeMap<
+        runmat_types::FunctionId,
+        flow::NumericalSuspensionEvidence,
+    >,
+) {
+    use std::collections::BTreeSet;
+    let mut certified = BTreeSet::new();
+    loop {
+        let mut changed = false;
+        for function in &store.functions {
+            let Some(CallableIdentity::BoundFunction(local)) = function.callable.identity.as_ref()
+            else {
+                continue;
+            };
+            let Some(proof) = evidence.get(local) else {
+                continue;
+            };
+            if proof.local
+                && proof.callees.is_subset(&certified)
+                && function.convergence == FunctionConvergence::Exact
+                && function.capabilities.0.is_empty()
+                && function.effects.0.iter().all(|effect| {
+                    matches!(
+                        effect,
+                        runmat_types::EffectKind::MayThrow | runmat_types::EffectKind::MaySuspend
+                    )
+                })
+            {
+                changed |= certified.insert(*local);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for function in &mut store.functions {
+        function.cooperative_suspension = matches!(function.callable.identity,
+            Some(CallableIdentity::BoundFunction(local)) if certified.contains(&local));
+    }
+}
 
 pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     let mut store = AnalysisStore {
@@ -32,6 +77,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.functions.clear();
     store.classes.clear();
     let mut liveness_by_function = std::collections::BTreeMap::new();
+    let mut numerical_suspension = std::collections::BTreeMap::new();
 
     for (function, body) in &assembly.bodies {
         let source = assembly
@@ -59,7 +105,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             continue;
         };
         let program_function = ProgramFunctionId(function_ordinal);
-        let flow = flow::analyze_body(
+        let flow = flow::analyze_body_with_suspension(
             body,
             program_function,
             program.parameters.get(function).map_or(&[], Vec::as_slice),
@@ -136,6 +182,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
                 None => diagnostic,
             });
         }
+        numerical_suspension.insert(*function, flow.numerical_suspension);
         store.functions.push(FunctionAnalysis {
             function: program_function,
             callable: CallableFact {
@@ -156,6 +203,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             },
             outputs: summary.outputs.clone(),
             effects: operation_effects,
+            cooperative_suspension: false,
             capabilities: operation_capabilities,
             convergence,
         });
@@ -169,6 +217,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         .fusion_stage_contracts
         .sort_by_key(|contract| contract.point);
     store.functions.sort_by_key(|function| function.function);
+    certify_numerical_suspension(&mut store, &numerical_suspension);
     store.classes = assembly
         .classes
         .iter()

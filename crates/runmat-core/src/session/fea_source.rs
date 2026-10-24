@@ -284,6 +284,7 @@ impl RunMatSession {
                     .map(runmat_runtime::analysis::operation_pattern_from_value_fact)
                     .collect(),
                 effects: interface.effects,
+                cooperative_suspension: interface.cooperative_suspension,
                 capabilities: interface.capabilities,
             });
         }

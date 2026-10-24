@@ -34,6 +34,7 @@ fn function_facts() -> FunctionAnalysis {
         },
         outputs: vec![output],
         effects: EffectSet::default(),
+        cooperative_suspension: false,
         capabilities: CapabilitySet::default(),
         convergence: FunctionConvergence::Exact,
     }

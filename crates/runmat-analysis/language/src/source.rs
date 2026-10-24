@@ -138,6 +138,8 @@ pub struct FunctionFacts {
     pub inputs: Vec<OperationParameter>,
     pub outputs: Vec<OperationTypePattern>,
     pub effects: EffectSet,
+    #[serde(default)]
+    pub cooperative_suspension: bool,
     pub capabilities: CapabilitySet,
 }
 

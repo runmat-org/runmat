@@ -9,8 +9,11 @@ import function impactPulse from "./impactPulse.m"
 
 The imported file must define the named function entrypoint. RunMat checks its arguments, result,
 effects, capabilities, source digest, and executable revision through the ordinary project
-pipeline. Scripts, ambient workspace reads, suspension, unapproved effects, ambiguous definitions,
-or an incompatible result fail before materialization.
+pipeline. Scripts, ambient workspace reads, unapproved effects, ambiguous definitions,
+or an incompatible result fail before materialization. Numerical signal generators may
+suspend only when the compiler proves deterministic data-local work, including cooperative
+CPU turns or completion of their owned numerical provider operations. Arbitrary asynchronous
+calls, unknown targets and opaque receiver overrides do not inherit this permission.
 
 ## Generated signals
 

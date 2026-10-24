@@ -67,6 +67,7 @@ impl TestHost {
                 inputs,
                 outputs,
                 effects,
+                cooperative_suspension: false,
                 capabilities: CapabilitySet::default(),
             },
         );
@@ -103,6 +104,7 @@ impl RunMatFunctionSource for TestHost {
             inputs: Vec::new(),
             outputs: Vec::new(),
             effects: EffectSet::default(),
+            cooperative_suspension: false,
             capabilities: CapabilitySet::default(),
         })
     }

@@ -440,6 +440,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
         },
         outputs: vec![output],
         effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+        cooperative_suspension: false,
         capabilities: CapabilitySet::default(),
         convergence: FunctionConvergence::Exact,
     };

@@ -105,6 +105,7 @@ fn analysis() -> FunctionAnalysis {
         },
         outputs: vec![output],
         effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+        cooperative_suspension: false,
         capabilities: CapabilitySet::default(),
         convergence: FunctionConvergence::Exact,
     }

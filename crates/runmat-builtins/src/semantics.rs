@@ -38,6 +38,9 @@ pub enum BuiltinCompatibility {
 pub enum BuiltinAsyncBehavior {
     NeverSuspends,
     MaySuspend,
+    /// Deterministic work on original arguments may yield cooperatively or
+    /// await their owned numerical provider completion. No ambient host work.
+    MaySuspendLocally,
     RequiresAsyncRuntime,
 }
 

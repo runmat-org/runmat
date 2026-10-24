@@ -562,12 +562,19 @@ fn validate_static_contract(
             "seeded-random generators require a task-scoped deterministic RNG context".into(),
         ));
     }
-    if !function.effects.is_side_effect_free() {
+    if !function.effects.0.iter().all(|effect| {
+        effect.is_side_effect_free()
+            || (*effect == runmat_types::EffectKind::MaySuspend && function.cooperative_suspension)
+    }) {
         let forbidden = function
             .effects
             .0
             .iter()
-            .filter(|effect| !effect.is_side_effect_free())
+            .filter(|effect| {
+                !effect.is_side_effect_free()
+                    && (**effect != runmat_types::EffectKind::MaySuspend
+                        || !function.cooperative_suspension)
+            })
             .copied()
             .collect::<Vec<_>>();
         return Err(AnalysisBridgeError::Invalid(format!(
@@ -834,6 +841,7 @@ mod tests {
             },
             outputs: vec![output],
             effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+            cooperative_suspension: false,
             capabilities: CapabilitySet::default(),
             convergence: FunctionConvergence::Exact,
         }
@@ -1211,6 +1219,52 @@ mod tests {
                 ),
                 &facts,
                 &BTreeSet::new(),
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn numerical_suspension_requires_proof_and_never_covers_ambient_effects() {
+        let PhysicalSignal::Force(signal) = signal() else {
+            unreachable!()
+        };
+        let SignalRepresentation::Generator(generator) = signal.representation else {
+            unreachable!()
+        };
+        let mut facts = analysis();
+        facts.effects.0.insert(EffectKind::MaySuspend);
+        assert!(validate_static_contract(
+            &generator.invocation,
+            &facts,
+            0,
+            GeneratorOutputDomain::Real,
+            &BTreeSet::new()
+        )
+        .is_err());
+        facts.cooperative_suspension = true;
+        assert!(validate_static_contract(
+            &generator.invocation,
+            &facts,
+            0,
+            GeneratorOutputDomain::Real,
+            &BTreeSet::new()
+        )
+        .is_ok());
+        for forbidden in [
+            EffectKind::Clock,
+            EffectKind::Network,
+            EffectKind::HostCallback,
+            EffectKind::Unknown,
+        ] {
+            let mut ambient = facts.clone();
+            ambient.effects.0.insert(forbidden);
+            assert!(validate_static_contract(
+                &generator.invocation,
+                &ambient,
+                0,
+                GeneratorOutputDomain::Real,
+                &BTreeSet::new()
             )
             .is_err());
         }

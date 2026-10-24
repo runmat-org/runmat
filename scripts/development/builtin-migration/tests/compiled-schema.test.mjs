@@ -52,13 +52,24 @@ test("foreign runtime link policy retains its actual typed adapter family", () =
   assert.throws(() => catalogEntry(entry), /foreign adapter family/);
 });
 
-test("catalog and legacy semantics retain the declared current-workspace eval effect", () => {
+test("catalog and legacy semantics retain declared effect and suspension identities", () => {
   const entry = compiledInventoryFixture().snapshot.declared.catalog_entries[0];
   entry.contract.workspace_effect = "DynamicEvalCurrentWorkspace";
   assert.doesNotThrow(() => catalogEntry(entry));
   const legacy = legacyFunctionFixture([]);
   legacy.semantics.workspace_effect = "DynamicEvalCurrentWorkspace";
   assert.doesNotThrow(() => legacyFunction(legacy));
+  for (const behavior of ["NeverSuspends", "MaySuspend", "MaySuspendLocally", "RequiresAsyncRuntime"]) {
+    entry.contract.async_behavior = behavior;
+    legacy.semantics.async_behavior = behavior;
+    assert.doesNotThrow(() => catalogEntry(entry));
+    assert.doesNotThrow(() => legacyFunction(legacy));
+  }
+  entry.contract.async_behavior = "guessed-suspension";
+  legacy.semantics.async_behavior = "guessed-suspension";
+  assert.throws(() => catalogEntry(entry), /async behavior/);
+  assert.throws(() => legacyFunction(legacy), /semantic async/);
+  legacy.semantics.async_behavior = "NeverSuspends";
   legacy.semantics.workspace_effect = "guessed-workspace-effect";
   assert.throws(() => legacyFunction(legacy), /workspace effect/);
 });
