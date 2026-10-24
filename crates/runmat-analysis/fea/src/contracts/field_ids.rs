@@ -364,6 +364,36 @@ pub fn fea_thermal_energy_storage_rate_field_id(snapshot_index: usize) -> String
     format!("thermal.energy_storage_rate.{snapshot_index}")
 }
 
+/// Structural fields that have one snapshot field per retained transient state.
+pub const FEA_TRANSIENT_SNAPSHOT_STRUCTURAL_FIELDS: [&str; 8] = [
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_ROTATION,
+    FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+];
+
+/// The accepted-state snapshot field that carries a structural field at one retained transient
+/// time. Transient recovery names its snapshots through this map, and time-sampled field reads
+/// resolve through it, so the two cannot disagree.
+pub fn fea_transient_snapshot_field_id(field_id: &str, snapshot_index: usize) -> Option<String> {
+    let family = match field_id {
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT => fea_transient_displacement_field_id,
+        FEA_FIELD_STRUCTURAL_ROTATION => fea_transient_rotation_field_id,
+        FEA_FIELD_STRUCTURAL_STRAIN => fea_transient_strain_field_id,
+        FEA_FIELD_STRUCTURAL_STRESS => fea_transient_stress_field_id,
+        FEA_FIELD_STRUCTURAL_VON_MISES => fea_transient_von_mises_field_id,
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY => fea_transient_strain_energy_density_field_id,
+        FEA_FIELD_STRUCTURAL_REACTION_FORCE => fea_transient_reaction_force_field_id,
+        FEA_FIELD_STRUCTURAL_REACTION_MOMENT => fea_transient_reaction_moment_field_id,
+        _ => return None,
+    };
+    Some(family(snapshot_index))
+}
+
 pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
     format!("transient.displacement.{snapshot_index}")
 }

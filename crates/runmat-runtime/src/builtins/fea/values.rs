@@ -37,6 +37,7 @@ pub(super) const THERMAL_CONTACT_RESISTANCE_CLASS: &str =
 pub(super) const FRICTION_COEFFICIENT_CLASS: &str =
     identities::FEA_FRICTION_COEFFICIENT_CLASS.display_name();
 pub(super) const FREQUENCY_CLASS: &str = identities::FEA_FREQUENCY_CLASS.display_name();
+pub(super) const TIME_CLASS: &str = identities::FEA_TIME_CLASS.display_name();
 pub(super) const MASS_DENSITY_CLASS: &str = identities::FEA_MASS_DENSITY_CLASS.display_name();
 pub(super) const DYNAMIC_VISCOSITY_CLASS: &str =
     identities::FEA_DYNAMIC_VISCOSITY_CLASS.display_name();
@@ -112,6 +113,14 @@ scalar_quantity_builtin!(
     "fea.Frequency.hertz",
     FREQUENCY_CLASS,
     "hertz",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    time_seconds_builtin,
+    "fea.Time.seconds",
+    TIME_CLASS,
+    "seconds",
     1.0,
     0.0
 );
@@ -400,7 +409,7 @@ pub(super) fn ensure_quantity_classes_registered() {
     });
 }
 
-fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 24] {
+fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 25] {
     [
         (DISPLACEMENT_CLASS, "runmat.fea.displacement", METERS),
         (ROTATION_CLASS, "runmat.fea.rotation", RADIANS),
@@ -457,6 +466,7 @@ fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]);
             RATIO,
         ),
         (FREQUENCY_CLASS, "runmat.fea.frequency", HERTZ),
+        (TIME_CLASS, "runmat.fea.time", SECONDS),
         (
             MASS_DENSITY_CLASS,
             "runmat.fea.mass-density",
@@ -544,6 +554,7 @@ fn quantity_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
         )],
         FRICTION_COEFFICIENT_CLASS => &[("ratio", "fea.FrictionCoefficient.ratio")],
         FREQUENCY_CLASS => &[("hertz", "fea.Frequency.hertz")],
+        TIME_CLASS => &[("seconds", "fea.Time.seconds")],
         MASS_DENSITY_CLASS => &[(
             "kilogramsPerCubicMeter",
             "fea.MassDensity.kilogramsPerCubicMeter",

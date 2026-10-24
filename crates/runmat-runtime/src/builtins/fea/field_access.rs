@@ -99,6 +99,22 @@ pub(super) fn selection_from_field_object(
             }
             Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(hertz))
         }
+        Some(value @ Value::Object(sample)) if sample.class_name().is(identities::FEA_TIME_CLASS) => {
+            let seconds = super::values::quantity_scalar(
+                builtin,
+                value,
+                super::values::TIME_CLASS,
+                "seconds",
+            )?;
+            if !seconds.is_finite() {
+                return Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "fea.Field time sample must be finite",
+                ));
+            }
+            Some(runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(seconds))
+        }
         Some(Value::Tensor(tensor)) if tensor.is_empty() => None,
         None => None,
         Some(_) => {

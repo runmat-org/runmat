@@ -53,13 +53,13 @@ const EXAMPLES: &[BuiltinExample] = &[
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.field",
     summary: "Select one result field, such as stress or displacement, from an FEA run.",
-    description: "`field = fea.field(resultsOrRun, selector)` returns the `fea.Field` named by a typed selector such as `fea.StructuralField.vonMises()` or `fea.OutputField.named(\"peak_stress\")`. `fea.field(resultsOrRun, selector, fea.Frequency.hertz(f))` selects the field at one frequency sample.",
+    description: "`field = fea.field(resultsOrRun, selector)` returns the `fea.Field` named by a typed selector such as `fea.StructuralField.vonMises()` or `fea.OutputField.named(\"peak_stress\")`. `fea.field(resultsOrRun, selector, fea.Frequency.hertz(f))` selects the field at one frequency sample; `fea.field(resultsOrRun, selector, fea.Time.seconds(t))` or `fea.field(resultsOrRun, selector, k)` selects it at one retained transient time.",
     keywords: &["fea", "field", "stress", "displacement", "von Mises", "post-processing", "results"],
-    related: &["fea.results", "fea.fieldPage", "fea.StructuralField.vonMises", "fea.OutputField.named", "fea.Frequency.hertz", "fea.run"],
+    related: &["fea.results", "fea.fieldPage", "fea.StructuralField.vonMises", "fea.OutputField.named", "fea.Frequency.hertz", "fea.Time.seconds", "fea.run"],
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "The first argument is a `fea.Results`, a single-step `fea.RunResult`, a `fea.StepRunResult`, or a persisted run id. The second is a typed selector: a `fea.StructuralField`, `fea.ResponseSpectrumField`, `fea.RandomResponseField`, or `fea.OutputField` value. Field ids given as text are not accepted, so a misspelled quantity is caught when the selector is built.",
-            "The optional third argument is a `fea.Frequency` sample for frequency-domain results; it must be finite and positive.",
+            "The optional third argument selects a sample. A `fea.Frequency` (finite and positive) selects a frequency-domain sample. A `fea.Time` selects the retained transient state at that time; it matches a retained time to within one part in 10^9 of the run's time span, so times written in source match the times the integrator retained. A positive integer `k` selects the k-th retained transient state in time order. Structural displacement, rotation, strain, stress, von Mises stress, strain energy density, reaction force, and reaction moment have transient states.",
             "When the results already hold the selected field and no sample is given, the field is returned with its values in `values` and `materialized` set to `true`. Otherwise RunMat looks up the field in the run's artifacts and returns its descriptor with `materialized` set to `false`; read its values with `fea.fieldPage`. That lookup needs a run identity, so the input must be a run, a step run, a run id, or results that carry a `run_id`.",
             "A field reports `field_id`, `shape`, `unit`, `location` (lowercase, such as `node`, `element`, or `integrationpoint`), `kind`, `family`, `quantity`, `statistic`, topology and element metadata, `component_count`, `element_count`, `entity_count`, `value_count`, `storage`, `sample`, and `numeric_representation` (`real` or `complex`). Counts and shapes are exact integers. The field keeps the run id and study so it can be paged, plotted, or shown on its mesh.",
             "An exact field id wins; otherwise a unique dotted-suffix match is used.",
@@ -68,7 +68,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "Call `fea.field` on the output of `fea.run` or `fea.results`. Selectors come from the `fea.StructuralField.*`, `fea.ResponseSpectrumField.*`, and `fea.RandomResponseField.*` constructors, or from `fea.OutputField.named` for outputs a `.fea` study declares by name. Pass the field to `fea.fieldPage`, `plot(field)`, or `mesh(field)`.",
         ] },
         BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
-            "`RunMat:fea:InvalidInput` reports the wrong number of arguments, a text or unknown selector, a sample that is not a positive `fea.Frequency`, a multi-step run, or an artifact lookup without a run identity. `RunMat:fea:OperationFailed` reports a field that the run did not produce or artifacts that cannot be read.",
+            "`RunMat:fea:InvalidInput` reports the wrong number of arguments, a text or unknown selector, a sample that is not a positive `fea.Frequency`, a `fea.Time`, or a positive integer, a multi-step run, or an artifact lookup without a run identity. `RunMat:fea:OperationFailed` reports a field that the run did not produce or artifacts that cannot be read.",
         ] },
     ],
     examples: EXAMPLES,

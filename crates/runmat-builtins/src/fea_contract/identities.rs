@@ -37,6 +37,7 @@ pub const FEA_RANDOM_RESPONSE_FIELD_CLASS: StaticClassIdentity =
     StaticClassIdentity::new("fea.RandomResponseField");
 pub const FEA_OUTPUT_FIELD_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.OutputField");
 pub const FEA_FREQUENCY_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Frequency");
+pub const FEA_TIME_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Time");
 pub const GEOMETRY_ASSET_CLASS: StaticClassIdentity = StaticClassIdentity::new("geometry.Asset");
 pub const MESHING_MESH_CLASS: StaticClassIdentity = StaticClassIdentity::new("meshing.Mesh");
 

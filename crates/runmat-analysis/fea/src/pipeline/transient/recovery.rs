@@ -6,12 +6,10 @@ use crate::{
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
         fea_transient_angular_velocity_field_id, fea_transient_connector_force_field_id,
-        fea_transient_connector_stored_energy_field_id, fea_transient_displacement_field_id,
-        fea_transient_reaction_force_field_id, fea_transient_reaction_moment_field_id,
-        fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
-        fea_transient_strain_field_id, fea_transient_stress_field_id,
-        fea_transient_velocity_field_id, fea_transient_von_mises_field_id, FeaRunError,
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_ROTATION,
+        fea_transient_connector_stored_energy_field_id, fea_transient_snapshot_field_id,
+        fea_transient_velocity_field_id, FeaRunError, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+        FEA_FIELD_STRUCTURAL_ROTATION,
         FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
@@ -145,37 +143,37 @@ where
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            fea_transient_displacement_field_id(index),
+            index,
             &mut displacement_snapshots,
         );
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_ROTATION,
-            fea_transient_rotation_field_id(index),
+            index,
             &mut rotation_snapshots,
         );
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_STRAIN,
-            fea_transient_strain_field_id(index),
+            index,
             &mut strain_snapshots,
         );
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_STRESS,
-            fea_transient_stress_field_id(index),
+            index,
             &mut stress_snapshots,
         );
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_VON_MISES,
-            fea_transient_von_mises_field_id(index),
+            index,
             &mut von_mises_snapshots,
         );
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-            fea_transient_strain_energy_density_field_id(index),
+            index,
             &mut strain_energy_density_snapshots,
         );
         let projected_velocity =
@@ -249,7 +247,8 @@ where
             acceleration.translations,
         ));
         reaction_force_snapshots.push(AnalysisField::host_f64(
-            fea_transient_reaction_force_field_id(index),
+            fea_transient_snapshot_field_id(FEA_FIELD_STRUCTURAL_REACTION_FORCE, index)
+                .expect("reaction force has a transient snapshot family"),
             shape.clone(),
             reaction.translations,
         ));
@@ -260,7 +259,8 @@ where
                 acceleration.rotations,
             ));
             reaction_moment_snapshots.push(AnalysisField::host_f64(
-                fea_transient_reaction_moment_field_id(index),
+                fea_transient_snapshot_field_id(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, index)
+                    .expect("reaction moment has a transient snapshot family"),
                 shape,
                 reaction.rotations,
             ));
@@ -464,9 +464,11 @@ fn require_recovered_field_count(
 fn move_snapshot_field(
     fields: &mut Vec<AnalysisField>,
     source_id: &str,
-    snapshot_id: String,
+    index: usize,
     history: &mut Vec<AnalysisField>,
 ) {
+    let snapshot_id = fea_transient_snapshot_field_id(source_id, index)
+        .expect("every moved structural field has a transient snapshot family");
     if let Some(position) = fields
         .iter()
         .position(|field| field.field_id == source_id && !field.is_empty())
@@ -535,12 +537,15 @@ mod tests {
         move_snapshot_field(
             &mut fields,
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            fea_transient_displacement_field_id(2),
+            2,
             &mut history,
         );
         assert!(fields.is_empty());
         assert_eq!(history.len(), 1);
-        assert_eq!(history[0].field_id, fea_transient_displacement_field_id(2));
+        assert_eq!(
+            history[0].field_id,
+            crate::contracts::fea_transient_displacement_field_id(2)
+        );
         assert_eq!(history[0].as_host_f64().unwrap().as_ptr(), original_storage);
     }
 
