@@ -313,13 +313,7 @@ impl MatrixData {
                 let value = tensor
                     .numeric_value_at(idx)
                     .expect("index within authoritative numeric storage");
-                if let Some(value) = value.into_int_value() {
-                    return MatrixCell::Numeric(value.decimal_string());
-                }
-                MatrixCell::Numeric(format_numeric(
-                    value.materialize_f64(),
-                    options.decimal_separator,
-                ))
+                MatrixCell::Numeric(format_numeric(value, options.decimal_separator))
             }
             MatrixData::Text { rows, data, .. } => {
                 if *rows == 0 {

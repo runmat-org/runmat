@@ -415,3 +415,42 @@ fn writecell_rejects_unsupported_spreadsheet_extension() {
         .contains("unsupported spreadsheet file extension"));
     let _ = fs::remove_file(path);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn text_numeric_fields_keep_storage_precision_without_changing_xlsx_policy() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let path = temp_path("csv");
+    let single = 1.2345679_f32;
+    let value = cell(
+        vec![
+            Value::Num(1.693061224489796),
+            Value::Tensor(Tensor::from_f32(vec![single], vec![1, 1]).unwrap()),
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Bool(true),
+            Value::Num(-0.0),
+            Value::Tensor(Tensor::from_f32(vec![-0.0], vec![1, 1]).unwrap()),
+        ],
+        1,
+        6,
+    );
+    block_on(writecell_builtin(
+        value,
+        vec![Value::from(path.to_string_lossy().as_ref())],
+    ))
+    .expect("write class-aware text");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "1.6930612244898,1.234568,18446744073709551615,1,0,0\n"
+    );
+    let _ = fs::remove_file(path);
+
+    let single =
+        scalar_tensor_cell_value(&Tensor::from_f32(vec![single], vec![1, 1]).unwrap()).unwrap();
+    let mut xml = String::new();
+    append_sheet_cell_xml(&mut xml, "A1", &single);
+    assert!(
+        xml.contains("<v>1.234567880630493</v>"),
+        "XLSX retains its existing numeric encoding: {xml}"
+    );
+}

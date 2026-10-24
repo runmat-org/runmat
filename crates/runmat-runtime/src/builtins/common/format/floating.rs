@@ -125,3 +125,62 @@ fn normalize_exponent(text: String, uppercase: bool) -> String {
     };
     format!("{mantissa}{marker}{exponent:+03}")
 }
+
+/// Numeric text-file conversion retains the scalar's storage class until its
+/// general-format precision is selected. Integers never pass through a float.
+pub(crate) fn format_delimited_numeric(value: runmat_value::NumericScalar) -> String {
+    if let Some(integer) = value.into_int_value() {
+        return integer.decimal_string();
+    }
+    let significant = if matches!(value, runmat_value::NumericScalar::F32(_)) {
+        7
+    } else {
+        15
+    };
+    let value = value.materialize_f64();
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-Inf"
+        } else {
+            "Inf"
+        }
+        .to_string();
+    }
+    let mut body = format_general(value.abs(), significant, false, false);
+    if value.is_sign_negative() {
+        body.insert(0, '-');
+    }
+    body
+}
+
+#[cfg(test)]
+mod delimited_tests {
+    use super::*;
+    use runmat_value::NumericScalar::*;
+
+    #[test]
+    fn class_precision_rounding_carry_and_nonfinite_text_are_bounded() {
+        for (value, expected) in [
+            (F64(1.693061224489796), "1.6930612244898"),
+            (F32(1.2345679), "1.234568"),
+            (F64(1e-20), "1e-20"),
+            (F32(1e-8), "1e-08"),
+            (F64(1e20), "1e+20"),
+            (F64(9.999999999999996e14), "1e+15"),
+            (F64(0.00009999999999999996), "0.0001"),
+            (F32(9.999999e6), "9999999"),
+            (F64(-0.0), "-0"),
+            (F32(-0.0), "-0"),
+            (F64(f64::NAN), "NaN"),
+            (F64(f64::INFINITY), "Inf"),
+            (F32(f32::NEG_INFINITY), "-Inf"),
+            (I64(i64::MIN), "-9223372036854775808"),
+            (U64(u64::MAX), "18446744073709551615"),
+        ] {
+            assert_eq!(format_delimited_numeric(value), expected, "{value:?}");
+        }
+    }
+}

@@ -259,3 +259,32 @@ fn writematrix_accepts_gpu_tensor_inputs() {
         let _ = fs::remove_file(path);
     });
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn text_numeric_fields_use_original_single_and_double_storage() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    for (data, expected) in [
+        (
+            Tensor::new(vec![1.693061224489796, 1e-20, -0.0], vec![1, 3]).unwrap(),
+            "1.6930612244898,1e-20,0\n",
+        ),
+        (
+            Tensor::from_f32(vec![1.2345679, 1e-8, -0.0], vec![1, 3]).unwrap(),
+            "1.234568,1e-08,0\n",
+        ),
+    ] {
+        let path = temp_path("csv");
+        block_on(writematrix_builtin(
+            Value::Tensor(data),
+            vec![Value::from(path.to_string_lossy().as_ref())],
+        ))
+        .expect("write class-aware matrix text");
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        let _ = fs::remove_file(path);
+    }
+    assert_eq!(
+        format_numeric(runmat_value::NumericScalar::F32(1.2345679), ','),
+        "1,234568",
+    );
+}
