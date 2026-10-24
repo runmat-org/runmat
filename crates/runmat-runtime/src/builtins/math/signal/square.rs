@@ -277,7 +277,7 @@ async fn square_gpu(
         |value| square_scalar(value, duty),
         cooperation,
     )
-    .await
+    .await?
     .map(tensor_into_value)
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL))
 }
@@ -288,7 +288,7 @@ async fn square_real(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
-        .await
+        .await?
         .map_err(|error| {
             error.into_runtime_error(
                 BUILTIN_NAME,
@@ -302,7 +302,7 @@ async fn square_real(
         |sample| square_scalar(sample, duty),
         cooperation,
     )
-    .await
+    .await?
     .map(tensor_into_value)
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL))
 }

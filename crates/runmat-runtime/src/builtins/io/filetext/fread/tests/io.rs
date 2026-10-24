@@ -1,56 +1,5 @@
 use super::*;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn boxed_execution_failure_moves_original_error_and_retains_allocation_owner() {
-    use runmat_async::RetainedDiagnosticAllocation;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
-
-    #[derive(Debug)]
-    struct Lease(Arc<AtomicUsize>);
-    impl Drop for Lease {
-        fn drop(&mut self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    let drops = Arc::new(AtomicUsize::new(0));
-    let original = build_runtime_error("original read failure")
-        .with_identifier("RunMat:OriginalReadFailure")
-        .with_source(std::io::Error::from_raw_os_error(13))
-        .with_retained_diagnostic_allocation(RetainedDiagnosticAllocation::Owned(Box::new(Lease(
-            drops.clone(),
-        ))))
-        .build();
-    let message_allocation = original.message.as_ptr();
-    let failure = ReadFailure::from(original);
-    let source = std::error::Error::source(&failure)
-        .expect("runtime source")
-        .downcast_ref::<RuntimeError>()
-        .expect("exact runtime error, not a formatted wrapper");
-    assert_eq!(source.message.as_ptr(), message_allocation);
-    let ReadFailure::Execution(error) = failure else {
-        panic!("execution variant");
-    };
-    let restored = *error;
-    assert_eq!(restored.message.as_ptr(), message_allocation);
-    assert_eq!(restored.identifier(), Some("RunMat:OriginalReadFailure"));
-    assert_eq!(
-        std::error::Error::source(&restored)
-            .unwrap()
-            .downcast_ref::<std::io::Error>()
-            .unwrap()
-            .raw_os_error(),
-        Some(13),
-    );
-    assert_eq!(drops.load(Ordering::SeqCst), 0);
-    drop(restored);
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-}
-
 struct FailingBinaryRead;
 
 impl std::io::Read for FailingBinaryRead {
@@ -84,7 +33,7 @@ fn binary_read_failure_keeps_operational_source() {
     ))
     .unwrap_err();
     assert!(
-        matches!(&error, ReadFailure::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied)
+        matches!(std::error::Error::source(&error).and_then(|source| source.downcast_ref::<ReadFailure>()), Some(ReadFailure::Io { source, .. }) if source.kind() == std::io::ErrorKind::PermissionDenied)
     );
     assert!(std::error::Error::source(&error).is_some());
 }
@@ -131,10 +80,7 @@ fn binary_read_yield_cancellation_stops_before_next_byte() {
     ));
     cancellation.cancel(CancellationReason::User);
     let error = futures::executor::block_on(read).expect_err("cancelled read");
-    assert!(matches!(
-        error,
-        ReadFailure::Execution(ref error) if error.identifier() == Some("RunMat:Cancelled")
-    ));
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert_eq!(file.position(), 1, "later bytes were not read after yield");
 }
 

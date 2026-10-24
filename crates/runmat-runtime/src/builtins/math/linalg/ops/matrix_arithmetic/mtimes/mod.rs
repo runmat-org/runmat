@@ -33,6 +33,7 @@ async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     super::product::evaluate(lhs, rhs)
         .await
+        .map_err(errors::map_control_flow)?
         .map_err(errors::from_product)
 }
 
@@ -43,6 +44,7 @@ pub(crate) async fn mtimes_eval_in_context(
 ) -> BuiltinResult<Value> {
     super::product::evaluate_in_context(Some(context), lhs, rhs)
         .await
+        .map_err(errors::map_control_flow)?
         .map_err(errors::from_product)
 }
 

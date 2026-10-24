@@ -13,7 +13,7 @@ pub(super) async fn read_fixed_values<'a, T: FixedValue, R: Read + Seek>(
     endianness: Endianness,
     cooperation: &mut super::super::super::cooperation::FileCooperation,
     runtime: Option<&'a crate::context::RuntimeContext>,
-) -> Result<(StreamValues<'a, T>, usize, bool), ReadFailure> {
+) -> BuiltinResult<(StreamValues<'a, T>, usize, bool)> {
     let mut values = StreamValues::new(runtime)?;
     let mut count = 0usize;
     let mut eof = false;
@@ -29,37 +29,34 @@ pub(super) async fn read_fixed_values<'a, T: FixedValue, R: Read + Seek>(
                 }
                 Ok(read) => {
                     filled += read;
-                    cooperation
-                        .completed(read)
-                        .await
-                        .map_err(ReadFailure::from)?;
+                    cooperation.completed(read).await?;
                 }
                 Err(source) if source.kind() == ErrorKind::Interrupted => {
-                    cooperation.completed(1).await.map_err(ReadFailure::from)?;
+                    cooperation.completed(1).await?;
                 }
                 Err(source) => {
                     return Err(ReadFailure::Io {
                         operation: "failed to read from file",
                         source,
-                    })
+                    }
+                    .into())
                 }
             }
         }
-        values.push(T::decode(&buffer[..width], endianness)?)?;
+        values.push(T::decode(&buffer[..width], endianness).map_err(ReadFailure::Semantic)?)?;
         count += 1;
         if skip != 0 && count.is_multiple_of(repeat) {
             reader
-                .seek(SeekFrom::Current(i64::try_from(skip).map_err(|_| {
-                    "fread: skip exceeds the file cursor range".to_string()
-                })?))
+                .seek(SeekFrom::Current(
+                    i64::try_from(skip)
+                        .map_err(|_| "fread: skip exceeds the file cursor range".to_string())
+                        .map_err(ReadFailure::Semantic)?,
+                ))
                 .map_err(|source| ReadFailure::Io {
                     operation: "failed to skip bytes",
                     source,
                 })?;
-            cooperation
-                .completed(skip)
-                .await
-                .map_err(ReadFailure::from)?;
+            cooperation.completed(skip).await?;
         }
     }
     Ok((values, count, eof))
@@ -74,7 +71,7 @@ pub(super) async fn read_fixed_source<T: FixedValue>(
     cooperation: &mut super::super::super::cooperation::FileCooperation,
     runtime: Option<&crate::context::RuntimeContext>,
     projection: presentation::Projection<'_>,
-) -> Result<(FreadEval, bool), ReadFailure> {
+) -> BuiltinResult<(FreadEval, bool)> {
     let (values, count, eof) = read_fixed_values::<T, _>(
         file,
         precision.repeat,

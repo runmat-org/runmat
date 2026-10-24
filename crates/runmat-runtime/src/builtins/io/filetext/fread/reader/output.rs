@@ -14,7 +14,12 @@ use workspace::{allocation, StreamValues};
 
 const OUTPUT_FILL_CHUNK: usize = 4096;
 
-fn geometry(size: &SizeSpec, count: usize) -> Result<(usize, usize, usize), ReadFailure> {
+fn geometry(
+    runtime: Option<&crate::context::RuntimeContext>,
+    size: &SizeSpec,
+    count: usize,
+) -> BuiltinResult<(usize, usize, usize)> {
+    let allocation = |source| allocation(runtime, source);
     let (rows, columns) = match size {
         SizeSpec::All | SizeSpec::Count(_) => (count, 1),
         SizeSpec::Matrix {
@@ -31,7 +36,11 @@ fn geometry(size: &SizeSpec, count: usize) -> Result<(usize, usize, usize), Read
     Ok((rows, columns, count))
 }
 
-fn character_plan(count: usize) -> Result<u64, ReadFailure> {
+fn character_plan(
+    runtime: Option<&crate::context::RuntimeContext>,
+    count: usize,
+) -> BuiltinResult<u64> {
+    let allocation = |source| allocation(runtime, source);
     let payload = ExactArrayStorage::<runmat_value::Utf16CodeUnit>::requested_bytes(count)
         .map_err(|source| allocation(HostAllocationError::Numeric(source)))?;
     let dimensions = SharedShape::requested_bytes_for_rank(2)
@@ -44,9 +53,15 @@ fn character_plan(count: usize) -> Result<u64, ReadFailure> {
         .map_err(allocation)
 }
 
-fn output_plan(destination: Destination, shape: &[usize; 2]) -> Result<u64, ReadFailure> {
+fn output_plan(
+    runtime: Option<&crate::context::RuntimeContext>,
+    destination: Destination,
+    shape: &[usize; 2],
+) -> BuiltinResult<u64> {
+    let allocation = |source| allocation(runtime, source);
     match destination {
         Destination::Character => character_plan(
+            runtime,
             shape[0]
                 .checked_mul(shape[1])
                 .ok_or_else(|| allocation(HostAllocationError::Overflow))?,
@@ -65,12 +80,11 @@ async fn checkpoint<T: Copy>(
     values: &StreamValues<'_, T>,
     receipt: Option<&HostAllocationReceipt>,
     completed: usize,
-) -> Result<(), ReadFailure> {
+) -> BuiltinResult<()> {
+    let runtime = values.runtime();
+    let allocation = |source| allocation(runtime, source);
     if completed != 0 {
-        cooperation
-            .completed(completed)
-            .await
-            .map_err(ReadFailure::from)?;
+        cooperation.completed(completed).await?;
     }
     values.check()?;
     if let Some(receipt) = receipt {
@@ -86,14 +100,15 @@ pub(super) async fn finish<T: ReadValue>(
     size: &SizeSpec,
     projection: Projection<'_>,
     cooperation: &mut FileCooperation,
-) -> Result<Value, ReadFailure> {
-    let (rows, columns, _) = geometry(size, values.values().len())?;
+) -> BuiltinResult<Value> {
+    let runtime = values.runtime();
+    let allocation = |source| allocation(runtime, source);
+    let (rows, columns, _) = geometry(runtime, size, values.values().len())?;
     let shape = [rows, columns];
     values.check()?;
-    let runtime = values.runtime();
     let receipt = HostAllocationReceipt::admit(
         runtime,
-        HostAllocationPlan::new(0, output_plan(projection.destination, &shape)?)
+        HostAllocationPlan::new(0, output_plan(runtime, projection.destination, &shape)?)
             .map_err(allocation)?,
     )
     .map_err(allocation)?;
@@ -116,7 +131,9 @@ async fn finish_character<T: ReadValue>(
     projection: Projection<'_>,
     receipt: Option<HostAllocationReceipt>,
     cooperation: &mut FileCooperation,
-) -> Result<Value, ReadFailure> {
+) -> BuiltinResult<Value> {
+    let runtime = values.runtime();
+    let allocation = |source| allocation(runtime, source);
     let [rows, columns] = shape;
     let count = rows
         .checked_mul(columns)
@@ -136,12 +153,10 @@ async fn finish_character<T: ReadValue>(
     let mut ordinary = Vec::new();
     if managed.is_none() {
         ordinary.try_reserve_exact(count).map_err(|source| {
-            ReadFailure::from(
-                build_runtime_error("fread: character output allocation failed")
-                    .with_builtin(BUILTIN_NAME)
-                    .with_source(source)
-                    .build(),
-            )
+            build_runtime_error("fread: character output allocation failed")
+                .with_builtin(BUILTIN_NAME)
+                .with_source(source)
+                .build()
         })?;
     }
     let mut pending = 0usize;
@@ -156,12 +171,15 @@ async fn finish_character<T: ReadValue>(
             .get(source)
             .copied()
             .map(|value| projection.character(value))
-            .transpose()?
+            .transpose()
+            .map_err(ReadFailure::Semantic)?
             .unwrap_or(runmat_value::Utf16CodeUnit::from_raw(0));
         if let Some(managed) = &mut managed {
-            managed
-                .try_push(value)
-                .map_err(|_| "fread: character output exceeds admitted geometry".to_string())?;
+            managed.try_push(value).map_err(|_| {
+                ReadFailure::Semantic(
+                    "fread: character output exceeds admitted geometry".to_string(),
+                )
+            })?;
         } else {
             ordinary.push(value);
         }
@@ -187,7 +205,7 @@ async fn finish_character<T: ReadValue>(
     };
     array
         .map(Value::CharArray)
-        .map_err(|detail| format!("fread: {detail}").into())
+        .map_err(|detail| ReadFailure::Semantic(format!("fread: {detail}")).into())
 }
 
 async fn finish_numeric<T: ReadValue>(
@@ -197,7 +215,9 @@ async fn finish_numeric<T: ReadValue>(
     dtype: NumericDType,
     receipt: Option<HostAllocationReceipt>,
     cooperation: &mut FileCooperation,
-) -> Result<Value, ReadFailure> {
+) -> BuiltinResult<Value> {
+    let runtime = values.runtime();
+    let allocation = |source| allocation(runtime, source);
     let count = shape[0]
         .checked_mul(shape[1])
         .ok_or_else(|| allocation(HostAllocationError::Overflow))?;
@@ -231,12 +251,15 @@ async fn finish_numeric<T: ReadValue>(
             .map(|value| projection.numeric(value, dtype))
             .unwrap_or_else(|| projection.numeric(0_u8, dtype));
         if let Some(managed) = &mut managed {
-            managed.set_value(index, scalar)?;
+            managed
+                .set_value(index, scalar)
+                .map_err(ReadFailure::Semantic)?;
         } else {
             ordinary
                 .as_mut()
                 .expect("ordinary output")
-                .set_value(index, scalar)?;
+                .set_value(index, scalar)
+                .map_err(ReadFailure::Semantic)?;
         }
         pending += 1;
         if pending == OUTPUT_FILL_CHUNK {
@@ -251,7 +274,7 @@ async fn finish_numeric<T: ReadValue>(
             .map_err(|source| allocation(HostAllocationError::Numeric(source)))?
     } else {
         Tensor::from_numeric_storage(ordinary.expect("ordinary output"), shape.to_vec())
-            .map_err(|detail| format!("fread: {detail}"))?
+            .map_err(|detail| ReadFailure::Semantic(format!("fread: {detail}")))?
     };
     Ok(Value::Tensor(tensor))
 }
@@ -262,7 +285,9 @@ async fn finish_logical<T: ReadValue>(
     projection: Projection<'_>,
     receipt: Option<HostAllocationReceipt>,
     cooperation: &mut FileCooperation,
-) -> Result<Value, ReadFailure> {
+) -> BuiltinResult<Value> {
+    let runtime = values.runtime();
+    let allocation = |source| allocation(runtime, source);
     let count = shape[0]
         .checked_mul(shape[1])
         .ok_or_else(|| allocation(HostAllocationError::Overflow))?;
@@ -281,12 +306,10 @@ async fn finish_logical<T: ReadValue>(
     let mut ordinary = if managed.is_none() {
         let mut bits = Vec::new();
         bits.try_reserve_exact(count).map_err(|source| {
-            ReadFailure::from(
-                build_runtime_error("fread: logical output allocation failed")
-                    .with_builtin(BUILTIN_NAME)
-                    .with_source(source)
-                    .build(),
-            )
+            build_runtime_error("fread: logical output allocation failed")
+                .with_builtin(BUILTIN_NAME)
+                .with_source(source)
+                .build()
         })?;
         bits.resize(count, 0);
         Some(bits)
@@ -300,7 +323,8 @@ async fn finish_logical<T: ReadValue>(
             .get(index)
             .copied()
             .map(|value| projection.logical(value))
-            .transpose()?
+            .transpose()
+            .map_err(ReadFailure::Semantic)?
             .unwrap_or(0);
         if let Some(managed) = &mut managed {
             managed.as_mut_slice()[index] = value;
@@ -320,7 +344,7 @@ async fn finish_logical<T: ReadValue>(
             .map_err(|source| allocation(HostAllocationError::Numeric(source)))?
     } else {
         LogicalArray::new(ordinary.expect("ordinary output"), shape.to_vec())
-            .map_err(|detail| format!("fread: {detail}"))?
+            .map_err(|detail| ReadFailure::Semantic(format!("fread: {detail}")))?
     };
     Ok(Value::LogicalArray(array))
 }

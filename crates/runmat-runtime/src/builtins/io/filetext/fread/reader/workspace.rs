@@ -19,19 +19,25 @@ pub(super) struct StreamValues<'a, T: Copy> {
     checkpoint: Option<HostAllocationCheckpoint>,
 }
 
-pub(super) fn allocation(source: HostAllocationError) -> ReadFailure {
-    let mut builder =
-        build_runtime_error(format!("fread: input storage allocation failed: {source}"))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(source);
-    if let Some(identifier) = FREAD_ERROR_IO.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    ReadFailure::from(builder.build())
+pub(super) fn allocation(
+    runtime: Option<&RuntimeContext>,
+    source: HostAllocationError,
+) -> RuntimeError {
+    let mut error = crate::context::host_allocation::host_allocation_runtime_error(
+        runtime,
+        FREAD_ERROR_IO
+            .identifier
+            .expect("fread I/O descriptor has an identifier"),
+        format!("fread: input storage allocation failed: {source}"),
+        source,
+    );
+    error.context.builtin = Some(BUILTIN_NAME.to_string());
+    error
 }
 
 impl<'a, T: Copy> StreamValues<'a, T> {
-    pub(super) fn new(runtime: Option<&'a RuntimeContext>) -> Result<Self, ReadFailure> {
+    pub(super) fn new(runtime: Option<&'a RuntimeContext>) -> BuiltinResult<Self> {
+        let allocation = |source| allocation(runtime, source);
         let checkpoint = HostAllocationReceipt::capture_owner(runtime).map_err(allocation)?;
         let gate = if checkpoint.is_some() {
             let runtime = runtime.expect("managed stream has runtime");
@@ -61,7 +67,8 @@ impl<'a, T: Copy> StreamValues<'a, T> {
     pub(super) fn values(&self) -> &[T] {
         &self.values
     }
-    pub(super) fn check(&self) -> Result<(), ReadFailure> {
+    pub(super) fn check(&self) -> BuiltinResult<()> {
+        let allocation = |source| allocation(self.runtime, source);
         if let Some(checkpoint) = &self.checkpoint {
             checkpoint
                 .check(self.runtime.expect("managed stream has runtime"))
@@ -74,7 +81,9 @@ impl<'a, T: Copy> StreamValues<'a, T> {
         Ok(())
     }
 
-    pub(super) fn reserve_next(&mut self) -> Result<(), ReadFailure> {
+    pub(super) fn reserve_next(&mut self) -> BuiltinResult<()> {
+        let runtime = self.runtime;
+        let allocation = |source| allocation(runtime, source);
         self.check()?;
         if self.values.len() == self.values.capacity() {
             let capacity = self
@@ -114,7 +123,7 @@ impl<'a, T: Copy> StreamValues<'a, T> {
         Ok(())
     }
 
-    pub(super) fn push(&mut self, unit: T) -> Result<(), ReadFailure> {
+    pub(super) fn push(&mut self, unit: T) -> BuiltinResult<()> {
         self.reserve_next()?;
         self.values.push(unit);
         Ok(())

@@ -359,6 +359,6 @@ pub(super) async fn default_window(
         ((input_len / 9) * 2 + ((input_len % 9) * 2) / 9).clamp(1, DEFAULT_NFFT_MIN)
     };
     symmetric_window_values(section_len, hamming_coefficient, cooperation)
-        .await
+        .await?
         .map_err(pwelch_window_generation_error)
 }

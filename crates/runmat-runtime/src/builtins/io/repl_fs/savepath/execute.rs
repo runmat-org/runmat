@@ -9,12 +9,11 @@ pub(super) async fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinRe
 pub(super) async fn evaluate(
     request: super::input::Request,
 ) -> crate::BuiltinResult<super::result::Outcome> {
-    let target = match super::target::resolve(request.filename.as_deref()).await {
+    let target = match super::target::resolve(request.filename.as_deref()).await? {
         Ok(target) => target,
-        Err(super::target::ResolveError::Status(failure)) => {
+        Err(failure) => {
             return Ok(super::result::Outcome::failure(failure));
         }
-        Err(super::target::ResolveError::Compatibility(error)) => return Err(*error),
     };
     let path = crate::builtins::common::path_state::current_path_string();
     let contents = super::contents::build(&path);

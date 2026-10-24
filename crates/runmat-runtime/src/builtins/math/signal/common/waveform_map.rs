@@ -20,14 +20,7 @@ pub(crate) enum WaveformOutputMode {
 pub(crate) enum WaveformMapError {
     Storage(String),
     Allocation(std::collections::TryReserveError),
-    Execution(Box<RuntimeError>),
     Tensor(String),
-}
-
-impl From<RuntimeError> for WaveformMapError {
-    fn from(error: RuntimeError) -> Self {
-        Self::Execution(Box::new(error))
-    }
 }
 
 impl WaveformMapError {
@@ -37,7 +30,6 @@ impl WaveformMapError {
         descriptor: &'static BuiltinErrorDescriptor,
     ) -> RuntimeError {
         let detail = match self {
-            Self::Execution(error) => return *error,
             Self::Storage(detail) | Self::Tensor(detail) => detail,
             Self::Allocation(cause) => {
                 let mut builder = build_runtime_error(format!("{}: {cause}", descriptor.message))
@@ -62,32 +54,40 @@ impl WaveformMapError {
     }
 }
 
+macro_rules! waveform_try {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(error) => return Ok(Err(error)),
+        }
+    };
+}
+
 pub(crate) async fn map_real_waveform(
     tensor: Tensor,
     mode: WaveformOutputMode,
     evaluate: impl Fn(f64) -> f64,
     cooperation: &mut SignalCooperation,
-) -> Result<Tensor, WaveformMapError> {
-    cooperation
-        .completed(0)
-        .await
-        .map_err(WaveformMapError::from)?;
+) -> crate::BuiltinResult<Result<Tensor, WaveformMapError>> {
+    cooperation.completed(0).await?;
     let shape = tensor.shape().to_vec();
-    let storage = tensor
+    let storage = waveform_try!(tensor
         .into_numeric_storage()
-        .map_err(WaveformMapError::Storage)?;
+        .map_err(WaveformMapError::Storage));
     let output = match (storage, mode) {
-        (NumericStorage::F32(values), WaveformOutputMode::PreserveSingle) => NumericStorage::F32(
-            map_values(
-                values,
-                |value| f64::from(value),
-                &evaluate,
-                |value| value as f32,
-                cooperation,
-            )
-            .await?,
-        ),
-        (NumericStorage::F64(values), _) => NumericStorage::F64(
+        (NumericStorage::F32(values), WaveformOutputMode::PreserveSingle) => {
+            NumericStorage::F32(waveform_try!(
+                map_values(
+                    values,
+                    |value| f64::from(value),
+                    &evaluate,
+                    |value| value as f32,
+                    cooperation,
+                )
+                .await?
+            ))
+        }
+        (NumericStorage::F64(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 std::convert::identity,
@@ -95,29 +95,21 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::F32(values), WaveformOutputMode::Double) => NumericStorage::F64(
-            map_values(
-                values,
-                |value| f64::from(value),
-                &evaluate,
-                std::convert::identity,
-                cooperation,
-            )
-            .await?,
-        ),
-        (NumericStorage::I8(values), _) => NumericStorage::F64(
-            map_values(
-                values,
-                |value| f64::from(value),
-                &evaluate,
-                std::convert::identity,
-                cooperation,
-            )
-            .await?,
-        ),
-        (NumericStorage::I16(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::F32(values), WaveformOutputMode::Double) => {
+            NumericStorage::F64(waveform_try!(
+                map_values(
+                    values,
+                    |value| f64::from(value),
+                    &evaluate,
+                    std::convert::identity,
+                    cooperation,
+                )
+                .await?
+            ))
+        }
+        (NumericStorage::I8(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| f64::from(value),
@@ -125,9 +117,9 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::I32(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::I16(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| f64::from(value),
@@ -135,9 +127,19 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::I64(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::I32(values), _) => NumericStorage::F64(waveform_try!(
+            map_values(
+                values,
+                |value| f64::from(value),
+                &evaluate,
+                std::convert::identity,
+                cooperation,
+            )
+            .await?
+        )),
+        (NumericStorage::I64(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| value as f64,
@@ -145,9 +147,9 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::U8(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::U8(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| f64::from(value),
@@ -155,9 +157,9 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::U16(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::U16(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| f64::from(value),
@@ -165,9 +167,9 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::U32(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::U32(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| f64::from(value),
@@ -175,9 +177,9 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        (NumericStorage::U64(values), _) => NumericStorage::F64(
+            .await?
+        )),
+        (NumericStorage::U64(values), _) => NumericStorage::F64(waveform_try!(
             map_values(
                 values,
                 |value| value as f64,
@@ -185,11 +187,11 @@ pub(crate) async fn map_real_waveform(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
+            .await?
+        )),
     };
-    Tensor::from_numeric_storage(output, shape)
-        .map_err(|error| WaveformMapError::Tensor(error.to_string()))
+    Ok(Tensor::from_numeric_storage(output, shape)
+        .map_err(|error| WaveformMapError::Tensor(error.to_string())))
 }
 
 async fn map_values<Input: Copy, Output>(
@@ -198,21 +200,18 @@ async fn map_values<Input: Copy, Output>(
     evaluate: &impl Fn(f64) -> f64,
     cast: impl Fn(f64) -> Output,
     cooperation: &mut SignalCooperation,
-) -> Result<Vec<Output>, WaveformMapError> {
+) -> crate::BuiltinResult<Result<Vec<Output>, WaveformMapError>> {
     let mut output = Vec::new();
-    output
+    waveform_try!(output
         .try_reserve_exact(values.len())
-        .map_err(WaveformMapError::Allocation)?;
+        .map_err(WaveformMapError::Allocation));
     for chunk in values.chunks(MAP_CHUNK) {
         for &value in chunk {
             output.push(cast(evaluate(to_double(value))));
         }
-        cooperation
-            .completed(chunk.len() as u64)
-            .await
-            .map_err(WaveformMapError::from)?;
+        cooperation.completed(chunk.len() as u64).await?;
     }
-    Ok(output)
+    Ok(Ok(output))
 }
 
 #[cfg(test)]

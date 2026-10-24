@@ -425,7 +425,7 @@ pub(super) async fn parse_window(
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
             return symmetric_window_values(len, hamming_coefficient, cooperation)
-                .await
+                .await?
                 .map_err(pwelch_window_generation_error);
         }
         Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
@@ -439,7 +439,7 @@ pub(super) async fn parse_window(
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
             return symmetric_window_values(len, hamming_coefficient, cooperation)
-                .await
+                .await?
                 .map_err(pwelch_window_generation_error);
         }
         _ => {}

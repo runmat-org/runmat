@@ -279,7 +279,7 @@ async fn sawtooth_gpu(
         |value| sawtooth_scalar(value, xmax),
         cooperation,
     )
-    .await
+    .await?
     .map(tensor_into_value)
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL))
 }
@@ -290,7 +290,7 @@ async fn sawtooth_real(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
-        .await
+        .await?
         .map_err(|error| {
             error.into_runtime_error(
                 BUILTIN_NAME,
@@ -304,7 +304,7 @@ async fn sawtooth_real(
         |sample| sawtooth_scalar(sample, xmax),
         cooperation,
     )
-    .await
+    .await?
     .map(tensor_into_value)
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL))
 }

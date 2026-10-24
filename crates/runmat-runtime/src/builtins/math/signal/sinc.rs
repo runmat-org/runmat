@@ -301,7 +301,7 @@ async fn sinc_gpu_host_fallback(
 
 async fn sinc_real(value: Value, cooperation: &mut SignalCooperation) -> BuiltinResult<Value> {
     let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
-        .await
+        .await?
         .map_err(|error| {
             error.into_runtime_error(
                 BUILTIN_NAME,
@@ -324,7 +324,7 @@ async fn sinc_tensor_mode(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Tensor> {
     map_real_waveform(tensor, output_mode, sinc_real_value, cooperation)
-        .await
+        .await?
         .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL))
 }
 

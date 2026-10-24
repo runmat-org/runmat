@@ -3,14 +3,10 @@
 pub(crate) enum ProductError {
     InvalidInput(String),
     Internal(String),
-    Runtime(Box<crate::RuntimeError>),
 }
 pub(super) fn invalid_input(message: impl Into<String>) -> ProductError {
     ProductError::InvalidInput(message.into())
 }
 pub(super) fn internal(message: impl Into<String>) -> ProductError {
     ProductError::Internal(message.into())
-}
-pub(super) fn map_control_flow(error: crate::RuntimeError) -> ProductError {
-    ProductError::Runtime(Box::new(error))
 }

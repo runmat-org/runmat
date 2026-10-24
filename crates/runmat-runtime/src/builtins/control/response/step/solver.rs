@@ -13,7 +13,7 @@ pub(crate) fn evaluate_step(
     model: &RealTfModel,
     time: TimeSpec,
     caller: StepSimulationCaller,
-) -> SimulationResult<StepResponse> {
+) -> BuiltinResult<StepResponse> {
     if model.sample_time() > 0.0 {
         evaluate_discrete_step(model, time, caller)
     } else {
@@ -25,12 +25,11 @@ fn evaluate_continuous_step(
     model: &RealTfModel,
     time: TimeSpec,
     caller: StepSimulationCaller,
-) -> SimulationResult<StepResponse> {
+) -> BuiltinResult<StepResponse> {
     let t = continuous_time_vector(model, time, caller)?;
-    let (num, den) = model
-        .normalized(caller.name())
-        .map_err(SimulationError::from)?;
-    let response = continuous_response(&num, &den, &t)?;
+    let (num, den) = model.normalized(caller.name())?;
+    let response =
+        continuous_response(&num, &den, &t).map_err(|error| error.into_runtime(caller))?;
     Ok(StepResponse { y: response, t })
 }
 
@@ -38,7 +37,7 @@ fn continuous_time_vector(
     model: &RealTfModel,
     time: TimeSpec,
     caller: StepSimulationCaller,
-) -> SimulationResult<Vec<f64>> {
+) -> BuiltinResult<Vec<f64>> {
     match time {
         TimeSpec::Auto => Ok(linspace(
             0.0,
@@ -132,29 +131,33 @@ fn evaluate_discrete_step(
     model: &RealTfModel,
     time: TimeSpec,
     caller: StepSimulationCaller,
-) -> SimulationResult<StepResponse> {
-    let t = discrete_time_vector(model.sample_time(), time)?;
+) -> BuiltinResult<StepResponse> {
+    let t = discrete_time_vector(model.sample_time(), time)
+        .map_err(|error| error.into_runtime(caller))?;
     if t.len() > MAX_DISCRETE_SAMPLES {
         return Err(simulation_error(
             SimulationErrorKind::DiscreteLimit,
             format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
-        ));
+        )
+        .into_runtime(caller));
     }
     let sample_indices = t
         .iter()
         .map(|&value| checked_discrete_sample_index(model.sample_time(), value))
-        .collect::<SimulationResult<Vec<_>>>()?;
+        .collect::<SimulationResult<Vec<_>>>()
+        .map_err(|error| error.into_runtime(caller))?;
     let max_k = sample_indices.iter().copied().max().unwrap_or(0);
-    let count = max_k.checked_add(1).ok_or_else(|| {
-        simulation_error(
-            SimulationErrorKind::DiscreteLimit,
-            "discrete sample index exceeds platform limits",
-        )
-    })?;
-    let (num, den) = model
-        .normalized(caller.name())
-        .map_err(SimulationError::from)?;
-    let all_y = discrete_response(&num, &den, count)?;
+    let count = max_k
+        .checked_add(1)
+        .ok_or_else(|| {
+            simulation_error(
+                SimulationErrorKind::DiscreteLimit,
+                "discrete sample index exceeds platform limits",
+            )
+        })
+        .map_err(|error| error.into_runtime(caller))?;
+    let (num, den) = model.normalized(caller.name())?;
+    let all_y = discrete_response(&num, &den, count).map_err(|error| error.into_runtime(caller))?;
     let y = sample_indices
         .into_iter()
         .map(|idx| {
@@ -165,7 +168,8 @@ fn evaluate_discrete_step(
                 )
             })
         })
-        .collect::<SimulationResult<Vec<_>>>()?;
+        .collect::<SimulationResult<Vec<_>>>()
+        .map_err(|error| error.into_runtime(caller))?;
     Ok(StepResponse { y, t })
 }
 
@@ -238,14 +242,9 @@ fn discrete_response(num: &[f64], den: &[f64], count: usize) -> SimulationResult
     Ok(y)
 }
 
-fn automatic_final_time(
-    model: &RealTfModel,
-    caller: StepSimulationCaller,
-) -> SimulationResult<f64> {
-    let (_, den) = model
-        .normalized(caller.name())
-        .map_err(SimulationError::from)?;
-    let poles = polynomial_roots(&den)?;
+fn automatic_final_time(model: &RealTfModel, caller: StepSimulationCaller) -> BuiltinResult<f64> {
+    let (_, den) = model.normalized(caller.name())?;
+    let poles = polynomial_roots(&den).map_err(|error| error.into_runtime(caller))?;
     let slowest_decay = poles
         .iter()
         .filter_map(|pole| if pole.re < -EPS { Some(-pole.re) } else { None })

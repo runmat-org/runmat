@@ -39,6 +39,7 @@ fn forced_turn_preserves_coefficient_values_and_count() {
         |idx, _| idx as f64 / 3.0,
         &mut SignalCooperation::new(None, "hann"),
     ))
+    .unwrap()
     .unwrap();
     let source = CancellationSource::new();
     let turns = Rc::new(Cell::new(0));
@@ -56,6 +57,7 @@ fn forced_turn_preserves_coefficient_values_and_count() {
         |idx, _| idx as f64 / 3.0,
         &mut SignalCooperation::with_budget(budget, "hann"),
     ))
+    .unwrap()
     .unwrap();
     let (Value::Tensor(expected), Value::Tensor(actual)) = (expected, actual) else {
         panic!("expected host tensors");
@@ -85,6 +87,7 @@ fn single_window_uses_the_same_f64_coefficient_formula_before_native_cast() {
         |idx, total| idx as f64 / total as f64,
         &mut SignalCooperation::with_budget(budget, "hann"),
     ))
+    .unwrap()
     .unwrap();
     let Value::Tensor(output) = output else {
         panic!("expected native single tensor");
@@ -129,7 +132,7 @@ fn pending_turn_cancellation_and_abandonment_do_not_publish_output() {
         if cancel {
             source.cancel(CancellationReason::User);
             let result = work.as_mut().poll(&mut context);
-            let Poll::Ready(Err(WindowArgError::Execution(error))) = result else {
+            let Poll::Ready(Err(error)) = result else {
                 panic!("cancelled work must not publish a window");
             };
             assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -162,9 +165,6 @@ fn service_failure_retains_owning_source() {
         &mut SignalCooperation::with_budget(budget, "hamming"),
     ))
     .unwrap_err();
-    let WindowArgError::Execution(error) = error else {
-        panic!("expected execution error");
-    };
     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
     assert_eq!(error.context.builtin.as_deref(), Some("hamming"));
     assert!(matches!(

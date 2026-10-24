@@ -14,27 +14,24 @@ pub(super) fn contains(value: &Value) -> bool {
     }
 }
 
-pub(super) async fn evaluate(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+pub(super) async fn evaluate(
+    lhs: &Value,
+    rhs: &Value,
+) -> crate::BuiltinResult<BuiltinResult<Value>> {
     let restore_source = gpu_helpers::select_resident_output_source(
         [lhs, rhs].into_iter().filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
             _ => None,
         }),
         NAME,
-    )
-    .map_err(errors::map_control_flow)?;
-    let lhs = crate::dispatcher::gather_if_needed_async(lhs)
-        .await
-        .map_err(errors::map_control_flow)?;
-    let rhs = crate::dispatcher::gather_if_needed_async(rhs)
-        .await
-        .map_err(errors::map_control_flow)?;
-    let result = host::evaluate(lhs, rhs).await?;
+    )?;
+    let lhs = crate::dispatcher::gather_if_needed_async(lhs).await?;
+    let rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
+    let result = product_try!(host::evaluate(lhs, rhs).await?);
     let Some(source) = restore_source else {
-        return Ok(result);
+        return Ok(Ok(result));
     };
-    let owner = gpu_helpers::exact_provider_for_handle(&source)
-        .ok_or_else(|| errors::internal("mtimes: resident input owner was lost"))?;
-    provider_restore::upload_value_like(owner, result, NAME, &source)
-        .map_err(errors::map_control_flow)
+    let owner = product_try!(gpu_helpers::exact_provider_for_handle(&source)
+        .ok_or_else(|| errors::internal("mtimes: resident input owner was lost")));
+    provider_restore::upload_value_like(owner, result, NAME, &source).map(Ok)
 }
