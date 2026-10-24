@@ -9,11 +9,49 @@ use runmat_runtime::context::{RuntimePlacementService, RuntimeWholeWorkSelection
 use std::cell::RefCell;
 
 #[cfg(not(target_arch = "wasm32"))]
-struct ControlledReadyPlacement {
+pub(crate) struct ControlledReadyPlacement {
     actual: Rc<runmat_accelerate::placement::PlacementSession>,
     winner: runmat_execution::ExecutionCandidateKind,
     offered: RefCell<Vec<Vec<runmat_execution::ExecutionCandidateKind>>>,
     chosen: RefCell<Vec<runmat_execution::ExecutionCandidateKind>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ControlledReadyPlacement {
+    pub(crate) fn chosen_kinds(&self) -> Vec<runmat_execution::ExecutionCandidateKind> {
+        self.chosen.borrow().clone()
+    }
+
+    fn install(
+        session: &mut RunMatSession,
+        winner: runmat_execution::ExecutionCandidateKind,
+    ) -> Rc<Self> {
+        let service = Rc::new(Self {
+            actual: session.placement_session.clone(),
+            winner,
+            offered: RefCell::new(Vec::new()),
+            chosen: RefCell::new(Vec::new()),
+        });
+        let ports = session
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_placement(service.clone());
+        session.runtime_context = session.runtime_context.clone().with_service_ports(ports);
+        service
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl RunMatSession {
+    pub(crate) fn use_specialized_ready_route_for_testing(
+        &mut self,
+    ) -> Rc<ControlledReadyPlacement> {
+        ControlledReadyPlacement::install(
+            self,
+            runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu,
+        )
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -30,7 +68,19 @@ impl RuntimePlacementService for ControlledReadyPlacement {
         &self,
         mut request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
-        if request.signature.operation == "core.ready-invocation" {
+        let ready_invocation = request.signature.region.is_none()
+            && request.candidates.iter().any(|item| {
+                item.kind == runmat_execution::ExecutionCandidateKind::GenericNativeCpu
+            })
+            && request.candidates.iter().all(|item| {
+                matches!(
+                    item.kind,
+                    runmat_execution::ExecutionCandidateKind::SharedRuntime
+                        | runmat_execution::ExecutionCandidateKind::GenericNativeCpu
+                        | runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu
+                )
+            });
+        if ready_invocation {
             self.offered
                 .borrow_mut()
                 .push(request.candidates.iter().map(|item| item.kind).collect());
@@ -56,7 +106,7 @@ impl RuntimePlacementService for ControlledReadyPlacement {
         // A selected specialized invocation can itself run a numerical-region
         // comparison (including OriginalNativeRegion). That is a different
         // decision domain, not another complete-call ready alternative.
-        if selected.decision.signature.operation == "core.ready-invocation" {
+        if ready_invocation {
             self.chosen
                 .borrow_mut()
                 .push(selected.decision.selected.kind);
@@ -68,10 +118,15 @@ impl RuntimePlacementService for ControlledReadyPlacement {
     // them and make the deterministic winner depend on machine noise.
     fn observe_selected_whole_work(
         &self,
-        _: &RuntimeWholeWorkSelection,
-        _: u64,
-        _: WholeWorkObservationOutcome,
+        selected: &RuntimeWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: WholeWorkObservationOutcome,
     ) -> Result<(), RuntimeError> {
+        if selected.decision.signature.region.is_some() {
+            return self
+                .actual
+                .observe_selected_whole_work(selected, elapsed_ns, outcome);
+        }
         Ok(())
     }
     fn plan(&self, request: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
@@ -109,18 +164,7 @@ fn controlled_ready_routes(
         None,
     ))
     .expect("compile all-ready fixture");
-    let service = Rc::new(ControlledReadyPlacement {
-        actual: session.placement_session.clone(),
-        winner,
-        offered: RefCell::new(Vec::new()),
-        chosen: RefCell::new(Vec::new()),
-    });
-    let ports = session
-        .runtime_context
-        .service_ports()
-        .clone()
-        .with_placement(service.clone());
-    session.runtime_context = session.runtime_context.clone().with_service_ports(ports);
+    let service = ControlledReadyPlacement::install(&mut session, winner);
     let mut compilation_digest = None;
     for _ in 0..12 {
         // A clone shares the digest OnceCell and cannot model ordinary source

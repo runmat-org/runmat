@@ -16494,6 +16494,10 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
 #[test]
 fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_placement() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
+    // Hotness publishes a version; complete-call placement independently
+    // chooses whether to enter it. Control that outer choice while retaining
+    // the real numerical-region comparison and feedback below.
+    let ready_placement = session.use_specialized_ready_route_for_testing();
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 1,
         specialized_hot_threshold: 3,
@@ -16519,7 +16523,9 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
             &[runmat_value::Value::Tensor(input.clone())],
         ) >= 1
     );
-    for _ in 0..4 {
+    // Publication on call four follows the ready-at-start snapshot. Call five
+    // must select and execute the already-ready specialization.
+    for _ in 0..5 {
         let value = block_on(session.invoke_executable(
             &unit,
             ProcedureInvocation {
@@ -16539,6 +16545,9 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
         assert_eq!(output.as_f64_slice().unwrap()[0], 6.0);
         assert_eq!(output.as_f64_slice().unwrap()[4095], 8196.0);
     }
+    assert!(ready_placement
+        .chosen_kinds()
+        .contains(&runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
     assert!(
         session.vectorized_native_region_count_for_testing() >= 2,
@@ -16552,6 +16561,7 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
 #[test]
 fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
+    let ready_placement = session.use_specialized_ready_route_for_testing();
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 1,
         specialized_hot_threshold: 3,
@@ -16575,7 +16585,9 @@ fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() 
             &[runmat_value::Value::Tensor(input.clone())],
         ) >= 1
     );
-    for _ in 0..4 {
+    // Publication on call four follows the ready-at-start snapshot. Call five
+    // must select and execute the already-ready specialization.
+    for _ in 0..5 {
         let value = block_on(session.invoke_executable(
             &unit,
             ProcedureInvocation {
@@ -16594,9 +16606,16 @@ fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() 
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(output.materialize_f64(), vec![2.0, 8.0, 18.0]);
     }
+    assert!(ready_placement
+        .chosen_kinds()
+        .contains(&runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
     assert_eq!(session.vectorized_native_region_count_for_testing(), 0);
-    assert!(session.placement_profile_snapshot().feedback.is_empty());
+    assert!(session
+        .placement_profile_snapshot()
+        .feedback
+        .iter()
+        .all(|series| series.signature.region.is_none()));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

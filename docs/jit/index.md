@@ -24,6 +24,8 @@ Each `RunMatSession` owns its feedback, pending compilations, published generati
 
 RunMat can progress from interpretation to a generic native version and then to guarded specialized versions. Specializations are selected only for an exact matching runtime representation profile. Hot loops can transfer from generic to optimized code at a verified loop header without restarting the function or repeating an iteration.
 
+Cranelift compiles control flow and invokes Runtime for each semantic instruction and terminator. Generic and specialized versions share this lowering. Shared placement can execute eligible numeric regions through Runtime's typed fused CPU evaluator or an acceleration provider.
+
 ## Correctness And Fallback
 
 Before native entry, an unavailable, unsupported, stale, or failed compilation simply leaves execution on the canonical cold path. After native entry, RunMat does not restart the request in the VM: doing so could repeat I/O or workspace effects. Native exceptions, cancellation, suspension, and deoptimization instead preserve exact frame and resume state.
