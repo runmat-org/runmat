@@ -74,6 +74,47 @@ pub fn dot<T: Scalar>(x: &[T], y: &[T]) -> T {
     })
 }
 
+#[derive(Clone, Copy)]
+struct DotMagnitude<T> {
+    dot: T,
+    magnitude: f64,
+}
+
+impl<T: Scalar> std::ops::Add for DotMagnitude<T> {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self {
+            dot: self.dot + other.dot,
+            magnitude: self.magnitude + other.magnitude,
+        }
+    }
+}
+
+/// Hermitian inner product together with `Σ |conj(x_i) y_i|` (one pass, same block order).
+pub fn dot_and_magnitude<T: Scalar>(x: &[T], y: &[T]) -> (T, f64) {
+    debug_assert_eq!(x.len(), y.len());
+    let total = blocked_reduce(
+        x.len(),
+        DotMagnitude {
+            dot: T::zero(),
+            magnitude: 0.0,
+        },
+        |range| {
+            let mut sum = DotMagnitude {
+                dot: T::zero(),
+                magnitude: 0.0,
+            };
+            for i in range {
+                let term = x[i].conj() * y[i];
+                sum.dot += term;
+                sum.magnitude += term.abs();
+            }
+            sum
+        },
+    );
+    (total.dot, total.magnitude)
+}
+
 /// Bilinear (unconjugated) product `Σ x_i y_i`, used by complex-symmetric methods.
 pub fn dotu<T: Scalar>(x: &[T], y: &[T]) -> T {
     debug_assert_eq!(x.len(), y.len());

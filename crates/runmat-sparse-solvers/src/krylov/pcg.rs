@@ -11,6 +11,26 @@ pub trait Arithmetic<T> {
     fn subtract_scaled(target: &mut T, scale: f64, value: T);
     fn scaled_conjugate_product(left: T, right: T, left_scale: f64, right_scale: f64)
         -> (f64, f64);
+    /// Optional native Hermitian product: `(Re Σ conj(l)r, Im Σ conj(l)r, Σ |conj(l)r|)`.
+    /// `None` (the default, and whenever a native sum is not finite and safely above
+    /// underflow) selects the portable two-pass scale-separated product.
+    fn native_dot(_left: &[T], _right: &[T]) -> Option<(f64, f64, f64)> {
+        None
+    }
+    /// Optional native `x += α p; r −= α q`, returning whether any entry of `x` changed.
+    fn native_step(
+        _x: &mut [T],
+        _residual: &mut [T],
+        _direction: &[T],
+        _product: &[T],
+        _alpha: f64,
+    ) -> Option<bool> {
+        None
+    }
+    /// Optional native `p = s + β p`; `false` leaves `p` untouched.
+    fn native_direction(_direction: &mut [T], _source: &[T], _beta: f64) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

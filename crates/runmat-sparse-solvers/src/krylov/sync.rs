@@ -54,7 +54,59 @@ impl<T: Scalar> pcg::Arithmetic<T> for ScalarArithmetic {
         let (br, bi) = (right.re() / right_scale, right.im() / right_scale);
         (ar * br + ai * bi, ar * bi - ai * br)
     }
+    fn native_dot(left: &[T], right: &[T]) -> Option<(f64, f64, f64)> {
+        let (dot, magnitude) = par::dot_and_magnitude(left, right);
+        // Plain sums are exact enough when finite and clear of gradual underflow.
+        (dot.re().is_finite()
+            && dot.im().is_finite()
+            && magnitude.is_finite()
+            && (magnitude == 0.0 || magnitude >= SAFE_MINIMUM))
+            .then(|| (dot.re(), dot.im(), magnitude))
+    }
+    fn native_step(
+        x: &mut [T],
+        residual: &mut [T],
+        direction: &[T],
+        product: &[T],
+        alpha: f64,
+    ) -> Option<bool> {
+        let progressed = std::sync::atomic::AtomicBool::new(false);
+        par::for_each_chunk_mut(x, |start, chunk| {
+            let mut changed = false;
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                let previous = *value;
+                <Self as pcg::Arithmetic<T>>::add_scaled(value, alpha, direction[start + offset]);
+                changed |= *value != previous;
+            }
+            if changed {
+                progressed.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        par::for_each_chunk_mut(residual, |start, chunk| {
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                <Self as pcg::Arithmetic<T>>::subtract_scaled(
+                    value,
+                    alpha,
+                    product[start + offset],
+                );
+            }
+        });
+        Some(progressed.into_inner())
+    }
+    fn native_direction(direction: &mut [T], source: &[T], beta: f64) -> bool {
+        par::for_each_chunk_mut(direction, |start, chunk| {
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                let previous = *value;
+                *value = source[start + offset];
+                <Self as pcg::Arithmetic<T>>::add_scaled(value, beta, previous);
+            }
+        });
+        true
+    }
 }
+
+/// Below this, plain sums of products may have lost digits to gradual underflow.
+const SAFE_MINIMUM: f64 = f64::MIN_POSITIVE * (1u64 << 52) as f64;
 
 impl<T: Scalar> gmres::Arithmetic<T> for ScalarArithmetic {
     fn zero() -> T {
@@ -77,6 +129,38 @@ impl<T: Scalar> gmres::Arithmetic<T> for ScalarArithmetic {
             return None;
         }
         Some(T::from_parts(value.re, value.im))
+    }
+    fn native_norm(values: &[T]) -> Option<f64> {
+        // Scaled sum of squares: finite whenever the norm is representable.
+        let norm = par::norm2(values);
+        norm.is_finite().then_some(norm)
+    }
+    fn native_dot(left: &[T], right: &[T]) -> Option<Complex64> {
+        let (dot, magnitude) = par::dot_and_magnitude(left, right);
+        let product = Complex64::new(dot.re(), dot.im());
+        (product.re.is_finite()
+            && product.im.is_finite()
+            && (magnitude == 0.0 || magnitude >= SAFE_MINIMUM))
+            .then_some(product)
+    }
+    fn native_axpy(target: &mut [T], scale: Complex64, source: &[T]) -> bool {
+        if (!T::IS_COMPLEX && scale.im != 0.0) || !scale.re.is_finite() || !scale.im.is_finite() {
+            return false;
+        }
+        par::axpy(T::from_parts(scale.re, scale.im), source, target);
+        true
+    }
+    fn native_divide(target: &mut [T], source: &[T], divisor: f64) -> bool {
+        if !(divisor.is_finite() && divisor > 0.0) {
+            return false;
+        }
+        par::for_each_chunk_mut(target, |start, chunk| {
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                let entry = source[start + offset];
+                *value = T::from_parts(entry.re() / divisor, entry.im() / divisor);
+            }
+        });
+        true
     }
     fn divide_complex(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64) {
         // Smith's algorithm: no intermediate |c|² overflow or underflow.

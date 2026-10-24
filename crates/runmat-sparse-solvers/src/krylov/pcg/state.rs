@@ -107,6 +107,19 @@ async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, C: Control>(
     if left.len() != right.len() {
         return Err(invalid("PCG dot-product extents differ"));
     }
+    if let Some((real, imaginary, absolute_sum)) = A::native_dot(left, right) {
+        checkpoint
+            .cooperate(left.len() as u64)
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        return Ok(ScaledDot {
+            real,
+            imaginary,
+            absolute_sum,
+            left: 1.0,
+            right: 1.0,
+        });
+    }
     let mut left_scale: f64 = 0.0;
     let mut right_scale: f64 = 0.0;
     for (index, (&a, &b)) in left.iter().zip(right).enumerate() {
@@ -330,16 +343,23 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                         .complete_best(4, prior, residual_count, &mut *checkpoint)
                         .await;
                 };
-                for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-                    if index % 1024 == 0 {
-                        checkpoint
-                            .cooperate((self.rhs.len() - index).min(1024) as u64)
-                            .await
-                            .map_err(KrylovFailure::Operation)?;
+                if A::native_direction(&mut *self.work.direction, &output[..self.rhs.len()], beta) {
+                    checkpoint
+                        .cooperate(self.rhs.len() as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                } else {
+                    for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
+                        if index % 1024 == 0 {
+                            checkpoint
+                                .cooperate((self.rhs.len() - index).min(1024) as u64)
+                                .await
+                                .map_err(KrylovFailure::Operation)?;
+                        }
+                        let previous = self.work.direction[index];
+                        self.work.direction[index] = value;
+                        A::add_scaled(&mut self.work.direction[index], beta, previous);
                     }
-                    let previous = self.work.direction[index];
-                    self.work.direction[index] = value;
-                    A::add_scaled(&mut self.work.direction[index], beta, previous);
                 }
                 Iteration {
                     rhs_squared: prior.rhs_squared,
@@ -379,17 +399,31 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .await;
         };
         let mut progressed = false;
-        for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-            if index % 1024 == 0 {
-                checkpoint
-                    .cooperate((self.rhs.len() - index).min(1024) as u64)
-                    .await
-                    .map_err(KrylovFailure::Operation)?;
+        if let Some(native) = A::native_step(
+            &mut *self.work.x,
+            &mut *self.work.residual,
+            &*self.work.direction,
+            &output[..self.rhs.len()],
+            alpha,
+        ) {
+            progressed = native;
+            checkpoint
+                .cooperate(self.rhs.len() as u64)
+                .await
+                .map_err(KrylovFailure::Operation)?;
+        } else {
+            for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
+                if index % 1024 == 0 {
+                    checkpoint
+                        .cooperate((self.rhs.len() - index).min(1024) as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                }
+                let previous = self.work.x[index];
+                A::add_scaled(&mut self.work.x[index], alpha, self.work.direction[index]);
+                progressed |= self.work.x[index] != previous;
+                A::subtract_scaled(&mut self.work.residual[index], alpha, value);
             }
-            let previous = self.work.x[index];
-            A::add_scaled(&mut self.work.x[index], alpha, self.work.direction[index]);
-            progressed |= self.work.x[index] != previous;
-            A::subtract_scaled(&mut self.work.residual[index], alpha, value);
         }
         let Some(residual_squared) =
             dot::<T, A, C>(&*self.work.residual, &*self.work.residual, &mut *checkpoint)
@@ -448,16 +482,23 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
-        for index in 0..self.rhs.len() {
-            if index % 1024 == 0 {
-                checkpoint
-                    .cooperate((self.rhs.len() - index).min(1024) as u64)
-                    .await
-                    .map_err(KrylovFailure::Operation)?;
+        if A::native_direction(&mut *self.work.direction, &*self.work.residual, beta) {
+            checkpoint
+                .cooperate(self.rhs.len() as u64)
+                .await
+                .map_err(KrylovFailure::Operation)?;
+        } else {
+            for index in 0..self.rhs.len() {
+                if index % 1024 == 0 {
+                    checkpoint
+                        .cooperate((self.rhs.len() - index).min(1024) as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                }
+                let previous = self.work.direction[index];
+                self.work.direction[index] = self.work.residual[index];
+                A::add_scaled(&mut self.work.direction[index], beta, previous);
             }
-            let previous = self.work.direction[index];
-            self.work.direction[index] = self.work.residual[index];
-            A::add_scaled(&mut self.work.direction[index], beta, previous);
         }
         // The synchronous kernel computes beta and updates the direction even
         // at the limit, so its breakdown disposition remains unchanged.

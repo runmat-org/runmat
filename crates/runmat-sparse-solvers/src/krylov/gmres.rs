@@ -112,11 +112,34 @@ pub struct GmresParameters {
 
 /// A zero-sized native arithmetic policy avoids imposing a foreign scalar
 /// trait on a caller's canonical storage type. No view cast or copy is needed.
+///
+/// The optional vector kernels let a policy whose storage has native, deterministic
+/// reductions supply them. Returning `None`/`false` (the default) selects the
+/// recurrence's portable scale-separated kernels for that call; a policy also
+/// returns `None` whenever its native result is not finite, so extreme-range
+/// vectors still take the portable path.
 pub trait Arithmetic<T> {
     fn zero() -> T;
     fn to_complex(value: T) -> Complex64;
     fn from_complex(value: Complex64) -> Option<T>;
     fn divide_complex(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64);
+    /// Euclidean norm, finite.
+    fn native_norm(_values: &[T]) -> Option<f64> {
+        None
+    }
+    /// Hermitian product `Σ conj(left_i) right_i`, finite.
+    fn native_dot(_left: &[T], _right: &[T]) -> Option<Complex64> {
+        None
+    }
+    /// `target += scale · source`; `false` leaves `target` untouched.
+    fn native_axpy(_target: &mut [T], _scale: Complex64, _source: &[T]) -> bool {
+        false
+    }
+    /// `target = source / divisor` for a finite positive divisor; `false` leaves
+    /// `target` untouched.
+    fn native_divide(_target: &mut [T], _source: &[T], _divisor: f64) -> bool {
+        false
+    }
 }
 
 /// Left-preconditioned GMRES with a true residual after every step.
@@ -343,25 +366,31 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             // OnEstimate verification pass after the last permitted cycle or step.
             break;
         }
-        for (index, (target, &value)) in work.basis[..n]
-            .iter_mut()
-            .zip(&*work.preconditioned)
-            .enumerate()
+        if beta.native_magnitude().is_some()
+            && A::native_divide(&mut work.basis[..n], work.preconditioned, beta.magnitude())
         {
-            if index % 1024 == 0 {
-                operations.cooperate((n - index).min(1024) as u64).await?;
+            operations.cooperate(n as u64).await?;
+        } else {
+            for (index, (target, &value)) in work.basis[..n]
+                .iter_mut()
+                .zip(&*work.preconditioned)
+                .enumerate()
+            {
+                if index % 1024 == 0 {
+                    operations.cooperate((n - index).min(1024) as u64).await?;
+                }
+                let Some(value) = A::from_complex(beta.normalize(A::to_complex(value))) else {
+                    return Ok(GmresOutcome {
+                        flag: 4,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    });
+                };
+                *target = value;
             }
-            let Some(value) = A::from_complex(beta.normalize(A::to_complex(value))) else {
-                return Ok(GmresOutcome {
-                    flag: 4,
-                    relres: best_residual.relative(denominator),
-                    outer: best_iteration.0,
-                    inner: best_iteration.1,
-                    residual_count,
-                    steps,
-                });
-            };
-            *target = value;
         }
         for chunk in work.rotated_rhs[..restart + 1].chunks_mut(1024) {
             operations.cooperate(chunk.len() as u64).await?;
@@ -482,7 +511,16 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             };
             work.hessenberg[h_index(inner + 1, inner, restart)] =
                 Complex64::new(next_norm.magnitude(), 0.0);
-            if !next_norm.is_zero() {
+            if !next_norm.is_zero()
+                && next_norm.native_magnitude().is_some()
+                && A::native_divide(
+                    &mut work.basis[(inner + 1) * n..(inner + 2) * n],
+                    work.preconditioned,
+                    next_norm.magnitude(),
+                )
+            {
+                operations.cooperate(n as u64).await?;
+            } else if !next_norm.is_zero() {
                 for (index, (target, &value)) in work.basis[(inner + 1) * n..(inner + 2) * n]
                     .iter_mut()
                     .zip(&*work.preconditioned)
