@@ -28,7 +28,7 @@ pub use crate::solver::core::cones::{SupportedConeT, SupportedConeT::*};
 
 //user facing traits required to interact with solver
 pub use crate::solver::core::kktsolvers::LinearSolverInfo;
-pub use crate::solver::core::{IPSolver, SolverStatus};
+pub use crate::solver::core::{IPSolver, ProgressControl, ProgressStop, SolverStatus};
 
 //user facing traits required to define new implementatiions
 pub use crate::solver::core::traits;

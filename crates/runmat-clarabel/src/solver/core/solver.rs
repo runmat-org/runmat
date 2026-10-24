@@ -214,6 +214,28 @@ where
 
 // RunMat extension to upstream Clarabel.rs 0.11.1: one numerical source
 // body for both the original synchronous API and owned cooperative execution.
+/// Normal control of the owned cooperative solve, distinct from callback errors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProgressControl {
+    /// Advance the existing numerical solve from its current state.
+    Continue,
+    /// Finalize the current solve with the supplied normal stop reason.
+    Stop(ProgressStop),
+}
+/// A cooperative observer's normal stop reason, independent of callback failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProgressStop {
+    /// The invocation's selected timing authority reached its deadline.
+    TimeLimit,
+    /// The observer requested termination without a callback error.
+    Requested,
+}
+impl From<()> for ProgressControl {
+    fn from(_: ()) -> Self {
+        Self::Continue
+    }
+}
+
 macro_rules! solve_body {
     ($solver:ident $(; $progress:ident, $context:ident)?) => {{
 
@@ -281,8 +303,18 @@ macro_rules! solve_body {
             // A cancelled/erroring owned async solve drops its entire solver.
             $(
                 timers.suspend();
-                $progress($context, &$solver.info).await?;
+                let directive = $progress($context, &$solver.info).await?;
                 timers.resume();
+                match Into::<ProgressControl>::into(directive) {
+                    ProgressControl::Continue => {},
+                    ProgressControl::Stop(reason) => {
+                        $solver.info.set_status(match reason {
+                            ProgressStop::TimeLimit => SolverStatus::MaxTime,
+                            ProgressStop::Requested => SolverStatus::CallbackTerminated,
+                        });
+                        break;
+                    }
+                }
             )?
 
 
@@ -506,13 +538,14 @@ where
     /// This method consumes the solver: cancelling the future or returning a
     /// checkpoint error drops the same solver and workspaces once, rather than
     /// exposing a partially progressed borrowed solver for accidental reuse.
-    pub async fn solve_with_progress<X, E, F>(
+    pub async fn solve_with_progress<X, E, F, P>(
         mut self,
         context: &mut X,
         mut progress: F,
     ) -> Result<Self, E>
     where
-        F: for<'a> std::ops::AsyncFnMut(&'a mut X, &'a I) -> Result<(), E>,
+        F: for<'a> std::ops::AsyncFnMut(&'a mut X, &'a I) -> Result<P, E>,
+        P: Into<ProgressControl>,
     {
         solve_body!(self; progress, context);
         Ok(self)

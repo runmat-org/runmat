@@ -79,6 +79,37 @@ impl Drop for DropProbe {
 }
 
 #[test]
+fn typed_time_limit_uses_normal_finalization_and_retains_owned_drop() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let probe = DropProbe(drops.clone());
+    let mut solver = problem();
+    solver.set_termination_callback(move |_| {
+        std::hint::black_box(&probe);
+        false
+    });
+    let mut turns = 0usize;
+    let solver =
+        futures::executor::block_on(solver.solve_with_progress(&mut turns, async |turns, _| {
+            *turns += 1;
+            Ok::<_, u32>(ProgressControl::Stop(ProgressStop::TimeLimit))
+        }))
+        .unwrap();
+    assert_eq!(turns, 1);
+    assert_eq!(solver.info.status, SolverStatus::MaxTime);
+    assert_eq!(solver.solution.status, SolverStatus::MaxTime);
+    assert_eq!(solver.solution.iterations, 0);
+    assert_eq!(solver.solution.x.len(), 2);
+    assert_eq!(solver.solution.z.len(), 5);
+    assert!(
+        solver.timers.is_some(),
+        "normal finalization restores solver timers"
+    );
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(solver);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn cancelling_owned_progress_drops_solver_once_and_progress_errors_are_unchanged() {
     let drops = Arc::new(AtomicUsize::new(0));
     let probe = DropProbe(drops.clone());
