@@ -31,7 +31,7 @@ pub(super) async fn get_field_value(
     }
     match value {
         Value::Struct(st) => get_struct_field(&st, name),
-        Value::Object(obj) => property::get_object_field(runtime, &obj, name).await,
+        Value::Object(obj) => property::get_object_field(runtime, &obj, name, None).await,
         Value::HandleObject(handle) => {
             get_handle_field(runtime, &handle, name, enforce_public_builtin_extension).await
         }
@@ -92,5 +92,11 @@ async fn get_handle_field(
             &GETFIELD_ERROR_INVALID_HANDLE,
         )
     })?;
-    get_field_value(runtime, target, name, enforce_public_builtin_extension).await
+    match target {
+        // Metadata and stored fields belong to the target, but a dependent
+        // getter must receive the original issued handle, not its value-object
+        // backing. The caller's root lease retains that identity while awaited.
+        Value::Object(obj) => property::get_object_field(runtime, &obj, name, Some(handle)).await,
+        target => get_field_value(runtime, target, name, enforce_public_builtin_extension).await,
+    }
 }

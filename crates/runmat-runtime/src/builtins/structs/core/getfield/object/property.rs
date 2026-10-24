@@ -11,7 +11,12 @@ pub(super) async fn get_object_field(
     runtime: Option<&crate::context::RuntimeContext>,
     obj: &ObjectInstance,
     name: &str,
+    receiver: Option<&runmat_value::HandleRef>,
 ) -> BuiltinResult<RootedValue> {
+    let receiver = || match receiver {
+        Some(handle) => Value::HandleObject(handle.clone()),
+        None => Value::Object(obj.clone()),
+    };
     if let Some(projection) = crate::class_registry::checked_receiver_projection(obj)? {
         let property = projection.receiver_property(obj.class_name(), &name.into());
         if let Some((prop, owner)) = &property {
@@ -37,10 +42,10 @@ pub(super) async fn get_object_field(
                 if projection.receiver_declares_method(obj.class_name(), &getter.as_str().into()) {
                     let outputs = match runtime {
                         Some(runtime) => crate::object::dispatch::call_object_property_getter_with_outputs_in_context(
-                            runtime, Value::Object(obj.clone()), name, 1,
+                            runtime, receiver(), name, 1,
                         ).await,
                         None => crate::object::dispatch::call_object_property_getter_with_outputs(
-                            Value::Object(obj.clone()), name, 1,
+                            receiver(), name, 1,
                         ).await,
                     }?;
                     return outputs.try_map_owned(
@@ -104,7 +109,7 @@ pub(super) async fn get_object_field(
         }
         if prop.is_dependent {
             let getter = object_property_getter_name(name);
-            let receiver = [Value::Object(obj.clone())];
+            let receiver = [receiver()];
             let result = match runtime {
                 Some(runtime) => {
                     crate::call_builtin_async_in_context(runtime, &getter, &receiver).await
