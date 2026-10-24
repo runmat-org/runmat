@@ -123,10 +123,10 @@ pub(super) fn adopt_rooted_arguments(
     state: &mut HostState,
     arguments: RootedValues,
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    Ok(arguments
+    arguments
         .try_into_values()?
-        .map(|value| state.arena.insert(value))
-        .collect())
+        .map(|value| state.arena.insert(value, Some(&state.runtime)))
+        .collect::<NativeExecutorResult<_>>()
 }
 
 pub(in crate::execute) fn begin_rooted_sequence_with_roots<F>(
@@ -167,10 +167,10 @@ pub(super) fn adopt_selected_sequence(
     state: &mut HostState,
     sequence: RootedValueSequence,
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    Ok(sequence
+    sequence
         .try_into_values()?
-        .map(|value| state.arena.insert(value))
-        .collect())
+        .map(|value| state.arena.insert(value, Some(&state.runtime)))
+        .collect::<NativeExecutorResult<_>>()
 }
 
 pub(in crate::execute) fn begin_selected_sequence<F>(

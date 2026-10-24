@@ -33,7 +33,7 @@ pub(in crate::execute) fn publish(
     }
     let continuation = pending.continuation;
     let generation = pending.generation;
-    let roots = state.refresh_roots();
+    let roots = state.refresh_roots()?;
     unsafe {
         (*resume).function = request.function;
         (*resume).block = request.block;

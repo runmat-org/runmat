@@ -340,13 +340,18 @@ fn polled_resume_drop_and_cancellation_keep_roots_and_context_during_work_destru
                 assert!(runmat_gc::gc_clone_value(&handle).is_ok());
             }));
             let mut invocation = invocation(&source, work);
-            invocation.active.as_mut().unwrap().state.arena.insert(
-                runmat_value::Value::HandleObject(runmat_value::HandleRef {
-                    class_name: "PolledCapture".into(),
-                    target: handle,
-                    valid: true,
-                }),
-            );
+            let state = &mut invocation.active.as_mut().unwrap().state;
+            state
+                .arena
+                .insert(
+                    runmat_value::Value::HandleObject(runmat_value::HandleRef {
+                        class_name: "PolledCapture".into(),
+                        target: handle,
+                        valid: true,
+                    }),
+                    Some(&state.runtime),
+                )
+                .unwrap();
             allocation.unroot().unwrap();
             let waker = Waker::from(Arc::new(Wakes::default()));
             let mut cx = Context::from_waker(&waker);

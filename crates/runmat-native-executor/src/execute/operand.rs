@@ -53,18 +53,18 @@ pub(super) fn evaluate_rvalue(
             }
             arguments.push(materialize_operand(state, end)?);
             super::call::builtin(state, "colon", arguments, 1).and_then(|values| {
-                Ok(super::call_suspension::own_output_storage(values)?
+                super::call_suspension::own_output_storage(values)?
                     .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>()
             })
         }
         MirRvalue::Call(call) => {
             super::call::evaluate(state, call, requested_outputs).and_then(|values| {
-                Ok(super::call_suspension::own_output_storage(values)?
+                super::call_suspension::own_output_storage(values)?
                     .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>()
             })
         }
         MirRvalue::Aggregate {
@@ -73,26 +73,34 @@ pub(super) fn evaluate_rvalue(
             elements,
         } => super::aggregate::evaluate(state, kind, row_lengths, elements)
             .map(|reference| vec![reference]),
-        MirRvalue::StructLiteral { fields } => super::aggregate::structure(state, fields)
-            .map(|rooted| rooted.with_owned(|value| vec![state.arena.insert(value)])),
+        MirRvalue::StructLiteral { fields } => {
+            super::aggregate::structure(state, fields).and_then(|rooted| {
+                rooted.with_owned(|value| {
+                    Ok(vec![state.arena.insert(value, Some(&state.runtime))?])
+                })
+            })
+        }
         MirRvalue::ObjectLiteral { class_name, fields } => {
-            super::aggregate::object(state, class_name, fields)
-                .map(|rooted| rooted.with_owned(|value| vec![state.arena.insert(value)]))
+            super::aggregate::object(state, class_name, fields).and_then(|rooted| {
+                rooted.with_owned(|value| {
+                    Ok(vec![state.arena.insert(value, Some(&state.runtime))?])
+                })
+            })
         }
         MirRvalue::Index { base, indexing } => {
             super::indexing::read(state, base, indexing, requested_outputs).and_then(|values| {
-                Ok(super::call_suspension::own_output_storage(values)?
+                super::call_suspension::own_output_storage(values)?
                     .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>()
             })
         }
         MirRvalue::SubscriptChain(chain) => {
-            super::subscript_path::read(state, chain, requested_outputs).map(|values| {
+            super::subscript_path::read(state, chain, requested_outputs).and_then(|values| {
                 values
                     .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect()
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>()
             })
         }
         MirRvalue::Member {
@@ -142,23 +150,23 @@ pub(super) fn evaluate_rvalue(
                 })?
             };
             if *sequence_use == runmat_types::SequenceUse::RequireSingle {
-                return values
-                    .try_into_single()?
-                    .with_owned(|value| Ok(vec![state.arena.insert(value)]));
+                return values.try_into_single()?.with_owned(|value| {
+                    Ok(vec![state.arena.insert(value, Some(&state.runtime))?])
+                });
             }
             if *sequence_use == runmat_types::SequenceUse::ExpandAll {
-                return Ok(values
+                return values
                     .try_into_values()?
-                    .map(|value| state.arena.insert(value))
-                    .collect());
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>();
             }
-            Ok(values
+            values
                 .resolve_values(
                     *sequence_use,
                     sequence_resolution_context(*sequence_use, requested_outputs),
                 )?
-                .map(|value| state.arena.insert(value))
-                .collect())
+                .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                .collect::<NativeExecutorResult<_>>()
         }
         MirRvalue::DynamicMember {
             base,
@@ -208,23 +216,23 @@ pub(super) fn evaluate_rvalue(
                 })?
             };
             if *sequence_use == runmat_types::SequenceUse::RequireSingle {
-                return values
-                    .try_into_single()?
-                    .with_owned(|value| Ok(vec![state.arena.insert(value)]));
+                return values.try_into_single()?.with_owned(|value| {
+                    Ok(vec![state.arena.insert(value, Some(&state.runtime))?])
+                });
             }
             if *sequence_use == runmat_types::SequenceUse::ExpandAll {
-                return Ok(values
+                return values
                     .try_into_values()?
-                    .map(|value| state.arena.insert(value))
-                    .collect());
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>();
             }
-            Ok(values
+            values
                 .resolve_values(
                     *sequence_use,
                     sequence_resolution_context(*sequence_use, requested_outputs),
                 )?
-                .map(|value| state.arena.insert(value))
-                .collect())
+                .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                .collect::<NativeExecutorResult<_>>()
         }
         MirRvalue::WorkspaceFirstStaticProperty {
             workspace_name,
@@ -252,17 +260,22 @@ pub(super) fn evaluate_rvalue(
                     )
                     .map_err(NativeExecutorError::from)
                 })?;
-            Ok(vec![state.arena.insert(value)])
+            Ok(vec![state.arena.insert(value, Some(&state.runtime))?])
         }
-        MirRvalue::MetaClass(name) => Ok(vec![state.arena.insert(Value::String(
-            name.0
-                .iter()
-                .map(|segment| segment.0.as_str())
-                .collect::<Vec<_>>()
-                .join(".")
-                .into(),
-        ))]),
-        MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
+        MirRvalue::MetaClass(name) => Ok(vec![state.arena.insert(
+            Value::String(
+                name.0
+                    .iter()
+                    .map(|segment| segment.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")
+                    .into(),
+            ),
+            Some(&state.runtime),
+        )?]),
+        MirRvalue::Colon => Ok(vec![state
+            .arena
+            .insert(Value::Num(0.0), Some(&state.runtime))?]),
         MirRvalue::End => {
             if let Some((prepared, component, component_count)) =
                 state.subscript_end_receivers.last()
@@ -276,7 +289,7 @@ pub(super) fn evaluate_rvalue(
                     component,
                     component_count,
                 )?;
-                return Ok(vec![state.arena.insert(value)]);
+                return Ok(vec![state.arena.insert(value, Some(&state.runtime))?]);
             }
             if state.contextual_index_extents.is_empty()
                 && super::mutation::has_fixed_end_context(state)
@@ -292,7 +305,9 @@ pub(super) fn evaluate_rvalue(
                         "verified Native IR evaluated end without an indexing context".into(),
                     )
                 })?;
-            Ok(vec![state.arena.insert(Value::Num(extent as f64))])
+            Ok(vec![state
+                .arena
+                .insert(Value::Num(extent as f64), Some(&state.runtime))?])
         }
         MirRvalue::Future {
             function,
@@ -413,7 +428,10 @@ pub(super) fn evaluate_rvalue(
                     program,
                 })
                 .map_err(execution_service_error)?;
-            Ok(vec![state.arena.insert(Value::Future(future.into()))])
+            Ok(vec![state.arena.insert(
+                Value::Future(future.into()),
+                Some(&state.runtime),
+            )?])
         }
         MirRvalue::Spawn(operand) => {
             let value = materialize_operand(state, operand)?;
@@ -429,7 +447,9 @@ pub(super) fn evaluate_rvalue(
                 .execution()
                 .spawn(&future)
                 .map_err(execution_service_error)?;
-            Ok(vec![state.arena.insert(Value::Task(task.into()))])
+            Ok(vec![state
+                .arena
+                .insert(Value::Task(task.into()), Some(&state.runtime))?])
         }
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(NativeExecutorError::Host(
             "predeclared distributed capability rejection reached native execution".into(),
@@ -535,7 +555,7 @@ pub(super) fn evaluate_operand(
                         .map_err(NativeExecutorError::Host)?,
                 ),
             };
-            Ok(state.arena.insert(value))
+            state.arena.insert(value, Some(&state.runtime))
         }
         MirOperand::FunctionHandle(identity) => {
             if let runmat_types::CallableIdentity::BoundFunction(function)
@@ -576,18 +596,18 @@ pub(super) fn evaluate_operand(
                                 .flatten(),
                         )
                     };
-                    return Ok(state.arena.insert(value));
+                    return state.arena.insert(value, Some(&state.runtime));
                 }
             }
             identity
                 .display_name()
                 .map(Value::function_handle)
-                .map(|value| state.arena.insert(value))
+                .map(|value| state.arena.insert(value, Some(&state.runtime)))
                 .ok_or_else(|| {
                     NativeExecutorError::Host(format!(
                         "function handle {identity:?} has no runtime identity"
                     ))
-                })
+                })?
         }
     }
 }

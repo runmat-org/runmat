@@ -17,7 +17,7 @@ fn edge() -> NativeEdge {
 }
 
 fn set_value(state: &mut HostState, id: NativeValueId, value: Value) {
-    let reference = state.arena.insert(value);
+    let reference = state.arena.insert(value, Some(&state.runtime)).unwrap();
     state.values.insert(id, reference);
 }
 

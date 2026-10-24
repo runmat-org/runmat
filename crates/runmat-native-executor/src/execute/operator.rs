@@ -38,7 +38,7 @@ fn evaluate_inner(
                 "resumed native operator did not produce exactly one value".into(),
             )
         })?;
-        return Ok(state.arena.insert(value));
+        return state.arena.insert(value, Some(&state.runtime));
     }
     let selected_host_route = super::region::observation::host_route(state);
     if let Some(route) = &selected_host_route {
@@ -134,7 +134,7 @@ fn evaluate_inner(
     let [value] = <[Value; 1]>::try_from(values).map_err(|_| {
         crate::NativeExecutorError::Host("native operator did not produce exactly one value".into())
     })?;
-    Ok(state.arena.insert(value))
+    state.arena.insert(value, Some(&state.runtime))
 }
 
 fn single_rooted_sequence(

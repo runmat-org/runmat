@@ -58,7 +58,8 @@ impl PendingSequenceAssign {
                             .await?;
                     single_member_sequence(value).map_err(|error| *error)
                 })?;
-                self.phase = SequencePhase::Writeback(state.arena.insert(updated));
+                self.phase =
+                    SequencePhase::Writeback(state.arena.insert(updated, Some(&state.runtime))?);
             }
             SequencePhase::Writeback(current) => {
                 let Some((parent, segment)) = self.prepared.destination.writeback.parents.last()
@@ -69,7 +70,8 @@ impl PendingSequenceAssign {
                 let value = state.arena.get(current)?.clone();
                 let updated = write_step(state, parent, segment, value, false)?;
                 self.prepared.destination.writeback.parents.pop();
-                self.phase = SequencePhase::Writeback(state.arena.insert(updated));
+                self.phase =
+                    SequencePhase::Writeback(state.arena.insert(updated, Some(&state.runtime))?);
             }
         }
         self.step = self.step.checked_add(1).ok_or_else(|| {
@@ -220,7 +222,7 @@ pub(in crate::execute) fn assign_prepared_sequence(
     let next_step = usize::from(result.is_ok());
     state.finish_contextual_step(region, 0, next_step)?;
     if let Ok(value) = &result {
-        let reference = state.arena.insert(value.clone());
+        let reference = state.arena.insert(value.clone(), Some(&state.runtime))?;
         state.finish_contextual_region(region, reference);
     }
     result
@@ -247,7 +249,9 @@ pub(in crate::execute) fn assign_prepared_fixed(
         use super::super::super::call_suspension as suspension;
         let kind = suspension::SemanticOperationKind::IndexedAssignment;
         match suspension::take_completed_semantic_value_operation(state, embedded.as_ref(), kind)? {
-            Some(value) => Ok(value.with_owned(|value| state.arena.insert(value))),
+            Some(value) => {
+                value.with_owned(|value| state.arena.insert(value, Some(&state.runtime)))
+            }
             None => {
                 if destination.is_none() {
                     return Err(NativeExecutorError::Host(

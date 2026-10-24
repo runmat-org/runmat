@@ -286,7 +286,7 @@ fn refresh_frame_roots(state: &mut HostState, call: &mut NativeCall) -> NativeEx
     if call.frame.is_null() {
         return Err(NativeExecutorError::Host("native call has no frame".into()));
     }
-    let roots = state.refresh_roots();
+    let roots = state.refresh_roots()?;
     // SAFETY: checked above and retained by the invoking executor.
     unsafe { (*call.frame).roots = roots };
     Ok(())
@@ -631,7 +631,7 @@ fn execute_terminator(
                 requested_outputs,
             )?;
             for (index, value) in outputs.into_iter().enumerate() {
-                let reference = state.arena.insert(value);
+                let reference = state.arena.insert(value, Some(&state.runtime))?;
                 // SAFETY: NativeCall validation guarantees a writable result
                 // slice of result_capacity elements for this invocation.
                 unsafe { *call.results.add(index) = reference };
@@ -646,7 +646,8 @@ fn execute_terminator(
             let value = state.arena.get(value_for(state, *future)?)?.clone();
             match super::awaiting::begin(state, value, resume.clone())? {
                 super::awaiting::AwaitStart::Ready(value) => {
-                    let value = value.with_owned(|value| state.arena.insert(value));
+                    let value = value
+                        .with_owned(|value| state.arena.insert(value, Some(&state.runtime)))?;
                     take_edge(state, resume, 0, None, Some(value))
                 }
                 super::awaiting::AwaitStart::Suspended {
@@ -658,7 +659,7 @@ fn execute_terminator(
                             "native await has no frame".into(),
                         ));
                     }
-                    let roots = state.refresh_roots();
+                    let roots = state.refresh_roots()?;
                     // SAFETY: NativeCall validation guarantees a live frame and resume
                     // record for this synchronous entry. The pointer is validated before
                     // returning from this entry and is not retained by the Rust driver.
@@ -793,7 +794,7 @@ pub(super) fn resume_await(
 ) -> NativeExecutorResult<runmat_runtime::native::NativeSiteRequest> {
     let value = completion
         .value
-        .with_owned(|value| state.arena.insert(value));
+        .with_owned(|value| state.arena.insert(value, Some(&state.runtime)))?;
     let target = completion.edge.target;
     let _ = take_edge(state, &completion.edge, 0, None, Some(value))?;
     state.resume_request_for_block(target)

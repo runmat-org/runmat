@@ -50,7 +50,7 @@ impl HostState {
             };
             runmat_runtime::sequence::assignment_container_in_context(Some(&self.runtime), intent)?
                 .with_owned(|value| {
-                    let seed = self.arena.insert(value.clone());
+                    let seed = self.arena.insert(value.clone(), Some(&self.runtime))?;
                     Ok((value, Some(seed)))
                 })
         } else {
@@ -115,7 +115,9 @@ impl HostState {
                 let prior = self.locals.get(slot).copied().ok_or_else(|| {
                     NativeExecutorError::Host("native lexical local is out of bounds".into())
                 })?;
-                let refreshed = self.arena.reuse_or_insert_retained_lease(prior, value)?;
+                let refreshed =
+                    self.arena
+                        .reuse_or_insert_retained_lease(prior, value, Some(&self.runtime))?;
                 self.locals[slot] = refreshed;
                 self.record_local_initialization(slot, refreshed);
                 return Ok(refreshed);
@@ -183,7 +185,7 @@ impl HostState {
         value: Option<Value>,
     ) -> NativeExecutorResult<NativeValueRef> {
         let value = value.unwrap_or_else(empty_workspace_value);
-        let refreshed = self.arena.insert(value);
+        let refreshed = self.arena.insert(value, Some(&self.runtime))?;
         if let Some(workspace) = &self.workspace {
             workspace.refresh_local_with_context(
                 &self.runtime,
@@ -398,7 +400,10 @@ impl HostState {
                 NativeExecutorError::Host("native workspace local is out of bounds".into())
             })?;
             let reference = match workspace.lookup_local_lease(&self.runtime, slot)? {
-                Some(value) => self.arena.reuse_or_insert_retained_lease(*local, value)?,
+                Some(value) => {
+                    self.arena
+                        .reuse_or_insert_retained_lease(*local, value, Some(&self.runtime))?
+                }
                 None => NativeValueRef::NULL,
             };
             *local = reference;
@@ -510,7 +515,7 @@ impl HostState {
         let value = authority
             .persistent_named_value(&owner_function, &name)?
             .unwrap_or_else(empty_workspace_value);
-        let reference = self.arena.insert(value);
+        let reference = self.arena.insert(value, Some(&self.runtime))?;
         self.set_local(slot, reference)
     }
 

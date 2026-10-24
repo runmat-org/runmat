@@ -128,7 +128,7 @@ pub(super) fn assignment_root_reference_for_place(
         NativeExecutorError::Host("assignment root is outside the native frame".into())
     })?;
     if reference.is_null() {
-        return Ok(state.arena.insert(value));
+        return state.arena.insert(value, Some(&state.runtime));
     }
     state.arena.retain(reference)?;
     Ok(reference)
@@ -222,7 +222,7 @@ pub(super) fn prepare_place_write(
         match result {
             Ok(value) => {
                 cursor.parents.push((cursor.current, segment));
-                cursor.current = state.arena.insert(value);
+                cursor.current = state.arena.insert(value, Some(&state.runtime))?;
                 cursor.step += 1;
             }
             Err(NativeExecutorError::CallSuspended) => {
@@ -291,8 +291,8 @@ impl PendingAssign {
             Some(root_value) => root_value,
             None => assignment_root_for_segments(state, root, creation, &segments)?,
         };
-        let current = state.arena.insert(current);
-        let rhs = state.arena.insert(rhs);
+        let current = state.arena.insert(current, Some(&state.runtime))?;
+        let rhs = state.arena.insert(rhs, Some(&state.runtime))?;
         Ok(Self {
             request,
             place: place.clone(),
@@ -317,7 +317,7 @@ impl PendingAssign {
                 let segment = self.segments[index].clone();
                 let child = read_step(state, current, &segment, allow_init)?;
                 let parent = self.current;
-                let child = state.arena.insert(child);
+                let child = state.arena.insert(child, Some(&state.runtime))?;
                 self.parents.push((parent, segment));
                 (child, Phase::ReadPrefix(index + 1))
             }
@@ -327,7 +327,10 @@ impl PendingAssign {
                     NativeExecutorError::Host("nonlocal assignment has no place segment".into())
                 })?;
                 let value = write_step(state, current, segment, rhs, self.delete)?;
-                (state.arena.insert(value), Phase::Writeback)
+                (
+                    state.arena.insert(value, Some(&state.runtime))?,
+                    Phase::Writeback,
+                )
             }
             Phase::Writeback => {
                 let Some((parent, segment)) = self.parents.last() else {
@@ -336,7 +339,10 @@ impl PendingAssign {
                 let parent_value = state.arena.get(*parent)?.clone();
                 let updated = write_step(state, parent_value, segment, current, false)?;
                 self.parents.pop();
-                (state.arena.insert(updated), Phase::Writeback)
+                (
+                    state.arena.insert(updated, Some(&state.runtime))?,
+                    Phase::Writeback,
+                )
             }
         };
         self.current = updated;
@@ -509,7 +515,7 @@ fn drive(
         if creation == AssignmentCreationPolicy::ExistingOnly && explicit_root.is_none() {
             state.assignment_root(local.0, creation)?;
         }
-        return Ok((*local, state.arena.insert(rhs)));
+        return Ok((*local, state.arena.insert(rhs, Some(&state.runtime))?));
     }
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("native mutation has no active statement site".into())

@@ -18,7 +18,10 @@ fn first_global_declaration_replaces_a_stale_local_with_canonical_empty() {
         let mut state = omitted_input_state();
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
-        let stale = state.arena.insert(Value::Num(42.0));
+        let stale = state
+            .arena
+            .insert(Value::Num(42.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, stale).unwrap();
 
         state.declare_global(0, "fresh_global".into()).unwrap();
@@ -89,7 +92,10 @@ fn declared_global_reads_follow_nested_session_writes() {
             Value::Num(7.0)
         );
 
-        let reference = state.arena.insert(Value::Num(9.0));
+        let reference = state
+            .arena
+            .insert(Value::Num(9.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, reference).unwrap();
         assert_eq!(
             runmat_runtime::workspace::session::global_value("x"),
@@ -110,7 +116,10 @@ fn declared_global_reads_follow_nested_session_writes() {
         prepared.commit();
         let retargeted = state.local_reference(0).unwrap();
         assert_eq!(state.arena.get(retargeted).unwrap(), &Value::Num(17.0));
-        let updated = state.arena.insert(Value::Num(19.0));
+        let updated = state
+            .arena
+            .insert(Value::Num(19.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, updated).unwrap();
         assert_eq!(authority.global_value("h").unwrap(), Some(Value::Num(19.0)));
         assert_eq!(authority.global_value("x").unwrap(), Some(Value::Num(9.0)));
@@ -127,7 +136,10 @@ fn missing_canonical_global_replaces_an_old_frame_snapshot_with_empty() {
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
         state.declare_global(0, "x".into()).unwrap();
-        let old = state.arena.insert(Value::Num(9.0));
+        let old = state
+            .arena
+            .insert(Value::Num(9.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, old).unwrap();
         let refreshed = state
             .replace_local_from_global(
@@ -155,7 +167,10 @@ fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
         state.declare_global(0, "x".into()).unwrap();
-        let old = state.arena.insert(Value::Num(1.0));
+        let old = state
+            .arena
+            .insert(Value::Num(1.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, old).unwrap();
         state.values.insert(NativeValueId(1), old);
         let terminator = state.function.blocks[0].terminator.clone();
@@ -225,7 +240,10 @@ fn inherited_persistent_local_delegates_to_ancestor_named_storage() {
         let reference = state.local_reference(0).unwrap();
         assert_eq!(state.arena.get(reference).unwrap(), &Value::Num(5.0));
 
-        let updated = state.arena.insert(Value::Num(7.0));
+        let updated = state
+            .arena
+            .insert(Value::Num(7.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, updated).unwrap();
         assert_eq!(
             authority.persistent_named_value("outer", "P").unwrap(),
@@ -459,7 +477,10 @@ fn indexed_root_creation_initializes_only_absent_non_input_numeric_bindings() {
             "planning does not publish a binding"
         );
 
-        let existing = state.arena.insert(Value::Num(7.0));
+        let existing = state
+            .arena
+            .insert(Value::Num(7.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, existing).unwrap();
         assert_eq!(
             state
@@ -487,7 +508,11 @@ fn non_null_write_initializes_an_omitted_input_and_deopt_metadata() {
         missing_error(&mut state);
         let reference = state
             .arena
-            .insert(Value::Struct(runmat_value::StructValue::new()));
+            .insert(
+                Value::Struct(runmat_value::StructValue::new()),
+                Some(&state.runtime),
+            )
+            .unwrap();
         state.set_local(0, reference).unwrap();
         assert!(matches!(
             state

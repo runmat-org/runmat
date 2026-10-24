@@ -312,7 +312,7 @@ impl PendingSequenceTarget {
         self.builder = Some(builder);
         self.fixed_end_receiver = Some(receiver);
         self.fixed_end_pending = false;
-        Ok(value.with_owned(|value| state.arena.insert(value)))
+        value.with_owned(|value| state.arena.insert(value, Some(&state.runtime)))
     }
 
     pub(in crate::execute::mutation) fn root_references(
@@ -387,14 +387,25 @@ impl PendingSequenceTarget {
             return Ok(());
         }
         if let Some(builder) = &self.builder {
+            let mut admission_error = None;
             builder.visit_retained_values(&mut |value| {
-                self.retained.push(state.arena.insert(value.clone()));
+                if admission_error.is_some() {
+                    return;
+                }
+                match state.arena.insert(value.clone(), Some(&state.runtime)) {
+                    Ok(reference) => self.retained.push(reference),
+                    Err(error) => admission_error = Some(error),
+                }
             });
+            if let Some(error) = admission_error {
+                return Err(error);
+            }
         }
         if let Some(components) = components {
             for component in components {
                 if let ObjectIndexComponent::Value(value) = component {
-                    self.retained.push(state.arena.insert(value.clone()));
+                    self.retained
+                        .push(state.arena.insert(value.clone(), Some(&state.runtime))?);
                 }
             }
         }

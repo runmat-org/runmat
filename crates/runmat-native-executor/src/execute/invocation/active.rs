@@ -109,9 +109,22 @@ impl ActiveInvocation {
     ) -> NativeExecutorResult<()> {
         let original =
             runmat_runtime::runtime_error::RuntimeErrorOwner::new(self.state.annotate_error(error));
-        let exception = self.state.arena.insert(runmat_value::Value::MException(
-            runmat_runtime::runtime_error::exception_from_error(original.clone()),
-        ));
+        let exception = self
+            .state
+            .arena
+            .insert(
+                runmat_value::Value::MException(
+                    runmat_runtime::runtime_error::exception_from_error(original.clone()),
+                ),
+                Some(&self.state.runtime),
+            )
+            .map_err(|_| {
+                // Preserve the originating operation error if its ABI envelope
+                // cannot be admitted; never retry the completed source operation.
+                NativeExecutorError::from(runmat_runtime::RuntimeError::from_shared_original(
+                    original.clone(),
+                ))
+            })?;
         let native_exception = runmat_runtime::native::NativeException {
             handle: exception.handle,
             generation: exception.generation,
@@ -266,7 +279,7 @@ impl ActiveInvocation {
         let host = super::super::callbacks::table(&mut self.state);
         host.validate()
             .map_err(|error| NativeExecutorError::Host(error.to_string()))?;
-        let roots = self.state.refresh_roots();
+        let roots = self.state.refresh_roots()?;
         let mut frame = NativeFrame {
             locals: slice_mut_pointer(&mut self.state.locals),
             local_count: self.state.locals.len(),

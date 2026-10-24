@@ -377,7 +377,7 @@ impl HostState {
     ) -> NativeExecutorResult<()> {
         let mut references = CachedRefsBuilder::prepare(&self.runtime, values.len())?;
         for value in values {
-            let reference = self.arena.insert(value.clone());
+            let reference = self.arena.insert(value.clone(), Some(&self.runtime))?;
             if let Err(error) = references.push_initial(reference) {
                 let _ = self.arena.release(reference);
                 for prior in references.as_slice() {

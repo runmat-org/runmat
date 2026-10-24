@@ -82,7 +82,10 @@ where
                 Some(output) => {
                     managed::execute(context.unwrap(), output, operator, &left, &right)?
                 }
-                None => body(left, right).await?,
+                None => {
+                    managed::require_unbounded_host_output(context.unwrap())?;
+                    body(left, right).await?
+                }
             };
             route.confirm_host_branch(
                 context.unwrap(),
@@ -130,7 +133,10 @@ where
                     &right,
                 )?,
                 None => {
-                    if let (Some(_), Some(context)) = (&route, context) {
+                    // No selected route is not evidence of unbounded
+                    // execution. A finite canonical host call must retain an
+                    // actual numerical output owner even without acceleration.
+                    if let Some(context) = context {
                         managed::require_unbounded_host_output(context)?;
                     }
                     body(left, right).await?

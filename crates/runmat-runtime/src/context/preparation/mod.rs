@@ -146,6 +146,7 @@ where
     execute_request_resources(
         context,
         request,
+        false,
         |values, compound, host_cast_output| async move {
             if compound.is_some() {
                 return Err(missing_compound_consumer());
@@ -172,7 +173,7 @@ where
     ) -> Fut,
     Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    execute_request_resources(context, request, execute).await
+    execute_request_resources(context, request, true, execute).await
 }
 
 pub(crate) async fn execute_request_host_numerical<F, Fut>(
@@ -187,6 +188,7 @@ where
     execute_request_resources(
         context,
         request,
+        true,
         |values, compound, numerical_output| async move {
             if compound.is_some() {
                 return Err(missing_compound_consumer());
@@ -214,6 +216,7 @@ fn missing_host_numerical_consumer() -> RuntimeError {
 async fn execute_request_resources<F, Fut>(
     context: Option<&RuntimeContext>,
     request: AdmittedBuiltinPreparation,
+    consumes_host_numerical_output: bool,
     execute: F,
 ) -> Result<RootedValue, RuntimeError>
 where
@@ -226,7 +229,51 @@ where
 {
     match context {
         Some(context) => {
-            execute_prepared_resources(prepare_admitted(context, request).await?, execute).await
+            // A finite host invocation with an actual numerical consumer
+            // does not require an acceleration service. With no service,
+            // admit the canonical numerical owner
+            // before entering the ordinary prepared body, rather than letting
+            // passthrough operands imply an unclaimed host result.
+            //
+            // Service-backed preparations retain their existing authority:
+            // they alone choose/provide their output owner. Ordinary unbounded
+            // calls keep their allocation-neutral passthrough path.
+            let host_output = if consumes_host_numerical_output
+                && context.service_ports().acceleration().is_none()
+            {
+                use super::host_allocation::{
+                    host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+                };
+                let error = |cause| {
+                    host_allocation_runtime_error(
+                        Some(context),
+                        "RunMat:Placement:HostNumericalOutput",
+                        "admitted host numerical output preparation failed",
+                        cause,
+                    )
+                };
+                match HostAllocationReceipt::policy(Some(context)).map_err(error)? {
+                    HostAllocationPolicy::Managed => request
+                        .prepare_host_numerical_output(context)
+                        .map_err(error)?,
+                    HostAllocationPolicy::Unbounded => None,
+                }
+            } else {
+                None
+            };
+            execute_prepared_resources(
+                prepare_admitted(context, request).await?,
+                |values, compound, numerical_output| async move {
+                    // host_output can exist only with no acceleration
+                    // service; that passthrough has no observation/output.
+                    // Refuse any contradictory delivery before body effects.
+                    if host_output.is_some() && numerical_output.is_some() {
+                        return Err(missing_host_numerical_consumer());
+                    }
+                    execute(values, compound, numerical_output.or(host_output)).await
+                },
+            )
+            .await
         }
         None => {
             execute_prepared_resources(
