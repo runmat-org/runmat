@@ -130,3 +130,15 @@ fn transient_rod_time_refinement_is_independent_of_spatial_refinement() {
         eprintln!("transient temporal damped={damped} errors={errors:?}");
     }
 }
+
+#[test]
+#[ignore = "diagnostic: temporal order of the cold-block rod configuration"]
+fn diagnostic_cold_block_rod_temporal_order() {
+    let mesh = mesh(true, 4);
+    for intervals in [80, 160, 320, 640] {
+        eprintln!(
+            "rod temporal intervals={intervals} errors={:?}",
+            errors(&mesh, true, &run(&mesh, true, intervals))
+        );
+    }
+}
