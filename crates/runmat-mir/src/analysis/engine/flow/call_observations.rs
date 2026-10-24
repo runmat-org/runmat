@@ -11,6 +11,9 @@ use super::{transfer_short_circuit_temps, transfer_statement, FlowState};
 #[derive(Debug, Clone)]
 pub(crate) struct CallObservation {
     pub callee: FunctionId,
+    /// Only immediate positional calls establish this diagnostic context;
+    /// expansion and deferred execution retain their own runtime authority.
+    pub complete_arguments: bool,
     pub arguments: Vec<ValueFact>,
     pub span: Span,
     pub argument_spans: Vec<Span>,
@@ -65,6 +68,10 @@ fn collect_value(
             if let Some(callee) = callee {
                 calls.push(CallObservation {
                     callee,
+                    complete_arguments: call
+                        .args
+                        .iter()
+                        .all(|argument| matches!(argument, crate::MirCallArg::Single(_))),
                     arguments: call
                         .args
                         .iter()
@@ -78,6 +85,7 @@ fn collect_value(
         }
         MirRvalue::Future { function, args, .. } => calls.push(CallObservation {
             callee: *function,
+            complete_arguments: false,
             arguments: args
                 .iter()
                 .filter_map(|argument| argument.operand())

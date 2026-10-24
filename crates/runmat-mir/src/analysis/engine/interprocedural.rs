@@ -12,7 +12,7 @@ use crate::{MirAssembly, MirBody};
 use super::{call_graph, flow};
 use crate::analysis::inference::FunctionSummary;
 
-const MAX_SUMMARY_UPDATES: usize = 24;
+pub(super) const MAX_SUMMARY_UPDATES: usize = 24;
 
 pub(crate) struct ProgramAnalysis {
     pub summaries: BTreeMap<FunctionId, FunctionSummary>,

@@ -10,8 +10,8 @@ mod spawn_safety;
 mod store;
 mod workspace_effect;
 
-pub use engine::analyze_assembly;
 pub(crate) use engine::lexical_reference_graph;
+pub use engine::{analyze_assembly, diagnose_call_contexts, CallContextDiagnostics};
 pub use fusion_stage::{FusionStageContract, FusionStageFactStatus};
 pub use reachability::*;
 pub use store::*;

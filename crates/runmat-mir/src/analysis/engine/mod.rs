@@ -1,8 +1,10 @@
 mod call_graph;
+mod call_context;
 mod flow;
 mod interprocedural;
 mod state;
 
+pub use call_context::{diagnose_call_contexts, CallContextDiagnostics};
 pub(crate) use call_graph::lexical_reference_graph;
 pub(crate) use state::FlowState;
 
