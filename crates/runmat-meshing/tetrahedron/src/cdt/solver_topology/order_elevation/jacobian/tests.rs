@@ -157,8 +157,22 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
     )
     .unwrap());
 
+    // The exact fallback proves the Jacobian positive everywhere ...
     let mut work = 0;
-    certify_element(
+    certify_element_within(
+        coordinates,
+        10_000,
+        0,
+        &NeverCancelled,
+        &Storage(None),
+        &mut work,
+        1,
+    )
+    .unwrap();
+    // ... but a corner determinant of order 1e-16 has no scale-relative margin, so the shared
+    // Tet10 element rule, and with it the mesher's certification, rejects the element.
+    let mut work = 0;
+    let failure = certify_element(
         coordinates,
         10_000,
         0,
@@ -169,7 +183,8 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
             storage: Storage(None),
         },
     )
-    .unwrap();
+    .unwrap_err();
+    assert!(failure.reason.contains("InsufficientJacobianMargin"), "{failure:?}");
 }
 
 #[test]

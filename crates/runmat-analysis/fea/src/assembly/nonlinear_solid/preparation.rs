@@ -215,7 +215,9 @@ impl CanonicalNonlinearSolidBasis {
             crate::topology::quadrature::visit_volume_rule(
                 element.order,
                 coordinates,
-                plan.rule().reference_points(),
+                // The element's own rule: a curved Tet10 integrates on the converged points of
+                // the shared Tet10 element-validity rule.
+                inventory.rule.reference_points(),
                 |point| {
                     points.push(PreparedPoint {
                         identity: NonlinearSolidPointIdentity {

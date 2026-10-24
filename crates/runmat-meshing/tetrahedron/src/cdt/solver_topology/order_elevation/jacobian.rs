@@ -282,6 +282,16 @@ fn certify_element(
                 "Tet10 isoparametric Jacobian could not be certified positive within the element's search work of {maximum_search_work}"
             )))
         }
+        // A positive Jacobian is necessary but not sufficient: the element must also pass the
+        // shared Tet10 rule (Jacobian margin and stiffness-quadrature convergence) that analysis
+        // applies before integrating it, so the mesher never publishes an element it rejects.
+        Ok(()) => runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates)
+            .map(|_| ())
+            .map_err(|invalidity| {
+                invalid(format!(
+                    "Tet10 element fails the shared element-validity rule: {invalidity:?}"
+                ))
+            }),
         result => result,
     }
 }

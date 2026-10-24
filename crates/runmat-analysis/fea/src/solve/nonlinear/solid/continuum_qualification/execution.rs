@@ -83,9 +83,24 @@ pub(super) fn run_with_rule(
         state.accumulated_plastic_dissipation_j,
         &evaluation,
     );
-    eprintln!("nonlinear cube rule={rule:?} cells={cells} quadratic={quadratic} requestedincrements={requested_increments} minimumstrainincrement={minimum_strain_increment} errors={errors:?}");
+    // Proportionality diagnostic: uniaxial strain keeps plastic flow along [1, -1/2, -1/2, 0, 0, 0].
+    let plastic_off_axis = state
+        .constitutive
+        .points
+        .iter()
+        .map(|point| {
+            let p = point.engineering_plastic_strain;
+            let axial = p[0];
+            [p[1] + 0.5 * axial, p[2] + 0.5 * axial, p[3], p[4], p[5]]
+                .iter()
+                .fold(0.0_f64, |m, v| m.max(v.abs()))
+                / point.equivalent_plastic_strain.max(f64::MIN_POSITIVE)
+        })
+        .fold(0.0_f64, f64::max);
+    eprintln!("nonlinear cube rule={rule:?} cells={cells} quadratic={quadratic} requestedincrements={requested_increments} minimumstrainincrement={minimum_strain_increment} plasticoffaxis={plastic_off_axis:e} errors={errors:?}");
     Run {
         errors,
+        plastic_off_axis,
         displacement: state.displacement,
         alpha: state
             .constitutive
