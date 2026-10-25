@@ -83,6 +83,23 @@ impl CanonicalLimits {
             maximum_nesting_depth,
         }
     }
+
+    /// Limits for contracts whose collections grow with admitted content (complete fields,
+    /// meshes, byte payloads). Every collection item occupies at least one encoded byte, so
+    /// the declared encoded-byte ceiling already bounds every collection length; a separate,
+    /// smaller item cap would reject admitted content that fits the byte ceiling.
+    pub const fn content_bounded(
+        maximum_encoded_bytes: usize,
+        maximum_string_bytes: usize,
+        maximum_nesting_depth: usize,
+    ) -> Self {
+        Self::new(
+            maximum_encoded_bytes,
+            maximum_encoded_bytes,
+            maximum_string_bytes,
+            maximum_nesting_depth,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -70,3 +70,26 @@ fn fluid_state_rejects_original_source_and_declaration_substitution() {
         CanonicalSemanticState::from_fluid_publication(&request, &capped, &mesh, &result).is_err()
     );
 }
+
+#[test]
+fn fluid_state_profiles_result_payloads_beyond_a_fixed_item_count() {
+    // A real mesh's original result encodes to millions of bytes, each one collection item;
+    // the state contract bounds them by its encoded-byte ceiling, not a fixed item count.
+    let (workload, mesh) = crate::execution::fluid_test_workload();
+    let result = workload.execute(&mesh).unwrap();
+    let topology = result.native_field_topology(&workload, &mesh).unwrap();
+    let result_bytes = vec![0x5a_u8; 5_000_000];
+    let profile = profile_serialized(
+        &FluidStatePayloadProjection {
+            workload: &workload,
+            mesh: &mesh,
+            result_bytes: &result_bytes,
+            topology: &topology,
+        },
+        STATE_LIMITS,
+    )
+    .unwrap();
+    assert!(profile.encoded_bytes_upper_bound >= result_bytes.len() as u64);
+    let beyond_ceiling = vec![0_u8; STATE_LIMITS.maximum_encoded_bytes + 1];
+    assert!(profile_serialized(&beyond_ceiling, STATE_LIMITS).is_err());
+}

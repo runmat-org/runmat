@@ -13,8 +13,10 @@ use super::{
 };
 
 const STATE_PREFIX: &[u8] = b"runmat-analysis-semantic-state/v1\0";
+/// Semantic states carry complete fields of any admitted mesh, so their collections are
+/// bounded by the contract's encoded-byte ceiling rather than a fixed item count.
 const STATE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 pub(super) mod field_validation;
 mod resource_profile;
