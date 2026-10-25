@@ -22,12 +22,11 @@ fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(format!("observation publication: {error}"))
 }
 /// Catalogs grow with the observed mesh and samples, so codec bounds follow the content:
-/// encoding is bounded by the profiled size of the owned value, decoding by the received bytes
-/// (every collection item occupies at least one encoded byte). Never below the fixed floor.
+/// encoding is bounded by the profiled size of the owned value, decoding by the received bytes.
+/// Never below the fixed floor.
 fn content_limits(bytes: usize) -> CanonicalLimits {
-    CanonicalLimits::new(
+    CanonicalLimits::content_bounded(
         bytes.max(LIMITS.maximum_encoded_bytes),
-        bytes.max(LIMITS.maximum_collection_items),
         LIMITS.maximum_string_bytes,
         LIMITS.maximum_nesting_depth,
     )

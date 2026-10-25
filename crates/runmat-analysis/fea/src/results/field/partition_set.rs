@@ -18,7 +18,7 @@ pub use selection::{
 
 const FIELD_PARTITION_SET_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition-set/v1\0";
 const FIELD_PARTITION_SET_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 32);
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4_000_000, 32);
 
 /// Canonical field-storage block size. It is part of the artifact contract rather than a
 /// placement decision, so the same recovered field has the same storage partition identities on

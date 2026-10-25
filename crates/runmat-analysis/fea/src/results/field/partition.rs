@@ -15,7 +15,7 @@ use super::{
 
 const FIELD_PARTITION_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition/v1\0";
 const FIELD_PARTITION_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 32);
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4_000_000, 32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

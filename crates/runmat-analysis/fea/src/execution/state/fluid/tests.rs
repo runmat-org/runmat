@@ -90,6 +90,12 @@ fn fluid_state_profiles_result_payloads_beyond_a_fixed_item_count() {
     )
     .unwrap();
     assert!(profile.encoded_bytes_upper_bound >= result_bytes.len() as u64);
-    let beyond_ceiling = vec![0_u8; STATE_LIMITS.maximum_encoded_bytes + 1];
+    struct Bytes(usize);
+    impl serde::Serialize for Bytes {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.collect_seq(std::iter::repeat_n(0_u8, self.0))
+        }
+    }
+    let beyond_ceiling = Bytes(STATE_LIMITS.maximum_encoded_bytes + 1);
     assert!(profile_serialized(&beyond_ceiling, STATE_LIMITS).is_err());
 }

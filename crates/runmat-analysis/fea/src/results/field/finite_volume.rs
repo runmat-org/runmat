@@ -14,7 +14,8 @@ mod tests;
 mod validation;
 
 const PREFIX: &[u8] = b"runmat-finite-volume-field-layout/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+/// Per-entity topology of any admitted mesh: collections are bounded by the byte ceiling.
+const LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

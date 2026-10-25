@@ -117,3 +117,24 @@ fn identity_profile_rejects_invalid_metadata_overflow_and_codec_limits() {
         RecoveredField::identity_profile_shape(&invalid, RecoveredFieldSample::Final, 1).is_err()
     );
 }
+
+#[test]
+fn identity_profile_admits_mesh_scale_fields_beyond_a_fixed_item_count() {
+    // A vector field on a large fluid mesh has millions of values in one collection; the field
+    // contract bounds them by its encoded-byte ceiling, not a fixed item count.
+    let definition = definition(
+        ObservationQuantity::HeatFlux,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    );
+    let entities = 2_000_000;
+    let profile =
+        RecoveredField::identity_profile_shape(&definition, RecoveredFieldSample::Final, entities)
+            .unwrap();
+    assert!(profile.encoded_bytes_upper_bound >= 3 * entities as u64);
+    let beyond = FIELD_LIMITS.maximum_encoded_bytes / 3 + 1;
+    assert!(
+        RecoveredField::identity_profile_shape(&definition, RecoveredFieldSample::Final, beyond)
+            .is_err()
+    );
+}

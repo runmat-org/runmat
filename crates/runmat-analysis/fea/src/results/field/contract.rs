@@ -16,8 +16,12 @@ use super::partition_set::{
     RecoveredFieldPartitionDescriptor,
 };
 
-const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
-const FIELD_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 4096, 32);
+pub(super) const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
+/// Recovered fields carry one value per entity and component of any admitted mesh (the same
+/// complete fields a semantic state carries), so collections are bounded by the encoded-byte
+/// ceiling rather than a fixed item count. Memory is admitted by the recovery resource plan.
+pub(super) const FIELD_LIMITS: CanonicalLimits =
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4096, 32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

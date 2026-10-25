@@ -40,7 +40,9 @@ use crate::{
 const PREFIX: &[u8] = b"runmat-fluid-study-completion\0";
 // Full original task history replaces the previous winning-attempt payload.
 const COMPLETION_SCHEMA_VERSION: u16 = 2;
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
+/// The completion carries the solver mesh and workload of any admitted mesh, so collections are
+/// bounded by the encoded-byte ceiling rather than a fixed item count.
+const LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

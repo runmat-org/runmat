@@ -1,17 +1,16 @@
 use std::collections::BTreeMap;
 
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::encode_contract;
 use runmat_execution::Digest;
 
 use crate::topology::AnalysisProjection;
 
+use super::contract::{FIELD_LIMITS, FIELD_PREFIX};
 use super::{
     RecoveredField, RecoveredFieldArtifact, RecoveredFieldDefinitionIdentity,
     RecoveredFieldEntityCounts, RecoveredFieldError, RecoveredFieldSample,
 };
 
-const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
-const FIELD_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 4096, 32);
 
 #[derive(Clone, Debug)]
 pub struct RecoveredFieldCatalog {
