@@ -2658,6 +2658,27 @@ pub trait AccelProvider: AcceleratorThreadBound {
         sparse::unsupported_sparse_future()
     }
 
+    /// Uploads a multigrid hierarchy for device-resident preconditioning (see
+    /// [`SparseMultigridRequest`]). The default is unsupported.
+    fn prepare_sparse_multigrid(
+        &self,
+        _request: &SparseMultigridRequest<'_>,
+    ) -> anyhow::Result<SparseMultigridHandle> {
+        Err(anyhow!("sparse multigrid not supported by provider"))
+    }
+
+    /// Applies an uploaded hierarchy to one residual (one upload, one download).
+    fn sparse_multigrid_solve<'a>(
+        &'a self,
+        _request: &'a SparseMultigridSolveRequest<'a>,
+    ) -> AccelProviderFuture<'a, SparseMultigridSolveResult> {
+        Box::pin(async { Err(anyhow!("sparse multigrid not supported by provider")) })
+    }
+
+    fn free_sparse_multigrid(&self, _hierarchy: &SparseMultigridHandle) -> anyhow::Result<()> {
+        Err(anyhow!("sparse multigrid release not supported by provider"))
+    }
+
     fn free_sparse_preconditioner(
         &self,
         _preconditioner: &SparsePreconditionerHandle,

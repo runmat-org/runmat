@@ -38,7 +38,9 @@ pub(crate) fn restarted_gmres<E>(
         self, GmresGeometry, GmresMode, GmresOperations, GmresParameters, PreconditionerSide,
         ResidualCheck,
     };
-    use runmat_sparse_solvers::krylov::{block_on, ApplyStatus, KrylovFailure, ScalarArithmetic};
+    use runmat_sparse_solvers::krylov::{
+        block_on, ApplyStatus, HostKernels, KrylovFailure, ScalarArithmetic,
+    };
     let size = right_hand_side.len();
     if size == 0
         || initial.len() != size
@@ -88,6 +90,34 @@ pub(crate) fn restarted_gmres<E>(
         }
         async fn cooperate(&mut self, _completed: u64) -> Result<(), Stop<E>> {
             Ok(())
+        }
+        // The shared host kernels (deterministic blocked reductions on the admitted pool).
+        fn native_norm(&mut self, values: &[f64]) -> Option<f64> {
+            HostKernels::norm(values)
+        }
+        fn native_dot(&mut self, left: &[f64], right: &[f64]) -> Option<runmat_sparse_solvers::c64> {
+            HostKernels::dot(left, right)
+        }
+        fn native_axpy(&mut self, target: &mut [f64], scale: runmat_sparse_solvers::c64, source: &[f64]) -> bool {
+            HostKernels::axpy(target, scale, source)
+        }
+        fn native_divide(&mut self, target: &mut [f64], source: &[f64], divisor: f64) -> bool {
+            HostKernels::divide(target, source, divisor)
+        }
+        fn native_project(
+            &mut self,
+            basis: &[f64],
+            rows: usize,
+            w: &mut [f64],
+            coefficients: &mut [runmat_sparse_solvers::c64],
+        ) -> bool {
+            HostKernels::project(basis, rows, w, coefficients)
+        }
+        fn native_residual(&mut self, rhs: &[f64], product: &[f64], residual: &mut [f64]) -> Option<bool> {
+            HostKernels::residual(rhs, product, residual)
+        }
+        fn native_equal(&mut self, left: &[f64], right: &[f64]) -> Option<bool> {
+            HostKernels::equal(left, right)
         }
     }
     if right_hand_side.iter().all(|value| *value == 0.0) {

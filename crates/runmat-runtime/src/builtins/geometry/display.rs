@@ -1,9 +1,8 @@
 //! `mesh(asset, ...)` display for geometry.Asset and `geometry.load` options.
 use super::*;
-use runmat_builtins::{
-    GEOMETRY_MESH_METHOD_ERROR_INPUT as MESH_INPUT,
-    GEOMETRY_MESH_METHOD_ERROR_OPERATION as MESH_OPERATION,
-};
+#[cfg(feature = "plot-core")]
+use runmat_builtins::GEOMETRY_MESH_METHOD_ERROR_INPUT as MESH_INPUT;
+use runmat_builtins::GEOMETRY_MESH_METHOD_ERROR_OPERATION as MESH_OPERATION;
 use runmat_geometry_core::UnitSystem;
 use runmat_geometry_io::GeometryImportOptions;
 

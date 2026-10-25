@@ -195,3 +195,38 @@ fn cancellation_and_iteration_limits_are_reported() {
     assert_eq!(report.flag, StopFlag::MaxIterations);
     assert!((residual(&a, &x, &b) - report.relative_residual).abs() < 1e-12);
 }
+
+/// A truncated inner CG: a variable (nonlinear) preconditioner.
+struct InnerCg<'a> {
+    a: &'a CsrMatrix<f64>,
+    jacobi: Jacobi<f64>,
+    iterations: usize,
+}
+impl Preconditioner<f64> for InnerCg<'_> {
+    fn apply(&self, r: &[f64], z: &mut [f64]) -> SolverResult<()> {
+        z.iter_mut().for_each(|v| *v = 0.0);
+        let options = KrylovOptions { rtol: 1e-30, max_iterations: self.iterations, ..Default::default() };
+        let _ = pcg(self.a, Some(&self.jacobi), r, z, &options, SolveControl::NONE)?;
+        Ok(())
+    }
+    fn is_variable(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn variable_preconditioners_select_flexible_cg_and_flexible_gmres() {
+    let a = poisson3d::<f64>(14, 13, 12);
+    let n = a.nrows();
+    let b = par::seeded_vector::<f64>(n, 5);
+    let inner = InnerCg { a: &a, jacobi: Jacobi(a.as_ref().diagonal()), iterations: 4 };
+    let options = KrylovOptions { rtol: 1e-10, max_iterations: 300, ..Default::default() };
+    let mut x = vec![0.0; n];
+    let report = pcg(&a, Some(&inner), &b, &mut x, &options, SolveControl::NONE).unwrap();
+    assert!(report.converged(), "flexible CG {report:?}");
+    assert!(residual(&a, &x, &b) <= 1e-9);
+    let mut y = vec![0.0; n];
+    let report = gmres(&a, Some(&inner), &b, &mut y, &options, &GmresOptions { restart: 30, ..Default::default() }, SolveControl::NONE).unwrap();
+    assert!(report.converged(), "flexible GMRES {report:?}");
+    assert!(residual(&a, &y, &b) <= 1e-9);
+}

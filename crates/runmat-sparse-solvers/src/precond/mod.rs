@@ -15,9 +15,10 @@ mod amg;
 mod direct;
 mod ilu;
 mod jacobi;
+mod schedule;
 mod schwarz;
 
-pub use amg::{rigid_body_modes, Amg, AmgOptions, AmgStatistics, NearNullspace};
+pub use amg::{rigid_body_modes, Amg, AmgExport, AmgLevelExport, AmgOptions, AmgStatistics, NearNullspace};
 pub use direct::DirectPreconditioner;
 pub use ilu::{Ilu0, Ilut, IlutOptions};
 pub use jacobi::{BlockJacobi, Jacobi};

@@ -72,7 +72,9 @@ pub(super) fn execute(
             "static acoustic response execution identity differs from numerical intent and allocation",
         ));
     }
-    let result = workload.execute_with_resource_plan(&mesh, &resource_plan)?;
+    let result = super::with_admitted_cpu_pool(&resource_plan, || {
+        Ok(workload.execute_with_resource_plan(&mesh, &resource_plan)?)
+    })?;
     let receipt = AcousticResponseNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let bytes = result.canonical_bytes()?;
     let bound = runmat_analysis_fea::planning::resource::acoustic_response_result_payload_bytes_upper_bound(

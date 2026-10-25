@@ -3,6 +3,7 @@ members = [
     "crates/runmat-async",
     "crates/runmat-cpu-execution",
     "crates/runmat-sparse-solvers",
+    "crates/runmat-sparse-accelerate",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -84,6 +85,7 @@ resolver = "2"
 runmat-build-identity = { version = "=0.6.2", path = "crates/runmat-build-identity" }
 runmat-cpu-execution = { version = "=0.6.2", path = "crates/runmat-cpu-execution" }
 runmat-sparse-solvers = { version = "=0.6.2", path = "crates/runmat-sparse-solvers" }
+runmat-sparse-accelerate = { version = "=0.6.2", path = "crates/runmat-sparse-accelerate" }
 # External dependencies used across multiple crates
 wgpu = "24.0.0"
 inventory = "0.1"

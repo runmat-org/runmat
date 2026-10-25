@@ -36,6 +36,52 @@ pub trait GmresOperations<T> {
         &mut self,
         completed: u64,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
+
+    // Optional native vector kernels. A caller whose storage has native, deterministic (and,
+    // for a partitioned backend, globally reduced) kernels supplies them; returning
+    // `None`/`false` (the default) selects the recurrence's portable scale-separated kernels
+    // for that call. A native result that is not finite also returns `None`, so extreme-range
+    // vectors take the portable path. Every native answer must be identical on all ranks of a
+    // partitioned solve.
+
+    /// Euclidean norm, finite.
+    fn native_norm(&mut self, _values: &[T]) -> Option<f64> {
+        None
+    }
+    /// Hermitian product `Σ conj(left_i) right_i`, finite.
+    fn native_dot(&mut self, _left: &[T], _right: &[T]) -> Option<Complex64> {
+        None
+    }
+    /// `target += scale · source`; `false` leaves `target` untouched.
+    fn native_axpy(&mut self, _target: &mut [T], _scale: Complex64, _source: &[T]) -> bool {
+        false
+    }
+    /// `target = source / divisor` for a finite positive divisor; `false` leaves `target`
+    /// untouched.
+    fn native_divide(&mut self, _target: &mut [T], _source: &[T], _divisor: f64) -> bool {
+        false
+    }
+    /// One classical Gram–Schmidt pass against the `rows` contiguous basis vectors:
+    /// `coefficients[k] = ⟨v_k, w⟩` for all `k`, then `w −= Σ coefficients[k] v_k`. Returning
+    /// `false` must leave `w` untouched and selects the portable sequential projection.
+    fn native_project(
+        &mut self,
+        _basis: &[T],
+        _rows: usize,
+        _w: &mut [T],
+        _coefficients: &mut [Complex64],
+    ) -> bool {
+        false
+    }
+    /// `residual = rhs − product`: `Some(true)` when every entry is representable,
+    /// `Some(false)` when one is not (breakdown), `None` for the portable loop.
+    fn native_residual(&mut self, _rhs: &[T], _product: &[T], _residual: &mut [T]) -> Option<bool> {
+        None
+    }
+    /// Whether two vectors are equal entry by entry.
+    fn native_equal(&mut self, _left: &[T], _right: &[T]) -> Option<bool> {
+        None
+    }
 }
 
 pub struct GmresWork<'a, T> {
@@ -123,23 +169,6 @@ pub trait Arithmetic<T> {
     fn to_complex(value: T) -> Complex64;
     fn from_complex(value: Complex64) -> Option<T>;
     fn divide_complex(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64);
-    /// Euclidean norm, finite.
-    fn native_norm(_values: &[T]) -> Option<f64> {
-        None
-    }
-    /// Hermitian product `Σ conj(left_i) right_i`, finite.
-    fn native_dot(_left: &[T], _right: &[T]) -> Option<Complex64> {
-        None
-    }
-    /// `target += scale · source`; `false` leaves `target` untouched.
-    fn native_axpy(_target: &mut [T], _scale: Complex64, _source: &[T]) -> bool {
-        false
-    }
-    /// `target = source / divisor` for a finite positive divisor; `false` leaves
-    /// `target` untouched.
-    fn native_divide(_target: &mut [T], _source: &[T], _divisor: f64) -> bool {
-        false
-    }
 }
 
 /// Left-preconditioned GMRES with a true residual after every step.
@@ -290,6 +319,19 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             chunk.fill(Complex64::new(0.0, 0.0));
         }
         operations.coefficient(work.x, work.product).await?;
+        match operations.native_residual(rhs, work.product, work.residual) {
+            Some(true) => operations.cooperate(n as u64).await?,
+            Some(false) => {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                })
+            }
+            None => {
         for (index, (destination, (&b, &ax))) in work
             .residual
             .iter_mut()
@@ -310,6 +352,8 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 });
             };
             *destination = value;
+        }
+            }
         }
         if side == PreconditionerSide::Left {
             if operations
@@ -367,7 +411,7 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             break;
         }
         if beta.native_magnitude().is_some()
-            && A::native_divide(&mut work.basis[..n], work.preconditioned, beta.magnitude())
+            && operations.native_divide(&mut work.basis[..n], work.preconditioned, beta.magnitude())
         {
             operations.cooperate(n as u64).await?;
         } else {
@@ -463,32 +507,45 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 });
             };
             for pass in 0..2 {
-                for row in 0..=inner {
-                    let basis = &work.basis[row * n..(row + 1) * n];
-                    let Some(coefficient) =
-                        dot::<T, A, O>(basis, work.preconditioned, operations).await?
-                    else {
-                        return Ok(GmresOutcome {
-                            flag: 4,
-                            relres: best_residual.relative(denominator),
-                            outer: best_iteration.0,
-                            inner: best_iteration.1,
-                            residual_count,
-                            steps,
-                        });
-                    };
-                    work.hessenberg[h_index(row, inner, restart)] += coefficient;
-                    if !axpy::<T, A, O>(work.preconditioned, -coefficient, basis, operations)
-                        .await?
-                    {
-                        return Ok(GmresOutcome {
-                            flag: 4,
-                            relres: best_residual.relative(denominator),
-                            outer: best_iteration.0,
-                            inner: best_iteration.1,
-                            residual_count,
-                            steps,
-                        });
+                let rows = inner + 1;
+                if operations.native_project(
+                    &work.basis[..rows * n],
+                    rows,
+                    work.preconditioned,
+                    &mut work.coefficients[..rows],
+                ) {
+                    operations.cooperate((2 * rows * n) as u64).await?;
+                    for row in 0..rows {
+                        work.hessenberg[h_index(row, inner, restart)] += work.coefficients[row];
+                    }
+                } else {
+                    for row in 0..=inner {
+                        let basis = &work.basis[row * n..(row + 1) * n];
+                        let Some(coefficient) =
+                            dot::<T, A, O>(basis, work.preconditioned, operations).await?
+                        else {
+                            return Ok(GmresOutcome {
+                                flag: 4,
+                                relres: best_residual.relative(denominator),
+                                outer: best_iteration.0,
+                                inner: best_iteration.1,
+                                residual_count,
+                                steps,
+                            });
+                        };
+                        work.hessenberg[h_index(row, inner, restart)] += coefficient;
+                        if !axpy::<T, A, O>(work.preconditioned, -coefficient, basis, operations)
+                            .await?
+                        {
+                            return Ok(GmresOutcome {
+                                flag: 4,
+                                relres: best_residual.relative(denominator),
+                                outer: best_iteration.0,
+                                inner: best_iteration.1,
+                                residual_count,
+                                steps,
+                            });
+                        }
                     }
                 }
                 if pass == 0
@@ -513,7 +570,7 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 Complex64::new(next_norm.magnitude(), 0.0);
             if !next_norm.is_zero()
                 && next_norm.native_magnitude().is_some()
-                && A::native_divide(
+                && operations.native_divide(
                     &mut work.basis[(inner + 1) * n..(inner + 2) * n],
                     work.preconditioned,
                     next_norm.magnitude(),
@@ -614,11 +671,19 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             if on_estimate {
                 // The candidate becomes the iterate; the restart forms and
                 // certifies its residual. An unchanged iterate is stagnation.
-                let mut same = true;
-                for (candidate, current) in work.candidate.chunks(1024).zip(work.x.chunks(1024)) {
-                    operations.cooperate(candidate.len() as u64).await?;
-                    same &= candidate == current;
-                }
+                let same = match operations.native_equal(work.candidate, work.x) {
+                    Some(same) => same,
+                    None => {
+                        let mut same = true;
+                        for (candidate, current) in
+                            work.candidate.chunks(1024).zip(work.x.chunks(1024))
+                        {
+                            operations.cooperate(candidate.len() as u64).await?;
+                            same &= candidate == current;
+                        }
+                        same
+                    }
+                };
                 if same {
                     copy(work.best, work.x, operations).await?;
                     return Ok(GmresOutcome {
@@ -635,6 +700,19 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 break;
             }
             operations.coefficient(work.candidate, work.product).await?;
+            match operations.native_residual(rhs, work.product, work.residual) {
+                Some(true) => operations.cooperate(n as u64).await?,
+                Some(false) => {
+                    return Ok(GmresOutcome {
+                        flag: 4,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    })
+                }
+                None => {
             for (index, (destination, (&b, &ax))) in work
                 .residual
                 .iter_mut()
@@ -655,6 +733,8 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                     });
                 };
                 *destination = value;
+            }
+                }
             }
             let checked: &[T] = if side == PreconditionerSide::Left {
                 if operations
@@ -704,12 +784,19 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                     steps,
                 });
             }
-            let mut same = previous_candidate;
-            for (candidate, previous) in work.candidate.chunks(1024).zip(work.previous.chunks(1024))
-            {
-                operations.cooperate(candidate.len() as u64).await?;
-                same &= candidate == previous;
-            }
+            let same = match operations.native_equal(work.candidate, work.previous) {
+                Some(equal) => previous_candidate && equal,
+                None => {
+                    let mut same = previous_candidate;
+                    for (candidate, previous) in
+                        work.candidate.chunks(1024).zip(work.previous.chunks(1024))
+                    {
+                        operations.cooperate(candidate.len() as u64).await?;
+                        same &= candidate == previous;
+                    }
+                    same
+                }
+            };
             if same {
                 return Ok(GmresOutcome {
                     flag: 3,

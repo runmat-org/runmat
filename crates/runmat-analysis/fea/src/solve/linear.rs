@@ -236,7 +236,34 @@ fn solve_operator_system_with_settings(
     // Compatibility is a solver-independent admission boundary. A runtime provider must never
     // receive a system that the reference path would reject, and provider fallback must not alter
     // that decision.
-    if backend_kind == LinearAlgebraBackendKind::Accelerator {
+    // One canonical SPD path: the shared sparse layer solves with the coercivity-proving
+    // Cholesky factor when one exists, otherwise with the policy's strategy.
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    let strategy = shared_sparse::resolve_spd_strategy(
+        preconditioner_kind,
+        prepared.dof_count(),
+        prepared.matrix().values().len(),
+        1,
+        factor.is_some(),
+    );
+    // A multigrid strategy on an accelerator runs mixed precision: host hierarchy, device inner
+    // CG, host f64 flexible CG with the f64 true-residual certificate. Other strategies use the
+    // provider's resident Jacobi CG.
+    #[cfg(not(target_arch = "wasm32"))]
+    let device: Option<shared_sparse::SolverDevice<'static>> = (backend_kind
+        == LinearAlgebraBackendKind::Accelerator
+        && matches!(
+            strategy,
+            shared_sparse::SpdStrategy::Pcg(runmat_sparse_solvers::policy::PreconditionerChoice::Amg)
+        ))
+    .then(runmat_accelerate_api::provider)
+    .flatten();
+    #[cfg(target_arch = "wasm32")]
+    let device: Option<shared_sparse::SolverDevice<'static>> = None;
+    if backend_kind == LinearAlgebraBackendKind::Accelerator && device.is_none() {
         let maximum_iterations = accelerator_iteration_limit(operator, 64);
         match prepare_accelerator_linear_system(prepared.clone(), maximum_iterations).and_then(
             |accelerator| {
@@ -292,19 +319,6 @@ fn solve_operator_system_with_settings(
             x[index] = b[index];
         }
     }
-    // One canonical SPD path: the shared sparse layer solves with the coercivity-proving
-    // Cholesky factor when one exists, otherwise with the policy's strategy.
-    let factor = prepared
-        .admissibility()
-        .and_then(|evidence| evidence.factor())
-        .map(|factor| factor.0.clone());
-    let strategy = shared_sparse::resolve_spd_strategy(
-        preconditioner_kind,
-        prepared.dof_count(),
-        prepared.matrix().values().len(),
-        1,
-        factor.is_some(),
-    );
     let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
         matrix: prepared.matrix(),
         rhs: b,
@@ -314,9 +328,25 @@ fn solve_operator_system_with_settings(
         strategy,
         block_size: 1,
         factor: factor.as_deref(),
+        device,
     });
     let mut diagnostics = initial_diagnostics;
     diagnostics.push(SuccessfulDiagnostic::CpuMethod(strategy).diagnostic());
+    if outcome.device_preconditioner {
+        effective_backend_kind = LinearAlgebraBackendKind::Accelerator;
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_DEVICE_PRECONDITIONER".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solver=flexible_cg preconditioner=device_amg_inner_cg inner_steps={} inner_precision=f32 outer_precision=f64",
+                shared_sparse::DEVICE_INNER_CG_STEPS
+            ),
+        });
+    } else if device.is_some() {
+        // The provider could not hold the hierarchy: the host multigrid ran instead.
+        effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
+        diagnostics.push(SuccessfulDiagnostic::AdmissionFallback.diagnostic());
+    }
     if outcome.cancelled {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_SOLVER_CANCELLED".to_string(),
