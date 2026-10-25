@@ -62,16 +62,46 @@ fn blocked_reduce<R: Copy + Send + std::ops::Add<Output = R>>(
     }
 }
 
+/// `Σ conj(x_i) y_i` over one block with four interleaved accumulators combined as
+/// `(s0 + s1) + (s2 + s3)`: a fixed order (independent of threads) that hides add latency and
+/// lets the loop vectorize.
+#[inline]
+fn block_dot<T: Scalar>(x: &[T], y: &[T]) -> T {
+    let mut s = [T::zero(); 4];
+    let (xc, yc) = (x.chunks_exact(4), y.chunks_exact(4));
+    let (xr, yr) = (xc.remainder(), yc.remainder());
+    for (a, b) in xc.zip(yc) {
+        for k in 0..4 {
+            s[k] += a[k].conj() * b[k];
+        }
+    }
+    for (k, (a, b)) in xr.iter().zip(yr).enumerate() {
+        s[k] += a.conj() * *b;
+    }
+    (s[0] + s[1]) + (s[2] + s[3])
+}
+
+/// `Σ |x_i|²` over one block, four interleaved accumulators (as [`block_dot`]).
+#[inline]
+fn block_abs2<T: Scalar>(x: &[T]) -> f64 {
+    let mut s = [0.0f64; 4];
+    let chunks = x.chunks_exact(4);
+    let rest = chunks.remainder();
+    for a in chunks {
+        for k in 0..4 {
+            s[k] += a[k].abs2();
+        }
+    }
+    for (k, a) in rest.iter().enumerate() {
+        s[k] += a.abs2();
+    }
+    (s[0] + s[1]) + (s[2] + s[3])
+}
+
 /// Hermitian inner product `Σ conj(x_i) y_i`.
 pub fn dot<T: Scalar>(x: &[T], y: &[T]) -> T {
     debug_assert_eq!(x.len(), y.len());
-    blocked_reduce(x.len(), T::zero(), |range| {
-        let mut sum = T::zero();
-        for i in range {
-            sum += x[i].conj() * y[i];
-        }
-        sum
-    })
+    blocked_reduce(x.len(), T::zero(), |range| block_dot(&x[range.clone()], &y[range]))
 }
 
 #[derive(Clone, Copy)]
@@ -100,16 +130,17 @@ pub fn dot_and_magnitude<T: Scalar>(x: &[T], y: &[T]) -> (T, f64) {
             magnitude: 0.0,
         },
         |range| {
-            let mut sum = DotMagnitude {
-                dot: T::zero(),
-                magnitude: 0.0,
-            };
-            for i in range {
+            // Four interleaved accumulators, combined in a fixed order (see `block_dot`).
+            let (mut dot, mut magnitude) = ([T::zero(); 4], [0.0f64; 4]);
+            for (offset, i) in range.enumerate() {
                 let term = x[i].conj() * y[i];
-                sum.dot += term;
-                sum.magnitude += term.abs();
+                dot[offset % 4] += term;
+                magnitude[offset % 4] += term.abs();
             }
-            sum
+            DotMagnitude {
+                dot: (dot[0] + dot[1]) + (dot[2] + dot[3]),
+                magnitude: (magnitude[0] + magnitude[1]) + (magnitude[2] + magnitude[3]),
+            }
         },
     );
     (total.dot, total.magnitude)
@@ -128,11 +159,7 @@ pub fn multi_dot<T: Scalar>(vectors: &[T], count: usize, w: &[T]) -> Vec<T> {
         (0..count)
             .map(|k| {
                 let vk = &vectors[k * n + range.start..k * n + range.end];
-                let mut sum = T::zero();
-                for (v, x) in vk.iter().zip(wb) {
-                    sum += v.conj() * *x;
-                }
-                sum
+                block_dot(vk, wb)
             })
             .collect::<Vec<T>>()
     };
@@ -265,7 +292,7 @@ pub fn norm2<T: Scalar>(x: &[T]) -> f64 {
     blocked_reduce(x.len(), ScaledSquares::ZERO, |range| {
         // Fast path: the plain sum of squares is exact enough whenever it is finite and normal
         // with margin; otherwise rescan the block with explicit scaling.
-        let plain: f64 = x[range.clone()].iter().map(|value| value.abs2()).sum();
+        let plain = block_abs2(&x[range.clone()]);
         if plain.is_finite() && plain >= SAFE_MINIMUM {
             return ScaledSquares {
                 scale: plain.sqrt(),

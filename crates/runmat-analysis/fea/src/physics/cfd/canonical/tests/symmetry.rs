@@ -291,3 +291,35 @@ fn assembled_momentum_block_matches_the_matrix_free_rows() {
         .fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
     assert!(worst <= 1e-12 * scale, "difference {worst} against scale {scale}");
 }
+
+/// Solver-speed benchmark on the graded symmetry slab (not a validation test):
+/// `RUNMAT_CFD_BENCH_N=<n> RUNMAT_CFD_BENCH_THREADS=<t> cargo test -p runmat-analysis-fea --lib
+/// graded_slab_solver_benchmark -- --ignored --nocapture`. The slab has about 6·n³ cells.
+#[test]
+#[ignore = "benchmark"]
+fn graded_slab_solver_benchmark() {
+    let n: usize = std::env::var("RUNMAT_CFD_BENCH_N").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let threads: usize =
+        std::env::var("RUNMAT_CFD_BENCH_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    let start = std::time::Instant::now();
+    let f = symmetry_case_on(
+        fixture::case_mapped(n, ReferenceCase::Duct, false, |[x, y, z]| [x, y, z.powi(4)]),
+        |target| FluidConstraintKind::Symmetry { target },
+    );
+    let mut f = f;
+    // Benchmark budgets: the study converges in a handful of coupled steps.
+    f.policy.maximum_outer_iterations = 50;
+    f.policy.maximum_resident_bytes = 24_000_000_000;
+    f.policy.maximum_operator_work = u64::MAX / 4;
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let prepare = start.elapsed().as_secs_f64();
+    let cells = p.topology.cells.len();
+    let start = std::time::Instant::now();
+    let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve()).unwrap().unwrap();
+    let solve = start.elapsed().as_secs_f64();
+    let (relative, _) = error(&f, &r);
+    println!(
+        "{{\"bench\":\"graded_slab\",\"n\":{n},\"cells\":{cells},\"threads\":{threads},\"prepare_s\":{prepare:.2},\"solve_s\":{solve:.2},\"outer_iterations\":{},\"linear_iterations\":{},\"relative_l2_error\":{relative:.3e}}}",
+        r.outer_iterations, r.linear_iterations
+    );
+}

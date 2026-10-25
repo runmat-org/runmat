@@ -1,9 +1,10 @@
 //! Coupled pressure–velocity solve: Picard linearization of convection and viscosity, then
 //! the whole momentum + continuity system for (u, p) at once by flexible GMRES from the shared
-//! sparse layer, preconditioned by one SIMPLE sweep (momentum ILU solves, Rhie–Chow pressure
-//! Laplacian by AMG, velocity correction). The discrete equations are exactly the segregated
+//! sparse layer, preconditioned by one SIMPLE sweep (momentum solves with component AMG,
+//! Rhie–Chow pressure Laplacian by AMG, velocity correction). The discrete equations are exactly the segregated
 //! solver's: the same momentum operator, the same Rhie–Chow face flux, the same physical
 //! acceptance; only the way the fixed point is reached differs.
+use super::linear::{momentum_amg_options, within_admission, PreconditionerEnvelope};
 use super::{
     geometry_ops::*, linear, momentum, pressure, recovery, CanonicalFluidError as Error,
     CanonicalFluidProblem, CanonicalFluidResult,
@@ -15,7 +16,8 @@ use crate::{
 use runmat_sparse_solvers::{
     krylov::PreconditionerSide,
     operator::FnOperator,
-    precond::{Amg, AmgOptions, Ilu0},
+    krylov::GmresWorkspace,
+    precond::{Amg, AmgOptions},
     Preconditioner, SolverError, SolverResult,
 };
 
@@ -200,19 +202,24 @@ struct SimplePreconditioner<'a, 'p> {
     base_u: &'a [V],
     base_p: &'a [f64],
     base_residual: &'a [f64],
+    /// Pressure force of a zero increment (the outlet reference constant), fixed per step.
+    zero_force: Vec<[f64; 3]>,
+    /// Inner-solve storage reused by every application.
+    momentum_workspace: std::sync::Mutex<GmresWorkspace<f64>>,
+    pressure_workspace: std::sync::Mutex<GmresWorkspace<f64>>,
 }
 
 /// The shared crate's operator trait object over a borrowed CSR view.
 trait LinearOperatorView: runmat_sparse_solvers::LinearOperator<f64> {}
 impl<T: runmat_sparse_solvers::LinearOperator<f64>> LinearOperatorView for T {}
 
-/// Block-diagonal preconditioner: each velocity component by its own ILU factors.
-struct ComponentIlu<F> {
+/// Block-diagonal preconditioner: each velocity component by its own factors.
+struct ComponentPreconditioner<F> {
     n: usize,
     factors: [F; 3],
 }
 
-impl<F: Preconditioner<f64>> Preconditioner<f64> for ComponentIlu<F> {
+impl<F: Preconditioner<f64>> Preconditioner<f64> for ComponentPreconditioner<F> {
     fn apply(&self, r: &[f64], z: &mut [f64]) -> SolverResult<()> {
         for k in 0..3 {
             let range = k * self.n..(k + 1) * self.n;
@@ -221,7 +228,7 @@ impl<F: Preconditioner<f64>> Preconditioner<f64> for ComponentIlu<F> {
         Ok(())
     }
     fn label(&self) -> &'static str {
-        "component-ilu"
+        "component-amg"
     }
     fn is_symmetric_positive_definite(&self) -> bool {
         false
@@ -229,6 +236,7 @@ impl<F: Preconditioner<f64>> Preconditioner<f64> for ComponentIlu<F> {
 }
 
 fn inner_solve(
+    workspace: &std::sync::Mutex<GmresWorkspace<f64>>,
     operator: &dyn LinearOperatorView,
     preconditioner: &dyn Preconditioner<f64>,
     rhs: &[f64],
@@ -238,7 +246,14 @@ fn inner_solve(
     if rhs.iter().all(|v| *v == 0.0) {
         return Ok(x);
     }
+    let mut fresh = GmresWorkspace::default();
+    let mut held = workspace.try_lock();
+    let workspace = match held.as_deref_mut() {
+        Ok(workspace) => workspace,
+        Err(_) => &mut fresh,
+    };
     linear::restarted_gmres(
+        workspace,
         operator,
         Some(preconditioner),
         rhs,
@@ -257,7 +272,12 @@ impl Preconditioner<f64> for SimplePreconditioner<'_, '_> {
         let fail = |e: Error| SolverError::Breakdown(e.to_string());
         // Momentum predictor on the assembled momentum block J (the implicit operator and
         // the explicit terms' Jacobian): J z_u* = r_u by inner GMRES with its ILU factors.
-        let solution = inner_solve(self.momentum, self.momentum_preconditioner, &r[..3 * n])?;
+        let solution = inner_solve(
+            &self.momentum_workspace,
+            self.momentum,
+            self.momentum_preconditioner,
+            &r[..3 * n],
+        )?;
         let predicted = (0..n)
             .map(|c| [solution[c], solution[n + c], solution[2 * n + c]])
             .collect::<Vec<_>>();
@@ -271,7 +291,12 @@ impl Preconditioner<f64> for SimplePreconditioner<'_, '_> {
         let rhs = (0..n)
             .map(|c| (shifted[3 * n + c] - self.base_residual[3 * n + c] - r[3 * n + c]) / w)
             .collect::<Vec<_>>();
-        let correction = inner_solve(self.pressure, self.pressure_preconditioner, &rhs)?;
+        let correction = inner_solve(
+            &self.pressure_workspace,
+            self.pressure,
+            self.pressure_preconditioner,
+            &rhs,
+        )?;
         // Velocity correction z_u = z_u* − G z_p / a_P.
         let force = pressure_force(
             self.p,
@@ -281,12 +306,7 @@ impl Preconditioner<f64> for SimplePreconditioner<'_, '_> {
         .map_err(fail)?;
         // The pressure force of an increment has no boundary constants except the outlet
         // reference, which pressure_force evaluates at the absolute value: remove it.
-        let zero = pressure_force(
-            self.p,
-            &vec![0.0; n],
-            &pressure_gradient(self.p, &vec![0.0; n]).map_err(fail)?,
-        )
-        .map_err(fail)?;
+        let zero = &self.zero_force;
         for c in 0..n {
             for k in 0..3 {
                 z[k * n + c] =
@@ -418,25 +438,42 @@ pub(super) fn solve_with_time(
             &frozen.matrix,
             &frozen.viscosity_gradients,
         )?;
+        let planned = PreconditionerEnvelope::for_counts(n as u64, p.reservation.sparse_entries)
+            .ok_or(Error::Resource("planned preconditioner envelope"))?;
         let solved = with_plan(ambient_plan(), || {
             let momentum_view = frozen.jacobian.view(&p.momentum_jacobian);
             let pressure_view = pressure_arrays.view();
             // Each velocity component is preconditioned by the ILU factors of its implicit
             // operator; the inner solve applies the full block J.
-            let ilu = ComponentIlu {
+            // Each velocity component is preconditioned by smoothed-aggregation AMG of its
+            // implicit operator (a weak strength threshold keeps the thin-cell couplings of
+            // graded meshes in the aggregates); the inner solve applies the full block J.
+            let component_amg = |k: usize| {
+                let amg = Amg::new(blocks[k].view(), momentum_amg_options(), control())?;
+                within_admission(&amg, &planned)?;
+                Ok::<_, SolverError>(amg)
+            };
+            let momentum_preconditioner = ComponentPreconditioner {
                 n,
-                factors: [
-                    Ilu0::new(blocks[0].view(), false)?,
-                    Ilu0::new(blocks[1].view(), false)?,
-                    Ilu0::new(blocks[2].view(), false)?,
-                ],
+                factors: [component_amg(0)?, component_amg(1)?, component_amg(2)?],
             };
             let amg = Amg::new(pressure_view, AmgOptions::default(), control())?;
+            within_admission(&amg, &planned)?;
+            let zero_force = pressure_force(
+                p,
+                &vec![0.0; n],
+                &pressure_gradient(p, &vec![0.0; n])
+                    .map_err(|e| SolverError::Breakdown(e.to_string()))?,
+            )
+            .map_err(|e| SolverError::Breakdown(e.to_string()))?;
             let preconditioner = SimplePreconditioner {
+                zero_force,
+                momentum_workspace: Default::default(),
+                pressure_workspace: Default::default(),
                 p,
                 frozen: &frozen,
                 momentum: &momentum_view,
-                momentum_preconditioner: &ilu,
+                momentum_preconditioner: &momentum_preconditioner,
                 pressure: &pressure_view,
                 pressure_preconditioner: &amg,
                 base_u: &u,
@@ -463,6 +500,7 @@ pub(super) fn solve_with_time(
             let rhs = base_residual.iter().map(|v| -v).collect::<Vec<_>>();
             let mut step = vec![0.0; 4 * n];
             let report = linear::restarted_gmres(
+                &mut GmresWorkspace::default(),
                 &operator,
                 Some(&preconditioner),
                 &rhs,
@@ -476,6 +514,9 @@ pub(super) fn solve_with_time(
         });
         let (step, report) = solved.map_err(|error| match error {
             SolverError::Cancelled => Error::Cancelled,
+            SolverError::OverBudget { .. } => {
+                Error::Resource("preconditioner exceeds original admission")
+            }
             other => Error::Operator(other.to_string()),
         })?;
         linear_iterations += report.iterations as u64;

@@ -61,7 +61,8 @@ pub(super) fn assembler(
 /// The two cell-centred linear systems of the canonical flow solve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LinearSystem {
-    /// Momentum predictor: convection-diffusion, preconditioned by ILU(0).
+    /// Momentum predictor of the segregated solve: convection-diffusion, preconditioned by
+    /// ILU(0).
     Momentum,
     /// Pressure correction: a Laplacian-like system, preconditioned by smoothed-aggregation AMG.
     PressureCorrection,
@@ -78,6 +79,35 @@ pub(super) struct PreconditionerEnvelope {
 }
 
 pub(super) const AMG_OPERATOR_COMPLEXITY_LIMIT: f64 = 3.0;
+
+/// AMG for a velocity component's implicit operator. A weak strength threshold keeps the
+/// couplings across thin (graded) cells in the aggregates, which ILU(0) and the default
+/// threshold leave unresolved.
+pub(super) fn momentum_amg_options() -> AmgOptions {
+    AmgOptions {
+        strength_threshold: 0.1,
+        ..AmgOptions::default()
+    }
+}
+
+/// An AMG hierarchy must stay inside the admitted per-system preconditioner envelope.
+pub(super) fn within_admission(amg: &Amg, planned: &PreconditionerEnvelope) -> Result<(), SolverError> {
+    let statistics = amg.statistics();
+    let entries = statistics.level_nnz.iter().sum::<usize>() as u64;
+    let rows = statistics.level_rows.iter().sum::<usize>() as u64;
+    if statistics.operator_complexity > AMG_OPERATOR_COMPLEXITY_LIMIT
+        || entries
+            .saturating_mul(24)
+            .saturating_add(rows.saturating_mul(64))
+            > planned.resident_bytes_upper_bound
+    {
+        return Err(SolverError::OverBudget {
+            required: entries.saturating_mul(24),
+            budget: planned.resident_bytes_upper_bound,
+        });
+    }
+    Ok(())
+}
 
 impl PreconditionerEnvelope {
     pub(super) fn for_counts(n: u64, nnz: u64) -> Option<Self> {
@@ -157,20 +187,7 @@ pub(super) fn solve(
             LinearSystem::Momentum => Box::new(Ilu0::new(view, false)?),
             LinearSystem::PressureCorrection => {
                 let amg = Amg::new(view, AmgOptions::default(), control())?;
-                let statistics = amg.statistics();
-                let entries = statistics.level_nnz.iter().sum::<usize>() as u64;
-                let rows = statistics.level_rows.iter().sum::<usize>() as u64;
-                if statistics.operator_complexity > AMG_OPERATOR_COMPLEXITY_LIMIT
-                    || entries
-                        .saturating_mul(24)
-                        .saturating_add(rows.saturating_mul(64))
-                        > planned.resident_bytes_upper_bound
-                {
-                    return Err(SolverError::OverBudget {
-                        required: entries.saturating_mul(24),
-                        budget: planned.resident_bytes_upper_bound,
-                    });
-                }
+                within_admission(&amg, &planned)?;
                 Box::new(amg)
             }
         };
@@ -223,6 +240,7 @@ pub(super) fn solve(
 /// here, so a change of the shared solver interface is made in one place.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn restarted_gmres(
+    workspace: &mut runmat_sparse_solvers::krylov::GmresWorkspace<f64>,
     operator: &dyn runmat_sparse_solvers::LinearOperator<f64>,
     preconditioner: Option<&dyn Preconditioner<f64>>,
     rhs: &[f64],
@@ -232,7 +250,8 @@ pub(super) fn restarted_gmres(
     restart: usize,
     side: PreconditionerSide,
 ) -> Result<runmat_sparse_solvers::krylov::KrylovReport, SolverError> {
-    gmres(
+    runmat_sparse_solvers::krylov::gmres_with_workspace(
+        workspace,
         operator,
         preconditioner,
         rhs,

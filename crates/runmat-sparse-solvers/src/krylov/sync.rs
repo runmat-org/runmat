@@ -471,6 +471,59 @@ pub fn gmres_solve<T: Scalar>(
     gmres_options: &GmresOptions,
     control: SolveControl<'_>,
 ) -> SolverResult<KrylovReport> {
+    gmres_with_workspace(
+        &mut GmresWorkspace::default(),
+        operator,
+        preconditioner,
+        b,
+        x,
+        options,
+        gmres_options,
+        control,
+    )
+}
+
+/// Caller-owned GMRES storage reused across solves (inner solves of a preconditioner, sweeps).
+/// Every region is written by the recurrence before it is read, so reuse needs no clearing.
+#[derive(Debug, Default)]
+pub struct GmresWorkspace<T> {
+    native: Vec<T>,
+    complex: Vec<Complex64>,
+    real: Vec<f64>,
+    flexible: Vec<T>,
+}
+
+impl<T: Scalar> GmresWorkspace<T> {
+    /// Bytes currently held.
+    pub fn retained_bytes(&self) -> u64 {
+        ((self.native.capacity() + self.flexible.capacity()) * std::mem::size_of::<T>()
+            + self.complex.capacity() * 16
+            + self.real.capacity() * 8) as u64
+    }
+}
+
+fn exact_len<V: Clone>(vector: &mut Vec<V>, len: usize, zero: V) -> SolverResult<()> {
+    if vector.len() < len {
+        vector
+            .try_reserve_exact(len - vector.len())
+            .map_err(|_| SolverError::OutOfMemory { bytes: (len * std::mem::size_of::<V>()) as u64 })?;
+    }
+    vector.resize(len, zero);
+    Ok(())
+}
+
+/// [`gmres_solve`] on caller-owned, reusable storage.
+#[allow(clippy::too_many_arguments)]
+pub fn gmres_with_workspace<T: Scalar>(
+    workspace: &mut GmresWorkspace<T>,
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    gmres_options: &GmresOptions,
+    control: SolveControl<'_>,
+) -> SolverResult<KrylovReport> {
     check_dims(operator, b, x)?;
     let n = b.len();
     if n == 0 {
@@ -493,25 +546,28 @@ pub fn gmres_solve<T: Scalar>(
         .iter()
         .any(|value| *value != T::zero())
         .then(|| x.to_vec());
-    let mut native = par::try_zeros::<T>(geometry.native_elements)?;
-    let mut complex = vec![
-        Complex64::new(0.0, 0.0);
-        geometry.hessenberg_elements + geometry.complex_small_elements
-    ];
-    let mut real = vec![0.0f64; geometry.real_small_elements + geometry.history_elements];
+    let GmresWorkspace { native, complex, real, flexible } = workspace;
+    exact_len(native, geometry.native_elements, T::zero())?;
+    exact_len(
+        complex,
+        geometry.hessenberg_elements + geometry.complex_small_elements,
+        Complex64::new(0.0, 0.0),
+    )?;
+    exact_len(real, geometry.real_small_elements + geometry.history_elements, 0.0)?;
     let mode = GmresMode {
         side: gmres_options.side,
         residual_check: gmres_options.residual_check,
         step_limit: (gmres_options.residual_check == ResidualCheck::OnEstimate)
             .then_some(options.max_iterations),
     };
-    let mut flexible = if mode.side == PreconditionerSide::Flexible {
-        par::try_zeros::<T>(geometry.flexible_elements())?
+    let flexible_len = if mode.side == PreconditionerSide::Flexible {
+        geometry.flexible_elements()
     } else {
-        Vec::new()
+        0
     };
+    exact_len(flexible, flexible_len, T::zero())?;
     let mut work = geometry
-        .project(&mut native, &mut complex, &mut real)
+        .project(native, complex, real)
         .ok_or_else(|| SolverError::Unsupported("GMRES workspace projection failed".into()))?;
     let mut operations = SyncOperations {
         operator,
@@ -530,7 +586,7 @@ pub fn gmres_solve<T: Scalar>(
         },
         mode,
         &mut work,
-        &mut flexible,
+        flexible,
         &mut operations,
     ))
     .map_err(failure)?;

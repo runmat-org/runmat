@@ -84,6 +84,7 @@ impl<T: Scalar> BsrMatrix<T> {
         match self.block {
             2 => self.spmv_fixed::<2>(x, y),
             3 => self.spmv_fixed::<3>(x, y),
+            6 => self.spmv_fixed::<6>(x, y),
             _ => self.spmv_general(x, y),
         }
     }

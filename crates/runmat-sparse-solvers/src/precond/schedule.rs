@@ -15,8 +15,11 @@ pub(crate) struct LevelSchedule {
     level_ptr: Vec<usize>,
 }
 
-/// Minimum rows in a level before it fans out over the pool.
-const PARALLEL_LEVEL_ROWS: usize = 256;
+/// Minimum rows in a level before it fans out over the pool. A level is one fork-join; narrow
+/// levels (structured orderings give thousands of short rows per level) are faster serially.
+const PARALLEL_LEVEL_ROWS: usize = 32 * LEVEL_ROWS_PER_TASK;
+/// Rows per task inside a wide level.
+const LEVEL_ROWS_PER_TASK: usize = 1024;
 
 impl LevelSchedule {
     /// `dependencies(i)` yields the rows row `i` reads. For a forward (lower) solve they are all
@@ -75,7 +78,8 @@ impl LevelSchedule {
                 unsafe { ptr.add(i).write(value) };
             };
             if rows.len() >= PARALLEL_LEVEL_ROWS && par::threads() > 1 {
-                runmat_cpu_execution::ordered_map(rows, |i| kernel(i));
+                let tasks: Vec<&[usize]> = rows.chunks(LEVEL_ROWS_PER_TASK).collect();
+                runmat_cpu_execution::ordered_map(&tasks, |task| task.iter().for_each(&kernel));
             } else {
                 rows.iter().for_each(kernel);
             }
@@ -119,6 +123,33 @@ mod tests {
     use crate::par;
     use crate::precond::{Ilu0, Ilut, IlutOptions};
     use crate::testutil::poisson3d;
+
+    #[test]
+    fn wide_levels_run_in_parallel_and_match_the_sequential_solve_bitwise() {
+        // 40 000 independent tridiagonal chains of length 4: four levels of 40 000 rows each.
+        let (chains, length) = (40_000, 4);
+        let n = chains * length;
+        let mut t = crate::TripletBuilder::new(n, n);
+        for chain in 0..chains {
+            for k in 0..length {
+                let i = chain * length + k;
+                t.push(i, i, 4.0 + (i % 7) as f64 * 0.1);
+                if k > 0 {
+                    t.push(i, i - 1, -1.0 - (i % 3) as f64 * 0.1);
+                    t.push(i - 1, i, -0.5);
+                }
+            }
+        }
+        let a: crate::CsrMatrix<f64> = t.build();
+        let ilu = Ilu0::new(a.as_ref(), false).unwrap();
+        assert_eq!(ilu.lower.levels(), length);
+        let r = par::seeded_vector::<f64>(n, 3);
+        let mut serial = vec![0.0; n];
+        ilu.apply(&r, &mut serial).unwrap();
+        let mut threaded = vec![0.0; n];
+        par::with_threads(4, || ilu.apply(&r, &mut threaded).unwrap());
+        assert!(serial.iter().zip(&threaded).all(|(p, q)| p.to_bits() == q.to_bits()));
+    }
 
     #[test]
     fn scheduled_triangular_solves_match_the_sequential_solve_bitwise() {

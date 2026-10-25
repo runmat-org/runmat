@@ -8,6 +8,7 @@
 //! fixed SPD operator suitable for PCG. Every kernel is threaded with fixed partitioning, so the
 //! hierarchy and each application are identical for any thread count.
 
+use crate::bsr::BsrMatrix;
 use crate::control::{Progress, ProgressPhase, SolveControl};
 use crate::csr::{CsrMatrix, CsrRef};
 use crate::dense::{cholesky_in_place, cholesky_solve};
@@ -104,8 +105,36 @@ pub struct AmgStatistics {
     pub operator_complexity: f64,
 }
 
+/// A level operator: CSR during setup; block levels switch to BSR for the cycle (fewer index
+/// loads per entry, and the CSR copy is released).
+enum LevelMatrix {
+    Csr(CsrMatrix<f64>),
+    Bsr(BsrMatrix<f64>),
+}
+
+impl LevelMatrix {
+    fn nrows(&self) -> usize {
+        match self {
+            Self::Csr(a) => a.nrows(),
+            Self::Bsr(a) => a.nrows(),
+        }
+    }
+    fn spmv(&self, x: &[f64], y: &mut [f64]) {
+        match self {
+            Self::Csr(a) => a.as_ref().spmv(x, y),
+            Self::Bsr(a) => a.spmv(x, y),
+        }
+    }
+    fn csr(&self) -> &CsrMatrix<f64> {
+        match self {
+            Self::Csr(a) => a,
+            Self::Bsr(_) => unreachable!("setup operators are CSR"),
+        }
+    }
+}
+
 struct Level {
-    a: CsrMatrix<f64>,
+    a: LevelMatrix,
     /// Block size of this level's unknowns.
     block: usize,
     /// Inverse diagonal blocks (column-major `block × block` per node).
@@ -193,7 +222,7 @@ impl Amg {
             let stop = rows <= options.coarse_size || levels.len() + 1 >= options.max_levels;
             if stop {
                 levels.push(Level {
-                    a,
+                    a: LevelMatrix::Csr(a),
                     block,
                     inverse_blocks,
                     lambda_max,
@@ -205,7 +234,7 @@ impl Amg {
             let aggregates = aggregate(&a, block, options.strength_threshold);
             if aggregates.count == 0 || aggregates.count * candidates.count >= rows {
                 levels.push(Level {
-                    a,
+                    a: LevelMatrix::Csr(a),
                     block,
                     inverse_blocks,
                     lambda_max,
@@ -221,7 +250,7 @@ impl Amg {
             let mut coarse = spgemm::multiply(r.as_ref(), ap.as_ref())?;
             coarse = repair_empty_rows(coarse);
             levels.push(Level {
-                a,
+                a: LevelMatrix::Csr(a),
                 block,
                 inverse_blocks,
                 lambda_max,
@@ -232,14 +261,23 @@ impl Amg {
             block = candidates.count;
             candidates = coarse_candidates;
         }
-        let coarsest = &levels.last().unwrap().a;
+        let coarsest = levels.last().unwrap().a.csr();
         let coarse = build_coarse_solver(coarsest)?;
-        let nnz0 = levels[0].a.nnz().max(1) as f64;
+        let nnz0 = levels[0].a.csr().nnz().max(1) as f64;
         let statistics = AmgStatistics {
             level_rows: levels.iter().map(|l| l.a.nrows()).collect(),
-            level_nnz: levels.iter().map(|l| l.a.nnz()).collect(),
-            operator_complexity: levels.iter().map(|l| l.a.nnz() as f64).sum::<f64>() / nnz0,
+            level_nnz: levels.iter().map(|l| l.a.csr().nnz()).collect(),
+            operator_complexity: levels.iter().map(|l| l.a.csr().nnz() as f64).sum::<f64>() / nnz0,
         };
+        // Block levels above the coarsest run their smoother and residual products in BSR.
+        let last = levels.len() - 1;
+        for level in &mut levels[..last] {
+            if matches!(level.block, 2 | 3 | 6) {
+                if let Ok(bsr) = BsrMatrix::from_csr(level.a.csr().as_ref(), level.block) {
+                    level.a = LevelMatrix::Bsr(bsr);
+                }
+            }
+        }
         let scratch = std::sync::Mutex::new(Self::scratch_for(&levels));
         Ok(Self {
             levels,
@@ -303,7 +341,7 @@ impl Amg {
         // `scratch[0]` belongs to this level, the rest to the coarser ones.
         let (here, below) = scratch.split_first_mut().expect("scratch for every level");
         chebyshev(l, b, x, self.options.smoother_degree, self.options.chebyshev_ratio, &mut here.smoother);
-        l.a.as_ref().spmv(x, &mut here.ax);
+        l.a.spmv(x, &mut here.ax);
         par::sub_into(b, &here.ax, &mut here.residual);
         let r = l.r.as_ref().unwrap();
         let p = l.p.as_ref().unwrap();
@@ -416,10 +454,34 @@ fn inverse_diagonal_blocks(a: &CsrMatrix<f64>, block: usize) -> SolverResult<Vec
 }
 
 fn apply_inverse_blocks(block: usize, inverse: &[f64], r: &[f64], z: &mut [f64]) {
-    if block == 1 {
-        par::mul_into(inverse, r, z);
-        return;
+    match block {
+        1 => par::mul_into(inverse, r, z),
+        2 => apply_inverse_blocks_fixed::<2>(inverse, r, z),
+        3 => apply_inverse_blocks_fixed::<3>(inverse, r, z),
+        6 => apply_inverse_blocks_fixed::<6>(inverse, r, z),
+        _ => apply_inverse_blocks_general(block, inverse, r, z),
     }
+}
+
+/// Same arithmetic as the general kernel; the block size is a constant, so indexing divides by
+/// a constant and the inner loop unrolls.
+fn apply_inverse_blocks_fixed<const B: usize>(inverse: &[f64], r: &[f64], z: &mut [f64]) {
+    par::for_each_chunk_mut(z, |start, chunk| {
+        for (offset, value) in chunk.iter_mut().enumerate() {
+            let global = start + offset;
+            let (node, a) = (global / B, global % B);
+            let base = node * B;
+            let inv = &inverse[node * B * B..(node + 1) * B * B];
+            let mut sum = 0.0;
+            for c in 0..B {
+                sum += inv[c * B + a] * r[base + c];
+            }
+            *value = sum;
+        }
+    });
+}
+
+fn apply_inverse_blocks_general(block: usize, inverse: &[f64], r: &[f64], z: &mut [f64]) {
     par::for_each_chunk_mut(z, |start, chunk| {
         for (offset, value) in chunk.iter_mut().enumerate() {
             let global = start + offset;
@@ -471,7 +533,7 @@ fn chebyshev(level: &Level, b: &[f64], x: &mut [f64], degree: usize, ratio: f64,
     let mut rho = 1.0 / sigma;
     let (mut r, mut ax, mut d, mut z) = (&mut scratch.r, &mut scratch.ax, &mut scratch.d, &mut scratch.z);
     debug_assert_eq!(r.len(), n);
-    level.a.as_ref().spmv(x, &mut ax);
+    level.a.spmv(x, &mut ax);
     par::sub_into(b, &ax, &mut r);
     apply_inverse_blocks(level.block, &level.inverse_blocks, &r, &mut z);
     par::for_each_chunk_mut(&mut d, |start, chunk| {
@@ -484,7 +546,7 @@ fn chebyshev(level: &Level, b: &[f64], x: &mut [f64], degree: usize, ratio: f64,
         if k + 1 == degree.max(1) {
             break;
         }
-        level.a.as_ref().spmv(&d, &mut ax);
+        level.a.spmv(&d, &mut ax);
         par::axpy(-1.0, &ax, &mut r);
         apply_inverse_blocks(level.block, &level.inverse_blocks, &r, &mut z);
         let rho_next = 1.0 / (2.0 * sigma - rho);
