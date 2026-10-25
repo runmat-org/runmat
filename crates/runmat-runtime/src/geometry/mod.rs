@@ -1824,6 +1824,11 @@ fn map_geometry_load_error(
             OperationErrorType::Input,
             false,
         ),
+        GeometryImportError::UnresolvedUnits(_) => (
+            "RM.GEOMETRY.LOAD.UNITS_UNRESOLVED",
+            OperationErrorType::Input,
+            false,
+        ),
         GeometryImportError::BackendUnavailable(_) => (
             "RM.GEOMETRY.LOAD.BACKEND_UNAVAILABLE",
             OperationErrorType::Backend,

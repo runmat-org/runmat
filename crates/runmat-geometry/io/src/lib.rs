@@ -10,6 +10,7 @@ pub mod exact;
 pub mod faceted;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 pub mod feature;
+pub mod iges_units;
 pub mod import;
 pub mod normalize;
 pub mod preview;

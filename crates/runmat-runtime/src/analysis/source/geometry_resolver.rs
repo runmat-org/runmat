@@ -68,7 +68,7 @@ fn inspect_uncached(
     let file_declared_units = file_declared_units(bytes, logical_path);
     let units = match request.source_units {
         runmat_geometry_core::UnitSystem::Unspecified => {
-            file_declared_units.ok_or_else(|| undeclared_units(logical_path))?
+            file_declared_units.ok_or_else(|| undeclared_units(bytes, logical_path))?
         }
         authored => authored,
     };
@@ -167,28 +167,40 @@ fn inspect_uncached(
     })
 }
 
-/// The single length unit a STEP file declares; other formats declare none.
+/// The single supported length unit a STEP or IGES file declares; BREP declares none.
 fn file_declared_units(
     bytes: &[u8],
     logical_path: &str,
 ) -> Option<runmat_geometry_core::UnitSystem> {
-    matches!(
-        detect_geometry_format(logical_path, bytes),
-        GeometryFormat::Step
-    )
-    .then(|| runmat_geometry_io::ap242::declared_length_unit(&String::from_utf8_lossy(bytes)))
-    .flatten()
+    match detect_geometry_format(logical_path, bytes) {
+        GeometryFormat::Step => {
+            runmat_geometry_io::ap242::declared_length_unit(&String::from_utf8_lossy(bytes))
+        }
+        GeometryFormat::Iges => runmat_geometry_io::iges_units::iges_declared_length_unit(bytes),
+        _ => None,
+    }
     .filter(|units| *units != runmat_geometry_core::UnitSystem::Unspecified)
 }
 
-/// An imported geometry without authored `units` uses the single length unit
-/// its STEP file declares; other files must state their unit.
-fn undeclared_units(logical_path: &str) -> SourceDiagnostic {
+/// An imported geometry without authored `units` uses the single length unit its STEP or IGES
+/// file declares. A BREP must state its unit; an exchange file without one supported declared
+/// unit cannot be read in any authored unit either and must be re-exported with one.
+fn undeclared_units(bytes: &[u8], logical_path: &str) -> SourceDiagnostic {
+    let exchange = matches!(
+        detect_geometry_format(logical_path, bytes),
+        GeometryFormat::Step | GeometryFormat::Iges
+    );
     diagnostic(
         "fea.host.geometry_units_undeclared",
-        format!(
-            "geometry `{logical_path}` does not declare a single length unit; add `units = mm`, `m`, or `in`"
-        ),
+        if exchange {
+            format!(
+                "geometry `{logical_path}` does not declare one length unit in meters, millimeters or inches; re-export it with a declared unit"
+            )
+        } else {
+            format!(
+                "geometry `{logical_path}` declares no length unit; add `units = mm`, `m`, or `in`"
+            )
+        },
         SourceAvailability::Available,
     )
 }

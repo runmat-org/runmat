@@ -174,6 +174,99 @@ fn authored_step_units_override_a_different_declaration_and_record_it() {
     assert_eq!(same.declared_units, None);
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: An authored metre unit over an IGES file whose global section declares millimetres
+//   reads the coordinates in metres and records the declared unit; without authority the
+//   declaration governs.
+#[test]
+fn authored_iges_units_override_a_different_declaration_and_record_it() {
+    let import = |options: &ExactCadImportOptions| {
+        let imported = import_exact_cad(
+            "box_metre_values_mm_label.igs",
+            include_bytes!("fixtures/box_metre_values_mm_label.igs"),
+            GeometryFormat::Iges,
+            options,
+            &GeometryImportContext::new(),
+        )
+        .unwrap();
+        let volume = OcctExactEvaluator::new(&imported)
+            .unwrap()
+            .mass_properties(
+                &imported.topology.bodies[0].mass_properties_evaluator_id,
+                &Unlimited,
+            )
+            .unwrap()
+            .volume_m3;
+        (volume, imported)
+    };
+    let box_m3 = 0.5 * 0.1 * 0.02;
+    let (authored_volume, authored) = import(&ExactCadImportOptions {
+        source_units: UnitSystem::Meter,
+        source_units_authority: SourceUnitsAuthority::Authored,
+        ..ExactCadImportOptions::default()
+    });
+    assert!(
+        (authored_volume / box_m3 - 1.0).abs() < 1.0e-9,
+        "{authored_volume} vs {box_m3}"
+    );
+    assert_eq!(authored.declared_units, Some(UnitSystem::Millimeter));
+    authored.build_closure().unwrap();
+    let (declared_volume, declared) = import(&ExactCadImportOptions {
+        source_units: UnitSystem::Meter,
+        ..ExactCadImportOptions::default()
+    });
+    assert!((declared_volume / (box_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
+    assert_eq!(declared.declared_units, None);
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Authored units over a STEP file with mixed length units, or with a length unit
+//   outside meters, millimeters and inches, are refused with GEOMETRY_UNITS_UNRESOLVED instead
+//   of skipping the rescale; the same files still import under their own declarations.
+#[test]
+fn authored_units_refuse_step_files_without_one_supported_declared_unit() {
+    let tube = include_str!("../../../../docs/simulation/examples/geometry/compliant-tube.step");
+    let mixed = tube.replacen(
+        "#136 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );",
+        "#136 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );",
+        1,
+    );
+    assert_ne!(mixed, tube);
+    let pipe = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
+    let centimetres = pipe.replacen("SI_UNIT($,.METRE.) );", "SI_UNIT(.CENTI.,.METRE.) );", 1);
+    assert_ne!(centimetres, pipe);
+    for (name, bytes) in [("mixed.step", mixed), ("centimetres.step", centimetres)] {
+        let refused = import_exact_cad(
+            name,
+            bytes.as_bytes(),
+            GeometryFormat::Step,
+            &ExactCadImportOptions {
+                source_units: UnitSystem::Meter,
+                source_units_authority: SourceUnitsAuthority::Authored,
+                ..ExactCadImportOptions::default()
+            },
+            &GeometryImportContext::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(refused, GeometryImportError::UnresolvedUnits(_)),
+            "{name}: {refused}"
+        );
+        import_exact_cad(
+            name,
+            bytes.as_bytes(),
+            GeometryFormat::Step,
+            &ExactCadImportOptions::default(),
+            &GeometryImportContext::new(),
+        )
+        .unwrap();
+    }
+}
+
 struct Unlimited;
 
 impl GeometryEvaluationControl for Unlimited {

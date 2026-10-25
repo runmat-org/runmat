@@ -288,9 +288,10 @@ struct ResolvedExactUnits {
 
 /// STEP and IGES readers resolve file-declared units into a stable millimetre kernel
 /// representation, which keeps kernel tolerances independent of the caller's units. An
-/// authoritative authored unit reinterprets the coordinates of a STEP file that declares a
-/// different single length unit: the kernel stays in the reader's millimetres and the projection
-/// to SI scales by authored/declared. BREP declares nothing and uses `source_units` directly.
+/// authoritative authored unit reinterprets the coordinates of a STEP or IGES file that declares a
+/// different length unit: the kernel stays in the reader's millimetres and the projection to SI
+/// scales by authored/declared. A file without one declared supported unit cannot be
+/// reinterpreted and is refused. BREP declares nothing and uses `source_units` directly.
 fn resolve_exact_units(
     bytes: &[u8],
     format: OcctCadFormat,
@@ -308,22 +309,29 @@ fn resolve_exact_units(
                 meters_per_kernel_unit: unit_m,
             })
         }
-        OcctCadFormat::Step if authored => {
+        OcctCadFormat::Step | OcctCadFormat::Iges if authored => {
             let authored_m = meters_per_unit(options.source_units)?;
-            let declared = crate::ap242::declared_length_unit(&String::from_utf8_lossy(bytes))
-                .filter(|declared| *declared != UnitSystem::Unspecified);
-            let (declared_units, meters_per_kernel_unit) = match declared {
-                Some(declared) if declared != options.source_units => (
-                    Some(declared),
-                    KERNEL_UNIT_M * authored_m / meters_per_unit(declared)?,
+            let (declared, exchange) = match format {
+                OcctCadFormat::Step => (
+                    crate::ap242::declared_length_unit(&String::from_utf8_lossy(bytes)),
+                    "STEP",
                 ),
-                _ => (None, KERNEL_UNIT_M),
+                _ => (crate::iges_units::iges_declared_length_unit(bytes), "IGES"),
             };
+            let declared = declared
+                .filter(|declared| *declared != UnitSystem::Unspecified)
+                .ok_or_else(|| {
+                    GeometryImportError::UnresolvedUnits(format!(
+                        "authored {:?} units cannot be applied: the {exchange} file does not declare one length unit in meters, millimeters or inches",
+                        options.source_units
+                    ))
+                })?;
+            let declared_units = (declared != options.source_units).then_some(declared);
             Ok(ResolvedExactUnits {
                 source_units: options.source_units,
                 declared_units,
                 kernel_unit_m: KERNEL_UNIT_M,
-                meters_per_kernel_unit,
+                meters_per_kernel_unit: KERNEL_UNIT_M * authored_m / meters_per_unit(declared)?,
             })
         }
         OcctCadFormat::Step | OcctCadFormat::Iges => {
