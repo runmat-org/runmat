@@ -92,9 +92,10 @@ pub fn build_fluid_field_recovery_resource_plan(
         .map_err(invalid)?;
     let (partitions, partition_workspace) = fluid_field_recovery_shape(request)?;
     let output_bytes = partitions.into_iter().try_fold(0, admission::add)?;
-    // The source phase bound already charges the workload and mesh wire profiles and the
-    // result's encoding and materialization alongside source preparation and the numerical
-    // reserve that validation re-prepares. Only the recovery request's wire is new here.
+    // The source verification phase bound charges the workload and mesh wire profiles and
+    // the result's encoding and materialization alongside source preparation and the
+    // numerical verification reserve (validation re-assembles and re-evaluates the retained
+    // residual but runs no linear solve). Only the recovery request's wire is new here.
     let request_profile = profile_serialized(request, LIMITS).map_err(invalid)?;
     let request_wire = admission::add(
         request_profile.encoded_bytes_upper_bound,
@@ -102,7 +103,7 @@ pub fn build_fluid_field_recovery_resource_plan(
     )?;
     let construction = admission::add(native, partition_workspace.0)?;
     let validation = admission::add(
-        projection.phase_resident_bytes_upper_bound.0,
+        projection.verification_phase_resident_bytes_upper_bound.0,
         request_wire,
     )?;
     tracing::info!(
@@ -110,7 +111,9 @@ pub fn build_fluid_field_recovery_resource_plan(
         native_bytes = native,
         partition_workspace_bytes = partition_workspace.0,
         source_phase_bytes = projection.phase_resident_bytes_upper_bound.0,
+        verification_phase_bytes = projection.verification_phase_resident_bytes_upper_bound.0,
         numerical_bytes = projection.numerical.resident_bytes_upper_bound,
+        numerical_verification_bytes = projection.numerical.verification_resident_bytes_upper_bound,
         source_preparation_bytes = projection.source_preparation_resident_bytes.0,
         result_materialization_bytes = projection.result_materialization_resident_bytes.0,
         request_wire_bytes = request_wire,
@@ -136,10 +139,8 @@ pub fn build_fluid_field_recovery_resource_plan(
             )?,
             admission::add(
                 d,
-                runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-                    b,
-                )
-                .map_err(invalid)?,
+                runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(b)
+                    .map_err(invalid)?,
             )?,
         ))
     })?;

@@ -136,6 +136,17 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
     let large =
         CanonicalFluidReservation::for_counts(&geometry(count * 2), count * 8, policy()).unwrap();
     assert!(large.operator_work_upper_bound <= small.operator_work_upper_bound * 2);
+    // Verification of a retained result excludes the solver-only workspace: at least the
+    // coupled momentum block (9 x 41 three-word entries per cell) and the GMRES/ILU peaks.
+    for reservation in [small, large] {
+        let cells = reservation.cells;
+        assert!(reservation.verification_resident_bytes_upper_bound > 0);
+        assert!(
+            reservation.verification_resident_bytes_upper_bound
+                + cells * 9 * 41 * 24
+                <= reservation.resident_bytes_upper_bound
+        );
+    }
 }
 
 #[test]
