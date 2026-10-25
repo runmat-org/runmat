@@ -30,6 +30,14 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
             "units and positive finite normalization must be explicit",
         ));
     }
+    if document.source.declared_units.is_some_and(|declared| {
+        declared == UnitSystem::Unspecified || declared == document.source.source_units
+    }) {
+        return Err(invalid(
+            "geometry declared units",
+            "a retained declared unit must be explicit and differ from the authored source unit",
+        ));
+    }
     if document.revision.revision == 0 || document.revision.persistent_mapping_version == 0 {
         return Err(invalid(
             "geometry revision",

@@ -23,11 +23,16 @@ use crate::{
 pub struct ImportedExactCad {
     pub source_digest: GeometryDigest,
     pub source_format: GeometrySourceFormat,
-    /// Authored fallback for unitless source formats; exchange declarations take precedence.
+    /// Coordinate unit of the source: the authored unit when the import options make it
+    /// authoritative, otherwise the fallback for unitless formats.
     pub source_units: UnitSystem,
+    /// The single length unit the exchange file declares, retained only when an authoritative
+    /// authored unit overrides a different declaration.
+    pub declared_units: Option<UnitSystem>,
     pub kernel_version: String,
-    /// Scale of the retained kernel representation, independent of the authored fallback.
-    /// STEP and IGES are retained in millimetres; unitless BREP uses `source_units`.
+    /// Scale of the retained kernel representation. STEP and IGES are retained in the exchange
+    /// reader's millimetre normalization of the declared unit (rescaled by authored/declared when
+    /// an authoritative authored unit overrides the declaration); unitless BREP uses `source_units`.
     pub meters_per_source_unit: f64,
     /// Canonical OCCT B-rep with all derived polygonal caches removed.
     pub representation: Vec<u8>,
@@ -132,7 +137,9 @@ impl ImportedExactCad {
             available.sort();
             available.dedup();
             return Err(if available.is_empty() {
-                format!("no {role_name} is {verb} \"{value}\"; the source has no {verb} {role_name}s")
+                format!(
+                    "no {role_name} is {verb} \"{value}\"; the source has no {verb} {role_name}s"
+                )
             } else {
                 format!(
                     "no {role_name} is {verb} \"{value}\"; {verb} {role_name}s: {}",
@@ -187,6 +194,7 @@ impl ImportedExactCad {
                 importer_version: "runmat-exact-cad-import/1".into(),
                 kernel_version: Some(self.kernel_version.clone()),
                 source_units: self.source_units,
+                declared_units: self.declared_units,
                 meters_per_source_unit: self.meters_per_source_unit,
             },
             revision: self.analysis.revision.clone(),
@@ -254,10 +262,32 @@ pub(crate) fn exact_representation_digest(representation: &[u8]) -> [u8; 32] {
     Sha256::digest(representation).into()
 }
 
+/// How an exact import treats `ExactCadImportOptions::source_units`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceUnitsAuthority {
+    /// `source_units` applies only to formats without a declared unit (BREP); STEP and IGES
+    /// keep the unit they declare.
+    #[default]
+    UndeclaredFallback,
+    /// `source_units` is the authored coordinate unit (`units` in a `.fea` geometry block). It
+    /// overrides a different single length unit declared by a STEP file; the import records the
+    /// declared unit as provenance.
+    Authored,
+}
+
+impl SourceUnitsAuthority {
+    fn is_fallback(&self) -> bool {
+        *self == Self::UndeclaredFallback
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExactCadImportOptions {
     pub source_units: UnitSystem,
+    #[serde(default, skip_serializing_if = "SourceUnitsAuthority::is_fallback")]
+    pub source_units_authority: SourceUnitsAuthority,
     /// Geometry identity, tolerance, and healing authority for this import. These settings are
     /// inseparable from the exact topology produced by the kernel.
     pub analysis: ExactCadAnalysisOptions,
@@ -279,6 +309,7 @@ impl Default for ExactCadImportOptions {
     fn default() -> Self {
         Self {
             source_units: UnitSystem::Meter,
+            source_units_authority: SourceUnitsAuthority::UndeclaredFallback,
             analysis: ExactCadAnalysisOptions::default(),
             max_representation_bytes: 512 * 1024 * 1024,
             max_entities: 10_000_000,

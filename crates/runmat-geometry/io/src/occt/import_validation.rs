@@ -55,11 +55,11 @@ impl GeometryEvaluationControl for ImportEvaluationControl<'_> {
     /// it; otherwise every temporary of a long validation stays charged and curved parts run
     /// out of budget although their live storage is small.
     fn release_allocation_bytes(&self, count: u64) {
-        let _ = self
-            .allocation_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
-                Some(available.saturating_add(count))
-            });
+        let _ =
+            self.allocation_bytes
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
+                    Some(available.saturating_add(count))
+                });
     }
 }
 

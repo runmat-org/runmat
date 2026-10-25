@@ -11,6 +11,8 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <Interface_Static.hxx>
+#include <STEPControl_Controller.hxx>
 #include <STEPControl_Writer.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
@@ -32,6 +34,11 @@ bool write(const TopoDS_Shape& shape, const std::string& path) {
 int main(int argc, char** argv) {
   if (argc != 2) return 1;
   const std::string dir = argv[1];
+  // Shapes are built in metres: the session unit and the declared STEP unit must both be metres,
+  // or the writer labels metre values as millimetres.
+  STEPControl_Controller::Init();
+  if (!Interface_Static::SetCVal("xstep.cascade.unit", "M")) return 5;
+  if (!Interface_Static::SetCVal("write.step.unit", "M")) return 5;
   // Lid-driven cavity: unit square section, thin spanwise slab closed by symmetry planes.
   if (!write(BRepPrimAPI_MakeBox(1.0, 1.0, 0.05).Shape(), dir + "cavity-slab.step")) return 2;
   // Plane channel: 1 m long, 0.1 m between the walls, spanwise slab closed by symmetry planes.

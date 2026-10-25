@@ -341,10 +341,13 @@ impl CoincidentNames {
         }
         let shells = refine(
             b"runmat.occt-coincident-shell-name\0",
-            payload
-                .shells
-                .iter()
-                .map(|shell| (shell.occurrence_index, shell.shape_key, &shell.identity_digest)),
+            payload.shells.iter().map(|shell| {
+                (
+                    shell.occurrence_index,
+                    shell.shape_key,
+                    &shell.identity_digest,
+                )
+            }),
             &solid_parents,
         );
         let mut shell_parents = BTreeMap::<(u64, u64), Vec<Vec<u8>>>::new();
@@ -418,7 +421,11 @@ impl CoincidentNames {
         let vertices = refine(
             b"runmat.occt-coincident-vertex-name\0",
             payload.vertices.iter().map(|vertex| {
-                (vertex.occurrence_index, vertex.shape_key, &vertex.identity_digest)
+                (
+                    vertex.occurrence_index,
+                    vertex.shape_key,
+                    &vertex.identity_digest,
+                )
             }),
             &vertex_parents,
         );
