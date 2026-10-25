@@ -92,26 +92,30 @@ pub fn build_fluid_field_recovery_resource_plan(
         .map_err(invalid)?;
     let (partitions, partition_workspace) = fluid_field_recovery_shape(request)?;
     let output_bytes = partitions.into_iter().try_fold(0, admission::add)?;
-    let profiles = [
-        profile_serialized(workload, LIMITS).map_err(invalid)?,
-        profile_serialized(mesh, LIMITS).map_err(invalid)?,
-        profile_serialized(result, LIMITS).map_err(invalid)?,
-        profile_serialized(request, LIMITS).map_err(invalid)?,
-    ];
-    let wire_workspace = profiles.into_iter().try_fold(0, |sum, p| {
-        admission::add(
-            sum,
-            admission::add(
-                p.encoded_bytes_upper_bound,
-                p.materialization_resident_bytes_estimate,
-            )?,
-        )
-    })?;
+    // The source phase bound already charges the workload and mesh wire profiles and the
+    // result's encoding and materialization alongside source preparation and the numerical
+    // reserve that validation re-prepares. Only the recovery request's wire is new here.
+    let request_profile = profile_serialized(request, LIMITS).map_err(invalid)?;
+    let request_wire = admission::add(
+        request_profile.encoded_bytes_upper_bound,
+        request_profile.materialization_resident_bytes_estimate,
+    )?;
     let construction = admission::add(native, partition_workspace.0)?;
     let validation = admission::add(
         projection.phase_resident_bytes_upper_bound.0,
-        wire_workspace,
+        request_wire,
     )?;
+    tracing::info!(
+        cells = projection.numerical.cells,
+        native_bytes = native,
+        partition_workspace_bytes = partition_workspace.0,
+        source_phase_bytes = projection.phase_resident_bytes_upper_bound.0,
+        numerical_bytes = projection.numerical.resident_bytes_upper_bound,
+        source_preparation_bytes = projection.source_preparation_resident_bytes.0,
+        result_materialization_bytes = projection.result_materialization_resident_bytes.0,
+        request_wire_bytes = request_wire,
+        "fluid field recovery workspace plan"
+    );
     admission::require_ceiling(
         admission::add(construction, validation)?,
         workload.resident_ceiling().map_err(invalid)?,
