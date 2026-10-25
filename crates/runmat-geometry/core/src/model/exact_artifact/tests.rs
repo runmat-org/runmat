@@ -31,6 +31,7 @@ fn document(exact_model: ExactBRepModel) -> GeometryDocument {
             importer_version: "step-import/3".into(),
             kernel_version: Some("occt/7.9".into()),
             source_units: UnitSystem::Meter,
+            declared_units: None,
             meters_per_source_unit: 1.0,
         },
         revision: GeometryRevisionIdentity {

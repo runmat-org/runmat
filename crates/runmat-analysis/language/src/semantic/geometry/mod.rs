@@ -9,8 +9,9 @@ use super::{
     CheckedFeaStatementKind, CheckedGeometryInspection,
 };
 use crate::{
-    BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey,
-    FeaSymbolKind, FeaSymbolOrigin, GeometryInspectionCapability, LogicalSourcePath,
+    BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
+    FeaDiagnosticSeverity, FeaSymbolKey, FeaSymbolKind, FeaSymbolOrigin,
+    GeometryInspectionCapability, LogicalSourcePath,
 };
 use runmat_geometry_core::{
     Ap242ParameterAccess, Ap242PhysicalDimension, CadParameterAccess, CadParameterDefinition,
@@ -33,14 +34,20 @@ pub fn lower_geometry_definitions(
         if identity.1.kind != FeaSymbolKind::Geometry {
             continue;
         }
-        let initial_errors = diagnostics.len();
+        let error_count = |diagnostics: &[FeaDiagnostic]| {
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity == FeaDiagnosticSeverity::Error)
+                .count()
+        };
+        let initial_errors = error_count(diagnostics);
         let definition = definition(
             bound,
             declaration,
             inspections.get(&(identity.0.clone(), identity.1.name.clone())),
             diagnostics,
         );
-        if diagnostics.len() == initial_errors {
+        if error_count(diagnostics) == initial_errors {
             let Some(definition) = definition else {
                 continue;
             };
@@ -101,8 +108,8 @@ fn definition(
         let Some(inspection) = inspection else {
             // The inspection diagnostic (missing file, undeclared length unit,
             // import failure) states the cause at the same declaration.
-            let file_span = imported_file(&declaration.statements)
-                .map_or(declaration.span, |file| file.span);
+            let file_span =
+                imported_file(&declaration.statements).map_or(declaration.span, |file| file.span);
             let message = format!(
                 "imported geometry `{}` could not be inspected; see the inspection diagnostic for its file",
                 declaration.key.name
@@ -382,10 +389,10 @@ fn imported_units(
         );
         return None;
     };
-    match unit.as_str() {
-        "m" | "meter" | "meters" => Some(UnitSystem::Meter),
-        "mm" | "millimeter" | "millimeters" => Some(UnitSystem::Millimeter),
-        "in" | "inch" | "inches" => Some(UnitSystem::Inch),
+    let authored = match unit.as_str() {
+        "m" | "meter" | "meters" => UnitSystem::Meter,
+        "mm" | "millimeter" | "millimeters" => UnitSystem::Millimeter,
+        "in" | "inch" | "inches" => UnitSystem::Inch,
         _ => {
             error(
                 declaration,
@@ -393,8 +400,44 @@ fn imported_units(
                 format!("unsupported geometry unit system `{unit}`"),
                 diagnostics,
             );
-            None
+            return None;
         }
+    };
+    if let Some(declared) = inspection
+        .facts
+        .declared_units
+        .filter(|declared| *declared != UnitSystem::Unspecified && *declared != authored)
+    {
+        // Authored units are authoritative; an override of the file's own declaration is
+        // reported, never silent.
+        diagnostics.push(FeaDiagnostic {
+            severity: FeaDiagnosticSeverity::Warning,
+            ..FeaDiagnostic::error(
+                "fea.semantic.geometry_units_override",
+                format!(
+                    "geometry `{}` authors `units = {}` but its file declares {}; coordinates are read in {}",
+                    declaration.key.name,
+                    unit,
+                    unit_name(declared),
+                    unit_name(authored),
+                ),
+                FeaDiagnosticPhase::Lowering,
+                Some(FeaDiagnosticLocation {
+                    path: declaration.module.clone(),
+                    span: value.span,
+                }),
+            )
+        });
+    }
+    Some(authored)
+}
+
+fn unit_name(units: UnitSystem) -> &'static str {
+    match units {
+        UnitSystem::Meter => "meters",
+        UnitSystem::Millimeter => "millimeters",
+        UnitSystem::Inch => "inches",
+        UnitSystem::Unspecified => "no unit",
     }
 }
 

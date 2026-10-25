@@ -92,6 +92,7 @@ pub fn import_faceted_solid(
             importer_version: "runmat-faceted-import/1".into(),
             kernel_version: None,
             source_units: options.source_units,
+            declared_units: None,
             meters_per_source_unit,
         },
         revision: options.revision.clone(),

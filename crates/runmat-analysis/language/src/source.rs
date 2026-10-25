@@ -275,6 +275,10 @@ pub struct GeometryInspection {
     /// single length unit the file itself declares when `units` is omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_units: Option<runmat_geometry_core::UnitSystem>,
+    /// The single length unit the file itself declares (STEP), whether or not `units` is
+    /// authored, so a check can report an authored unit that overrides a different declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_units: Option<runmat_geometry_core::UnitSystem>,
     /// Authored names in the exact model by region role (`face`, `solid`), so a check can reject
     /// a `select name` that matches nothing. Empty when the source carries no exact names.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

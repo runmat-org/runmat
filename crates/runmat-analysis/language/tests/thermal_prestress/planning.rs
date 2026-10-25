@@ -82,6 +82,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             ],
             exchange: None,
             resolved_units: None,
+            declared_units: None,
             authored_names: Default::default(),
         },
     );

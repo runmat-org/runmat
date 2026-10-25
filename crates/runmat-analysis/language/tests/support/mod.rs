@@ -30,6 +30,7 @@ impl TestHost {
                 ],
                 exchange: None,
                 resolved_units: None,
+                declared_units: None,
                 authored_names: Default::default(),
             },
         );
@@ -57,6 +58,7 @@ impl TestHost {
                 ],
                 exchange: None,
                 resolved_units: None,
+                declared_units: None,
                 authored_names,
             },
         )

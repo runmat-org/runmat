@@ -71,6 +71,10 @@ pub struct GeometrySourceIdentity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel_version: Option<String>,
     pub source_units: UnitSystem,
+    /// The length unit the exchange file declares, present only when the authored
+    /// `source_units` overrides a different declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_units: Option<UnitSystem>,
     pub meters_per_source_unit: f64,
 }
 

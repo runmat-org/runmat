@@ -92,6 +92,9 @@ geometry rounded_block {
     );
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A B-rep geometry without authored units fails closed at check with a located diagnostic naming the missing units.
 #[test]
 fn imported_geometry_without_units_names_the_missing_units() {
     let source = r#"
@@ -119,11 +122,16 @@ geometry bracket {
         "{messages:#?}"
     );
     assert!(
-        !messages.iter().any(|message| message.contains("no inspection facts")),
+        !messages
+            .iter()
+            .any(|message| message.contains("no inspection facts")),
         "{messages:#?}"
     );
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Omitted units resolve to the single unit the STEP file declares, without diagnostics.
 #[test]
 fn imported_geometry_without_units_uses_the_file_declared_unit() {
     let source = r#"
@@ -140,6 +148,7 @@ geometry bracket {
         ],
         exchange: None,
         resolved_units: Some(runmat_geometry_core::UnitSystem::Millimeter),
+        declared_units: None,
         authored_names: Default::default(),
     };
     let program = FeaCompiler::new(
@@ -157,5 +166,58 @@ geometry bracket {
         &geometry.source,
         runmat_geometry_core::GeometryDefinitionSource::Imported(imported)
             if imported.units == runmat_geometry_core::UnitSystem::Millimeter
+    ));
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Authored `units = m` over a STEP file declaring millimetres resolves to metres and reports a located units-override warning; the check stays valid.
+#[test]
+fn authored_units_override_a_different_file_declaration_with_a_warning() {
+    let source = r#"
+geometry channel {
+    file = "./channel.step"
+    units = m
+}
+"#;
+    let inspection = GeometryInspection {
+        content_digest: SourceDigest([3; 32]),
+        topology_digest: SourceDigest([4; 32]),
+        capabilities: vec![
+            GeometryInspectionCapability::Topology,
+            GeometryInspectionCapability::PersistentIds,
+        ],
+        exchange: None,
+        resolved_units: Some(runmat_geometry_core::UnitSystem::Meter),
+        declared_units: Some(runmat_geometry_core::UnitSystem::Millimeter),
+        authored_names: Default::default(),
+    };
+    let program = FeaCompiler::new(
+        &TestHost::default().with_geometry_inspection("project/channel.step", inspection),
+    )
+    .check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let warning = program
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "fea.semantic.geometry_units_override")
+        .expect("units override must be reported");
+    assert_eq!(warning.severity, FeaDiagnosticSeverity::Warning);
+    assert!(warning.location.is_some());
+    assert!(
+        warning.message.contains("declares millimeters"),
+        "{}",
+        warning.message
+    );
+    let geometry = program.geometries.values().next().unwrap();
+    assert!(matches!(
+        &geometry.source,
+        runmat_geometry_core::GeometryDefinitionSource::Imported(imported)
+            if imported.units == runmat_geometry_core::UnitSystem::Meter
     ));
 }

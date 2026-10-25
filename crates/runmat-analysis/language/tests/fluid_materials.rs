@@ -74,6 +74,7 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
             ],
             exchange: None,
             resolved_units: None,
+            declared_units: None,
             authored_names: Default::default(),
         },
     );

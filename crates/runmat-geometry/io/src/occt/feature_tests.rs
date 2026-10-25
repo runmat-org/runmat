@@ -503,10 +503,12 @@ fn bored_block_definition() -> GeometryDefinition {
 
 fn pinned_block_definition() -> GeometryDefinition {
     let translation = |x: f64| {
-        [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<_>>()
+        [
+            1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect::<Vec<_>>()
     };
     GeometryDefinition {
         module_path: "main.fea".into(),

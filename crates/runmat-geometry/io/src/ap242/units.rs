@@ -246,7 +246,11 @@ pub fn declared_length_unit(source: &str) -> Option<runmat_geometry_core::UnitSy
             continue;
         };
         for unit in references.iter().filter_map(P21Value::as_reference) {
-            let Some(unit) = file.entities.get(&unit).filter(|unit| unit.has("LENGTH_UNIT")) else {
+            let Some(unit) = file
+                .entities
+                .get(&unit)
+                .filter(|unit| unit.has("LENGTH_UNIT"))
+            else {
                 continue;
             };
             let system = length_unit_system(unit)?;
@@ -262,7 +266,8 @@ pub fn declared_length_unit(source: &str) -> Option<runmat_geometry_core::UnitSy
 fn length_unit_system(unit: &super::p21::Entity) -> Option<runmat_geometry_core::UnitSystem> {
     use runmat_geometry_core::UnitSystem;
     if let Some(si) = unit.component("SI_UNIT") {
-        let metre = matches!(si.arguments.get(1), Some(P21Value::Enumeration(base)) if base == "METRE");
+        let metre =
+            matches!(si.arguments.get(1), Some(P21Value::Enumeration(base)) if base == "METRE");
         return match si.arguments.first() {
             Some(P21Value::Null) | None if metre => Some(UnitSystem::Meter),
             Some(P21Value::Enumeration(prefix)) if metre && prefix == "MILLI" => {
@@ -298,7 +303,9 @@ mod declared_length_unit_tests {
     #[test]
     fn reads_the_declared_length_unit() {
         assert_eq!(
-            declared_length_unit(&step("LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.)")),
+            declared_length_unit(&step(
+                "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.)"
+            )),
             Some(UnitSystem::Millimeter)
         );
         assert_eq!(
@@ -306,7 +313,9 @@ mod declared_length_unit_tests {
             Some(UnitSystem::Meter)
         );
         assert_eq!(
-            declared_length_unit(&step("LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.)")),
+            declared_length_unit(&step(
+                "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.)"
+            )),
             None
         );
         assert_eq!(declared_length_unit("not a step file"), None);

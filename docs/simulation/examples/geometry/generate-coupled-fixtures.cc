@@ -9,6 +9,8 @@
 //   -lTKService -lTKV3d -lTKFillet -lTKShHealing -o generate-coupled-fixtures
 // Run: ./generate-coupled-fixtures <output-directory>/
 #include <BRepAdaptor_Surface.hxx>
+#include <Interface_Static.hxx>
+#include <STEPControl_Controller.hxx>
 #include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
@@ -141,7 +143,11 @@ bool write_cell(const std::string& path, std::vector<Body> bodies, const std::ve
     }
   }
   shapes->UpdateAssemblies();
+  // Shapes are built in metres: the document unit and the declared STEP unit must both be metres,
+  // or the writer labels metre values as millimetres.
+  XCAFDoc_DocumentTool::SetLengthUnit(doc, 1.0, UnitsMethods_LengthUnit_Meter);
   DESTEP_Parameters params; params.InitFromStatic(); params.WriteSubshapeNames = true;
+  params.WriteUnit = UnitsMethods_LengthUnit_Meter;
   STEPCAFControl_Writer writer; writer.SetNameMode(true); writer.SetColorMode(true);
   if (!writer.Transfer(doc, params, STEPControl_AsIs)) return false;
   if (writer.Write(path.c_str()) != IFSelect_RetDone) return false;
@@ -245,5 +251,8 @@ bool flexible_duct(const std::string& dir) {
 int main(int argc, char** argv) {
   if (argc != 2) { std::cerr << "usage: generate-coupled-fixtures <out-dir/>\n"; return 1; }
   const std::string dir = argv[1];
+  STEPControl_Controller::Init();
+  if (!Interface_Static::SetCVal("xstep.cascade.unit", "M")) return 3;
+  if (!Interface_Static::SetCVal("write.step.unit", "M")) return 3;
   return plate_channel(dir) && compliant_tube(dir) && cold_plate(dir) && flexible_duct(dir) ? 0 : 2;
 }

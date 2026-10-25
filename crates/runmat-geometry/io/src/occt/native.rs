@@ -3,7 +3,7 @@ use super::{
     OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart, OcctCadTopology,
     OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic, OcctRawTopology,
 };
-use crate::exact::{ExactCadImportOptions, ImportedExactCad};
+use crate::exact::{ExactCadImportOptions, ImportedExactCad, SourceUnitsAuthority};
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
     LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind,
@@ -60,14 +60,8 @@ pub(crate) fn import_exact_cad_shape(
 ) -> Result<ImportedExactCad, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
-    // Exchange readers resolve file-declared units into a stable millimetre
-    // kernel representation. Keep kernel tolerances independent of the caller's
-    // fallback units; BREP has no declared units and uses that explicit fallback.
-    let fallback_unit_m = meters_per_unit(options.source_units)?;
-    let meters_per_source_unit = match format {
-        OcctCadFormat::Step | OcctCadFormat::Iges => 0.001,
-        OcctCadFormat::Brep => fallback_unit_m,
-    };
+    let units = resolve_exact_units(bytes, format, options)?;
+    let meters_per_source_unit = units.meters_per_kernel_unit;
     let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_probe());
     let payload = ffi::bridge::import_exact_cad_bytes(
@@ -75,7 +69,12 @@ pub(crate) fn import_exact_cad_shape(
         bytes,
         materialized_path(&materialized)?,
         ffi_format(format),
-        ffi_exact_import_options(options, cancel_token.id(), meters_per_source_unit),
+        ffi_exact_import_options(
+            options,
+            cancel_token.id(),
+            units.kernel_unit_m,
+            meters_per_source_unit,
+        ),
     )
     .map_err(|err| exact_bridge_error(err, options))?;
     context.check_cancelled()?;
@@ -176,7 +175,8 @@ pub(crate) fn import_exact_cad_shape(
             OcctCadFormat::Iges => GeometrySourceFormat::Iges,
             OcctCadFormat::Brep => GeometrySourceFormat::Brep,
         },
-        source_units: options.source_units,
+        source_units: units.source_units,
+        declared_units: units.declared_units,
         kernel_version: payload.kernel_version,
         meters_per_source_unit,
         representation: payload.representation,
@@ -272,6 +272,71 @@ pub(crate) fn import_exact_cad_shape(
         ));
     }
     Ok(imported)
+}
+
+/// Units of one exact import, resolved once from the options and the file's own declaration.
+struct ResolvedExactUnits {
+    /// Coordinate unit recorded on the imported geometry.
+    source_units: UnitSystem,
+    /// The file's declared unit, kept only when the authored unit overrides it.
+    declared_units: Option<UnitSystem>,
+    /// Target length unit the exchange reader converts declared coordinates into.
+    kernel_unit_m: f64,
+    /// Meters per kernel coordinate unit after any authored override.
+    meters_per_kernel_unit: f64,
+}
+
+/// STEP and IGES readers resolve file-declared units into a stable millimetre kernel
+/// representation, which keeps kernel tolerances independent of the caller's units. An
+/// authoritative authored unit reinterprets the coordinates of a STEP file that declares a
+/// different single length unit: the kernel stays in the reader's millimetres and the projection
+/// to SI scales by authored/declared. BREP declares nothing and uses `source_units` directly.
+fn resolve_exact_units(
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &ExactCadImportOptions,
+) -> Result<ResolvedExactUnits, GeometryImportError> {
+    const KERNEL_UNIT_M: f64 = 0.001;
+    let authored = options.source_units_authority == SourceUnitsAuthority::Authored;
+    match format {
+        OcctCadFormat::Brep => {
+            let unit_m = meters_per_unit(options.source_units)?;
+            Ok(ResolvedExactUnits {
+                source_units: options.source_units,
+                declared_units: None,
+                kernel_unit_m: unit_m,
+                meters_per_kernel_unit: unit_m,
+            })
+        }
+        OcctCadFormat::Step if authored => {
+            let authored_m = meters_per_unit(options.source_units)?;
+            let declared = crate::ap242::declared_length_unit(&String::from_utf8_lossy(bytes))
+                .filter(|declared| *declared != UnitSystem::Unspecified);
+            let (declared_units, meters_per_kernel_unit) = match declared {
+                Some(declared) if declared != options.source_units => (
+                    Some(declared),
+                    KERNEL_UNIT_M * authored_m / meters_per_unit(declared)?,
+                ),
+                _ => (None, KERNEL_UNIT_M),
+            };
+            Ok(ResolvedExactUnits {
+                source_units: options.source_units,
+                declared_units,
+                kernel_unit_m: KERNEL_UNIT_M,
+                meters_per_kernel_unit,
+            })
+        }
+        OcctCadFormat::Step | OcctCadFormat::Iges => {
+            // Validates that the caller stated an explicit fallback, as before.
+            meters_per_unit(options.source_units)?;
+            Ok(ResolvedExactUnits {
+                source_units: options.source_units,
+                declared_units: None,
+                kernel_unit_m: KERNEL_UNIT_M,
+                meters_per_kernel_unit: KERNEL_UNIT_M,
+            })
+        }
+    }
 }
 
 fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
@@ -578,10 +643,11 @@ fn ffi_import_options(
 pub(super) fn ffi_exact_import_options(
     options: &ExactCadImportOptions,
     cancel_token_id: u64,
+    kernel_unit_m: f64,
     meters_per_source_unit: f64,
 ) -> ffi::bridge::OcctImportOptions {
     ffi::bridge::OcctImportOptions {
-        step_coordinate_unit_m: meters_per_source_unit,
+        step_coordinate_unit_m: kernel_unit_m,
         linear_deflection: DEFAULT_LINEAR_DEFLECTION,
         angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
         relative_deflection: false,

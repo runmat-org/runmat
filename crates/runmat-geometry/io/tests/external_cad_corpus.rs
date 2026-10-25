@@ -6,7 +6,7 @@ use runmat_geometry_core::{
 use runmat_geometry_io::import::GeometryImportError;
 use runmat_geometry_io::{
     import_exact_cad, ExactCadImportOptions, GeometryFormat, GeometryImportContext,
-    OcctExactEvaluator,
+    OcctExactEvaluator, SourceUnitsAuthority,
 };
 
 const NIST_SEEKER_TABLE: &[u8] = include_bytes!("fixtures/nist_seeker_table_acis.step");
@@ -100,6 +100,78 @@ fn declared_step_units_preserve_physical_scale_across_requested_coordinate_units
         assert!((mass.centroid_m[2] + 0.005).abs() < 1.0e-12);
         imported.build_closure().unwrap();
     }
+}
+
+/// The round-pipe flow fixture (radius 0.05, length 0.5) with its unit header relabelled as
+/// millimetres, as the fixture shipped before its generator was fixed.
+fn pipe_labelled_millimetres() -> Vec<u8> {
+    let metres = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
+    assert!(metres.contains("SI_UNIT($,.METRE.)"));
+    metres
+        .replace("SI_UNIT($,.METRE.)", "SI_UNIT(.MILLI.,.METRE.)")
+        .into_bytes()
+}
+
+fn pipe_volume_m3(options: &ExactCadImportOptions) -> (f64, runmat_geometry_io::ImportedExactCad) {
+    let imported = import_exact_cad(
+        "pipe.step",
+        &pipe_labelled_millimetres(),
+        GeometryFormat::Step,
+        options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let mass = evaluator
+        .mass_properties(
+            &imported.topology.bodies[0].mass_properties_evaluator_id,
+            &Unlimited,
+        )
+        .unwrap();
+    (mass.volume_m3, imported)
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: An authored metre unit over a STEP file declaring millimetres reads the coordinates
+//   in metres, records the declared unit as provenance in the geometry document, and survives
+//   closure; without authority the declaration governs. IGES overrides are not covered.
+#[test]
+fn authored_step_units_override_a_different_declaration_and_record_it() {
+    let pipe_m3 = std::f64::consts::PI * 0.05 * 0.05 * 0.5;
+    let (authored_volume, authored) = pipe_volume_m3(&ExactCadImportOptions {
+        source_units: UnitSystem::Meter,
+        source_units_authority: SourceUnitsAuthority::Authored,
+        ..ExactCadImportOptions::default()
+    });
+    assert!(
+        (authored_volume / pipe_m3 - 1.0).abs() < 1.0e-9,
+        "{authored_volume} vs {pipe_m3}"
+    );
+    assert_eq!(authored.source_units, UnitSystem::Meter);
+    assert_eq!(authored.declared_units, Some(UnitSystem::Millimeter));
+    assert!((authored.meters_per_source_unit - 1.0).abs() < 1.0e-15);
+    let document = authored.geometry_document().unwrap();
+    assert_eq!(document.source.declared_units, Some(UnitSystem::Millimeter));
+    authored.build_closure().unwrap();
+
+    // Without authority the caller's unit is only a fallback: the millimetre declaration governs.
+    let (declared_volume, declared) = pipe_volume_m3(&ExactCadImportOptions {
+        source_units: UnitSystem::Meter,
+        ..ExactCadImportOptions::default()
+    });
+    assert!((declared_volume / (pipe_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
+    assert_eq!(declared.declared_units, None);
+
+    // An authored unit equal to the declaration is not an override.
+    let (same_volume, same) = pipe_volume_m3(&ExactCadImportOptions {
+        source_units: UnitSystem::Millimeter,
+        source_units_authority: SourceUnitsAuthority::Authored,
+        ..ExactCadImportOptions::default()
+    });
+    assert!((same_volume / (pipe_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
+    assert_eq!(same.declared_units, None);
 }
 
 struct Unlimited;

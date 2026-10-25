@@ -44,6 +44,7 @@ fn exact_document() -> GeometryDocument {
             importer_version: "step-import/v2".into(),
             kernel_version: Some("occt/7.9".into()),
             source_units: UnitSystem::Millimeter,
+            declared_units: None,
             meters_per_source_unit: 0.001,
         },
         revision: GeometryRevisionIdentity {
