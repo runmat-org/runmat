@@ -107,6 +107,15 @@ pub trait PcgOperations<T>: Control {
     }
 }
 
+/// Iteration variant of the one PCG recurrence.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PcgMode {
+    /// Flexible CG (Polak–Ribière β, FCG(1)): valid when the preconditioner varies between
+    /// applications (an inner iterative solve or a reduced-precision cycle). Needs one extra
+    /// vector (`flexible_previous`) holding the previous residual.
+    pub flexible: bool,
+}
+
 /// The state is consumed on error. Each emitted A/M1/M2 request is applied
 /// exactly once; convergence and returned-best certificates are never replayed.
 pub async fn solve<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T>>(
@@ -117,6 +126,35 @@ pub async fn solve<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T
     operation_scratch: &mut [T],
     operations: &mut O,
 ) -> Result<PcgOutcome, KrylovFailure<O::Error>> {
+    solve_with::<T, A, O>(
+        rhs,
+        initial,
+        parameters,
+        PcgMode::default(),
+        work,
+        &mut [],
+        operation_scratch,
+        operations,
+    )
+    .await
+}
+
+/// PCG in the selected [`PcgMode`]; `flexible_previous` has `rhs.len()` entries when flexible
+/// and may be empty otherwise.
+#[allow(clippy::too_many_arguments)]
+pub async fn solve_with<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T>>(
+    rhs: &'a [T],
+    initial: Option<&[T]>,
+    parameters: PcgParameters,
+    mode: PcgMode,
+    work: PcgWork<'a, T>,
+    flexible_previous: &'a mut [T],
+    operation_scratch: &mut [T],
+    operations: &mut O,
+) -> Result<PcgOutcome, KrylovFailure<O::Error>> {
+    if mode.flexible && flexible_previous.len() != rhs.len() {
+        return Err(KrylovFailure::Invalid("flexible PCG previous-residual extent differs from b"));
+    }
     PcgGeometry::checked(
         rhs.len(),
         parameters.maximum_iterations,
@@ -140,6 +178,7 @@ pub async fn solve<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T
         parameters.maximum_iterations,
         work,
         parameters.preconditioners,
+        mode.flexible.then_some(flexible_previous),
         operations,
     )
     .await?;

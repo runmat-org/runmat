@@ -27,6 +27,11 @@ pub trait Preconditioner<T: Scalar>: Sync {
     fn is_symmetric_positive_definite(&self) -> bool {
         true
     }
+    /// True when the apply is variable or nonlinear (an inner iterative solve, a reduced-precision
+    /// cycle): the drivers then select flexible GMRES and flexible CG.
+    fn is_variable(&self) -> bool {
+        false
+    }
 }
 
 impl<T: Scalar> LinearOperator<T> for CsrRef<'_, T> {
@@ -98,6 +103,9 @@ impl<T: Scalar, P: Preconditioner<T> + ?Sized> Preconditioner<T> for Box<P> {
     fn is_symmetric_positive_definite(&self) -> bool {
         (**self).is_symmetric_positive_definite()
     }
+    fn is_variable(&self) -> bool {
+        (**self).is_variable()
+    }
 }
 
 impl<T: Scalar, P: Preconditioner<T> + ?Sized> Preconditioner<T> for &P {
@@ -109,6 +117,9 @@ impl<T: Scalar, P: Preconditioner<T> + ?Sized> Preconditioner<T> for &P {
     }
     fn is_symmetric_positive_definite(&self) -> bool {
         (**self).is_symmetric_positive_definite()
+    }
+    fn is_variable(&self) -> bool {
+        (**self).is_variable()
     }
 }
 

@@ -40,6 +40,8 @@ struct SparseStorage {
 
 #[derive(Default)]
 pub(in crate::backend::wgpu::provider) struct SparseState {
+    /// Device multigrid hierarchies and their pipelines.
+    pub(in crate::backend::wgpu::provider) multigrid: super::MultigridState,
     storage: Mutex<SparseStorage>,
     transient_bytes: AtomicU64,
     next_id: AtomicU64,

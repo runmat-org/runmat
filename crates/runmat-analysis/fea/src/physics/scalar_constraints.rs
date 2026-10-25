@@ -282,6 +282,7 @@ pub(crate) fn solve(
         strategy,
         block_size: 1,
         factor: None,
+        device: None,
     });
     if let Some(failure) = outcome.failure {
         return Err(failure);

@@ -452,6 +452,9 @@ fn pcg_impl<T: Scalar>(
     let mut direction = par::try_zeros::<T>(n)?;
     let mut scratch = par::try_zeros::<T>(n)?;
     let mut history = vec![0.0f64; options.max_iterations + 1];
+    // A variable preconditioner needs flexible CG (one extra vector).
+    let flexible = preconditioner.is_some_and(|p| p.is_variable());
+    let mut previous = if flexible { par::try_zeros::<T>(n)? } else { Vec::new() };
     let mut operations = SyncOperations {
         operator,
         preconditioner,
@@ -461,7 +464,7 @@ fn pcg_impl<T: Scalar>(
         distribution,
         failure: None,
     };
-    let outcome = block_on(pcg::solve::<T, ScalarArithmetic, _>(
+    let outcome = block_on(pcg::solve_with::<T, ScalarArithmetic, _>(
         b,
         initial.as_deref(),
         PcgParameters {
@@ -469,6 +472,7 @@ fn pcg_impl<T: Scalar>(
             maximum_iterations: options.max_iterations,
             preconditioners: (preconditioner.is_some(), false),
         },
+        pcg::PcgMode { flexible },
         PcgWork {
             x,
             best: &mut best,
@@ -477,6 +481,7 @@ fn pcg_impl<T: Scalar>(
             intermediate: None,
             residual_norms: &mut history,
         },
+        &mut previous,
         &mut scratch,
         &mut operations,
     ))
@@ -670,7 +675,12 @@ fn gmres_impl<T: Scalar>(
         0.0,
     )?;
     let mode = GmresMode {
-        side: gmres_options.side,
+        // A variable preconditioner needs the flexible variant.
+        side: if preconditioner.is_some_and(|p| p.is_variable()) {
+            PreconditionerSide::Flexible
+        } else {
+            gmres_options.side
+        },
         residual_check: gmres_options.residual_check,
         step_limit: (gmres_options.residual_check == ResidualCheck::OnEstimate)
             .then_some(options.max_iterations),

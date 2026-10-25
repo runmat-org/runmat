@@ -191,6 +191,7 @@ fn solve_affine_constraint_system_with_settings(
         strategy,
         block_size: 1,
         factor: factor.as_deref(),
+        device: None,
     });
     if outcome.cancelled {
         diagnostics.push(FeaDiagnostic {

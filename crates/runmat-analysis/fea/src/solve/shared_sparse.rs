@@ -97,7 +97,18 @@ pub(crate) struct SpdSolveOutcome {
     pub converged: bool,
     pub cancelled: bool,
     pub failure: Option<String>,
+    /// The multigrid preconditioner ran on the accelerator (f32 inner solve, f64 outer FCG).
+    pub device_preconditioner: bool,
 }
+
+/// The accelerator a solve may use (native only; browser builds always solve on the host).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type SolverDevice<'a> = &'a dyn runmat_accelerate_api::AccelProvider;
+#[cfg(target_arch = "wasm32")]
+pub(crate) type SolverDevice<'a> = std::marker::PhantomData<&'a ()>;
+
+/// Device inner-CG steps per outer application (variable preconditioner; outer flexible CG).
+pub(crate) const DEVICE_INNER_CG_STEPS: u32 = 10;
 
 /// Inputs of a shared SPD solve.
 pub(crate) struct SpdSolveRequest<'a> {
@@ -111,6 +122,11 @@ pub(crate) struct SpdSolveRequest<'a> {
     pub block_size: usize,
     /// A factorization of exactly `matrix` (from the coercivity proof) to reuse.
     pub factor: Option<&'a runmat_sparse_solvers::direct::DirectSolver<f64>>,
+    /// Accelerator for a multigrid strategy: the hierarchy is built on the host and applied on
+    /// the device as an inner single-precision CG (the outer f64 loop and its true-residual
+    /// certificate stay on the host). `None`, or a provider without device multigrid, keeps the
+    /// host hierarchy.
+    pub device: Option<SolverDevice<'a>>,
 }
 
 fn reference_norm(rhs: &[f64], residual: f64) -> f64 {
@@ -140,7 +156,9 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
         strategy,
         block_size,
         factor,
+        device,
     } = request;
+    let mut device_preconditioner = false;
     let n = matrix.rows();
     let arrays = CsrArrays::of(matrix);
     let failure = |message: String| SpdSolveOutcome {
@@ -151,6 +169,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
         converged: false,
         cancelled: crate::is_fea_cancelled(),
         failure: Some(message),
+        device_preconditioner: false,
     };
     with_plan(plan, || {
         let a = arrays.view();
@@ -176,6 +195,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                         reference_norm: reference,
                         cancelled: false,
                         failure: None,
+                        device_preconditioner: false,
                     };
                 }
                 let owned;
@@ -214,6 +234,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     reference_norm: reference,
                     cancelled: false,
                     failure: None,
+                    device_preconditioner: false,
                 }
             }
             SpdStrategy::Pcg(choice) => {
@@ -227,7 +248,13 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                         },
                         control(),
                     ) {
-                        Ok(amg) => Box::new(amg),
+                        Ok(amg) => match device_multigrid(device, &amg) {
+                            Some(on_device) => {
+                                device_preconditioner = true;
+                                on_device
+                            }
+                            None => Box::new(amg),
+                        },
                         Err(error) => return failure(format!("multigrid setup failed: {error}")),
                     },
                     PreconditionerChoice::Ilu0 => match Ilu0::new(a, true) {
@@ -270,6 +297,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                                     report.relative_residual
                                 )
                             }),
+                            device_preconditioner,
                         }
                     }
                     Err(runmat_sparse_solvers::SolverError::Cancelled) => SpdSolveOutcome {
@@ -281,6 +309,30 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
             }
         }
     })
+}
+
+/// The host hierarchy uploaded to `device` as an inner single-precision CG, when the provider
+/// supports device multigrid (browser builds keep the host path).
+fn device_multigrid<'a>(
+    device: Option<SolverDevice<'a>>,
+    amg: &runmat_sparse_solvers::precond::Amg,
+) -> Option<Box<dyn runmat_sparse_solvers::Preconditioner<f64> + 'a>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let provider = device?;
+        runmat_sparse_accelerate::DeviceAmg::new(
+            provider,
+            amg,
+            runmat_sparse_accelerate::DeviceApply::InnerCg { iterations: DEVICE_INNER_CG_STEPS },
+        )
+        .ok()
+        .map(|device| Box::new(device) as Box<dyn runmat_sparse_solvers::Preconditioner<f64> + 'a>)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (device, amg);
+        None
+    }
 }
 
 /// Bytes a single solve may plan for when the study gives no explicit budget: half the host.

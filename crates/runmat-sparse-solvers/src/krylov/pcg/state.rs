@@ -52,6 +52,8 @@ pub(super) struct RecurrenceState<'a, T, A> {
     second_preconditioner: bool,
     phase: Phase,
     best_certificate: Option<ScaledPositive>,
+    /// Flexible mode: the residual before the latest update (Polak–Ribière β).
+    previous: Option<&'a mut [T]>,
     arithmetic: std::marker::PhantomData<A>,
 }
 
@@ -86,6 +88,11 @@ struct ScaledDot {
 }
 
 impl ScaledDot {
+    /// The real part as a plain number (flexible β; ranges where it overflows stop the
+    /// recurrence as a breakdown).
+    fn value(&self) -> f64 {
+        self.real * self.left * self.right
+    }
     fn positive(&self) -> Option<ScaledPositive> {
         ScaledPositive::from_factors(self.real, self.left, self.right)
     }
@@ -179,6 +186,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         maximum_iterations: usize,
         work: PcgWork<'a, T>,
         preconditioners: (bool, bool),
+        previous: Option<&'a mut [T]>,
         checkpoint: &mut C,
     ) -> Result<Self, KrylovFailure<C::Error>> {
         let (first_preconditioner, second_preconditioner) = preconditioners;
@@ -230,6 +238,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
             second_preconditioner,
             phase: Phase::InitialProduct,
             best_certificate: None,
+            previous,
             arithmetic: std::marker::PhantomData,
         })
     }
@@ -344,7 +353,16 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 }
             }
             PreconditionerStage::Following { prior } => {
-                let Some(beta) = next_rho.ratio(prior.rho) else {
+                let beta = match self.previous.as_deref() {
+                    // Flexible: β = (⟨r, z⟩ − ⟨r_old, z⟩) / ⟨r_old, z_old⟩.
+                    Some(previous) => {
+                        let cross = dot::<T, A, C>(previous, output, &mut *checkpoint).await?;
+                        let value = (next_rho.value() - cross.value()) / prior.rho.value();
+                        value.is_finite().then_some(value)
+                    }
+                    None => next_rho.ratio(prior.rho),
+                };
+                let Some(beta) = beta else {
                     let residual_count = prior.index + 2;
                     return self
                         .complete_best(4, prior, residual_count, &mut *checkpoint)
@@ -405,6 +423,9 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
+        if let Some(previous) = self.previous.as_deref_mut() {
+            copy(previous, &*self.work.residual, &mut *checkpoint).await?;
+        }
         let mut progressed = false;
         if let Some(native) = checkpoint.native_step(
             &mut *self.work.x,
