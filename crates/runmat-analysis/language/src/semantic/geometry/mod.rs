@@ -34,14 +34,20 @@ pub fn lower_geometry_definitions(
         if identity.1.kind != FeaSymbolKind::Geometry {
             continue;
         }
-        let initial_errors = diagnostics.len();
+        let error_count = |diagnostics: &[FeaDiagnostic]| {
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity == FeaDiagnosticSeverity::Error)
+                .count()
+        };
+        let initial_errors = error_count(diagnostics);
         let definition = definition(
             bound,
             declaration,
             inspections.get(&(identity.0.clone(), identity.1.name.clone())),
             diagnostics,
         );
-        if diagnostics.len() == initial_errors {
+        if error_count(diagnostics) == initial_errors {
             let Some(definition) = definition else {
                 continue;
             };
