@@ -6,7 +6,7 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan, build_static_resource_plan_selecting,
+        build_static_resource_plan_selecting,
         require_executable_static_backend, StaticSolvePath, StaticSolveSelection,
         verify_assembled_structural_storage, FeaResourceDemand, ResourcePlanningError,
         SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
@@ -208,6 +208,7 @@ pub(super) fn model_has_explicit_structural_elements(model: &AnalysisModel) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::resource::build_static_resource_plan;
     use crate::fixtures::{fixture_model, FixtureId};
     use runmat_analysis_core::{AnalysisProcedure, AnalysisSequence};
 
