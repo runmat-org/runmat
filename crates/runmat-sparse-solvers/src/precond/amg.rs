@@ -292,6 +292,38 @@ impl Amg {
         &self.statistics
     }
 
+    /// Bytes the hierarchy holds while it preconditions: every level operator (CSR or BSR),
+    /// prolongator and restrictor, smoother inverse blocks, the cycle scratch of one
+    /// application, and the coarse solver (its dense factor, or the sparse Cholesky
+    /// reservation of the coarsest operator). Admission compares this with its budget.
+    pub fn resident_bytes(&self) -> u64 {
+        let word = std::mem::size_of::<usize>() as u64;
+        let csr = |m: &CsrMatrix<f64>| m.nnz() as u64 * (8 + word) + (m.nrows() as u64 + 1) * word;
+        let mut total = 0u64;
+        for level in &self.levels {
+            total += match &level.a {
+                LevelMatrix::Csr(a) => csr(a),
+                LevelMatrix::Bsr(a) => a.heap_bytes(),
+            };
+            total += level.p.as_ref().map_or(0, csr) + level.r.as_ref().map_or(0, csr);
+            total += level.inverse_blocks.len() as u64 * 8;
+            let n = level.a.nrows() as u64;
+            let coarse = level.r.as_ref().map_or(0, |r| r.nrows()) as u64;
+            // LevelScratch: ax, residual and four smoother vectors of n; coarse b and x.
+            total += (6 * n + 2 * coarse) * 8;
+        }
+        total
+            + match &self.coarse {
+                CoarseSolver::Sparse(_) => crate::estimate::direct_reservation_bytes(
+                    *self.statistics.level_rows.last().unwrap_or(&0),
+                    *self.statistics.level_nnz.last().unwrap_or(&0),
+                    false,
+                ),
+                CoarseSolver::Dense { factor, .. } => factor.len() as u64 * 8,
+                CoarseSolver::Smoothing => 0,
+            }
+    }
+
     fn scratch_for(levels: &[Level]) -> Vec<LevelScratch> {
         levels
             .iter()

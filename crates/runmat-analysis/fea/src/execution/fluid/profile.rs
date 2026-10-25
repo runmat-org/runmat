@@ -231,6 +231,17 @@ impl FluidSteadyWorkload {
     ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
         let source = self.prepare(mesh)?;
         let problem = source.problem(self)?;
+        self.result_encoding_profile_prepared(mesh, &source, problem)
+    }
+
+    /// [`Self::result_encoding_profile`] over a source and problem the caller already prepared
+    /// from this workload and mesh, so resource derivation prepares the original support once.
+    pub(crate) fn result_encoding_profile_prepared(
+        &self,
+        mesh: &SolverMeshArtifact,
+        source: &super::source::PreparedFluidSource,
+        problem: crate::physics::cfd::canonical::CanonicalFluidProblem<'_>,
+    ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
         let reservation = problem.reservation();
         let identity = Digest::from_bytes([0; 32]);
         if self.coupling() == super::workload::FluidCoupling::FluidStructure && self.is_transient()
@@ -279,7 +290,7 @@ impl FluidSteadyWorkload {
                     energy_relative_residual: 0.0,
                 },
             );
-            let data = source_data(self, &source, reservation, identity, shape)?;
+            let data = source_data(self, source, reservation, identity, shape)?;
             return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
         }
         if self.is_transient() && self.coupling() == super::workload::FluidCoupling::Standalone {
@@ -287,7 +298,7 @@ impl FluidSteadyWorkload {
             let view = self.transient_view();
             let prepared = view.prepare(mesh)?;
             let shape = RetainedShape::<(), _>::Transient(prepared.result_shape()?);
-            let data = source_data(self, &source, reservation, identity, shape)?;
+            let data = source_data(self, source, reservation, identity, shape)?;
             return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
         }
         let original = original_profile(
@@ -314,7 +325,7 @@ impl FluidSteadyWorkload {
                     largest_interface_displacement_m: 0.0,
                 },
             });
-            let data = source_data(self, &source, reservation, identity, shape)?;
+            let data = source_data(self, source, reservation, identity, shape)?;
             return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
         }
         if self.coupling() == super::workload::FluidCoupling::ConjugateHeat && self.is_transient() {
@@ -339,7 +350,7 @@ impl FluidSteadyWorkload {
                     },
                 },
             );
-            let data = source_data(self, &source, reservation, identity, shape)?;
+            let data = source_data(self, source, reservation, identity, shape)?;
             return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
         }
         if self.coupling() == super::workload::FluidCoupling::ConjugateHeat {
@@ -350,11 +361,11 @@ impl FluidSteadyWorkload {
                 flow: original,
                 energy,
             };
-            let data = source_data(self, &source, reservation, identity, shape)?;
+            let data = source_data(self, source, reservation, identity, shape)?;
             return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
         }
         let shape = RetainedShape::<_, ()>::Steady(original);
-        let data = source_data(self, &source, reservation, identity, shape)?;
+        let data = source_data(self, source, reservation, identity, shape)?;
         let wire = FluidResultWire { data };
         profile_serialized_shape(&wire, LIMITS).map_err(invalid)
     }

@@ -26,6 +26,12 @@ pub struct BsrMatrix<T> {
 }
 
 impl<T: Scalar> BsrMatrix<T> {
+    /// Heap bytes of the index and value arrays.
+    pub fn heap_bytes(&self) -> u64 {
+        let word = std::mem::size_of::<usize>() as u64;
+        (self.row_ptr.len() + self.col_idx.len()) as u64 * word
+            + self.values.len() as u64 * std::mem::size_of::<T>() as u64
+    }
     /// Converts a CSR matrix whose dimensions are multiples of `block`; missing entries inside a
     /// touched block are stored as zeros.
     pub fn from_csr(matrix: CsrRef<'_, T>, block: usize) -> SolverResult<Self> {

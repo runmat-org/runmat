@@ -13,15 +13,29 @@ enum Sample {
     Cell(usize),
     OutletFace(usize),
 }
-pub(super) struct PressureGradientStencil {
+/// Least-squares weights of every cell, stored contiguously: cell c reads
+/// `weights[offsets[c]..offsets[c + 1]]`. One allocation for the whole mesh, sized to the
+/// samples actually present rather than the per-cell worst case.
+pub(super) struct PressureGradientStencils {
+    offsets: Vec<usize>,
     weights: Vec<(Sample, V)>,
+}
+
+impl PressureGradientStencils {
+    fn cell(&self, c: usize) -> &[(Sample, V)] {
+        &self.weights[self.offsets[c]..self.offsets[c + 1]]
+    }
 }
 
 pub(super) fn derive(
     t: &FiniteVolumeTopology,
     b: &[FaceBoundary],
-) -> Result<Vec<PressureGradientStencil>, Error> {
-    let mut stencils = Vec::with_capacity(t.cells.len());
+) -> Result<PressureGradientStencils, Error> {
+    let mut offsets = Vec::with_capacity(t.cells.len() + 1);
+    offsets.push(0);
+    let mut all_weights = Vec::new();
+    let mut samples = Vec::with_capacity(265);
+    let mut displacements = Vec::with_capacity(265);
     for (root, cell) in t.cells.iter().enumerate() {
         // Degree≤4 tetrahedral face graph: depth3 has at most1+4+12+36=53 cells.
         let mut visited = BTreeSet::from([root]);
@@ -48,7 +62,7 @@ pub(super) fn derive(
         if visited.len() > 53 {
             return Err(Error::Invalid("pressure stencil graph degree"));
         }
-        let mut samples = Vec::with_capacity(265);
+        samples.clear();
         for c in visited {
             if c != root {
                 samples.push((Sample::Cell(c), t.cells[c].centroid_m));
@@ -63,32 +77,32 @@ pub(super) fn derive(
         if samples.len() > 265 {
             return Err(Error::Invalid("pressure stencil sample bound"));
         }
-        let displacements = samples
-            .iter()
-            .map(|(_, x)| sub(*x, cell.centroid_m))
-            .collect::<Vec<_>>();
+        displacements.clear();
+        displacements.extend(samples.iter().map(|(_, x)| sub(*x, cell.centroid_m)));
         let metric = super::reconstruction::GradientMetric::derive(&displacements)?;
-        let weights = samples
-            .into_iter()
-            .zip(displacements)
-            .map(|((sample, _), d)| metric.weight(d).map(|weight| (sample, weight)))
-            .collect::<Result<Vec<_>, _>>()?;
-        if weights.is_empty() {
+        if samples.is_empty() {
             return Err(Error::Unsupported(
                 "insufficient one-sided pressure samples",
             ));
         }
-        stencils.push(PressureGradientStencil { weights });
+        for ((sample, _), d) in samples.iter().zip(&displacements) {
+            all_weights.push((*sample, metric.weight(*d)?));
+        }
+        offsets.push(all_weights.len());
     }
-    Ok(stencils)
+    all_weights.shrink_to_fit();
+    Ok(PressureGradientStencils {
+        offsets,
+        weights: all_weights,
+    })
 }
 
 /// Reconstruct the gradient of original component-relative pressure.
 pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[f64]) -> Result<Vec<V>, Error> {
     let mut result = Vec::with_capacity(values.len());
-    for (c, stencil) in p.pressure_stencils.iter().enumerate() {
+    for c in 0..p.pressure_stencils.offsets.len() - 1 {
         let mut gradient = [0.0; 3];
-        for (sample, weight) in &stencil.weights {
+        for (sample, weight) in p.pressure_stencils.cell(c) {
             let value = match *sample {
                 Sample::Cell(n) => values[n],
                 Sample::OutletFace(i) => {

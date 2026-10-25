@@ -53,6 +53,7 @@ impl MomentumJacobianPattern {
         for row in &mut rows {
             row.sort_unstable();
             row.dedup();
+            row.shrink_to_fit();
         }
         let mut row_ptr = Vec::with_capacity(3 * n + 1);
         let mut col_idx = Vec::new();

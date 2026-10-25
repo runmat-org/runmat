@@ -69,16 +69,16 @@ pub(super) enum LinearSystem {
 }
 
 /// Conservative preconditioner reservation for one cell system (`n` rows, `nnz` entries):
-/// ILU(0) on the pattern, or an AMG hierarchy with operator complexity at most
-/// [`AMG_OPERATOR_COMPLEXITY_LIMIT`], prolongation/restriction of at most `nnz` entries each,
-/// smoother vectors and a sparse coarse factor of at most `AmgOptions::coarse_size` rows.
+/// ILU(0) on the pattern, or an AMG hierarchy sized as operator complexity 3 plus
+/// prolongation/restriction of `nnz` entries each, smoother vectors and a sparse coarse factor
+/// of at most `AmgOptions::coarse_size` rows. A built hierarchy is admitted by the bytes it
+/// actually holds ([`Amg::resident_bytes`]), not by how those bytes split between levels.
 pub(super) struct PreconditionerEnvelope {
     pub resident_bytes_upper_bound: u64,
     pub factor_scalar_operations: u64,
     pub application_scalar_operations: u64,
 }
 
-pub(super) const AMG_OPERATOR_COMPLEXITY_LIMIT: f64 = 3.0;
 
 /// AMG for a velocity component's implicit operator. A weak strength threshold keeps the
 /// couplings across thin (graded) cells in the aggregates, which ILU(0) and the default
@@ -92,17 +92,10 @@ pub(super) fn momentum_amg_options() -> AmgOptions {
 
 /// An AMG hierarchy must stay inside the admitted per-system preconditioner envelope.
 pub(super) fn within_admission(amg: &Amg, planned: &PreconditionerEnvelope) -> Result<(), SolverError> {
-    let statistics = amg.statistics();
-    let entries = statistics.level_nnz.iter().sum::<usize>() as u64;
-    let rows = statistics.level_rows.iter().sum::<usize>() as u64;
-    if statistics.operator_complexity > AMG_OPERATOR_COMPLEXITY_LIMIT
-        || entries
-            .saturating_mul(24)
-            .saturating_add(rows.saturating_mul(64))
-            > planned.resident_bytes_upper_bound
-    {
+    let required = amg.resident_bytes();
+    if required > planned.resident_bytes_upper_bound {
         return Err(SolverError::OverBudget {
-            required: entries.saturating_mul(24),
+            required,
             budget: planned.resident_bytes_upper_bound,
         });
     }

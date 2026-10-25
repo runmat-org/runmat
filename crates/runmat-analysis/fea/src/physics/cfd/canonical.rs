@@ -192,7 +192,7 @@ pub struct CanonicalFluidProblem<'a> {
     sample: crate::excitation::ProjectionSample,
     pressure_reference_pa: Vec<f64>,
     pressure_reference_plan: pressure_reference::PressureReferencePlan,
-    pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
+    pressure_stencils: pressure_gradient::PressureGradientStencils,
     velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
     /// Two-ring structure of the coupled momentum block, derived once per problem.
     momentum_jacobian: jacobian::MomentumJacobianPattern,
