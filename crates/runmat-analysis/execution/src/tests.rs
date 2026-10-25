@@ -217,6 +217,7 @@ fn portable_static_preparation_admits_connector_target_observation() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .expect("connector-target observation must be admitted in the portable resource plan");
     let demand = prepared.resource_plan.input.structural_operator().unwrap();
@@ -1630,6 +1631,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 4);
@@ -2903,6 +2905,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     assert_eq!(branch.inputs.len(), 5);
@@ -2954,6 +2957,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            machine_memory_bytes: None,
         })
         .is_err()
     );
@@ -2993,6 +2997,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     assert_eq!(prepared.host.workload, access_variant.host.workload);
@@ -3027,6 +3032,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     assert_eq!(
@@ -3099,6 +3105,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             required_features: BTreeSet::new(),
         }],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .err()
     .expect("unsupported GPU static work must be rejected before scheduler preparation");
@@ -3310,6 +3317,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .err()
     .expect("a later GPU branch must fail before the sequence admits any solve wave");
@@ -3331,6 +3339,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            machine_memory_bytes: None,
         })
         .is_err()
     );
@@ -3354,6 +3363,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
                 required_features: BTreeSet::new(),
             }],
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            machine_memory_bytes: None,
         })
         .is_err()
     );
@@ -3376,6 +3386,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            machine_memory_bytes: None,
         })
         .is_err()
     );
@@ -3391,6 +3402,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     assert_eq!(coordinator.sequence().parallel_levels().len(), 2);
@@ -3604,6 +3616,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            machine_memory_bytes: None,
         },
         closures.clone(),
     )
@@ -3626,6 +3639,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            machine_memory_bytes: None,
         },
         incomplete,
     )

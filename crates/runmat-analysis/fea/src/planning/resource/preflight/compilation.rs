@@ -10,11 +10,12 @@ pub fn build_structural_resource_plan_from_compilation(
     accelerator_requests: &[AcceleratorRequest],
     local_execution: LocalExecutionPlan,
     prepared_inputs: Option<&PreparedInputResourceFacts>,
+    selection: StaticSolveSelection,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    build_static_resource_plan(StaticResourcePreflight {
+    build_static_resource_plan_selecting(StaticResourcePreflight {
         compilation: Some(compilation),
         model: &workload.model,
         step: workload
@@ -29,7 +30,7 @@ pub fn build_structural_resource_plan_from_compilation(
         accelerator_requests,
         local_execution,
         prepared_inputs,
-    })
+    }, selection)
 }
 
 pub(super) fn original_peak(

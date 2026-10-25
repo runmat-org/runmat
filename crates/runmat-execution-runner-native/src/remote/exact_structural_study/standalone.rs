@@ -109,6 +109,7 @@ pub(super) async fn linear(
             required_capabilities: Default::default(),
             accelerator_requests: decoded.analysis_accelerator_requests.clone(),
             local_execution: decoded.local_execution,
+            machine_memory_bytes: None,
         },
         policy,
     )

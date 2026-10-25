@@ -14,6 +14,7 @@ const RHS_DOMAIN: &str = "fea-coercivity-rhs";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 
+mod elastic;
 mod energy;
 mod symbolic;
 
@@ -66,6 +67,8 @@ pub enum CoercivityError {
     Encoding(String),
     #[error(transparent)]
     Energy(#[from] super::EnergyError),
+    #[error(transparent)]
+    ElasticRigidity(#[from] super::ElasticRigidityError),
     #[error("anchored local energy did not establish coercivity: graph lower bound {}, error upper bound {}", f64::from_bits(*.graph_lower_bits), f64::from_bits(*.error_upper_bits))]
     EnergyIndeterminate {
         graph_lower_bits: u64,
@@ -98,6 +101,17 @@ enum CoercivityProof {
     AnchoredLocalEnergy {
         lower_bound_bits: u64,
         assembly_error_upper_bits: u64,
+        scalar_operations: u64,
+        resident_bytes: u64,
+    },
+    /// Element rigid-motion kernels glued by face adjacency and fixed by anchors
+    /// ([`super::elastic_rigidity`]): positive definite in exact arithmetic, with no eigenvalue
+    /// bound. Solution accuracy is accepted by the true-residual certificate.
+    ElasticRigidity {
+        elements: u64,
+        components: u64,
+        element_energy_ratio_bits: u64,
+        anchor_rank_ratio_bits: u64,
         scalar_operations: u64,
         resident_bytes: u64,
     },
@@ -137,6 +151,11 @@ impl CoercivityCertificate {
                 ..
             } => (dimension, factor_nonzero_count, flop_count, resident_bytes),
             CoercivityProof::AnchoredLocalEnergy {
+                scalar_operations,
+                resident_bytes,
+                ..
+            }
+            | CoercivityProof::ElasticRigidity {
                 scalar_operations,
                 resident_bytes,
                 ..
@@ -272,6 +291,16 @@ impl CoercivityCertificate {
                     return false;
                 }
                 lower_bound_bits
+            }
+            CoercivityProof::ElasticRigidity {
+                element_energy_ratio_bits,
+                anchor_rank_ratio_bits,
+                ..
+            } => {
+                if !(f64::from_bits(anchor_rank_ratio_bits) > 0.) {
+                    return false;
+                }
+                element_energy_ratio_bits
             }
         };
         f64::from_bits(bits).is_finite() && f64::from_bits(bits) > 0.

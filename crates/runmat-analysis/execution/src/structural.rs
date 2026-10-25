@@ -50,6 +50,9 @@ pub struct StructuralLinearProgramPreparation {
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
     pub local_execution: LocalExecutionPlan,
+    /// Memory this host admits for the solve, when known. With the authored ceiling it forms
+    /// the effective ceiling that selects the static solve path; it is never part of an identity.
+    pub machine_memory_bytes: Option<u64>,
 }
 
 pub struct PreparedStructuralLinearProgram {
@@ -338,6 +341,9 @@ pub fn prepare_structural_linear_program(
         &preparation.accelerator_requests,
         preparation.local_execution,
         Some(&input_facts),
+        runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: preparation.machine_memory_bytes,
+        },
     )?;
     let resource_plan_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,

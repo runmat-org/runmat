@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) fn solve_policy(
     preconditioner: SpdPreconditionerKind,
+    path: StaticSolvePath,
     dofs: u64,
     constraint_rows: u64,
     enforcement: ConstraintEnforcement,
@@ -11,6 +12,11 @@ pub(super) fn solve_policy(
     transpose_index_bytes: u64,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
     // Multiplier enforcement is solved on the affine-reduced SPD system (one canonical path).
+    // The elastic rigidity path always solves with AMG-preconditioned CG.
+    let preconditioner = match path {
+        StaticSolvePath::ElasticRigidityMultigrid => SpdPreconditionerKind::Amg,
+        StaticSolvePath::ProvingFactorization => preconditioner,
+    };
     let storage = match preconditioner {
         // The direct factor is the coercivity proof; its bytes are the admission envelope's
         // factorization charge.
@@ -52,6 +58,7 @@ pub(super) fn solve_policy(
         preconditioner: storage,
         admission,
         transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
+        path,
     })
 }
 
@@ -150,6 +157,7 @@ mod tests {
         };
         let policy = solve_policy(
             SpdPreconditionerKind::Ilu0,
+            StaticSolvePath::ProvingFactorization,
             12,
             7,
             ConstraintEnforcement::LagrangeMultiplier,

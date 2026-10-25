@@ -653,6 +653,7 @@ pub async fn execute_structural_workloads_locally(
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
                     local_execution,
+                    machine_memory_bytes: Some(maximum_resident_bytes),
                 },
                 policy,
             )

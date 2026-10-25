@@ -126,6 +126,14 @@ pub(super) fn execute(
             &accelerator_requests,
             local_execution,
             Some(&prepared_inputs),
+            // The submitted plan's recorded solve path is re-derived, never re-selected: the
+            // machine memory that chose it is provenance, not an input.
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::Recorded(
+                runmat_analysis_fea::planning::resource::recorded_static_solve_path(&resource_plan)
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "structural resource plan records no solve path",
+                    ))?,
+            ),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if expected_resource_plan != resource_plan {

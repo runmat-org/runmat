@@ -64,6 +64,7 @@ pub(super) fn solve_structural_system_with_execution(
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
     admission: Option<&SolverAdmissionResourcePolicy>,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     if crate::planning::resource::local_chunk_active() {
         return Err(ScopedSpmvError::Execution(
@@ -85,6 +86,8 @@ pub(super) fn solve_structural_system_with_execution(
             initial_guess,
             plan,
             admission,
+            preconditioner_kind,
+            preparation,
         );
     }
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
@@ -102,15 +105,19 @@ pub(super) fn solve_structural_system_with_execution(
             initial_guess,
             plan,
             admission,
+            preconditioner_kind,
+            preparation,
         );
     }
+    let mut settings = ScopedLinearSolveSettings::with_default_tolerance(plan, admission);
+    settings.preparation = preparation;
     solve_operator_system_scoped(
         summary.operator,
         preconditioner_kind,
         backend_kind,
         algebra_backend,
         initial_guess,
-        ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
+        settings,
     )
 }
 

@@ -6,7 +6,8 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan, require_executable_static_backend,
+        build_static_resource_plan, build_static_resource_plan_selecting,
+        require_executable_static_backend, StaticSolvePath, StaticSolveSelection,
         verify_assembled_structural_storage, FeaResourceDemand, ResourcePlanningError,
         SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
     },
@@ -23,6 +24,8 @@ pub(super) struct StaticPreassembly {
     pub constraints: Option<CanonicalStructuralConstraintPlan>,
     connectors: Option<CanonicalStructuralConnectorPlan>,
     pub solver_admission: Option<SolverAdmissionResourcePolicy>,
+    /// The planned solve path (`None` for synthetic operators, which have no plan).
+    pub solve_path: Option<StaticSolvePath>,
 }
 
 /// Direct and prepared CPU physical solves derive observations and recovery demand before
@@ -60,6 +63,7 @@ pub(super) fn prepare_static_preassembly(
             constraints: None,
             connectors,
             solver_admission: None,
+            solve_path: None,
         });
     }
     let compilation = crate::pipeline::constraint_preparation::compile_inventory(
@@ -99,7 +103,23 @@ pub(super) fn prepare_static_preassembly(
         ObservationLimits::default(),
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let resource_plan = build_static_resource_plan(StaticResourcePreflight {
+    // An admitted plan fixes the path; a direct run selects it within the authored ceiling and
+    // the memory a single solve may use on this host.
+    let selection = match admitted.as_ref() {
+        Some(admission) => match crate::planning::resource::recorded_static_solve_path(admission.plan) {
+            Some(path) => StaticSolveSelection::Recorded(path),
+            None => {
+                return Err(ResourcePlanningError::Invalid(
+                    "admitted static plan records no solve path".into(),
+                )
+                .into())
+            }
+        },
+        None => StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: crate::solve::shared_sparse::default_memory_budget(),
+        },
+    };
+    let resource_plan = build_static_resource_plan_selecting(StaticResourcePreflight {
         compilation: Some(&compilation),
         model,
         step,
@@ -116,7 +136,7 @@ pub(super) fn prepare_static_preassembly(
         accelerator_requests: &[],
         local_execution: options.local_execution,
         prepared_inputs: admitted.and_then(|admission| admission.prepared_inputs),
-    })?;
+    }, selection)?;
     if admitted.is_some_and(|admission| admission.plan != &resource_plan) {
         return Err(ResourcePlanningError::Invalid(
             "numerical static preassembly differs from the admitted resource plan".into(),
@@ -141,8 +161,10 @@ pub(super) fn prepare_static_preassembly(
         },
         connectors: Some(connectors),
         solver_admission,
+        solve_path: crate::planning::resource::recorded_static_solve_path(&resource_plan),
     })
 }
+
 
 pub(super) fn verify_executed_preassembly(
     model: &AnalysisModel,

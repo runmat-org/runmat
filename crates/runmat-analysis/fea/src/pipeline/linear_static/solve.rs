@@ -16,6 +16,7 @@ pub(super) fn solve_static_system(
     options: &LinearStaticSolveOptions,
     admission: Option<&SolverAdmissionResourcePolicy>,
     planned_reduced_support: Option<&crate::algebra::SparsePattern>,
+    elastic: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     let algebra_backend = build_backend(options.algebra_backend_kind);
     if options.initial_displacement.as_ref().is_some_and(|values| {
@@ -26,15 +27,22 @@ pub(super) fn solve_static_system(
             summary.dof_count
         )));
     }
+    // The elastic rigidity path proves without a factor and always solves with AMG-PCG.
+    let preconditioner = if elastic.is_some() {
+        crate::solve::preconditioner::SpdPreconditionerKind::Amg
+    } else {
+        options.preconditioner_kind
+    };
     let result = solve_linear_system_with_execution_admitted(
         summary,
-        options.preconditioner_kind,
+        preconditioner,
         options.algebra_backend_kind,
         algebra_backend.as_ref(),
         options.initial_displacement.as_deref(),
         options.local_execution,
         admission,
         planned_reduced_support,
+        elastic,
     )
     .map_err(|error| {
         if crate::is_fea_cancelled() {
@@ -124,7 +132,7 @@ mod tests {
             vec![1.0; dofs],
         )
         .unwrap();
-        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default(), None, None)
+        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default(), None, None, None)
             .expect_err("invalid exact operator must not yield a recoverable static solution");
         assert!(
             matches!(error, FeaRunError::Solve(message) if message.contains("FEA_INVALID_REAL_SYSTEM"))

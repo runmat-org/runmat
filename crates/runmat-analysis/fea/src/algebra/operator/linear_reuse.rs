@@ -9,6 +9,9 @@ pub(crate) struct LinearPreparationReuse {
     /// operator (time steps, eigen iterations, load cases).
     factor: Option<crate::algebra::coercivity::SharedFactor>,
     local_energy: Option<LocalEnergySource>,
+    /// Elastic rigidity proof from the assembly that built the operator. It is the only proof
+    /// tried: a refusal is final, never a fallback to factorization.
+    elastic: Option<crate::algebra::elastic_rigidity::ElasticRigidityProof>,
 }
 
 enum LocalEnergySource {
@@ -35,6 +38,16 @@ impl LinearPreparationReuse {
         self.certificate = None;
         self.factor = None;
         self.local_energy = None;
+        self.elastic = None;
+    }
+
+    pub(crate) fn with_elastic_rigidity(
+        proof: crate::algebra::elastic_rigidity::ElasticRigidityProof,
+    ) -> Self {
+        Self {
+            elastic: Some(proof),
+            ..Self::default()
+        }
     }
 
     /// Original source is consumed once and freed after proof; no serialized claim enters.
@@ -51,6 +64,7 @@ impl LinearPreparationReuse {
                 prescribed,
                 normalization,
             )),
+            elastic: None,
         }
     }
 
@@ -62,6 +76,7 @@ impl LinearPreparationReuse {
             certificate: None,
             factor: None,
             local_energy: Some(LocalEnergySource::Selection(source, rows)),
+            elastic: None,
         }
     }
 
@@ -86,8 +101,17 @@ impl LinearPreparationReuse {
         }
         // A failed replacement cannot leave a stale proof available for later work.
         let local_energy = self.local_energy.take();
+        let elastic = self.elastic.take();
         self.clear();
-        let evidence = if let Some(local) = local_energy {
+        let evidence = if let Some(proof) = elastic {
+            PreparedSolverAdmissibility::bind_existing_with_source(
+                CoercivityCertificate::from_elastic_rigidity(matrix, &proof)?,
+                None,
+                matrix,
+                rhs,
+                source,
+            )?
+        } else if let Some(local) = local_energy {
             let certificate = match local {
                 LocalEnergySource::Identity(local, prescribed, normalization) => {
                     CoercivityCertificate::prove_local_energy(

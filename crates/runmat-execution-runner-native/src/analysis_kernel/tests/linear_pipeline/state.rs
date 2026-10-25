@@ -175,6 +175,7 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     let warm_outputs = NativeAnalysisKernel

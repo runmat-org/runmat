@@ -4512,6 +4512,7 @@ mod tests {
                     iterations: 0,
                     residual_norm: 0.0,
                     relative_residual: Some(0.0),
+                    operator_proof: runmat_analysis_fea::contracts::StaticOperatorProof::SparseCholesky,
                 }),
                 structural_static_balance: Some(synthetic_static_balance()),
                 structural_constraint_result: Some(synthetic_constraint_result()),

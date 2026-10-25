@@ -5045,6 +5045,7 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
         plan,
         Some(&admission),
         None,
+        None,
     )
     .unwrap();
     assert_eq!(admitted, multiplier_serial);
@@ -5059,6 +5060,7 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
             factor_nonzero_upper_bound: Count(factor_nonzeros - 1),
             ..admission
         }),
+        None,
         None,
     )
     .unwrap();

@@ -37,13 +37,25 @@ pub(super) fn solve_affine_constraint_system_with_execution(
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
     admission: Option<&SolverAdmissionResourcePolicy>,
+    preconditioner: SpdPreconditionerKind,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
-    Ok(solve_affine_constraint_system_with_settings(
+    let mut settings = ScopedLinearSolveSettings::with_default_tolerance(plan, admission);
+    settings.preparation = preparation;
+    // A planned proof without a factor (a supplied preparation) solves with the planned
+    // preconditioner; otherwise the proving factor, when one exists, solves.
+    let kind = if settings.preparation.is_some() {
+        preconditioner
+    } else {
+        SpdPreconditionerKind::Auto
+    };
+    Ok(solve_affine_constraint_system_with_kind(
         summary,
         reduction,
         requested_backend,
         initial_guess,
-        ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
+        settings,
+        kind,
     ))
 }
 
@@ -56,6 +68,24 @@ fn solve_affine_constraint_system_with_settings(
     requested_backend: LinearAlgebraBackendKind,
     initial_guess: Option<&[f64]>,
     settings: ScopedLinearSolveSettings<'_>,
+) -> LinearSolveResult {
+    solve_affine_constraint_system_with_kind(
+        summary,
+        reduction,
+        requested_backend,
+        initial_guess,
+        settings,
+        SpdPreconditionerKind::Auto,
+    )
+}
+
+fn solve_affine_constraint_system_with_kind(
+    summary: &StructuralLinearSystemView<'_>,
+    reduction: &AffineConstraintReduction,
+    requested_backend: LinearAlgebraBackendKind,
+    initial_guess: Option<&[f64]>,
+    settings: ScopedLinearSolveSettings<'_>,
+    kind: SpdPreconditionerKind,
 ) -> LinearSolveResult {
     let admission = settings.admission;
     let reuse = settings.preparation;
@@ -176,7 +206,7 @@ fn solve_affine_constraint_system_with_settings(
         .and_then(|evidence| evidence.factor())
         .map(|factor| factor.0.clone());
     let strategy = shared_sparse::resolve_spd_strategy(
-        SpdPreconditionerKind::Auto,
+        kind,
         prepared.dof_count(),
         prepared.matrix().values().len(),
         1,

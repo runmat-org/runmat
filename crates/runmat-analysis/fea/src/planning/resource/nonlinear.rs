@@ -77,7 +77,10 @@ fn derive_resource_input(
     let properties = crate::properties::compile_structural_property_map(input.model, Some(mesh))
         .map_err(|e| invalid(&e))?
         .identity;
-    let mut input = super::preflight::build_static_resource_input(input)?;
+    let mut input = super::preflight::build_static_resource_input(
+        input,
+        super::StaticSolvePath::ProvingFactorization,
+    )?;
     let FeaResourceDemand::StructuralLinearPipeline(mut baseline) = input.demand else {
         return Err(ResourcePlanningError::Invalid(
             "structural preflight omitted its operator demand".into(),

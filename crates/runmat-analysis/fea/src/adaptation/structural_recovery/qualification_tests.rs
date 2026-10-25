@@ -32,6 +32,17 @@ mod cantilever_stiffness;
 #[path = "qualification_tests/interface.rs"]
 mod interface;
 
+#[path = "qualification_tests/elastic_static_path.rs"]
+mod elastic_static_path;
+
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
+//   linear_structural/tet4/numerical_kernel, linear_structural/tet10/numerical_kernel; coverage: partial;
+//   boundary: The elastic rigidity path (no global factor, AMG-PCG, true-residual acceptance) matches the proving factorization's displacement to 1e-6 on a structured cantilever.
+#[test]
+fn elastic_rigidity_static_path_agrees_with_the_proving_factorization() {
+    elastic_static_path::qualify();
+}
+
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();

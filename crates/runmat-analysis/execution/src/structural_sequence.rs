@@ -50,6 +50,9 @@ pub struct StructuralSequencePreparation {
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
     pub local_execution: LocalExecutionPlan,
+    /// Memory this host admits for each solve, when known (selects the static solve path
+    /// within the effective ceiling; provenance, never identity).
+    pub machine_memory_bytes: Option<u64>,
 }
 
 pub struct PreparedStructuralSolveTask {
@@ -339,6 +342,7 @@ impl StructuralSequenceCoordinator {
                 required_capabilities: self.preparation.required_capabilities.clone(),
                 accelerator_requests: self.preparation.accelerator_requests.clone(),
                 local_execution: self.preparation.local_execution,
+                machine_memory_bytes: self.preparation.machine_memory_bytes,
             })?;
             tasks.push(PreparedStructuralSolveTask {
                 node: StructuralSequenceNode::Solve(step_id.clone()),

@@ -163,6 +163,12 @@ fn run_linear_static_with_constraint_plan(
     );
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.assembly");
+    let elastic_path = preassembly.solve_path
+        == Some(crate::planning::resource::StaticSolvePath::ElasticRigidityMultigrid);
+    // The elastic rigidity path checks every element block as it is assembled; no global
+    // factor is ever formed.
+    let mut elastic_capture =
+        elastic_path.then(crate::assembly::solver_solid::SolidEnergyPreparation::elastic);
     let summary = assemble_structural_system_with_execution(
         model,
         &excitations,
@@ -178,6 +184,7 @@ fn run_linear_static_with_constraint_plan(
         thermal_transfer
             .as_ref()
             .map(|transfer| &transfer.temperature),
+        elastic_capture.as_mut(),
     )
     .map_err(|err| match err {
         LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
@@ -237,13 +244,32 @@ fn run_linear_static_with_constraint_plan(
     );
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.solve");
+    let mut elastic_reuse = elastic_capture
+        .map(|capture| {
+            capture
+                .into_elastic_reuse()
+                .map_err(|error| FeaRunError::Solve(format!("FEA_ELASTIC_RIGIDITY_REFUSED: {error}")))
+        })
+        .transpose()?;
     let solve_result =
         solve::solve_static_system(
             &summary,
             &options,
             preassembly.solver_admission.as_ref(),
             planned_reduced_support.as_ref(),
+            elastic_reuse.as_mut(),
         )?;
+    let operator_proof = match elastic_reuse.as_ref().and_then(|reuse| reuse.certificate()) {
+        Some(certificate) if certificate.proved_by_elastic_rigidity() => {
+            crate::contracts::StaticOperatorProof::ElasticRigidity
+        }
+        Some(_) => {
+            return Err(FeaRunError::Solve(
+                "elastic rigidity path completed without its elastic proof".into(),
+            ))
+        }
+        None => crate::contracts::StaticOperatorProof::SparseCholesky,
+    };
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.balance_and_reactions");
     let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;
@@ -530,7 +556,7 @@ fn run_linear_static_with_constraint_plan(
     diagnostics.extend(thermo_mechanical_diagnostics);
     diagnostics.extend(electro_thermal_diagnostics);
     let structural_static_convergence =
-        crate::contracts::StructuralStaticConvergence::from_solve(&solve_result);
+        crate::contracts::StructuralStaticConvergence::from_solve(&solve_result, operator_proof);
     diagnostics.extend(solve_result.diagnostics);
 
     emit_phase(

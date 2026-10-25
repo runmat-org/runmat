@@ -3,6 +3,8 @@ pub(crate) use compensated::CompensatedSum;
 pub(crate) mod anchored_energy;
 pub use anchored_energy::EnergyError;
 pub(crate) mod coercivity;
+pub(crate) mod elastic_rigidity;
+pub use elastic_rigidity::ElasticRigidityError;
 pub mod element_assembly;
 mod compatibility;
 mod matrix;

@@ -52,11 +52,26 @@ pub(super) fn solve_storage(
                     resident_bytes_upper_bound.0
                 }
             };
-            validate_solver_admission(
-                admission,
-                demand.sparse.rows.0,
-                demand.solve.scalar_bytes(),
-            )?;
+            match demand.solve.static_solve_path() {
+                Some(crate::planning::resource::StaticSolvePath::ElasticRigidityMultigrid) => {
+                    // No global factor: the admission carries only the proof's inventory.
+                    if admission.dimension.0 == 0
+                        || admission.dimension.0 > demand.sparse.rows.0
+                        || admission.factor_nonzero_upper_bound.0 != 0
+                        || admission.resident_bytes_upper_bound.0 == 0
+                        || !matches!(preconditioner, PreconditionerStorage::SparseCsr { .. })
+                    {
+                        return Err(ResourcePlanningError::Invalid(
+                            "elastic rigidity admission must reserve its proof inventory, no factor, and a multigrid preconditioner".into(),
+                        ));
+                    }
+                }
+                _ => validate_solver_admission(
+                    admission,
+                    demand.sparse.rows.0,
+                    demand.solve.scalar_bytes(),
+                )?,
+            }
             Ok((ByteCount(value), admission.resident_bytes_upper_bound))
         }
         SolveResourcePolicy::SaddlePointGmres { ref admission, .. } => {

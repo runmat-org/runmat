@@ -77,6 +77,7 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
         Some(constraint_plan),
         crate::planning::resource::LocalExecutionPlan::serial(),
         None,
+        None,
     )
 }
 
@@ -88,6 +89,7 @@ pub(crate) fn assemble_structural_system_with_execution(
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
     solved_nodal_temperature_k: Option<&crate::execution::SolvedTemperatureField>,
+    solid_energy: Option<&mut solver_solid::SolidEnergyPreparation>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_with_mesh(
         model,
@@ -98,7 +100,7 @@ pub(crate) fn assemble_structural_system_with_execution(
         local_execution,
         StructuralCouplingInput::Authored {
             solved_nodal_temperature_k,
-            solid_energy: None,
+            solid_energy,
         },
     )
 }

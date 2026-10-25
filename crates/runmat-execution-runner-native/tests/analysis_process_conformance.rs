@@ -1515,6 +1515,7 @@ fn fixture_for_study(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     (
@@ -1566,6 +1567,7 @@ fn explicit_fixture(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     assert!(prepared
@@ -1760,6 +1762,7 @@ fn mixed_fixture(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: None,
     })
     .unwrap();
     let constraint_plan =
@@ -1918,7 +1921,8 @@ fn sequence_preparation(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-    }
+    },
+    machine_memory_bytes: None,
 }
 
 fn sequence_policy() -> StructuralSequenceExecutionPolicy {
