@@ -167,7 +167,7 @@ fn inspect_uncached(
     })
 }
 
-/// The single supported length unit a STEP or IGES file declares; BREP declares none.
+/// The single length unit a STEP or IGES file declares; BREP declares none.
 fn file_declared_units(
     bytes: &[u8],
     logical_path: &str,
@@ -183,8 +183,8 @@ fn file_declared_units(
 }
 
 /// An imported geometry without authored `units` uses the single length unit its STEP or IGES
-/// file declares. A BREP must state its unit; an exchange file without one supported declared
-/// unit cannot be read in any authored unit either and must be re-exported with one.
+/// file declares. A BREP must state its unit; an exchange file without one declared length unit
+/// cannot be read in any authored unit either and must be re-exported with one.
 fn undeclared_units(bytes: &[u8], logical_path: &str) -> SourceDiagnostic {
     let exchange = matches!(
         detect_geometry_format(logical_path, bytes),
@@ -194,7 +194,7 @@ fn undeclared_units(bytes: &[u8], logical_path: &str) -> SourceDiagnostic {
         "fea.host.geometry_units_undeclared",
         if exchange {
             format!(
-                "geometry `{logical_path}` does not declare one length unit in meters, millimeters or inches; re-export it with a declared unit"
+                "geometry `{logical_path}` does not declare a single length unit (none, or several different ones); re-export it with one declared unit"
             )
         } else {
             format!(

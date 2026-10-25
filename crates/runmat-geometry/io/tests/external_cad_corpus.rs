@@ -221,14 +221,99 @@ fn authored_iges_units_override_a_different_declaration_and_record_it() {
     assert_eq!(declared.declared_units, None);
 }
 
+fn step_volume_m3(
+    name: &str,
+    bytes: &[u8],
+    options: &ExactCadImportOptions,
+) -> (f64, runmat_geometry_io::ImportedExactCad) {
+    let imported = import_exact_cad(
+        name,
+        bytes,
+        GeometryFormat::Step,
+        options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let volume = OcctExactEvaluator::new(&imported)
+        .unwrap()
+        .mass_properties(
+            &imported.topology.bodies[0].mass_properties_evaluator_id,
+            &Unlimited,
+        )
+        .unwrap()
+        .volume_m3;
+    (volume, imported)
+}
+
+const PIPE_METRE_UNIT: &str = "#114 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );";
+
 // witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
 //   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
 //   partial;
-//   boundary: Authored units over a STEP file with mixed length units, or with a length unit
-//   outside meters, millimeters and inches, are refused with GEOMETRY_UNITS_UNRESOLVED instead
-//   of skipping the rescale; the same files still import under their own declarations.
+//   boundary: STEP files declaring centimetres (SI prefix) or feet (conversion-based unit with a
+//   304.8 mm factor) import at their declared scale, and an authored metre unit over either reads
+//   the coordinates in metres and records the declared unit.
 #[test]
-fn authored_units_refuse_step_files_without_one_supported_declared_unit() {
+fn centimetre_and_foot_step_declarations_resolve_and_accept_authored_overrides() {
+    let pipe = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
+    assert!(pipe.contains(PIPE_METRE_UNIT));
+    let centimetres = pipe.replacen(
+        PIPE_METRE_UNIT,
+        "#114 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.) );",
+        1,
+    );
+    let feet = pipe.replacen(
+        PIPE_METRE_UNIT,
+        "#114 = ( CONVERSION_BASED_UNIT('FOOT',#900) LENGTH_UNIT() NAMED_UNIT(#901) );\n\
+         #900 = LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(304.8),#902);\n\
+         #901 = DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.);\n\
+         #902 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );",
+        1,
+    );
+    let pipe_m3 = std::f64::consts::PI * 0.05 * 0.05 * 0.5;
+    for (name, bytes, meters_per_unit) in [
+        ("centimetres.step", centimetres, 0.01),
+        ("feet.step", feet, 0.3048),
+    ] {
+        let (declared_volume, _) =
+            step_volume_m3(name, bytes.as_bytes(), &ExactCadImportOptions::default());
+        let scaled = pipe_m3 * meters_per_unit * meters_per_unit * meters_per_unit;
+        assert!(
+            (declared_volume / scaled - 1.0).abs() < 1.0e-9,
+            "{name}: {declared_volume} vs {scaled}"
+        );
+        let (authored_volume, authored) = step_volume_m3(
+            name,
+            bytes.as_bytes(),
+            &ExactCadImportOptions {
+                source_units: UnitSystem::Meter,
+                source_units_authority: SourceUnitsAuthority::Authored,
+                ..ExactCadImportOptions::default()
+            },
+        );
+        assert!(
+            (authored_volume / pipe_m3 - 1.0).abs() < 1.0e-9,
+            "{name}: {authored_volume} vs {pipe_m3}"
+        );
+        let declared = authored
+            .declared_units
+            .and_then(UnitSystem::meters_per_unit);
+        assert!(
+            (declared.unwrap() / meters_per_unit - 1.0).abs() < 1.0e-12,
+            "{name}: {declared:?}"
+        );
+        authored.build_closure().unwrap();
+    }
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Authored units over a STEP file whose global contexts declare several different
+//   length units, or no length unit, are refused with GEOMETRY_UNITS_UNRESOLVED instead of
+//   skipping the rescale. Both files are synthetic variants of the shipped fixtures.
+#[test]
+fn authored_units_refuse_step_files_without_one_declared_unit() {
     let tube = include_str!("../../../../docs/simulation/examples/geometry/compliant-tube.step");
     let mixed = tube.replacen(
         "#136 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );",
@@ -237,9 +322,13 @@ fn authored_units_refuse_step_files_without_one_supported_declared_unit() {
     );
     assert_ne!(mixed, tube);
     let pipe = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
-    let centimetres = pipe.replacen("SI_UNIT($,.METRE.) );", "SI_UNIT(.CENTI.,.METRE.) );", 1);
-    assert_ne!(centimetres, pipe);
-    for (name, bytes) in [("mixed.step", mixed), ("centimetres.step", centimetres)] {
+    let undeclared = pipe.replacen(
+        PIPE_METRE_UNIT,
+        "#114 = ( NAMED_UNIT(*) SI_UNIT($,.METRE.) );",
+        1,
+    );
+    assert_ne!(undeclared, pipe);
+    for (name, bytes) in [("mixed.step", mixed), ("undeclared.step", undeclared)] {
         let refused = import_exact_cad(
             name,
             bytes.as_bytes(),
@@ -256,14 +345,6 @@ fn authored_units_refuse_step_files_without_one_supported_declared_unit() {
             matches!(refused, GeometryImportError::UnresolvedUnits(_)),
             "{name}: {refused}"
         );
-        import_exact_cad(
-            name,
-            bytes.as_bytes(),
-            GeometryFormat::Step,
-            &ExactCadImportOptions::default(),
-            &GeometryImportContext::new(),
-        )
-        .unwrap();
     }
 }
 

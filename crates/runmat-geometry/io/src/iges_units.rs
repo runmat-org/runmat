@@ -8,8 +8,8 @@ use runmat_geometry_core::UnitSystem;
 const UNIT_FLAG: usize = 13;
 const UNIT_NAME: usize = 14;
 
-/// The single length unit an IGES file declares, or `None` when the global section is missing,
-/// malformed, or names a unit outside metres, millimetres and inches.
+/// The length unit an IGES file declares (any IGES 5.3 unit flag, or a recognised unit name with
+/// flag 3), or `None` when the global section is missing or malformed or the unit is unknown.
 pub fn iges_declared_length_unit(bytes: &[u8]) -> Option<UnitSystem> {
     let text = String::from_utf8_lossy(bytes);
     let mut global = String::new();
@@ -22,22 +22,46 @@ pub fn iges_declared_length_unit(bytes: &[u8]) -> Option<UnitSystem> {
     let parameters = global_parameters(&global)?;
     let flag = parameters.get(UNIT_FLAG)?.trim();
     let flag: i64 = flag.strip_suffix('.').unwrap_or(flag).parse().ok()?;
-    match flag {
-        1 => Some(UnitSystem::Inch),
-        2 => Some(UnitSystem::Millimeter),
-        6 => Some(UnitSystem::Meter),
-        3 => named_unit(parameters.get(UNIT_NAME)?),
-        _ => None,
-    }
+    let meters_per_unit = match flag {
+        3 => named_unit(parameters.get(UNIT_NAME)?)?,
+        flag => flag_unit(flag)?,
+    };
+    UnitSystem::from_meters_per_unit(meters_per_unit)
 }
 
-fn named_unit(name: &str) -> Option<UnitSystem> {
-    match name.trim().to_ascii_uppercase().as_str() {
-        "IN" | "INCH" => Some(UnitSystem::Inch),
-        "MM" => Some(UnitSystem::Millimeter),
-        "M" => Some(UnitSystem::Meter),
-        _ => None,
-    }
+/// IGES 5.3 global parameter 14 unit flags.
+fn flag_unit(flag: i64) -> Option<f64> {
+    Some(match flag {
+        1 => 0.0254,
+        2 => 0.001,
+        4 => 0.3048,
+        5 => 1609.344,
+        6 => 1.0,
+        7 => 1000.0,
+        8 => 2.54e-5,
+        9 => 1.0e-6,
+        10 => 0.01,
+        11 => 2.54e-8,
+        _ => return None,
+    })
+}
+
+/// Unit names that may accompany flag 3 (IGES 5.3 global parameter 15).
+fn named_unit(name: &str) -> Option<f64> {
+    let flag = match name.trim().to_ascii_uppercase().as_str() {
+        "IN" | "INCH" => 1,
+        "MM" => 2,
+        "FT" => 4,
+        "MI" => 5,
+        "M" => 6,
+        "KM" => 7,
+        "MIL" => 8,
+        "UM" | "MICRON" => 9,
+        "CM" => 10,
+        "UIN" => 11,
+        _ => return None,
+    };
+    flag_unit(flag)
 }
 
 /// Splits the global section into parameter values, decoding Hollerith strings (`nH...`).
@@ -140,14 +164,18 @@ mod tests {
     }
 
     #[test]
-    fn unrepresentable_or_missing_units_are_undeclared() {
-        // Feet, centimetres and an unknown named unit have no UnitSystem.
-        for (flag, name) in [("4", "2HFT"), ("10", "2HCM"), ("3", "4HFOOT")] {
-            assert_eq!(
-                iges_declared_length_unit(&iges_with_global(&global(flag, name))),
-                None
-            );
-        }
+    fn every_unit_flag_resolves_to_its_size() {
+        let meters = |flag: &str, name: &str| {
+            iges_declared_length_unit(&iges_with_global(&global(flag, name)))
+                .and_then(UnitSystem::meters_per_unit)
+        };
+        assert_eq!(meters("4", "2HFT"), Some(0.3048));
+        assert_eq!(meters("10", "2HCM"), Some(0.01));
+        assert_eq!(meters("9", "6HMICRON"), Some(1.0e-6));
+        assert_eq!(meters("3", "2HFT"), Some(0.3048));
+        // An unknown named unit or flag, or no global section, is unresolvable.
+        assert_eq!(meters("3", "4HFOOT"), None);
+        assert_eq!(meters("12", "2HMM"), None);
         assert_eq!(iges_declared_length_unit(b"not an iges file"), None);
     }
 

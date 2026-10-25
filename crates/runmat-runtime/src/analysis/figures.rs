@@ -1216,11 +1216,7 @@ fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSys
 }
 
 fn geometry_unit_scale_to_meters(units: UnitSystem) -> f32 {
-    match units {
-        UnitSystem::Unspecified | UnitSystem::Meter => 1.0,
-        UnitSystem::Millimeter => 0.001,
-        UnitSystem::Inch => 0.0254,
-    }
+    units.meters_per_unit().unwrap_or(1.0) as f32
 }
 
 fn append_mesh_plots(target: &mut Figure, source: &Figure) {

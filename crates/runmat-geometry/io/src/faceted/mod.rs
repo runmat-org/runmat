@@ -149,14 +149,9 @@ fn source_format(format: GeometryFormat) -> Result<GeometrySourceFormat, Geometr
 }
 
 fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
-    match units {
-        UnitSystem::Meter => Ok(1.0),
-        UnitSystem::Millimeter => Ok(0.001),
-        UnitSystem::Inch => Ok(0.0254),
-        UnitSystem::Unspecified => Err(GeometryImportError::InvalidOptions(
-            "faceted solid source units must be explicit".into(),
-        )),
-    }
+    units.meters_per_unit().ok_or_else(|| {
+        GeometryImportError::InvalidOptions("faceted solid source units must be explicit".into())
+    })
 }
 
 fn validate_options(options: &FacetedSolidImportOptions) -> Result<(), GeometryImportError> {

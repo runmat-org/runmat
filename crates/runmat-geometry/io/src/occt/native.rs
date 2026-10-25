@@ -290,8 +290,8 @@ struct ResolvedExactUnits {
 /// representation, which keeps kernel tolerances independent of the caller's units. An
 /// authoritative authored unit reinterprets the coordinates of a STEP or IGES file that declares a
 /// different length unit: the kernel stays in the reader's millimetres and the projection to SI
-/// scales by authored/declared. A file without one declared supported unit cannot be
-/// reinterpreted and is refused. BREP declares nothing and uses `source_units` directly.
+/// scales by authored/declared. A file that declares no length unit, or several different ones,
+/// cannot be reinterpreted and is refused. BREP declares nothing and uses `source_units` directly.
 fn resolve_exact_units(
     bytes: &[u8],
     format: OcctCadFormat,
@@ -322,7 +322,7 @@ fn resolve_exact_units(
                 .filter(|declared| *declared != UnitSystem::Unspecified)
                 .ok_or_else(|| {
                     GeometryImportError::UnresolvedUnits(format!(
-                        "authored {:?} units cannot be applied: the {exchange} file does not declare one length unit in meters, millimeters or inches",
+                        "authored {:?} units cannot be applied: the {exchange} file declares no single resolvable length unit (none, or several different ones)",
                         options.source_units
                     ))
                 })?;
@@ -348,14 +348,11 @@ fn resolve_exact_units(
 }
 
 fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
-    match units {
-        UnitSystem::Meter => Ok(1.0),
-        UnitSystem::Millimeter => Ok(0.001),
-        UnitSystem::Inch => Ok(0.0254),
-        UnitSystem::Unspecified => Err(GeometryImportError::InvalidOptions(
+    units.meters_per_unit().ok_or_else(|| {
+        GeometryImportError::InvalidOptions(
             "exact CAD import requires explicit source units".into(),
-        )),
-    }
+        )
+    })
 }
 
 fn materialize_iges_input(

@@ -65,7 +65,7 @@ pub use source_geometry::{
 };
 pub use tessellation_profile::{HealingMode, TessellationProfile};
 pub use topology::ElementKind;
-pub use units::UnitSystem;
+pub use units::{LengthScale, UnitSystem};
 
 #[cfg(test)]
 mod exact_topology_tests;

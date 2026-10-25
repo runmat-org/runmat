@@ -432,12 +432,15 @@ fn imported_units(
     Some(authored)
 }
 
-fn unit_name(units: UnitSystem) -> &'static str {
+fn unit_name(units: UnitSystem) -> String {
     match units {
-        UnitSystem::Meter => "meters",
-        UnitSystem::Millimeter => "millimeters",
-        UnitSystem::Inch => "inches",
-        UnitSystem::Unspecified => "no unit",
+        UnitSystem::Meter => "meters".into(),
+        UnitSystem::Millimeter => "millimeters".into(),
+        UnitSystem::Inch => "inches".into(),
+        UnitSystem::Length { meters_per_unit } => {
+            format!("a {} m length unit", meters_per_unit.meters())
+        }
+        UnitSystem::Unspecified => "no unit".into(),
     }
 }
 
