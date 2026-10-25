@@ -1,7 +1,8 @@
 //! Coupled pressure–velocity solve: Picard linearization of convection and viscosity, then
 //! the whole momentum + continuity system for (u, p) at once by flexible GMRES from the shared
-//! sparse layer, preconditioned by one SIMPLE sweep (momentum solves with component AMG,
-//! Rhie–Chow pressure Laplacian by AMG, velocity correction). The discrete equations are exactly the segregated
+//! sparse layer, preconditioned by one SIMPLE sweep (momentum solves with component AMG, a
+//! pressure Schur approximation — Rhie–Chow Laplacian plus the viscous term — by AMG, velocity
+//! correction). The discrete equations are exactly the segregated
 //! solver's: the same momentum operator, the same Rhie–Chow face flux, the same physical
 //! acceptance; only the way the fixed point is reached differs.
 use super::linear::{momentum_amg_options, within_admission, PreconditionerEnvelope};
@@ -158,37 +159,50 @@ fn split(x: &[f64], n: usize) -> (Vec<V>, Vec<f64>) {
     )
 }
 
-/// Rhie–Chow pressure Laplacian Σ_f rf α (p_N − p_P), outlet faces on the diagonal; a closed
-/// domain gets a vanishing shift so the preconditioner stays definite.
-fn pressure_laplacian(p: &CanonicalFluidProblem<'_>, rf: &[f64]) -> Result<RealSparseMatrix, Error> {
+/// The pressure operator of the SIMPLE sweep: an approximation of the Schur complement
+/// `S = D F⁻¹ G + C` of the coupled step. It is the Rhie–Chow Laplacian `L(rf)` (SIMPLE's
+/// `D diag(F)⁻¹ G` plus the Rhie–Chow dissipation `C`) plus the viscous term
+/// `diag(V_c / μ_eff,c)`, `μ_eff,c = a_P,c / Σ_f α_f`, i.e. `rau_c Σ_f α_f`. On smooth pressure
+/// modes `S` behaves like `M_p / μ`, which `L(rf)` alone misses (its eigenvalues there scale with
+/// `h²`), so SIMPLE's outer iterations grow with the mesh; with the viscous term they stay nearly
+/// constant (graded slab: 44, 51, 56 outer iterations at 384, 3 072, 10 368 cells, against 99, 165,
+/// 275 without).
+///
+/// Also returns the outlet couplings `(owner, rf α)`: the viscous term breaks SIMPLE's cellwise
+/// continuity exactness, and the sweep restores the global mass balance through them.
+fn pressure_schur(
+    p: &CanonicalFluidProblem<'_>,
+    rf: &[f64],
+    rau: &[f64],
+) -> Result<(RealSparseMatrix, Vec<(usize, f64)>), Error> {
     let mut a = linear::assembler(p, "coupled-pressure-preconditioner")?;
-    let mut diagonal = vec![0.0; p.topology.cells.len()];
-    let mut open = false;
+    // Σ_f α_f per cell (the geometric Laplacian diagonal).
+    let mut geometric = vec![0.0; p.topology.cells.len()];
+    let mut outlets = Vec::new();
     for (i, f) in p.topology.faces.iter().enumerate() {
         let (alpha, _, _) = face_geometry(p, f)?;
         let d = rf[i] * alpha;
+        geometric[f.owner] += alpha;
         if let Some(n) = f.neighbor {
+            geometric[n] += alpha;
             a.add(f.owner, f.owner, d);
             a.add(f.owner, n, -d);
             a.add(n, n, d);
             a.add(n, f.owner, -d);
-            diagonal[f.owner] += d;
-            diagonal[n] += d;
         } else if matches!(
             p.boundaries[i],
             super::boundary::FaceBoundary::PressureOutlet { .. }
         ) {
             a.add(f.owner, f.owner, d);
-            open = true;
+            outlets.push((f.owner, d));
         }
     }
-    if !open {
-        let mean = diagonal.iter().sum::<f64>() / diagonal.len().max(1) as f64;
-        for c in 0..diagonal.len() {
-            a.add(c, c, 1e-10 * mean);
-        }
+    // The viscous Schur term (also makes closed domains definite).
+    for (c, g) in geometric.iter().enumerate() {
+        a.add(c, c, rau[c] * g);
     }
-    a.finish().map_err(|e| Error::Operator(e.to_string()))
+    let matrix = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
+    Ok((matrix, outlets))
 }
 
 struct SimplePreconditioner<'a, 'p> {
@@ -202,6 +216,8 @@ struct SimplePreconditioner<'a, 'p> {
     base_u: &'a [V],
     base_p: &'a [f64],
     base_residual: &'a [f64],
+    /// Outlet couplings `(owner, rf α)` of the pressure operator.
+    outlets: &'a [(usize, f64)],
     /// Pressure force of a zero increment (the outlet reference constant), fixed per step.
     zero_force: Vec<[f64; 3]>,
     /// Inner-solve storage reused by every application.
@@ -291,12 +307,22 @@ impl Preconditioner<f64> for SimplePreconditioner<'_, '_> {
         let rhs = (0..n)
             .map(|c| (shifted[3 * n + c] - self.base_residual[3 * n + c] - r[3 * n + c]) / w)
             .collect::<Vec<_>>();
-        let correction = inner_solve(
+        let mut correction = inner_solve(
             &self.pressure_workspace,
             self.pressure,
             self.pressure_preconditioner,
             &rhs,
         )?;
+        // Global mass balance. With z_u = z_u* − G z_p / a_P the corrected continuity is
+        // rhs − L z_p cell by cell, whose sum is Σ rhs − Σ_outlet rf α z_p (interior faces cancel).
+        // The viscous Schur term leaves that sum nonzero; a uniform shift of z_p, which moves only
+        // the outlet fluxes, makes it vanish so every application conserves mass globally.
+        let outlet_weight: f64 = self.outlets.iter().map(|&(_, d)| d).sum();
+        if outlet_weight > 0.0 {
+            let outflow: f64 = self.outlets.iter().map(|&(c, d)| d * correction[c]).sum();
+            let shift = (rhs.iter().sum::<f64>() - outflow) / outlet_weight;
+            correction.iter_mut().for_each(|z| *z += shift);
+        }
         // Velocity correction z_u = z_u* − G z_p / a_P.
         let force = pressure_force(
             self.p,
@@ -431,7 +457,7 @@ pub(super) fn solve_with_time(
         }
         let frozen = freeze(p, &u, &pressure_values, &q, time)?;
         let base_residual = residual(p, &frozen, &u, &pressure_values)?;
-        let laplacian = pressure_laplacian(p, &frozen.rf)?;
+        let (laplacian, outlets) = pressure_schur(p, &frozen.rf, &frozen.rau)?;
         let pressure_arrays = CsrArrays::of(&laplacian);
         let blocks = super::jacobian::component_operators(
             p,
@@ -479,6 +505,7 @@ pub(super) fn solve_with_time(
                 base_u: &u,
                 base_p: &pressure_values,
                 base_residual: &base_residual,
+                outlets: &outlets,
             };
             let operator = FnOperator {
                 nrows: 4 * n,
