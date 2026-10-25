@@ -61,6 +61,9 @@ struct PersistedRunArtifact {
     created_at: String,
     op_version: String,
     run_digest: Digest,
+    /// Untyped run content of records written before the typed metadata became the single copy;
+    /// absent (null) for current records, whose content is `metadata` plus `observation_payload`.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     run: serde_json::Value,
     metadata: AnalysisRunResult,
     field_inventory: Vec<AnalysisField>,
@@ -75,6 +78,24 @@ struct PersistedRunArtifact {
     /// accepted state), stored as one chunked numerical object instead of inline JSON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dynamic_balance: Option<PersistedDynamicBalance>,
+    /// The run's materialized observations and series reductions, chunked out of the metadata so
+    /// the typed metadata is the record's only copy of the run content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    observation_payload: Option<AnalysisObjectManifest>,
+}
+
+impl PersistedRunArtifact {
+    /// The authenticated run content as JSON: the legacy untyped copy when present, otherwise
+    /// the typed metadata (the single copy of current records).
+    fn run_projection(&self) -> Result<std::borrow::Cow<'_, serde_json::Value>, String> {
+        if self.run.is_null() {
+            serde_json::to_value(&self.metadata)
+                .map(std::borrow::Cow::Owned)
+                .map_err(|error| format!("failed to project analysis run metadata: {error}"))
+        } else {
+            Ok(std::borrow::Cow::Borrowed(&self.run))
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -361,14 +382,16 @@ fn validate_persisted_run(
             persisted.schema_version
         ));
     }
+    let run_value = persisted.run_projection()?;
     if persisted_run_digest(
-        &persisted.run,
+        &run_value,
         &persisted.field_inventory,
         &persisted.materialized_field_ids,
         persisted.render_tiles.as_ref(),
         &persisted.observation_histories,
         persisted.original_fields.as_ref(),
         persisted.dynamic_balance.as_ref(),
+        persisted.observation_payload.as_ref(),
     )? != persisted.run_digest
     {
         return Err("analysis run metadata differs from its content digest".into());
@@ -401,18 +424,33 @@ fn validate_persisted_run(
             );
         }
     }
-    let authenticated_scalars: Vec<
-        runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
-    > = match persisted.run.get("observation_scalars") {
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|error| format!("invalid scalar observation inventory: {error}"))?,
-        None => Vec::new(),
-    };
-    if authenticated_scalars != persisted.metadata.observation_scalars {
-        return Err("scalar observation inventory differs from authenticated run content".into());
+    if let Some(manifest) = &persisted.observation_payload {
+        manifest.validate().map_err(|error| error.to_string())?;
+        if manifest.kind != AnalysisNumericalObjectKind::History {
+            return Err("observation payload manifest has the wrong numerical object kind".into());
+        }
     }
-    if compact_run_metadata(&persisted.run)? != persisted.metadata {
-        return Err("compact analysis metadata differs from authenticated run content".into());
+    // A legacy record carries a second, untyped copy that must agree with the typed metadata.
+    if !persisted.run.is_null() {
+        let authenticated_scalars: Vec<
+            runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
+        > = match persisted.run.get("observation_scalars") {
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid scalar observation inventory: {error}"))?,
+            None => Vec::new(),
+        };
+        if authenticated_scalars != persisted.metadata.observation_scalars {
+            return Err(
+                "scalar observation inventory differs from authenticated run content".into(),
+            );
+        }
+        if compact_run_metadata(&persisted.run)? != persisted.metadata {
+            return Err("compact analysis metadata differs from authenticated run content".into());
+        }
+    } else if !persisted.metadata.run.observations.is_empty()
+        || !persisted.metadata.run.series_reductions.is_empty()
+    {
+        return Err("analysis metadata must not carry inline observation payloads".into());
     }
     validate_run_identity(&persisted.metadata)?;
     if persisted.metadata.render_topology.is_some() {
@@ -422,7 +460,7 @@ fn validate_persisted_run(
         index.validate()?;
     }
     let mut expected_fields = BTreeMap::new();
-    collect_persisted_field_shells(&persisted.run, &mut expected_fields)?;
+    collect_persisted_field_shells(&run_value, &mut expected_fields)?;
     let mut inventory_fields = BTreeMap::new();
     for field in &persisted.field_inventory {
         validate_field_id(&field.field_id)?;
@@ -439,9 +477,24 @@ fn validate_persisted_run(
             ));
         }
     }
-    if inventory_fields != expected_fields {
+    // Current records chunk their observations (and the field shells inside them) out of the
+    // metadata, so the authenticated inventory covers the metadata shells and those of the
+    // observation payload; legacy records list exactly the shells of their untyped copy.
+    let inventory_matches = if persisted.run.is_null() {
+        expected_fields
+            .iter()
+            .all(|(field_id, shape)| inventory_fields.get(field_id) == Some(shape))
+    } else {
+        inventory_fields == expected_fields
+    };
+    if !inventory_matches {
         return Err("analysis run field inventory differs from its metadata shells".into());
     }
+    let expected_fields = if persisted.run.is_null() {
+        inventory_fields
+    } else {
+        expected_fields
+    };
     let mut stored_fields = BTreeMap::new();
     for field in &persisted.fields {
         validate_field_id(&field.field_id)?;
