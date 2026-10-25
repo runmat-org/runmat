@@ -130,7 +130,14 @@ fn element_without_energy_margin_or_rigid_kernel_is_refused() {
         }
     })
     .unwrap_err();
-    assert_eq!(indefinite, ElasticRigidityError::ElementEnergyMargin { element: 11 });
+    assert!(
+        matches!(
+            indefinite,
+            ElasticRigidityError::ElementEnergyMargin { element: 11, smallest_ratio_bits, .. }
+                if f64::from_bits(smallest_ratio_bits) < 0.0
+        ),
+        "{indefinite:?}"
+    );
     let grounded = prove(&POINTS[..5], &[[0, 1, 2, 3], [1, 2, 3, 4]], &[0, 1, 2], |e, k| {
         if e == 0 {
             k[0] *= 2.0;

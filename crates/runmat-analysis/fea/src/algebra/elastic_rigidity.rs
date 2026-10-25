@@ -4,9 +4,11 @@
 //! The proof has three parts, each checked on data the assembly actually used:
 //!
 //! 1. **Elements.** Every block annihilates the element's six rigid motions to a scale-relative
-//!    tolerance, and is positive definite on their orthogonal complement with a scale-relative
-//!    margin: the projected block minus [`ELASTIC_ELEMENT_MINIMUM_ENERGY_RATIO`] `‖Kₑ‖_F` admits a
-//!    Cholesky factorization. So `Kₑ` is positive semidefinite with kernel exactly the rigid
+//!    tolerance, and is positive definite on their orthogonal complement with a roundoff-relative
+//!    margin: the projected `d × d` block `A` minus `c·(d+1)·ε·tr(A)` (Rump's floating-point
+//!    Cholesky criterion, `c` = [`ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR`]) admits a Cholesky
+//!    factorization, so `A` is positive definite despite the rounding of its formation and
+//!    factorization. Element shape quality is the mesher's concern, not this proof's. So `Kₑ` is positive semidefinite with kernel exactly the rigid
 //!    motions of that element.
 //! 2. **Gluing.** Elements that share a face (three non-collinear corner nodes) share one rigid
 //!    motion, since three non-collinear points fix a rigid motion. Face adjacency partitions the
@@ -21,8 +23,16 @@
 //! solver's true-residual (backward-error) certificate, never by an eigenvalue bound.
 use std::collections::HashMap;
 
-/// Smallest admitted ratio of an element's energy on the rigid-motion complement to `‖Kₑ‖_F`.
-pub const ELASTIC_ELEMENT_MINIMUM_ENERGY_RATIO: f64 = 1.0e-8;
+/// Multiplier `c` of the roundoff-relative element margin `c·(d+1)·ε·tr(A)`: covers the rounding
+/// of forming the projected block and of its Cholesky factorization (Rump's criterion uses
+/// `γ_{d+1} ≈ (d+1)ε` for the factorization alone).
+pub const ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR: f64 = 3.0;
+
+/// The roundoff-relative margin subtracted before the element Cholesky test.
+fn element_energy_margin(dimension: usize, trace: f64) -> f64 {
+    let gamma = ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR * (dimension as f64 + 1.0) * f64::EPSILON;
+    gamma / (1.0 - gamma) * trace
+}
 /// Largest admitted `‖Kₑ U‖_F / ‖Kₑ‖_F` for the orthonormal rigid-motion basis `U`.
 pub const RIGID_MODE_RESIDUAL_RATIO: f64 = 1.0e-8;
 /// Smallest admitted ratio of the anchor Gram matrix's smallest eigenvalue to its trace.
@@ -38,8 +48,14 @@ pub enum ElasticRigidityError {
     DegenerateElementGeometry { element: u64 },
     #[error("element {element}: stiffness does not annihilate rigid motions (‖K U‖/‖K‖ = {}, tolerance {RIGID_MODE_RESIDUAL_RATIO})", f64::from_bits(*.residual_ratio_bits))]
     RigidMotionEnergy { element: u64, residual_ratio_bits: u64 },
-    #[error("element {element}: stiffness is not positive definite on the rigid-motion complement with margin {ELASTIC_ELEMENT_MINIMUM_ENERGY_RATIO} of ‖K‖")]
-    ElementEnergyMargin { element: u64 },
+    #[error("element {element}: stiffness is not positive definite on the rigid-motion complement beyond rounding (smallest energy ≈ {} ‖K‖, required margin {} ‖K‖)", f64::from_bits(*.smallest_ratio_bits), f64::from_bits(*.margin_ratio_bits))]
+    ElementEnergyMargin {
+        element: u64,
+        /// The required roundoff-relative margin over `‖Kₑ‖_F`.
+        margin_ratio_bits: u64,
+        /// Bisection estimate of the projected block's smallest eigenvalue over `‖Kₑ‖_F`.
+        smallest_ratio_bits: u64,
+    },
     #[error("node {node} has a free translation but belongs to no element")]
     UncoveredNode { node: u64 },
     #[error("glued component {component} ({elements} elements, including element {representative_element}) is a mechanism: its {constrained_dofs} constrained DOFs do not fix all six rigid motions")]
@@ -440,7 +456,11 @@ fn check_element(element: u64, points: &[[f64; 3]], k: &[f64]) -> Result<(), Ela
     }
     let k_norm = norm(k);
     if !(k_norm > 0.0) || !k_norm.is_finite() {
-        return Err(ElasticRigidityError::ElementEnergyMargin { element });
+        return Err(ElasticRigidityError::ElementEnergyMargin {
+            element,
+            margin_ratio_bits: f64::NAN.to_bits(),
+            smallest_ratio_bits: f64::NAN.to_bits(),
+        });
     }
     // KU (d × 6, column-major).
     let mut ku = vec![0.0; d * 6];
@@ -477,14 +497,34 @@ fn check_element(element: u64, points: &[[f64; 3]], k: &[f64]) -> Result<(), Ela
                 }
                 value += k_norm * u[a * d + i] * u[a * d + j];
             }
-            if i == j {
-                value -= ELASTIC_ELEMENT_MINIMUM_ENERGY_RATIO * k_norm;
-            }
             matrix[i * d + j] = value;
         }
     }
-    if !cholesky_in_place(&mut matrix, d) {
-        return Err(ElasticRigidityError::ElementEnergyMargin { element });
+    let trace = (0..d).map(|i| matrix[i * d + i]).sum::<f64>();
+    let margin = element_energy_margin(d, trace.abs());
+    let succeeds = |shift: f64| {
+        let mut shifted = matrix.clone();
+        for i in 0..d {
+            shifted[i * d + i] -= shift;
+        }
+        cholesky_in_place(&mut shifted, d)
+    };
+    if !succeeds(margin) {
+        // Diagnostics only: bisect the largest shift that still factors (≈ λ_min of the block).
+        let (mut low, mut high) = (-k_norm, margin);
+        for _ in 0..60 {
+            let middle = 0.5 * (low + high);
+            if succeeds(middle) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        return Err(ElasticRigidityError::ElementEnergyMargin {
+            element,
+            margin_ratio_bits: (margin / k_norm).to_bits(),
+            smallest_ratio_bits: (low / k_norm).to_bits(),
+        });
     }
     Ok(())
 }

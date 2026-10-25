@@ -1,7 +1,7 @@
 //! Bind a completed elastic rigidity proof to the operator it certifies.
 use super::*;
 use crate::algebra::elastic_rigidity::{
-    ElasticRigidityProof, ANCHOR_MINIMUM_RANK_RATIO, ELASTIC_ELEMENT_MINIMUM_ENERGY_RATIO,
+    ElasticRigidityProof, ANCHOR_MINIMUM_RANK_RATIO, ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR,
 };
 
 impl CoercivityCertificate {
@@ -29,7 +29,7 @@ impl CoercivityCertificate {
             proof: CoercivityProof::ElasticRigidity {
                 elements: proof.elements(),
                 components: proof.components(),
-                element_energy_ratio_bits: ELASTIC_ELEMENT_MINIMUM_ENERGY_RATIO.to_bits(),
+                element_margin_rounding_factor_bits: ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR.to_bits(),
                 anchor_rank_ratio_bits: ANCHOR_MINIMUM_RANK_RATIO.to_bits(),
                 scalar_operations: proof.scalar_operations(),
                 resident_bytes: proof.resident_bytes(),

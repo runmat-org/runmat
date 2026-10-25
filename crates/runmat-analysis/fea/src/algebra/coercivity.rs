@@ -110,7 +110,7 @@ enum CoercivityProof {
     ElasticRigidity {
         elements: u64,
         components: u64,
-        element_energy_ratio_bits: u64,
+        element_margin_rounding_factor_bits: u64,
         anchor_rank_ratio_bits: u64,
         scalar_operations: u64,
         resident_bytes: u64,
@@ -293,14 +293,14 @@ impl CoercivityCertificate {
                 lower_bound_bits
             }
             CoercivityProof::ElasticRigidity {
-                element_energy_ratio_bits,
+                element_margin_rounding_factor_bits,
                 anchor_rank_ratio_bits,
                 ..
             } => {
                 if !(f64::from_bits(anchor_rank_ratio_bits) > 0.) {
                     return false;
                 }
-                element_energy_ratio_bits
+                element_margin_rounding_factor_bits
             }
         };
         f64::from_bits(bits).is_finite() && f64::from_bits(bits) > 0.
