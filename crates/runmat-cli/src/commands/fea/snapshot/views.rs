@@ -82,7 +82,7 @@ pub(super) async fn capture(
     let camera = camera::shared_camera(captured.iter().map(|view| view.8.bounds));
     let mut result = Vec::new();
     for (id, label, field, unit, scale, minimum, maximum, scalar_scale, scene) in captured {
-        let bytes = runmat_runtime::replay::export_figure_scene_payload(
+        let bytes = plotting::encode_geometry_figure_scene(
             &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
         )?;
         // Render the persisted representation: the poster and live view must share
