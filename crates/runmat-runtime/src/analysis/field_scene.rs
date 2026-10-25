@@ -369,8 +369,122 @@ use geometry::*;
 #[cfg(test)]
 mod tests;
 
-/// Preserve explicit topology lines so shaded, x-ray and wireframe modes share one scene.
+/// Surface triangle count above which a scene carries feature edges instead of every mesh edge:
+/// a full wireframe on a dense mesh buries the field colors and is drawn only when asked for.
+pub const FULL_MESH_EDGE_TRIANGLE_LIMIT: usize = 20_000;
+
+/// Dihedral angle above which an edge between two surface triangles is a feature (crease) edge.
+pub const FEATURE_EDGE_CREASE_DEGREES: f32 = 30.0;
+
+/// Preserve explicit topology lines so shaded, x-ray and wireframe modes share one scene. Dense
+/// scenes get feature edges (creases and open boundary loops) instead of the full wireframe.
 pub fn append_solver_mesh_edges(scene: &mut GeometryScene) {
+    let triangle_count = scene
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.render_data.pipeline_type == PipelineType::Triangles)
+        .map(|chunk| {
+            chunk
+                .indices
+                .as_ref()
+                .map_or(chunk.vertices.len(), Vec::len)
+                / 3
+        })
+        .sum::<usize>();
+    if triangle_count > FULL_MESH_EDGE_TRIANGLE_LIMIT {
+        append_feature_edges(scene, FEATURE_EDGE_CREASE_DEGREES);
+    } else {
+        append_full_mesh_edges(scene);
+    }
+}
+
+/// Edges where adjacent surface triangles meet at more than `crease_degrees`, plus edges with
+/// a single adjacent triangle (open boundary loops), taken across every surface chunk so tile
+/// seams are not mistaken for boundaries.
+pub fn append_feature_edges(scene: &mut GeometryScene, crease_degrees: f32) {
+    type Key = [u32; 3];
+    let mut edges: HashMap<(Key, Key), (Vertex, Vertex, Vec<Vec3>)> = HashMap::new();
+    for chunk in &scene.chunks {
+        if chunk.render_data.pipeline_type != PipelineType::Triangles {
+            continue;
+        }
+        let indices = chunk
+            .indices
+            .clone()
+            .unwrap_or_else(|| (0..chunk.vertices.len() as u32).collect());
+        for triangle in indices.chunks_exact(3) {
+            let corners = [0, 1, 2].map(|corner| chunk.vertices.get(triangle[corner] as usize).copied());
+            let [Some(a), Some(b), Some(c)] = corners else {
+                continue;
+            };
+            let normal = (Vec3::from_array(b.position) - Vec3::from_array(a.position))
+                .cross(Vec3::from_array(c.position) - Vec3::from_array(a.position))
+                .normalize_or_zero();
+            for (start, end) in [(a, b), (b, c), (c, a)] {
+                let start_key = start.position.map(f32::to_bits);
+                let end_key = end.position.map(f32::to_bits);
+                let key = if start_key < end_key {
+                    (start_key, end_key)
+                } else {
+                    (end_key, start_key)
+                };
+                edges
+                    .entry(key)
+                    .or_insert_with(|| (start, end, Vec::new()))
+                    .2
+                    .push(normal);
+            }
+        }
+    }
+    let cosine = crease_degrees.to_radians().cos();
+    let mut keys = edges.keys().copied().collect::<Vec<_>>();
+    keys.sort_unstable();
+    let mut vertices = Vec::new();
+    for key in keys {
+        let (mut start, mut end, normals) = edges.remove(&key).expect("collected edge");
+        let feature = normals.len() == 1
+            || normals
+                .iter()
+                .enumerate()
+                .any(|(i, left)| normals[i + 1..].iter().any(|right| left.dot(*right) < cosine));
+        if !feature {
+            continue;
+        }
+        start.color = [0.12, 0.14, 0.18, 0.9];
+        end.color = start.color;
+        vertices.extend([start, end]);
+    }
+    if vertices.is_empty() {
+        return;
+    }
+    let vertex_count = vertices.len();
+    let mut edge_chunk = GeometrySceneChunk::from_render_data(
+        "feature-edges",
+        RenderData {
+            pipeline_type: PipelineType::Lines,
+            vertices,
+            indices: None,
+            gpu_vertices: None,
+            bounds: None,
+            material: Material {
+                albedo: Vec4::ONE,
+                ..Material::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count,
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            }],
+            image: None,
+        },
+    );
+    edge_chunk.label = Some("Feature edges".into());
+    scene.chunks.push(edge_chunk);
+}
+
+fn append_full_mesh_edges(scene: &mut GeometryScene) {
     let mut edge_chunks = Vec::new();
     for chunk in &scene.chunks {
         if chunk.render_data.pipeline_type != PipelineType::Triangles {

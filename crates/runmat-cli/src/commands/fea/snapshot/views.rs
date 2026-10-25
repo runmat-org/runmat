@@ -43,7 +43,9 @@ pub(super) async fn capture(
             field.as_deref(),
             shape,
             1.0,
-            true,
+            // Posters show the deformed body alone; an undeformed overlay drawn over a shape a
+            // few micrometres away only fights it for depth.
+            false,
         )
         .map_err(anyhow::Error::msg)?;
         let mut scalar_scale = 1.0;

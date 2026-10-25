@@ -50,11 +50,20 @@ pub(super) fn render_topology_from_solver_mesh(
     // Project one face at a time. Do not retain a second complete boundary
     // inventory or grow buffers from a linear-face capacity for quadratic faces.
     for face in &mesh.topology.boundary_faces {
-        let face_triangles = boundary_triangles(&face.node_ids, &node_index_by_id)?;
+        let mut face_triangles = boundary_triangles(&face.node_ids, &node_index_by_id)?;
         let volume_element_index = face
             .adjacent_volume_element_ids
             .iter()
             .find_map(|element_id| volume_index_by_id.get(element_id).copied());
+        // A boundary face's stored winding is not a rendering convention; draw it facing out of
+        // its adjacent element so front faces, normals and culling agree on every face.
+        if let Some(element) = volume_element_index.map(|index| &mesh.topology.volume_elements[index]) {
+            if faces_into_element(mesh, &face.node_ids, element, &node_index_by_id) {
+                for triangle in &mut face_triangles {
+                    triangle.swap(1, 2);
+                }
+            }
+        }
         let region_ids: Vec<String> = face
             .provenance
             .iter()
@@ -98,6 +107,44 @@ pub(super) fn render_topology_from_solver_mesh(
             triangle_volume_element_indices,
         }],
     })
+}
+
+/// Whether the face's corner winding normal points into its adjacent element (towards the
+/// element's corner centroid).
+fn faces_into_element(
+    mesh: &SolverMeshArtifact,
+    face_node_ids: &[u64],
+    element: &runmat_meshing_core::SolverVolumeElement,
+    node_indices: &HashMap<u64, u32>,
+) -> bool {
+    let position = |id: &u64| {
+        node_indices
+            .get(id)
+            .map(|index| mesh.topology.nodes[*index as usize].coordinates_m)
+    };
+    let corners = face_node_ids.iter().take(3).map(position).collect::<Option<Vec<_>>>();
+    let element_corners = element
+        .node_ids
+        .iter()
+        .take(4)
+        .map(position)
+        .collect::<Option<Vec<_>>>();
+    let (Some(corners), Some(element_corners)) = (corners, element_corners) else {
+        return false;
+    };
+    let edge = |a: [f64; 3], b: [f64; 3]| [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let (u, v) = (edge(corners[0], corners[1]), edge(corners[0], corners[2]));
+    let normal = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let count = element_corners.len() as f64;
+    let toward_element: [f64; 3] = std::array::from_fn(|axis| {
+        element_corners.iter().map(|corner| corner[axis]).sum::<f64>() / count
+            - (corners[0][axis] + corners[1][axis] + corners[2][axis]) / 3.0
+    });
+    (0..3).map(|axis| normal[axis] * toward_element[axis]).sum::<f64>() > 0.0
 }
 
 /// Tri6 midside order is 01, 12, 20. Render four consistently oriented pieces
