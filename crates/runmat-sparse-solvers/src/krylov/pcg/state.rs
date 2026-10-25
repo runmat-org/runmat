@@ -57,6 +57,21 @@ pub(super) struct RecurrenceState<'a, T, A> {
     arithmetic: std::marker::PhantomData<A>,
 }
 
+impl<T, A> RecurrenceState<'_, T, A> {
+    fn record_beta(&mut self, beta: f64) {
+        if let Some(coefficients) = self.work.coefficients.as_deref_mut() {
+            coefficients.beta.push(beta);
+        }
+    }
+
+    /// A reliable residual restart starts a new Lanczos segment.
+    fn restart_coefficients(&mut self) {
+        if let Some(coefficients) = self.work.coefficients.as_deref_mut() {
+            coefficients.restart();
+        }
+    }
+}
+
 fn invalid<E>(message: &'static str) -> KrylovFailure<E> {
     KrylovFailure::Invalid(message)
 }
@@ -190,6 +205,11 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         checkpoint: &mut C,
     ) -> Result<Self, KrylovFailure<C::Error>> {
         let (first_preconditioner, second_preconditioner) = preconditioners;
+        let mut work = work;
+        if let Some(coefficients) = work.coefficients.as_deref_mut() {
+            coefficients.restart();
+            coefficients.flexible = previous.is_some();
+        }
         let n = rhs.len();
         let residual_capacity = maximum_iterations
             .checked_add(1)
@@ -368,6 +388,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                         .complete_best(4, prior, residual_count, &mut *checkpoint)
                         .await;
                 };
+                self.record_beta(beta);
                 if checkpoint.native_direction(&mut *self.work.direction, &output[..self.rhs.len()], beta) {
                     checkpoint
                         .cooperate(self.rhs.len() as u64)
@@ -395,6 +416,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 }
             }
             PreconditionerStage::Restart { prior } => {
+                self.restart_coefficients();
                 copy(&mut *self.work.direction, output, &mut *checkpoint).await?;
                 Iteration {
                     rho: next_rho,
@@ -423,6 +445,9 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
+        if let Some(coefficients) = self.work.coefficients.as_deref_mut() {
+            coefficients.alpha.push(alpha);
+        }
         if let Some(previous) = self.previous.as_deref_mut() {
             copy(previous, &*self.work.residual, &mut *checkpoint).await?;
         }
@@ -510,6 +535,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
+        self.record_beta(beta);
         if checkpoint.native_direction(&mut *self.work.direction, &*self.work.residual, beta) {
             checkpoint
                 .cooperate(self.rhs.len() as u64)

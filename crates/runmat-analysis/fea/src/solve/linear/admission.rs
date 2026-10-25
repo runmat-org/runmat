@@ -45,6 +45,7 @@ pub(super) fn rejected_system_result(
     message: String,
 ) -> LinearSolveResult {
     LinearSolveResult {
+        spectral_estimate: None,
         iterations: 0,
         residual_norm: operator
             .load()

@@ -99,6 +99,8 @@ pub(crate) struct SpdSolveOutcome {
     pub failure: Option<String>,
     /// The multigrid preconditioner ran on the accelerator (f32 inner solve, f64 outer FCG).
     pub device_preconditioner: bool,
+    /// PCG only: the Lanczos λ_min estimate and the forward error it implies.
+    pub spectral_estimate: Option<crate::contracts::SpectralErrorEstimate>,
 }
 
 /// The accelerator a solve may use (native only; browser builds always solve on the host).
@@ -170,6 +172,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
         cancelled: crate::is_fea_cancelled(),
         failure: Some(message),
         device_preconditioner: false,
+        spectral_estimate: None,
     };
     with_plan(plan, || {
         let a = arrays.view();
@@ -196,6 +199,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                         cancelled: false,
                         failure: None,
                         device_preconditioner: false,
+                        spectral_estimate: None,
                     };
                 }
                 let owned;
@@ -235,6 +239,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     cancelled: false,
                     failure: None,
                     device_preconditioner: false,
+                    spectral_estimate: None,
                 }
             }
             SpdStrategy::Pcg(choice) => {
@@ -282,7 +287,11 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                 match pcg(&a, Some(preconditioner.as_ref()), rhs, &mut x, &options, control()) {
                     Ok(report) => {
                         let reference = reference_norm(rhs, report.residual_norm);
+                        let spectral_estimate = report.spectrum.and_then(|spectrum| {
+                            spectral_error_estimate(&a, preconditioner.as_ref(), rhs, &x, spectrum)
+                        });
                         SpdSolveOutcome {
+                            spectral_estimate,
                             converged: report.converged(),
                             solution: x,
                             iterations: u32::try_from(report.iterations).unwrap_or(u32::MAX),
@@ -309,6 +318,64 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
             }
         }
     })
+}
+
+/// The forward error the PCG Lanczos estimate implies for the returned `x`: with the true
+/// residual `r = b − A x` and `z = M⁻¹ r`, `‖e‖_A ≈ √(rᵀz / θ_min)`. One extra operator and
+/// preconditioner application; `None` when either fails or the quantities are not finite.
+fn spectral_error_estimate(
+    a: &CsrRef<'_, f64>,
+    preconditioner: &dyn runmat_sparse_solvers::Preconditioner<f64>,
+    rhs: &[f64],
+    x: &[f64],
+    spectrum: runmat_sparse_solvers::krylov::lanczos::PcgSpectrumEstimate,
+) -> Option<crate::contracts::SpectralErrorEstimate> {
+    let n = rhs.len();
+    let mut ax = vec![0.0; n];
+    a.spmv(x, &mut ax);
+    let residual: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
+    let mut z = vec![0.0; n];
+    preconditioner.apply(&residual, &mut z).ok()?;
+    let rz: f64 = residual.iter().zip(&z).map(|(r, z)| r * z).sum();
+    let energy_squared: f64 = x.iter().zip(&ax).map(|(x, v)| x * v).sum();
+    let energy_error_estimate = (rz.max(0.0) / spectrum.lambda_min).sqrt();
+    let estimate = crate::contracts::SpectralErrorEstimate {
+        lambda_min_estimate: spectrum.lambda_min,
+        lambda_max_estimate: spectrum.lambda_max,
+        lanczos_steps: u32::try_from(spectrum.lanczos_steps).unwrap_or(u32::MAX),
+        flexible: spectrum.flexible,
+        energy_error_estimate,
+        relative_energy_error_estimate: (energy_squared > 0.0)
+            .then(|| energy_error_estimate / energy_squared.sqrt()),
+    };
+    (rz.is_finite()
+        && energy_error_estimate.is_finite()
+        && spectrum.lambda_min > 0.0
+        && spectrum.lambda_max >= spectrum.lambda_min)
+        .then_some(estimate)
+}
+
+/// The accelerator for a multigrid PCG solve on an accelerator backend: the host hierarchy then
+/// runs as a device inner CG under a host f64 flexible CG; `None` keeps the host path.
+pub(crate) fn multigrid_device(
+    backend_kind: crate::solve::backend::kind::LinearAlgebraBackendKind,
+    strategy: SpdStrategy,
+) -> Option<SolverDevice<'static>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (backend_kind == crate::solve::backend::kind::LinearAlgebraBackendKind::Accelerator
+            && matches!(
+                strategy,
+                SpdStrategy::Pcg(runmat_sparse_solvers::policy::PreconditionerChoice::Amg)
+            ))
+        .then(runmat_accelerate_api::provider)
+        .flatten()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (backend_kind, strategy);
+        None
+    }
 }
 
 /// The host hierarchy uploaded to `device` as an inner single-precision CG, when the provider

@@ -341,7 +341,7 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
             accelerator_evidence: Vec::new(),
             diagnostics: Vec::new(),
             spatial_projection_evidence: Vec::new(),
-            structural_static_convergence: Some(crate::contracts::StructuralStaticConvergence { converged: true, iterations: 0, residual_norm: 0.0, relative_residual: Some(0.0), operator_proof: crate::contracts::StaticOperatorProof::SparseCholesky }),
+            structural_static_convergence: Some(crate::contracts::StructuralStaticConvergence { converged: true, iterations: 0, residual_norm: 0.0, relative_residual: Some(0.0), operator_proof: crate::contracts::StaticOperatorProof::SparseCholesky, spectral_estimate: None }),
             structural_static_balance: Some(Box::new(crate::solve::StructuralStaticBalanceEvidence {
                 internal_work_joules: 0.0,
                 applied_load_work_joules: 0.0,

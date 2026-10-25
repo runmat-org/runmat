@@ -109,7 +109,9 @@ pub(super) async fn linear(
             required_capabilities: Default::default(),
             accelerator_requests: decoded.analysis_accelerator_requests.clone(),
             local_execution: decoded.local_execution,
-            machine_memory_bytes: None,
+            solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         },
         policy,
     )

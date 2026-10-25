@@ -43,6 +43,12 @@ fn elastic_rigidity_static_path_agrees_with_the_proving_factorization() {
     elastic_static_path::qualify();
 }
 
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @ linear_structural/tet10/numerical_kernel; coverage: partial; boundary: The planner selects the elastic rigidity path exactly when the effective ceiling, min(authored, machine), lies below the proving factorization's plan; recorded and direct requests keep their path.
+#[test]
+fn effective_ceiling_selects_the_static_solve_path() {
+    elastic_static_path::ceiling_selects_the_static_path();
+}
+
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();

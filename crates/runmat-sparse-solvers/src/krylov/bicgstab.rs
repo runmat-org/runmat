@@ -189,5 +189,6 @@ pub async fn bicgstab_async<T: Scalar, O: KrylovOps<T>>(
         restart_position: None,
         operator_applications: counters.operator,
         preconditioner_applications: counters.preconditioner,
+        spectrum: None,
     })
 }

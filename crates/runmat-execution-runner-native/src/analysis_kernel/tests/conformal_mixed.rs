@@ -135,7 +135,9 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        machine_memory_bytes: None,
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     let outputs = NativeAnalysisKernel

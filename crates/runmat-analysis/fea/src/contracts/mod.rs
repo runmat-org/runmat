@@ -1,5 +1,7 @@
 mod static_convergence;
-pub use static_convergence::{StaticOperatorProof, StructuralStaticConvergence};
+pub use static_convergence::{
+    SpectralErrorEstimate, StaticOperatorProof, StructuralStaticConvergence,
+};
 mod field_ids;
 mod run_error;
 mod solver_compatibility;

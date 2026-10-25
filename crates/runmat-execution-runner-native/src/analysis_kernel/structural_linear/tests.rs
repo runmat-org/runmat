@@ -193,7 +193,9 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
             required_capabilities: Default::default(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-            machine_memory_bytes: None,
+            solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })
         .unwrap();
         let directory = tempfile::tempdir().unwrap();

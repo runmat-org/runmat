@@ -47,7 +47,9 @@ pub(super) fn admit_linear_static_result(
             }
         }
         PreconditionerMode::Amg => {
-            fallback_events.push(FallbackEvent::preconditioner(SolverPreconditioner::Jacobi));
+            if run.preconditioner != SolverPreconditioner::Amg {
+                fallback_events.push(FallbackEvent::preconditioner(run.preconditioner));
+            }
         }
     }
     if input.requested_backend == ComputeBackend::Gpu

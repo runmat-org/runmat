@@ -591,6 +591,7 @@ fn solve_related(
     )
     .map_err(FeaRunError::Solve)?;
     Ok(LinearSolveResult {
+        spectral_estimate: None,
         iterations: reduced.iterations,
         residual_norm: reduced.relative_residual * rhs_norm(load),
         relative_residual: Some(reduced.relative_residual),

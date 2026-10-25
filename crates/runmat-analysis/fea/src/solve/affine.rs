@@ -148,6 +148,7 @@ fn solve_affine_constraint_system_with_kind(
 
     if reduction.reduced_dof_count == 0 {
         return LinearSolveResult {
+            spectral_estimate: None,
             iterations: 0,
             residual_norm: 0.0,
             relative_residual: Some(0.0),
@@ -205,13 +206,20 @@ fn solve_affine_constraint_system_with_kind(
         .admissibility()
         .and_then(|evidence| evidence.factor())
         .map(|factor| factor.0.clone());
+    // The elastic rigidity proof guarantees a node-major three-DOF solid; when the reduction keeps
+    // whole nodes, multigrid aggregates nodal 3×3 blocks.
+    let elastic = prepared
+        .admissibility()
+        .is_some_and(|evidence| evidence.coercivity().proved_by_elastic_rigidity());
+    let block_size = if elastic && keeps_whole_nodes(reduction) { 3 } else { 1 };
     let strategy = shared_sparse::resolve_spd_strategy(
         kind,
         prepared.dof_count(),
         prepared.matrix().values().len(),
-        1,
+        block_size,
         factor.is_some(),
     );
+    let device = shared_sparse::multigrid_device(requested_backend, strategy);
     let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
         matrix: prepared.matrix(),
         rhs: prepared.rhs(),
@@ -219,9 +227,9 @@ fn solve_affine_constraint_system_with_kind(
         relative_tolerance: tolerance,
         plan,
         strategy,
-        block_size: 1,
+        block_size,
         factor: factor.as_deref(),
-        device: None,
+        device,
     });
     if outcome.cancelled {
         diagnostics.push(FeaDiagnostic {
@@ -243,14 +251,35 @@ fn solve_affine_constraint_system_with_kind(
     diagnostics.push(FeaDiagnostic {
         code: "FEA_SOLVER_METHOD".into(),
         severity: FeaDiagnosticSeverity::Info,
-        message: format!("{} space=affine_reduced", strategy.label()),
+        message: format!(
+            "{} space=affine_reduced block_size={block_size}",
+            strategy.label()
+        ),
     });
+    if outcome.device_preconditioner {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_DEVICE_PRECONDITIONER".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solver=flexible_cg preconditioner=device_amg_inner_cg inner_steps={} inner_precision=f32 outer_precision=f64",
+                shared_sparse::DEVICE_INNER_CG_STEPS
+            ),
+        });
+    } else if device.is_some() {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_DEVICE_FALLBACK".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: "the provider could not hold the multigrid hierarchy; the host multigrid ran"
+                .into(),
+        });
+    }
     let (solver_method, preconditioner) = strategy.provenance();
     let solution = match expand(reduction, &outcome.solution, Some(plan)) {
         Ok(solution) => solution,
         Err(error) => return rejected_affine_system(summary, &error.to_string()),
     };
     LinearSolveResult {
+        spectral_estimate: outcome.spectral_estimate,
         iterations: outcome.iterations,
         residual_norm: outcome.residual_norm,
         relative_residual: crate::solve::convergence::relative_residual(
@@ -259,7 +288,11 @@ fn solve_affine_constraint_system_with_kind(
         ),
         converged: outcome.converged && !outcome.cancelled,
         host_sync_count: 0,
-        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        solver_backend: if outcome.device_preconditioner {
+            LinearAlgebraBackendKind::Accelerator
+        } else {
+            LinearAlgebraBackendKind::CpuReference
+        },
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
         accelerator_evidence: None,
@@ -270,11 +303,20 @@ fn solve_affine_constraint_system_with_kind(
     }
 }
 
+/// The reduction keeps every node's three DOFs or none, so reduced DOFs form nodal triples.
+fn keeps_whole_nodes(reduction: &AffineConstraintReduction) -> bool {
+    reduction.free_dof_indices.len() % 3 == 0
+        && reduction.free_dof_indices.chunks_exact(3).all(|triple| {
+            triple[0] % 3 == 0 && triple[1] == triple[0] + 1 && triple[2] == triple[0] + 2
+        })
+}
+
 fn rejected_affine_system(
     summary: &StructuralLinearSystemView<'_>,
     message: &str,
 ) -> LinearSolveResult {
     LinearSolveResult {
+        spectral_estimate: None,
         iterations: 0,
         residual_norm: summary
             .operator

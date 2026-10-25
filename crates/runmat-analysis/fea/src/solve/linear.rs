@@ -43,6 +43,8 @@ pub struct LinearSolveResult {
     pub solver_method: SolverMethod,
     pub preconditioner: SolverPreconditioner,
     pub diagnostics: Vec<FeaDiagnostic>,
+    /// PCG only: Lanczos λ_min estimate and the forward error it implies (never a proof).
+    pub spectral_estimate: Option<crate::contracts::SpectralErrorEstimate>,
 }
 
 pub fn solve_linear_system(
@@ -166,6 +168,7 @@ fn solve_operator_system_with_settings(
     let has_dofs = operator.dof_count() > 0;
     if !has_dofs {
         return Ok(LinearSolveResult {
+            spectral_estimate: None,
             iterations: 0,
             residual_norm: 0.0,
             relative_residual: None,
@@ -255,17 +258,7 @@ fn solve_operator_system_with_settings(
     // A multigrid strategy on an accelerator runs mixed precision: host hierarchy, device inner
     // CG, host f64 flexible CG with the f64 true-residual certificate. Other strategies use the
     // provider's resident Jacobi CG.
-    #[cfg(not(target_arch = "wasm32"))]
-    let device: Option<shared_sparse::SolverDevice<'static>> = (backend_kind
-        == LinearAlgebraBackendKind::Accelerator
-        && matches!(
-            strategy,
-            shared_sparse::SpdStrategy::Pcg(runmat_sparse_solvers::policy::PreconditionerChoice::Amg)
-        ))
-    .then(runmat_accelerate_api::provider)
-    .flatten();
-    #[cfg(target_arch = "wasm32")]
-    let device: Option<shared_sparse::SolverDevice<'static>> = None;
+    let device = shared_sparse::multigrid_device(backend_kind, strategy);
     if backend_kind == LinearAlgebraBackendKind::Accelerator && device.is_none() {
         let maximum_iterations = accelerator_iteration_limit(operator, 64);
         match prepare_accelerator_linear_system(prepared.clone(), maximum_iterations).and_then(
@@ -369,6 +362,7 @@ fn solve_operator_system_with_settings(
     }
     let (solver_method, preconditioner) = strategy.provenance();
     Ok(LinearSolveResult {
+        spectral_estimate: outcome.spectral_estimate,
         iterations: outcome.iterations,
         residual_norm: outcome.residual_norm,
         relative_residual: crate::solve::convergence::relative_residual(
@@ -406,6 +400,7 @@ pub(crate) fn linear_result_from_accelerator_output(
         });
     }
     LinearSolveResult {
+        spectral_estimate: None,
         iterations: output.iterations,
         residual_norm: output
             .evidence
@@ -433,6 +428,7 @@ pub(crate) fn linear_result_from_accelerator_error(
 ) -> LinearSolveResult {
     let terminal = error.phase;
     LinearSolveResult {
+        spectral_estimate: None,
         iterations: 0,
         residual_norm: right_hand_side
             .iter()

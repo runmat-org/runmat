@@ -22,6 +22,7 @@ use crate::operator::{LinearOperator, Preconditioner};
 use crate::scalar::Scalar;
 
 mod bicgstab;
+pub mod lanczos;
 pub mod gmres;
 mod minres;
 pub mod pcg;
@@ -161,6 +162,8 @@ pub struct KrylovReport {
     pub restart_position: Option<(usize, usize)>,
     pub operator_applications: usize,
     pub preconditioner_applications: usize,
+    /// PCG only: extreme Ritz values of `M⁻¹A` from the final Lanczos segment (an estimate).
+    pub spectrum: Option<lanczos::PcgSpectrumEstimate>,
 }
 
 impl KrylovReport {

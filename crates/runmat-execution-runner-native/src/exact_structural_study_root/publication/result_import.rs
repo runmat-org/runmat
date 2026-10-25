@@ -367,7 +367,10 @@ pub fn import_exact_structural_study_result(
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests: expected.analysis_accelerator_requests.clone(),
                     local_execution: expected.local_execution,
-                    machine_memory_bytes: None,
+                    solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::recorded(
+                        &closures,
+                    )
+                    .map_err(protocol)?,
                 },
                 closures,
             )

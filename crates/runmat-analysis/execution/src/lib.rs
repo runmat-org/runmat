@@ -616,7 +616,7 @@ pub use structural_sequence::{
     CompletedStructuralSequence, CompletedStructuralSequenceState, CompletedStructuralSequenceStep,
     PreparedStructuralSolveTask, PreparedStructuralSolveWave, PreparedStructuralStateTask,
     PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
-    StructuralSequencePreparation, StructuralSequenceResultClosure,
+    StructuralSequencePreparation, StructuralSequenceResultClosure, StructuralSequenceSolveSelection,
     StructuralSequenceStateResourceAttempt,
 };
 pub use structural_transient_recovery::{

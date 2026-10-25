@@ -286,6 +286,7 @@ fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
     )
     .expect("valid Tet4 system should assemble");
     let solve = LinearSolveResult {
+        spectral_estimate: None,
         iterations: 1,
         residual_norm: 0.0,
         relative_residual: None,
@@ -350,6 +351,7 @@ fn solid_tetrahedron10_recovery_uses_midside_displacements() {
     )
     .expect("valid Tet10 system should assemble");
     let solve = LinearSolveResult {
+        spectral_estimate: None,
         iterations: 1,
         residual_norm: 0.0,
         relative_residual: None,
@@ -489,6 +491,7 @@ fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
     )
     .expect("valid Tet4 system should assemble");
     let solve = LinearSolveResult {
+        spectral_estimate: None,
         iterations: 10,
         residual_norm: 1.0e-4,
         relative_residual: None,

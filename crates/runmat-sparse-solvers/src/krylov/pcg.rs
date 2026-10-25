@@ -40,6 +40,26 @@ pub struct PcgWork<'a, T> {
     pub direction: &'a mut [T],
     pub intermediate: Option<&'a mut [T]>,
     pub residual_norms: &'a mut [f64],
+    /// Receives the CG coefficients of the final Lanczos segment when present.
+    pub coefficients: Option<&'a mut PcgCoefficients>,
+}
+
+/// The CG coefficients of the current Lanczos segment, from the start or the last reliable
+/// residual restart: `α_j = ρ_j / ⟨p_j, A p_j⟩` and `β_j = ρ_{j+1} / ρ_j`. They define the
+/// Lanczos tridiagonal of the preconditioned operator `M⁻¹A` (see [`super::lanczos`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PcgCoefficients {
+    pub alpha: Vec<f64>,
+    pub beta: Vec<f64>,
+    /// Flexible mode: β is Polak–Ribière, so the tridiagonal is only approximately Lanczos.
+    pub flexible: bool,
+}
+
+impl PcgCoefficients {
+    fn restart(&mut self) {
+        self.alpha.clear();
+        self.beta.clear();
+    }
 }
 #[derive(Clone, Copy)]
 pub struct PcgParameters {

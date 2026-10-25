@@ -362,6 +362,7 @@ fn empty_report() -> KrylovReport {
         restart_position: None,
         operator_applications: 0,
         preconditioner_applications: 0,
+        spectrum: None,
     }
 }
 
@@ -455,6 +456,7 @@ fn pcg_impl<T: Scalar>(
     // A variable preconditioner needs flexible CG (one extra vector).
     let flexible = preconditioner.is_some_and(|p| p.is_variable());
     let mut previous = if flexible { par::try_zeros::<T>(n)? } else { Vec::new() };
+    let mut coefficients = super::pcg::PcgCoefficients::default();
     let mut operations = SyncOperations {
         operator,
         preconditioner,
@@ -480,6 +482,7 @@ fn pcg_impl<T: Scalar>(
             direction: &mut direction,
             intermediate: None,
             residual_norms: &mut history,
+            coefficients: Some(&mut coefficients),
         },
         &mut previous,
         &mut scratch,
@@ -505,6 +508,7 @@ fn pcg_impl<T: Scalar>(
         restart_position: None,
         operator_applications: operations.operator_applications,
         preconditioner_applications: operations.preconditioner_applications,
+        spectrum: super::lanczos::PcgSpectrumEstimate::from_coefficients(&coefficients),
     })
 }
 
@@ -737,6 +741,7 @@ fn gmres_impl<T: Scalar>(
         restart_position: Some((outcome.outer, outcome.inner)),
         operator_applications: operations.operator_applications,
         preconditioner_applications: operations.preconditioner_applications,
+        spectrum: None,
     })
 }
 

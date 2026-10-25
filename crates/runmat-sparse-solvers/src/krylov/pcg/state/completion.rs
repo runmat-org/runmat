@@ -121,6 +121,7 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
         } else if self.second_preconditioner {
             Phase::SecondPreconditioner(stage, SecondInput::Residual)
         } else {
+            self.restart_coefficients();
             copy(&mut *self.work.direction, &*self.work.residual, checkpoint).await?;
             Phase::DirectionProduct(Iteration {
                 rho: actual,
