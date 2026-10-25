@@ -90,10 +90,14 @@ fn identity_profile_rejects_invalid_metadata_overflow_and_codec_limits() {
         usize::MAX
     )
     .is_err());
-    assert!(
-        RecoveredField::identity_profile_shape(&valid, RecoveredFieldSample::Final, 1_000_001)
-            .is_err()
-    );
+    // Six stored components per entity, each at least one encoded byte: beyond the byte ceiling.
+    let beyond_ceiling = FIELD_LIMITS.maximum_encoded_bytes / 6 + 1;
+    assert!(RecoveredField::identity_profile_shape(
+        &valid,
+        RecoveredFieldSample::Final,
+        beyond_ceiling
+    )
+    .is_err());
     for sample in [
         RecoveredFieldSample::TimeSeconds(f64::NAN),
         RecoveredFieldSample::FrequencyHertz(f64::INFINITY),
