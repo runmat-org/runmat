@@ -167,6 +167,7 @@ struct StandardDigestView<'a> {
     schema_version: &'a String,
     op_version: &'a String,
     run_digest: &'a Digest,
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     run: &'a serde_json::Value,
     metadata: &'a AnalysisRunResult,
     field_inventory: &'a Vec<AnalysisField>,
@@ -179,6 +180,8 @@ struct StandardDigestView<'a> {
     original_fields: &'a Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dynamic_balance: &'a Option<PersistedDynamicBalance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observation_payload: &'a Option<AnalysisObjectManifest>,
 }
 
 #[derive(Serialize)]
@@ -208,6 +211,7 @@ pub(super) fn record_digest(record: &PersistedAnalysisArtifact) -> Result<Digest
                 observation_histories: &r.observation_histories,
                 original_fields: &r.original_fields,
                 dynamic_balance: &r.dynamic_balance,
+                observation_payload: &r.observation_payload,
             },
         ),
         PersistedAnalysisArtifact::StructuralFrequency(r) => canonical_digest(

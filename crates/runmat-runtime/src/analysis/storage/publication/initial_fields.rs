@@ -118,14 +118,16 @@ impl AnalysisPublicationBuilder {
                 );
             }
         }
+        let run_value = run.run_projection()?.into_owned();
         let digest = persisted_run_digest(
-            &run.run,
+            &run_value,
             &run.field_inventory,
             &run.materialized_field_ids,
             run.render_tiles.as_ref(),
             &run.observation_histories,
             Some(catalog),
             run.dynamic_balance.as_ref(),
+            run.observation_payload.as_ref(),
         )?;
         run.original_fields = Some(catalog.clone());
         run.run_digest = digest;

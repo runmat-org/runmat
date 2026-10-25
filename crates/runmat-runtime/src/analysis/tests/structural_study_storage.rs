@@ -320,7 +320,7 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     let artifact: serde_json::Value =
         serde_json::from_slice(&fs::read(&artifact_path).unwrap()).unwrap();
     assert_eq!(
-        artifact["run"]["run"]["fields"][0]["values"]["host_f64"],
+        artifact["metadata"]["run"]["fields"][0]["values"]["host_f64"],
         serde_json::json!([])
     );
     let field_manifest = &artifact["fields"]

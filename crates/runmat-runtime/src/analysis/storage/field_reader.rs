@@ -13,7 +13,23 @@ pub(super) fn materialize_run(
             (field.shape.clone(), decode_field_values(&payload)?),
         );
     }
-    let mut run = persisted.run.clone();
+    let mut run = persisted.run_projection()?.into_owned();
+    if let Some(manifest) = &persisted.observation_payload {
+        let payload = read_numerical_payload(manifest, &mut read_chunk)?;
+        let mut payload: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_slice(&payload)
+                .map_err(|error| format!("invalid observation payload: {error}"))?;
+        let numerical_run = run
+            .get_mut("run")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or("authenticated analysis run has no numerical run")?;
+        for key in ["observations", "series_reductions"] {
+            let value = payload
+                .remove(key)
+                .ok_or_else(|| format!("observation payload has no `{key}`"))?;
+            numerical_run.insert(key.into(), value);
+        }
+    }
     hydrate_field_values(&mut run, &values)?;
     let mut run = serde_json::from_value::<AnalysisRunResult>(run)
         .map_err(|error| format!("failed to decode hydrated analysis run: {error}"))?;
@@ -168,25 +184,16 @@ enum TransientSampleRequest {
 /// source selects the state the integrator retained at it. `field_id` is a structural field id or
 /// the snapshot id itself (a paged `fea.Field` carries the resolved snapshot id).
 fn resolve_transient_snapshot(
-    run: &serde_json::Value,
+    times: Option<&[f64]>,
     field_id: &str,
     request: TransientSampleRequest,
 ) -> Result<Option<(String, f64)>, String> {
-    let Some(times) = run
-        .get("transient_results")
-        .and_then(|transient| transient.get("time_points_s"))
-        .and_then(serde_json::Value::as_array)
-    else {
+    let Some(times) = times else {
         return Ok(None);
     };
-    let times = times
-        .iter()
-        .map(|time| {
-            time.as_f64()
-                .filter(|time| time.is_finite())
-                .ok_or_else(|| "persisted transient time point is not a finite number".to_string())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    if times.iter().any(|time| !time.is_finite()) {
+        return Err("persisted transient time point is not a finite number".to_string());
+    }
     let index = match request {
         TransientSampleRequest::Index(index) => (index < times.len()).then_some(index),
         TransientSampleRequest::Time(time_s) => {
@@ -242,7 +249,12 @@ pub(super) fn field_page_from_artifact(
     let (resolved_field_id, resolved_sample) = match transient {
         None => (selection.field_id.clone(), None),
         Some(request) => {
-            match resolve_transient_snapshot(&persisted.run, &selection.field_id, request)? {
+            let times = persisted
+                .metadata
+                .transient_results
+                .as_ref()
+                .map(|transient| transient.time_points_s.as_slice());
+            match resolve_transient_snapshot(times, &selection.field_id, request)? {
                 Some((field_id, time_s)) => {
                     (field_id, Some(RecoveredFieldSample::TimeSeconds(time_s)))
                 }
@@ -389,9 +401,9 @@ mod transient_sample_tests {
     fn time_and_index_samples_select_the_retained_transient_state_and_report_its_time() {
         // Retained times as an integrator accumulates them: 0.0122 is not exactly 122 × 1e-4.
         let times = (0..=200).map(|step| step as f64 * 1.0e-4).collect::<Vec<_>>();
-        let run = serde_json::json!({ "transient_results": { "time_points_s": times } });
+        let run = Some(times.as_slice());
         let (field, time_s) = resolve_transient_snapshot(
-            &run,
+            run,
             "structural.displacement",
             TransientSampleRequest::Time(0.0122),
         )
@@ -400,14 +412,14 @@ mod transient_sample_tests {
         assert_eq!(field, "transient.displacement.122");
         assert_eq!(time_s.to_bits(), times[122].to_bits());
         assert_eq!(
-            resolve_transient_snapshot(&run, "structural.von_mises", TransientSampleRequest::Index(122))
+            resolve_transient_snapshot(run, "structural.von_mises", TransientSampleRequest::Index(122))
                 .unwrap(),
             Some(("transient.von_mises.122".to_string(), times[122]))
         );
         // A paged field carries the resolved snapshot id with its time.
         assert_eq!(
             resolve_transient_snapshot(
-                &run,
+                run,
                 "transient.displacement.122",
                 TransientSampleRequest::Time(times[122]),
             )
@@ -418,14 +430,10 @@ mod transient_sample_tests {
         // A time between retained states, an index past the last state, a field without
         // transient states, and a run without transient results select nothing.
         for (run, field, request) in [
-            (&run, "structural.displacement", TransientSampleRequest::Time(0.01225)),
-            (&run, "structural.displacement", TransientSampleRequest::Index(201)),
-            (&run, "structural.residual_norm", TransientSampleRequest::Index(3)),
-            (
-                &serde_json::json!({ "transient_results": null }),
-                "structural.displacement",
-                TransientSampleRequest::Index(0),
-            ),
+            (run, "structural.displacement", TransientSampleRequest::Time(0.01225)),
+            (run, "structural.displacement", TransientSampleRequest::Index(201)),
+            (run, "structural.residual_norm", TransientSampleRequest::Index(3)),
+            (None, "structural.displacement", TransientSampleRequest::Index(0)),
         ] {
             assert_eq!(resolve_transient_snapshot(run, field, request).unwrap(), None);
         }

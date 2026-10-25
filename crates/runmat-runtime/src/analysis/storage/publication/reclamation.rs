@@ -29,6 +29,7 @@ pub(super) fn visit_record_objects<E: From<String>>(
                         .map(|history| &history.manifest),
                 )
                 .chain(run.dynamic_balance.iter().map(|balance| &balance.manifest))
+                .chain(run.observation_payload.iter())
             {
                 for chunk in &manifest.chunks {
                     visit(chunk.digest)?;

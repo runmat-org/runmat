@@ -289,8 +289,56 @@ pub(super) fn prepare_run_artifact_with_admission(
     });
     let field_inventory =
         crate::analysis::operations::collect_analysis_result_fields(&stripped_run);
+    // Materialized observations and series reductions are chunked out so the typed metadata is
+    // the record's only copy of the run content.
+    let observation_payload = if stripped_run.run.observations.is_empty()
+        && stripped_run.run.series_reductions.is_empty()
+    {
+        None
+    } else {
+        // Field values were stripped above; their shells stay in the inventory and rehydrate
+        // from the field chunks when the run is materialized.
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "observations": &stripped_run.run.observations,
+            "series_reductions": &stripped_run.run.series_reductions,
+        }))
+        .map_err(|error| format!("failed to encode observation payload: {error}"))?;
+        stripped_run.run.observations = Vec::new();
+        stripped_run.run.series_reductions = Vec::new();
+        match sink.as_deref_mut() {
+            Some(sink) => sink.admit_in_flight(payload.len() as u64)?,
+            None => admit(payload.len() as u64)?,
+        }
+        let chunked = chunk_numerical_payload(
+            AnalysisNumericalObjectKind::History,
+            Digest::sha256(&payload),
+            &payload,
+            DEFAULT_ANALYSIS_CHUNK_BYTES,
+        )
+        .map_err(|error| error.to_string())?;
+        for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+            if let Some(sink) = sink.as_deref_mut() {
+                sink.put(descriptor.digest, &bytes)?;
+                continue;
+            }
+            match chunks.entry(descriptor.digest) {
+                std::collections::hash_map::Entry::Occupied(existing)
+                    if existing.get() != &bytes =>
+                {
+                    return Err("observation payload chunk digest collision".into());
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(bytes);
+                }
+            }
+        }
+        Some(chunked.manifest)
+    };
     admit(json_projection_estimate(&stripped_run)?)?;
-    let run_value = serde_json::to_value(&stripped_run)
+    // The typed metadata is the single copy; the digest binds its JSON projection.
+    let metadata = stripped_run;
+    let run_value = serde_json::to_value(&metadata)
         .map_err(|error| format!("failed to encode stripped analysis run: {error}"))?;
     let materialized_field_ids = fields.keys().map(ToOwned::to_owned).collect::<Vec<_>>();
     let run_digest = persisted_run_digest(
@@ -301,15 +349,16 @@ pub(super) fn prepare_run_artifact_with_admission(
         &observation_histories,
         None,
         dynamic_balance.as_ref(),
+        observation_payload.as_ref(),
     )?;
-    let metadata = compact_run_metadata(&run_value)?;
+    drop(run_value);
     Ok(PreparedRunArtifact {
         persisted: PersistedRunArtifact {
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
             created_at,
             op_version: run_operation_version(run)?,
             run_digest,
-            run: run_value,
+            run: serde_json::Value::Null,
             metadata,
             field_inventory,
             materialized_field_ids,
@@ -318,6 +367,7 @@ pub(super) fn prepare_run_artifact_with_admission(
             observation_histories,
             original_fields: None,
             dynamic_balance,
+            observation_payload,
         },
         chunks,
     })

@@ -57,11 +57,46 @@ fn scalar_evidence_is_derived_and_authenticated_before_metadata_reads() {
     }
     let mut substituted = artifact.clone();
     substituted.metadata.numerically_acceptable = !substituted.metadata.numerically_acceptable;
+    // The typed metadata is the single authenticated copy: any substitution breaks its digest.
     assert!(validate_persisted_run(&substituted, &run.run_id)
         .unwrap_err()
-        .contains("compact analysis metadata"));
+        .contains("content digest"));
     artifact.metadata.observation_scalars.push(forged);
     assert!(validate_persisted_run(&artifact, &run.run_id)
         .unwrap_err()
-        .contains("scalar observation inventory"));
+        .contains("content digest"));
+}
+
+// witness: FEA-STRUCTURAL-PUBLIC-001/result_publication_defects @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: a persisted run keeps its content once, as typed metadata (no untyped copy), and
+//   materializes back to the original fields; observation chunking is covered by publication tests.
+#[test]
+fn persisted_run_keeps_typed_metadata_as_its_single_content_copy() {
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let run = crate::analysis::analysis_run_linear_static_with_options(
+        &crate::analysis::tests::sample_model(),
+        crate::analysis::ComputeBackend::Cpu,
+        crate::analysis::AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: crate::analysis::PrecisionMode::Fp64,
+            preconditioner_mode: crate::analysis::PreconditionerMode::Auto,
+            quality_policy: crate::analysis::QualityPolicy::Balanced,
+            solver_mesh_artifact_path: None,
+        },
+        crate::operations::OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data;
+    let prepared = prepare_run_artifact(&run, Utc::now().to_rfc3339()).unwrap();
+    let artifact = &prepared.persisted;
+    assert!(artifact.run.is_null());
+    let encoded = serde_json::to_value(artifact).unwrap();
+    assert!(encoded.get("run").is_none(), "no untyped run copy is written");
+    validate_persisted_run(artifact, &run.run_id).unwrap();
+    let restored = field_reader::materialize_run(artifact, |digest| {
+        Ok(prepared.chunks.get(&digest).cloned())
+    })
+    .unwrap();
+    assert_eq!(restored.run.fields, run.run.fields);
 }
