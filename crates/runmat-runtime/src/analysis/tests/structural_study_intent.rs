@@ -2008,6 +2008,7 @@ fn sequence_result(
         .collect();
     StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
         frozen_project_digest: None,
+        effective_memory_ceiling_bytes: None,
         steps: vec![StructuralStudyStepNumericalResult {
             step_id: workload.step_id.clone(),
             solver_result_identity,

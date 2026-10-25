@@ -165,6 +165,7 @@ fn test_structural_sequence_result(
         .collect();
     StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
         frozen_project_digest: None,
+        effective_memory_ceiling_bytes: None,
         steps: vec![StructuralStudyStepNumericalResult {
             step_id: workload.step_id.clone(),
             solver_result_identity,
@@ -4307,6 +4308,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("rejected-property-coverage"),
+            effective_memory_ceiling_bytes: None,
         },
         solved.data.run.clone(),
     )
@@ -4327,6 +4329,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("rejected-structural-capability"),
+            effective_memory_ceiling_bytes: None,
         },
         solved.data.run,
     )

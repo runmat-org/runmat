@@ -139,6 +139,7 @@ pub(super) fn admit(
             preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events: Vec::new(),
+            effective_memory_ceiling_bytes: None,
         },
         completion: Box::new(AcousticFrequencyCompletionResults {
             workload: completed.workload.clone(),

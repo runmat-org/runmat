@@ -52,6 +52,7 @@ pub(super) fn admit_statistical_persistence(
         preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
         quality_policy: quality_policy.into(),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let run = AnalysisRunResult {
         observation_scalars: Vec::new(),

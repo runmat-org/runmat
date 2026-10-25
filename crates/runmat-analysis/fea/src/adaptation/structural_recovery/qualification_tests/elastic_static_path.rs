@@ -35,6 +35,13 @@ pub(super) fn qualify() {
         assert_eq!(elastic.preconditioner, crate::SolverPreconditioner::Amg);
         let relative = elastic_convergence.relative_residual.unwrap();
         assert!(elastic_convergence.converged && relative <= 1.0e-8, "{relative}");
+        // The Lanczos estimate is recorded as an estimate only; the factor path has none.
+        assert!(direct_convergence.spectral_estimate.is_none());
+        let estimate = elastic_convergence
+            .spectral_estimate
+            .expect("the PCG path records its Lanczos estimate");
+        assert!(estimate.lambda_min_estimate > 0.0 && estimate.lanczos_steps > 0, "{estimate:?}");
+        eprintln!("elastic static path {order:?}: spectral estimate {estimate:?}");
         let field = |run: &crate::FeaRunResult| {
             run.field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
                 .unwrap()

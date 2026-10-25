@@ -4563,6 +4563,7 @@ mod tests {
                 preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
+                effective_memory_ceiling_bytes: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
@@ -4703,6 +4704,7 @@ mod tests {
                 preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
+                effective_memory_ceiling_bytes: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("indexed run should persist");

@@ -219,6 +219,7 @@ fn complete_linear_sequence(
             prepared_linear,
             numerical.result.run,
             Some(&assigned_run_id),
+            None,
         )?;
         let mut authored_execution = step.authored_execution;
         authored_execution.solver_options =

@@ -68,6 +68,7 @@ pub(super) fn admit(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),

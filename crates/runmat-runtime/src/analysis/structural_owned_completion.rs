@@ -328,6 +328,7 @@ pub fn analysis_complete_structural_study_op(
         ));
     };
     let mut completed = Vec::with_capacity(result.steps.len());
+    let effective_memory_ceiling_bytes = result.effective_memory_ceiling_bytes;
     for step in result.steps {
         let linear = linears.remove(&step.step_id).ok_or_else(|| {
             operation_error(
@@ -357,7 +358,12 @@ pub fn analysis_complete_structural_study_op(
                 &step.result.run,
             )
             .map_err(|error| study_sequence_contract_error(&prepared.study.context, error))?;
-        let run = analysis_admit_linear_static_run_with_id(linear, step.result.run, None)?;
+        let run = analysis_admit_linear_static_run_with_id(
+            linear,
+            step.result.run,
+            None,
+            effective_memory_ceiling_bytes,
+        )?;
         completed.push(CompletedStudyStep {
             step_id: step.step_id,
             solver_result_identity: step.solver_result_identity,

@@ -56,6 +56,7 @@ pub(super) fn simple_run_result(
             preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
             quality_policy: "strict".to_string(),
             fallback_events: Vec::new(),
+            effective_memory_ceiling_bytes: None,
         },
     }
 }

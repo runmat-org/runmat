@@ -72,6 +72,7 @@ pub(super) fn admit(
         // Original mandatory accuracy evidence governs acceptance, never an override.
         quality_policy: contracts::format_quality_policy(QualityPolicy::Strict),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),

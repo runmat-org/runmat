@@ -90,6 +90,7 @@ pub(super) fn admit(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(QualityPolicy::Strict),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let output = OperationEnvelope::new(
         AnalysisOperation::Nonlinear.name(),

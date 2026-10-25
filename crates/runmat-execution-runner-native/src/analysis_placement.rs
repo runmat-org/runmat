@@ -664,6 +664,7 @@ pub async fn execute_structural_workloads_locally(
             Ok(StructuralStudyNumericalResult::LinearSequence(
                 StructuralStudySequenceNumericalResult {
                     frozen_project_digest,
+                    effective_memory_ceiling_bytes: Some(maximum_resident_bytes),
                     steps: completed
                         .steps
                         .into_iter()

@@ -616,6 +616,10 @@ pub struct RunProvenance {
     pub preconditioner: runmat_analysis_fea::SolverPreconditioner,
     pub quality_policy: String,
     pub fallback_events: Vec<FallbackEvent>,
+    /// The effective memory ceiling that selected the solve path, min(authored ceiling, the
+    /// memory this host admitted), when known. Provenance only: it never enters an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_memory_ceiling_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -84,6 +84,7 @@ pub(in crate::analysis) fn admit(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let [temperature_snapshots, temperature_gradient_snapshots, heat_flux_snapshots, energy_storage_rate_snapshots, interface_temperature_snapshots] =
         histories;

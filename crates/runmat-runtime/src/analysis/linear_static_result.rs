@@ -30,6 +30,8 @@ pub(super) struct LinearStaticResultInput<'a> {
     pub requested_backend: ComputeBackend,
     pub options: &'a AnalysisRunOptions,
     pub assigned_run_id: Option<&'a str>,
+    /// The effective memory ceiling the placement admitted (provenance only).
+    pub effective_memory_ceiling_bytes: Option<u64>,
 }
 
 pub(super) fn admit_linear_static_result(
@@ -173,6 +175,7 @@ pub(super) fn admit_linear_static_result(
             preconditioner: run.preconditioner,
             quality_policy: super::contracts::format_quality_policy(input.options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: input.effective_memory_ceiling_bytes,
         },
         run,
     })
@@ -520,6 +523,7 @@ mod convergence_tests {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("typed-convergence"),
+            effective_memory_ceiling_bytes: None,
         };
         run.diagnostics.clear();
         assert_eq!(

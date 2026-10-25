@@ -377,6 +377,8 @@ fn structural_result(
         } => {
             StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
                 frozen_project_digest: result.frozen_project_digest,
+                // A remote completion's placement ceiling belongs to the worker, not this host.
+                effective_memory_ceiling_bytes: None,
                 steps: sequence
                     .steps
                     .iter()

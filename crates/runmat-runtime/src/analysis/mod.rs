@@ -187,6 +187,9 @@ pub struct StructuralStudyStepNumericalResult {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudySequenceNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
+    /// The effective memory ceiling the local placement admitted, min(authored, machine);
+    /// `None` for imported or remote completions. Provenance only, never identity.
+    pub effective_memory_ceiling_bytes: Option<u64>,
     pub steps: Vec<StructuralStudyStepNumericalResult>,
     pub states: Vec<runmat_analysis_fea::execution::CanonicalSemanticState>,
 }
@@ -2069,6 +2072,7 @@ fn analysis_admit_buckling_run_with_id(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),
@@ -2394,6 +2398,7 @@ fn execute_acoustic_with_options(
             preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: None,
         },
     };
 
@@ -2958,6 +2963,7 @@ fn analysis_admit_transient_run_with_id(
             preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: None,
         },
     };
 
@@ -3481,6 +3487,7 @@ fn execute_nonlinear_with_options(
             preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: None,
         },
     };
 
@@ -3606,7 +3613,7 @@ fn analysis_complete_linear_static_run_with_id(
     assigned_run_id: Option<&str>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let context = prepared.context.clone();
-    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id)?;
+    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id, None)?;
     persist_linear_static_run(&context, &envelope.data)?;
     Ok(envelope)
 }
@@ -3615,6 +3622,7 @@ fn analysis_admit_linear_static_run_with_id(
     prepared: PreparedStructuralLinearRun,
     run: FeaRunResult,
     assigned_run_id: Option<&str>,
+    effective_memory_ceiling_bytes: Option<u64>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let result = linear_static_result::admit_linear_static_result(
         linear_static_result::LinearStaticResultInput {
@@ -3623,6 +3631,7 @@ fn analysis_admit_linear_static_run_with_id(
             requested_backend: prepared.workload.backend,
             options: &prepared.options,
             assigned_run_id,
+            effective_memory_ceiling_bytes,
         },
         run,
     )
