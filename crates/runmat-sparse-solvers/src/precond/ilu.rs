@@ -223,7 +223,7 @@ impl<T: Scalar> Ilu0<T> {
 impl<T: Scalar> Preconditioner<T> for Ilu0<T> {
     fn apply(&self, r: &[T], z: &mut [T]) -> SolverResult<()> {
         let n = self.n;
-        if par::threads() > 1 {
+        if par::threads() > 1 && self.lower.is_wide() && self.upper.is_wide() {
             // Same per-row arithmetic as below, independent rows of each level concurrently.
             self.lower.solve(z, |i, done| {
                 let mut sum = r[i];
@@ -415,7 +415,7 @@ impl<T: Scalar> Ilut<T> {
 
 impl<T: Scalar> Preconditioner<T> for Ilut<T> {
     fn apply(&self, r: &[T], z: &mut [T]) -> SolverResult<()> {
-        if par::threads() > 1 {
+        if par::threads() > 1 && self.lower.is_wide() && self.upper.is_wide() {
             self.lower.solve(z, |i, done| {
                 let mut sum = r[i];
                 for e in self.l_ptr[i]..self.l_ptr[i + 1] {

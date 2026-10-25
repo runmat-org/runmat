@@ -13,6 +13,9 @@ use crate::scalar::Scalar;
 pub(crate) struct LevelSchedule {
     rows: Vec<usize>,
     level_ptr: Vec<usize>,
+    /// Whether most rows lie in levels wide enough to fan out. Otherwise the solve keeps the
+    /// natural row order, which is a valid order with far better locality.
+    wide: bool,
 }
 
 /// Minimum rows in a level before it fans out over the pool. A level is one fork-join; narrow
@@ -57,7 +60,17 @@ impl LevelSchedule {
             rows[next[l]] = i;
             next[l] += 1;
         }
-        Self { rows, level_ptr }
+        let wide_rows: usize = level_ptr
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|&rows| rows >= PARALLEL_LEVEL_ROWS)
+            .sum();
+        Self { rows, level_ptr, wide: 2 * wide_rows >= n.max(1) }
+    }
+
+    /// Whether the scheduled (level-parallel) solve is worth using.
+    pub(crate) fn is_wide(&self) -> bool {
+        self.wide
     }
 
     pub(crate) fn levels(&self) -> usize {

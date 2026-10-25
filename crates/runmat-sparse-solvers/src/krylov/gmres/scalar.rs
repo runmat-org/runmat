@@ -153,7 +153,7 @@ pub(super) async fn norm<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
     values: &[T],
     operations: &mut O,
 ) -> Result<Option<Norm>, O::Error> {
-    if let Some(magnitude) = A::native_norm(values) {
+    if let Some(magnitude) = operations.native_norm(values) {
         operations.cooperate(values.len() as u64).await?;
         return Ok(Some(Norm::from_magnitude(magnitude)));
     }
@@ -196,7 +196,7 @@ pub(super) async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperation
     if left.len() != right.len() {
         return Ok(None);
     }
-    if let Some(product) = A::native_dot(left, right) {
+    if let Some(product) = operations.native_dot(left, right) {
         operations.cooperate(left.len() as u64).await?;
         return Ok(Some(product));
     }
@@ -239,7 +239,7 @@ pub(super) async fn scaled_axpy<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresO
     if target.len() != source.len() {
         return Ok(false);
     }
-    if norm.is_one() && A::native_axpy(target, scale, source) {
+    if norm.is_one() && operations.native_axpy(target, scale, source) {
         operations.cooperate(target.len() as u64).await?;
         return Ok(true);
     }

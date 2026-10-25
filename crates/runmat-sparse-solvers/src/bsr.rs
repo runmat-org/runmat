@@ -11,6 +11,8 @@ use crate::par;
 use crate::scalar::Scalar;
 
 const NODES_PER_TASK: usize = 512;
+/// Largest block size `from_csr` merges (rows of one block row held in a fixed array).
+const MAX_MERGE: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BsrMatrix<T> {
@@ -30,34 +32,83 @@ impl<T: Scalar> BsrMatrix<T> {
         if block == 0 || matrix.nrows() % block != 0 || matrix.ncols() % block != 0 {
             return Err(SolverError::Dimension(format!("block size {block} does not divide the matrix")));
         }
+        if block > MAX_MERGE {
+            return Err(SolverError::Unsupported(format!("block size {block} exceeds {MAX_MERGE}")));
+        }
         let node_rows = matrix.nrows() / block;
         let node_cols = matrix.ncols() / block;
-        let rows: Vec<(Vec<usize>, Vec<T>)> = par::map_range(node_rows, NODES_PER_TASK, |node| {
-            let mut cols: Vec<usize> = Vec::new();
-            for r in 0..block {
-                cols.extend(matrix.row(node * block + r).0.iter().map(|&c| c / block));
+        // Union of the block columns of a node's `block` sorted rows, in increasing order.
+        let block_columns = |node: usize, emit: &mut dyn FnMut(usize)| {
+            let mut rows: [&[usize]; MAX_MERGE] = [&[]; MAX_MERGE];
+            for (r, row) in rows.iter_mut().enumerate().take(block) {
+                *row = matrix.row(node * block + r).0;
             }
-            cols.sort_unstable();
-            cols.dedup();
-            let mut values = vec![T::zero(); cols.len() * block * block];
-            for r in 0..block {
-                let (c, v) = matrix.row(node * block + r);
-                for (&col, &value) in c.iter().zip(v) {
-                    let position = cols.binary_search(&(col / block)).unwrap();
-                    values[position * block * block + r * block + col % block] = value;
+            loop {
+                let Some(next) = rows[..block].iter().filter_map(|row| row.first()).map(|&c| c / block).min()
+                else {
+                    break;
+                };
+                for row in &mut rows[..block] {
+                    while row.first().is_some_and(|&c| c / block == next) {
+                        *row = &row[1..];
+                    }
                 }
+                emit(next);
             }
-            (cols, values)
+        };
+        // Pass 1: block-column counts, then offsets.
+        let counts: Vec<usize> = par::map_range(node_rows, NODES_PER_TASK, |node| {
+            let mut count = 0usize;
+            block_columns(node, &mut |_| count += 1);
+            count
         });
         let mut row_ptr = Vec::with_capacity(node_rows + 1);
-        row_ptr.push(0);
-        let mut col_idx = Vec::new();
-        let mut values = Vec::new();
-        for (c, v) in rows {
-            col_idx.extend(c);
-            values.extend(v);
-            row_ptr.push(col_idx.len());
+        row_ptr.push(0usize);
+        for count in &counts {
+            row_ptr.push(row_ptr.last().unwrap() + count);
         }
+        let stored = *row_ptr.last().unwrap();
+        let mut col_idx = vec![0usize; stored];
+        let mut values = vec![T::zero(); stored * block * block];
+        // Pass 2: each task fills the disjoint slices of its nodes.
+        let mut tasks = Vec::new();
+        {
+            let (mut cols_rest, mut values_rest) = (&mut col_idx[..], &mut values[..]);
+            let mut first = 0usize;
+            while first < node_rows {
+                let last = (first + NODES_PER_TASK).min(node_rows);
+                let entries = row_ptr[last] - row_ptr[first];
+                let (cols_here, cols_tail) = cols_rest.split_at_mut(entries);
+                let (values_here, values_tail) = values_rest.split_at_mut(entries * block * block);
+                tasks.push((first, last, cols_here, values_here));
+                cols_rest = cols_tail;
+                values_rest = values_tail;
+                first = last;
+            }
+        }
+        runmat_cpu_execution::for_each_mut(&mut tasks, |(first, last, cols, vals)| {
+            let base = row_ptr[*first];
+            for node in *first..*last {
+                let start = row_ptr[node] - base;
+                let mut written = start;
+                block_columns(node, &mut |c| {
+                    cols[written] = c;
+                    written += 1;
+                });
+                let node_cols = &cols[start..written];
+                for r in 0..block {
+                    let (c, v) = matrix.row(node * block + r);
+                    let mut position = 0usize;
+                    for (&col, &value) in c.iter().zip(v) {
+                        while node_cols[position] != col / block {
+                            position += 1;
+                        }
+                        vals[(start + position) * block * block + r * block + col % block] = value;
+                    }
+                }
+            }
+        });
+        drop(tasks);
         Ok(Self {
             block,
             node_rows,

@@ -27,6 +27,7 @@
 pub mod control;
 pub mod csr;
 pub mod direct;
+pub mod distributed;
 pub mod eigen;
 pub mod error;
 pub mod estimate;

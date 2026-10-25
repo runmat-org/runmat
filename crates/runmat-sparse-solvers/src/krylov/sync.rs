@@ -16,6 +16,7 @@ use super::{
     StopFlag,
 };
 use crate::control::{ProgressPhase, SolveControl};
+use crate::distributed::Communicator;
 use crate::error::{SolverError, SolverResult};
 use crate::operator::{LinearOperator, Preconditioner};
 use crate::par;
@@ -54,55 +55,6 @@ impl<T: Scalar> pcg::Arithmetic<T> for ScalarArithmetic {
         let (br, bi) = (right.re() / right_scale, right.im() / right_scale);
         (ar * br + ai * bi, ar * bi - ai * br)
     }
-    fn native_dot(left: &[T], right: &[T]) -> Option<(f64, f64, f64)> {
-        let (dot, magnitude) = par::dot_and_magnitude(left, right);
-        // Plain sums are exact enough when finite and clear of gradual underflow.
-        (dot.re().is_finite()
-            && dot.im().is_finite()
-            && magnitude.is_finite()
-            && (magnitude == 0.0 || magnitude >= SAFE_MINIMUM))
-            .then(|| (dot.re(), dot.im(), magnitude))
-    }
-    fn native_step(
-        x: &mut [T],
-        residual: &mut [T],
-        direction: &[T],
-        product: &[T],
-        alpha: f64,
-    ) -> Option<bool> {
-        let progressed = std::sync::atomic::AtomicBool::new(false);
-        par::for_each_chunk_mut(x, |start, chunk| {
-            let mut changed = false;
-            for (offset, value) in chunk.iter_mut().enumerate() {
-                let previous = *value;
-                <Self as pcg::Arithmetic<T>>::add_scaled(value, alpha, direction[start + offset]);
-                changed |= *value != previous;
-            }
-            if changed {
-                progressed.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        });
-        par::for_each_chunk_mut(residual, |start, chunk| {
-            for (offset, value) in chunk.iter_mut().enumerate() {
-                <Self as pcg::Arithmetic<T>>::subtract_scaled(
-                    value,
-                    alpha,
-                    product[start + offset],
-                );
-            }
-        });
-        Some(progressed.into_inner())
-    }
-    fn native_direction(direction: &mut [T], source: &[T], beta: f64) -> bool {
-        par::for_each_chunk_mut(direction, |start, chunk| {
-            for (offset, value) in chunk.iter_mut().enumerate() {
-                let previous = *value;
-                *value = source[start + offset];
-                <Self as pcg::Arithmetic<T>>::add_scaled(value, beta, previous);
-            }
-        });
-        true
-    }
 }
 
 /// Below this, plain sums of products may have lost digits to gradual underflow.
@@ -129,58 +81,6 @@ impl<T: Scalar> gmres::Arithmetic<T> for ScalarArithmetic {
             return None;
         }
         Some(T::from_parts(value.re, value.im))
-    }
-    fn native_norm(values: &[T]) -> Option<f64> {
-        // Scaled sum of squares: finite whenever the norm is representable.
-        let norm = par::norm2(values);
-        norm.is_finite().then_some(norm)
-    }
-    fn native_dot(left: &[T], right: &[T]) -> Option<Complex64> {
-        let (dot, magnitude) = par::dot_and_magnitude(left, right);
-        let product = Complex64::new(dot.re(), dot.im());
-        (product.re.is_finite()
-            && product.im.is_finite()
-            && (magnitude == 0.0 || magnitude >= SAFE_MINIMUM))
-            .then_some(product)
-    }
-    fn native_axpy(target: &mut [T], scale: Complex64, source: &[T]) -> bool {
-        if (!T::IS_COMPLEX && scale.im != 0.0) || !scale.re.is_finite() || !scale.im.is_finite() {
-            return false;
-        }
-        par::axpy(T::from_parts(scale.re, scale.im), source, target);
-        true
-    }
-    fn native_project(
-        basis: &[T],
-        rows: usize,
-        w: &mut [T],
-        coefficients: &mut [Complex64],
-    ) -> bool {
-        let n = w.len();
-        if basis.len() != rows * n || coefficients.len() != rows {
-            return false;
-        }
-        let dots = par::multi_dot(basis, rows, w);
-        if dots.iter().any(|value| !value.is_finite()) {
-            return false;
-        }
-        for (target, value) in coefficients.iter_mut().zip(&dots) {
-            *target = Complex64::new(value.re(), value.im());
-        }
-        par::multi_axpy(basis, &dots, w, -1.0);
-        true
-    }
-    fn native_divide(target: &mut [T], source: &[T], divisor: f64) -> bool {
-        if !(divisor.is_finite() && divisor > 0.0) {
-            return false;
-        }
-        par::for_each_chunk_mut(target, |start, chunk| {
-            for (offset, value) in chunk.iter_mut().enumerate() {
-                let entry = source[start + offset];
-                *value = T::from_parts(entry.re() / divisor, entry.im() / divisor);
-            }
-        });
-        true
     }
     fn divide_complex(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64) {
         // Smith's algorithm: no intermediate |c|² overflow or underflow.
@@ -210,6 +110,45 @@ struct SyncOperations<'a, T: Scalar> {
     control: SolveControl<'a>,
     operator_applications: usize,
     preconditioner_applications: usize,
+    /// Row-distributed solve: reductions gather block partials over this communicator.
+    distribution: Option<&'a dyn Communicator>,
+    /// A communication failure, reported at the next checkpoint.
+    failure: Option<SolverError>,
+}
+
+impl<T: Scalar> SyncOperations<'_, T> {
+    /// Gathers per-rank encoded partials (rank order); `None` records a failure.
+    fn gather(&mut self, comm: &dyn Communicator, local: &[f64]) -> Option<Vec<f64>> {
+        match comm.all_gather(local) {
+            Ok(all) => Some(all.concat()),
+            Err(error) => {
+                self.failure.get_or_insert(error);
+                None
+            }
+        }
+    }
+    /// The same boolean on every rank: all ranks' `local` combined with AND (`any = false`)
+    /// or OR (`any = true`).
+    fn agree(&mut self, comm: &dyn Communicator, local: bool, any: bool) -> Option<bool> {
+        let all = self.gather(comm, &[f64::from(u8::from(local))])?;
+        Some(if any { all.iter().any(|v| *v != 0.0) } else { all.iter().all(|v| *v != 0.0) })
+    }
+    /// Global `(Σ conj(l)r, Σ |conj(l)r|)` folded in global block order.
+    fn global_dot_magnitude(&mut self, comm: &dyn Communicator, left: &[T], right: &[T]) -> Option<(T, f64)> {
+        let mut local = Vec::new();
+        for (dot, magnitude) in par::dot_and_magnitude_partials(left, right) {
+            local.extend([dot.re(), dot.im(), magnitude]);
+        }
+        let all = self.gather(comm, &local)?;
+        Some(par::fold_dot_magnitude_partials(
+            all.chunks_exact(3).map(|v| (T::from_parts(v[0], v[1]), v[2])),
+        ))
+    }
+    fn global_norm(&mut self, comm: &dyn Communicator, values: &[T]) -> Option<f64> {
+        let local: Vec<f64> = par::norm2_partials(values).into_iter().flat_map(|(s, q)| [s, q]).collect();
+        let all = self.gather(comm, &local)?;
+        Some(par::fold_norm_partials(all.chunks_exact(2).map(|v| (v[0], v[1]))))
+    }
 }
 
 impl<T: Scalar> SyncOperations<'_, T> {
@@ -241,6 +180,9 @@ impl<T: Scalar> SyncOperations<'_, T> {
 impl<T: Scalar> Control for SyncOperations<'_, T> {
     type Error = SolverError;
     fn checkpoint(&mut self) -> SolverResult<()> {
+        if let Some(error) = self.failure.take() {
+            return Err(error);
+        }
         self.control.check()
     }
     async fn cooperate(&mut self, _completed: u64) -> SolverResult<()> {
@@ -264,6 +206,33 @@ impl<T: Scalar> PcgOperations<T> for SyncOperations<'_, T> {
             }
         }
     }
+    fn native_dot(&mut self, left: &[T], right: &[T]) -> Option<(f64, f64, f64)> {
+        let Some(comm) = self.distribution else {
+            return HostKernels::pcg_dot(left, right);
+        };
+        let (dot, magnitude) = self.global_dot_magnitude(comm, left, right)?;
+        HostKernels::accept_pcg_dot(dot, magnitude)
+    }
+    fn native_step(
+        &mut self,
+        x: &mut [T],
+        residual: &mut [T],
+        direction: &[T],
+        product: &[T],
+        alpha: f64,
+    ) -> Option<bool> {
+        let progressed = HostKernels::pcg_step(x, residual, direction, product, alpha)?;
+        match self.distribution {
+            Some(comm) => self.agree(comm, progressed, true),
+            None => Some(progressed),
+        }
+    }
+    fn native_direction(&mut self, direction: &mut [T], source: &[T], beta: f64) -> bool {
+        HostKernels::pcg_direction(direction, source, beta)
+    }
+    fn native_residual(&mut self, rhs: &[T], product: &[T], residual: &mut [T]) -> bool {
+        HostKernels::pcg_residual(rhs, product, residual)
+    }
 }
 
 impl<T: Scalar> GmresOperations<T> for SyncOperations<'_, T> {
@@ -280,10 +249,73 @@ impl<T: Scalar> GmresOperations<T> for SyncOperations<'_, T> {
         SyncOperations::precondition(self, input, output)
     }
     fn checkpoint(&mut self) -> SolverResult<()> {
-        self.control.check()
+        <Self as Control>::checkpoint(self)
     }
     async fn cooperate(&mut self, _completed: u64) -> SolverResult<()> {
         Ok(())
+    }
+    fn native_norm(&mut self, values: &[T]) -> Option<f64> {
+        let Some(comm) = self.distribution else {
+            return HostKernels::norm(values);
+        };
+        self.global_norm(comm, values).filter(|norm| norm.is_finite())
+    }
+    fn native_dot(&mut self, left: &[T], right: &[T]) -> Option<Complex64> {
+        let Some(comm) = self.distribution else {
+            return HostKernels::dot(left, right);
+        };
+        let (dot, magnitude) = self.global_dot_magnitude(comm, left, right)?;
+        HostKernels::accept_dot(dot, magnitude)
+    }
+    fn native_axpy(&mut self, target: &mut [T], scale: Complex64, source: &[T]) -> bool {
+        HostKernels::axpy(target, scale, source)
+    }
+    fn native_project(
+        &mut self,
+        basis: &[T],
+        rows: usize,
+        w: &mut [T],
+        coefficients: &mut [Complex64],
+    ) -> bool {
+        let Some(comm) = self.distribution else {
+            return HostKernels::project(basis, rows, w, coefficients);
+        };
+        let n = w.len();
+        if basis.len() != rows * n || coefficients.len() != rows {
+            return false;
+        }
+        let mut local = Vec::new();
+        for block in par::multi_dot_partials(basis, rows, w) {
+            for value in block {
+                local.extend([value.re(), value.im()]);
+            }
+        }
+        let Some(all) = self.gather(comm, &local) else {
+            return false;
+        };
+        let dots = par::fold_multi_partials(
+            rows,
+            all.chunks_exact(2 * rows)
+                .map(|block| block.chunks_exact(2).map(|v| T::from_parts(v[0], v[1])).collect()),
+        );
+        HostKernels::apply_projection(basis, &dots, w, coefficients)
+    }
+    fn native_divide(&mut self, target: &mut [T], source: &[T], divisor: f64) -> bool {
+        HostKernels::divide(target, source, divisor)
+    }
+    fn native_residual(&mut self, rhs: &[T], product: &[T], residual: &mut [T]) -> Option<bool> {
+        let finite = HostKernels::residual(rhs, product, residual)?;
+        match self.distribution {
+            Some(comm) => self.agree(comm, finite, false),
+            None => Some(finite),
+        }
+    }
+    fn native_equal(&mut self, left: &[T], right: &[T]) -> Option<bool> {
+        let equal = HostKernels::equal(left, right)?;
+        match self.distribution {
+            Some(comm) => self.agree(comm, equal, false),
+            None => Some(equal),
+        }
     }
 }
 
@@ -356,6 +388,45 @@ pub fn pcg_solve<T: Scalar>(
     options: &KrylovOptions,
     control: SolveControl<'_>,
 ) -> SolverResult<KrylovReport> {
+    pcg_impl(operator, preconditioner, b, x, options, control, None)
+}
+
+/// Row-distributed PCG: `operator`, `b` and `x` are this rank's owned rows (the operator does
+/// its own halo exchange, e.g. [`crate::distributed::DistributedCsr`]), and every rank calls
+/// collectively. With block-aligned rank boundaries the iterates are bitwise those of the
+/// single-rank solve.
+pub fn pcg_distributed<T: Scalar>(
+    comm: &dyn Communicator,
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    control: SolveControl<'_>,
+) -> SolverResult<KrylovReport> {
+    pcg_impl(operator, preconditioner, b, x, options, control, Some(comm))
+}
+
+/// `‖b‖`, globally reduced for a distributed solve.
+fn rhs_norm<T: Scalar>(b: &[T], distribution: Option<&dyn Communicator>) -> SolverResult<f64> {
+    let Some(comm) = distribution else {
+        return Ok(par::norm2(b));
+    };
+    let local: Vec<f64> = par::norm2_partials(b).into_iter().flat_map(|(s, q)| [s, q]).collect();
+    let all = comm.all_gather(&local)?.concat();
+    Ok(par::fold_norm_partials(all.chunks_exact(2).map(|v| (v[0], v[1]))))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pcg_impl<T: Scalar>(
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    control: SolveControl<'_>,
+    distribution: Option<&dyn Communicator>,
+) -> SolverResult<KrylovReport> {
     check_dims(operator, b, x)?;
     let n = b.len();
     if n == 0 {
@@ -368,7 +439,7 @@ pub fn pcg_solve<T: Scalar>(
     }
     PcgGeometry::checked(n, options.max_iterations, false)
         .ok_or_else(|| SolverError::Unsupported("PCG workspace geometry overflows".into()))?;
-    let rhs_norm = par::norm2(b);
+    let rhs_norm = rhs_norm(b, distribution)?;
     if rhs_norm == 0.0 {
         return Ok(zero_rhs_report(x));
     }
@@ -387,6 +458,8 @@ pub fn pcg_solve<T: Scalar>(
         control,
         operator_applications: 0,
         preconditioner_applications: 0,
+        distribution,
+        failure: None,
     };
     let outcome = block_on(pcg::solve::<T, ScalarArithmetic, _>(
         b,
@@ -506,7 +579,9 @@ fn exact_len<V: Clone>(vector: &mut Vec<V>, len: usize, zero: V) -> SolverResult
     if vector.len() < len {
         vector
             .try_reserve_exact(len - vector.len())
-            .map_err(|_| SolverError::OutOfMemory { bytes: (len * std::mem::size_of::<V>()) as u64 })?;
+            .map_err(|_| SolverError::OutOfMemory {
+                bytes: (len * std::mem::size_of::<V>()) as u64,
+            })?;
     }
     vector.resize(len, zero);
     Ok(())
@@ -524,6 +599,37 @@ pub fn gmres_with_workspace<T: Scalar>(
     gmres_options: &GmresOptions,
     control: SolveControl<'_>,
 ) -> SolverResult<KrylovReport> {
+    gmres_impl(workspace, operator, preconditioner, b, x, options, gmres_options, control, None)
+}
+
+/// Row-distributed GMRES (see [`pcg_distributed`]).
+#[allow(clippy::too_many_arguments)]
+pub fn gmres_distributed<T: Scalar>(
+    comm: &dyn Communicator,
+    workspace: &mut GmresWorkspace<T>,
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    gmres_options: &GmresOptions,
+    control: SolveControl<'_>,
+) -> SolverResult<KrylovReport> {
+    gmres_impl(workspace, operator, preconditioner, b, x, options, gmres_options, control, Some(comm))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gmres_impl<T: Scalar>(
+    workspace: &mut GmresWorkspace<T>,
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    gmres_options: &GmresOptions,
+    control: SolveControl<'_>,
+    distribution: Option<&dyn Communicator>,
+) -> SolverResult<KrylovReport> {
     check_dims(operator, b, x)?;
     let n = b.len();
     if n == 0 {
@@ -538,7 +644,7 @@ pub fn gmres_with_workspace<T: Scalar>(
     let max_outer = options.max_iterations.div_ceil(restart);
     let geometry = GmresGeometry::checked(n, restart, max_outer)
         .ok_or_else(|| SolverError::Unsupported("GMRES workspace geometry overflows".into()))?;
-    let rhs_norm = par::norm2(b);
+    let rhs_norm = rhs_norm(b, distribution)?;
     if rhs_norm == 0.0 {
         return Ok(zero_rhs_report(x));
     }
@@ -546,14 +652,23 @@ pub fn gmres_with_workspace<T: Scalar>(
         .iter()
         .any(|value| *value != T::zero())
         .then(|| x.to_vec());
-    let GmresWorkspace { native, complex, real, flexible } = workspace;
+    let GmresWorkspace {
+        native,
+        complex,
+        real,
+        flexible,
+    } = workspace;
     exact_len(native, geometry.native_elements, T::zero())?;
     exact_len(
         complex,
         geometry.hessenberg_elements + geometry.complex_small_elements,
         Complex64::new(0.0, 0.0),
     )?;
-    exact_len(real, geometry.real_small_elements + geometry.history_elements, 0.0)?;
+    exact_len(
+        real,
+        geometry.real_small_elements + geometry.history_elements,
+        0.0,
+    )?;
     let mode = GmresMode {
         side: gmres_options.side,
         residual_check: gmres_options.residual_check,
@@ -575,6 +690,8 @@ pub fn gmres_with_workspace<T: Scalar>(
         control,
         operator_applications: 0,
         preconditioner_applications: 0,
+        distribution,
+        failure: None,
     };
     let outcome = block_on(gmres::solve_with::<T, ScalarArithmetic, _>(
         b,
@@ -611,4 +728,157 @@ pub fn gmres_with_workspace<T: Scalar>(
         operator_applications: operations.operator_applications,
         preconditioner_applications: operations.preconditioner_applications,
     })
+}
+
+/// The host (shared-memory) vector kernels of the recurrences: deterministic blocked `par`
+/// kernels on the admitted pool. Operation objects supply them through the native hooks of
+/// [`GmresOperations`] and [`PcgOperations`]; [`SyncOperations`] and FEA's closure-operator
+/// GMRES delegate here.
+pub struct HostKernels;
+
+impl HostKernels {
+    pub fn pcg_dot<T: Scalar>(left: &[T], right: &[T]) -> Option<(f64, f64, f64)> {
+        let (dot, magnitude) = par::dot_and_magnitude(left, right);
+        Self::accept_pcg_dot(dot, magnitude)
+    }
+
+    /// Plain sums are exact enough when finite and clear of gradual underflow.
+    pub fn accept_pcg_dot<T: Scalar>(dot: T, magnitude: f64) -> Option<(f64, f64, f64)> {
+        (dot.re().is_finite()
+            && dot.im().is_finite()
+            && magnitude.is_finite()
+            && (magnitude == 0.0 || magnitude >= SAFE_MINIMUM))
+            .then(|| (dot.re(), dot.im(), magnitude))
+    }
+
+    pub fn pcg_step<T: Scalar>(
+        x: &mut [T],
+        residual: &mut [T],
+        direction: &[T],
+        product: &[T],
+        alpha: f64,
+    ) -> Option<bool> {
+        let progressed = std::sync::atomic::AtomicBool::new(false);
+        par::for_each_chunk_mut(x, |start, chunk| {
+            let mut changed = false;
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                let previous = *value;
+                <ScalarArithmetic as pcg::Arithmetic<T>>::add_scaled(
+                    value,
+                    alpha,
+                    direction[start + offset],
+                );
+                changed |= *value != previous;
+            }
+            if changed {
+                progressed.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        par::for_each_chunk_mut(residual, |start, chunk| {
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                <ScalarArithmetic as pcg::Arithmetic<T>>::subtract_scaled(
+                    value,
+                    alpha,
+                    product[start + offset],
+                );
+            }
+        });
+        Some(progressed.into_inner())
+    }
+
+    pub fn pcg_direction<T: Scalar>(direction: &mut [T], source: &[T], beta: f64) -> bool {
+        par::for_each_chunk_mut(direction, |start, chunk| {
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                let previous = *value;
+                *value = source[start + offset];
+                <ScalarArithmetic as pcg::Arithmetic<T>>::add_scaled(value, beta, previous);
+            }
+        });
+        true
+    }
+
+    pub fn pcg_residual<T: Scalar>(rhs: &[T], product: &[T], residual: &mut [T]) -> bool {
+        par::sub_into(rhs, product, residual);
+        true
+    }
+
+    pub fn norm<T: Scalar>(values: &[T]) -> Option<f64> {
+        // Scaled sum of squares: finite whenever the norm is representable.
+        let norm = par::norm2(values);
+        norm.is_finite().then_some(norm)
+    }
+
+    pub fn dot<T: Scalar>(left: &[T], right: &[T]) -> Option<Complex64> {
+        let (dot, magnitude) = par::dot_and_magnitude(left, right);
+        Self::accept_dot(dot, magnitude)
+    }
+
+    pub fn accept_dot<T: Scalar>(dot: T, magnitude: f64) -> Option<Complex64> {
+        let product = Complex64::new(dot.re(), dot.im());
+        (product.re.is_finite()
+            && product.im.is_finite()
+            && (magnitude == 0.0 || magnitude >= SAFE_MINIMUM))
+            .then_some(product)
+    }
+
+    pub fn axpy<T: Scalar>(target: &mut [T], scale: Complex64, source: &[T]) -> bool {
+        if (!T::IS_COMPLEX && scale.im != 0.0) || !scale.re.is_finite() || !scale.im.is_finite() {
+            return false;
+        }
+        par::axpy(T::from_parts(scale.re, scale.im), source, target);
+        true
+    }
+
+    pub fn project<T: Scalar>(
+        basis: &[T],
+        rows: usize,
+        w: &mut [T],
+        coefficients: &mut [Complex64],
+    ) -> bool {
+        let n = w.len();
+        if basis.len() != rows * n || coefficients.len() != rows {
+            return false;
+        }
+        let dots = par::multi_dot(basis, rows, w);
+        Self::apply_projection(basis, &dots, w, coefficients)
+    }
+
+    /// `w −= Σ dots[k] v_k` after checking the (globally reduced) coefficients.
+    pub fn apply_projection<T: Scalar>(
+        basis: &[T],
+        dots: &[T],
+        w: &mut [T],
+        coefficients: &mut [Complex64],
+    ) -> bool {
+        if dots.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        for (target, value) in coefficients.iter_mut().zip(dots) {
+            *target = Complex64::new(value.re(), value.im());
+        }
+        par::multi_axpy(basis, dots, w, -1.0);
+        true
+    }
+
+    pub fn divide<T: Scalar>(target: &mut [T], source: &[T], divisor: f64) -> bool {
+        if !(divisor.is_finite() && divisor > 0.0) {
+            return false;
+        }
+        par::for_each_chunk_mut(target, |start, chunk| {
+            for (offset, value) in chunk.iter_mut().enumerate() {
+                let entry = source[start + offset];
+                *value = T::from_parts(entry.re() / divisor, entry.im() / divisor);
+            }
+        });
+        true
+    }
+
+    pub fn residual<T: Scalar>(rhs: &[T], product: &[T], residual: &mut [T]) -> Option<bool> {
+        par::sub_into(rhs, product, residual);
+        Some(residual.iter().all(|value| value.is_finite()))
+    }
+
+    pub fn equal<T: Scalar>(left: &[T], right: &[T]) -> Option<bool> {
+        Some(left == right)
+    }
 }
