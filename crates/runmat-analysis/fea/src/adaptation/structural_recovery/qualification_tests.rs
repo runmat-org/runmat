@@ -36,14 +36,14 @@ mod interface;
 mod elastic_static_path;
 
 // witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
-//   linear_structural/tet4/numerical_kernel, linear_structural/tet10/numerical_kernel; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
 //   boundary: The elastic rigidity path (no global factor, AMG-PCG, true-residual acceptance) matches the proving factorization's displacement to 1e-6 on a structured cantilever.
 #[test]
 fn elastic_rigidity_static_path_agrees_with_the_proving_factorization() {
     elastic_static_path::qualify();
 }
 
-// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @ linear_structural/tet10/numerical_kernel; coverage: partial; boundary: The planner selects the elastic rigidity path exactly when the effective ceiling, min(authored, machine), lies below the proving factorization's plan; recorded and direct requests keep their path.
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: The planner selects the elastic rigidity path exactly when the effective ceiling, min(authored, machine), lies below the proving factorization's plan; recorded and direct requests keep their path.
 #[test]
 fn effective_ceiling_selects_the_static_solve_path() {
     elastic_static_path::ceiling_selects_the_static_path();

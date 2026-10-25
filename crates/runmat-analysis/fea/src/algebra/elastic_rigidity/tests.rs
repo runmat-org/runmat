@@ -80,7 +80,7 @@ const POINTS: [[f64; 3]; 6] = [
 ];
 
 // witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
-//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
 //   boundary: Face-glued elastic tetrahedra with a three-node anchor are proved positive definite without a global factor.
 #[test]
 fn face_glued_and_anchored_tetrahedra_are_proved() {
@@ -90,7 +90,7 @@ fn face_glued_and_anchored_tetrahedra_are_proved() {
 }
 
 // witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
-//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
 //   boundary: A hinge (two tetrahedra sharing only an edge) is a mechanism and is refused with a typed reason naming the unanchored component.
 #[test]
 fn hinge_glued_by_two_nodes_is_refused_as_a_mechanism() {
@@ -103,7 +103,7 @@ fn hinge_glued_by_two_nodes_is_refused_as_a_mechanism() {
 }
 
 // witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
-//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
 //   boundary: An anchor that leaves a rotation free (two fixed nodes) or no anchor at all is refused; the refusal counts the constrained DOFs.
 #[test]
 fn collinear_or_missing_anchor_is_refused() {
@@ -120,7 +120,7 @@ fn collinear_or_missing_anchor_is_refused() {
 }
 
 // witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
-//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
 //   boundary: An element block that is indefinite on the rigid-motion complement, or that does not annihilate rigid motions, is refused naming the element.
 #[test]
 fn element_without_energy_margin_or_rigid_kernel_is_refused() {
