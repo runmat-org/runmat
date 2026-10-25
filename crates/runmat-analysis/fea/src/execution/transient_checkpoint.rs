@@ -565,7 +565,7 @@ fn observation_cursors_continue(
 fn checkpoint_identity(
     input: CheckpointIdentityInput<'_>,
 ) -> AnalysisExecutionResult<StructuralTransientCheckpointIdentity> {
-    StructuralTransientCheckpointIdentity::derive("structural-transient-checkpoint", &input)
+    StructuralTransientCheckpointIdentity::derive_content("structural-transient-checkpoint", &input)
 }
 
 #[cfg(test)]

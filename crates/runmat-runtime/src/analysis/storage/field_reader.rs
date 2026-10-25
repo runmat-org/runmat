@@ -382,7 +382,7 @@ mod transient_sample_tests {
     use super::{resolve_transient_snapshot, TransientSampleRequest};
 
     // witness: FEA-STRUCTURAL-PUBLIC-001/result_publication_defects @
-    //   linear_structural/tet10/durable; coverage: partial;
+    //   linear_structural_dynamics/tet10/numerical_kernel; coverage: partial;
     //   boundary: a time or one-based state sample resolves to the persisted transient snapshot
     //   the integrator retained and reports its exact time; the solve itself is not covered.
     #[test]

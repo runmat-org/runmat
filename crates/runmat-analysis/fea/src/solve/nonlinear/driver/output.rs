@@ -96,8 +96,11 @@ pub(super) fn append_increment(
     result.plastic_strain_snapshots.push(plastic);
     result.equivalent_plastic_strain_snapshots.push(alpha);
     result.von_mises_snapshots.push(von_mises);
-    result.contact_pressure_snapshots.push(pressure);
-    result.contact_gap_snapshots.push(gap);
+    // Contact output exists only for a contact run; a run without contact has no contact history.
+    if contact.is_some() {
+        result.contact_pressure_snapshots.push(pressure);
+        result.contact_gap_snapshots.push(gap);
+    }
     result.residual_norms.push(increment.relative_residual);
     result.increment_norms.push(increment.correction_norm);
     result

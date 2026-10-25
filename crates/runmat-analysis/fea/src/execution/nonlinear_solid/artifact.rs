@@ -108,8 +108,6 @@ impl NonlinearSolidBlockArtifact {
             r.von_mises_snapshots.len(),
             r.plastic_strain_snapshots.len(),
             r.equivalent_plastic_strain_snapshots.len(),
-            r.contact_pressure_snapshots.len(),
-            r.contact_gap_snapshots.len(),
             r.residual_norms.len(),
             r.increment_norms.len(),
             r.relative_increment_norms.len(),
@@ -124,6 +122,9 @@ impl NonlinearSolidBlockArtifact {
                 .any(|x| *x > self.checkpoint.maximum_relative_increment())
             || n > self.request.accepted_block_limit
             || lengths.iter().any(|len| *len != n)
+            // Contact history is complete for a contact run and absent otherwise.
+            || r.contact_pressure_snapshots.len() != r.contact_gap_snapshots.len()
+            || (!r.contact_pressure_snapshots.is_empty() && r.contact_pressure_snapshots.len() != n)
             || r.total_increments != n
             || r.converged_increments != n
             || r.accepted_state != *self.checkpoint.accepted_state()

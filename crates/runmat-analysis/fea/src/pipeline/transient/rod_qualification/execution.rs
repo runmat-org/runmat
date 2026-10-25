@@ -17,7 +17,9 @@ use runmat_meshing_core::CanonicalMeshingContract;
 #[test]
 fn transient_rod_cold_blocks_and_recovered_history_retain_independent_continuum_accuracy() {
     for quadratic in [false, true] {
-        let mesh = mesh(quadratic, if quadratic { 4 } else { 8 });
+        // The continuum bound is a spatial accuracy claim: eight quadratic cells keep the nodal
+        // acceleration floor (0.0014) below it; four cells sit at 0.0061 for any time step.
+        let mesh = mesh(quadratic, 8);
         let model = model(&mesh, true);
         let workload = StructuralTransientWorkload {
             schema_version: 2,

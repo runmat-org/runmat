@@ -16,6 +16,7 @@ macro_rules! identity_type {
                 self.0
             }
 
+            #[allow(dead_code)]
             pub(in crate::execution) fn derive<T: Serialize>(
                 domain: &'static str,
                 input: &T,

@@ -364,7 +364,7 @@ impl StructuralTransientSegmentSample {
         )?;
         let sample = Self {
             schema_version: 1,
-            identity: StructuralTransientSegmentSampleIdentity::derive(
+            identity: StructuralTransientSegmentSampleIdentity::derive_content(
                 "structural-transient-segment-sample",
                 &(1_u16, request.identity, &physical),
             )?,
@@ -838,7 +838,7 @@ impl StructuralTransientSegment {
 fn segment_sample_identity(
     sample: &StructuralTransientSegmentSample,
 ) -> AnalysisExecutionResult<StructuralTransientSegmentSampleIdentity> {
-    StructuralTransientSegmentSampleIdentity::derive(
+    StructuralTransientSegmentSampleIdentity::derive_content(
         "structural-transient-segment-sample",
         &(sample.schema_version, sample.request, &sample.physical),
     )
@@ -849,7 +849,7 @@ fn physical_sample_input_identity(
     scope: StructuralTransientCheckpointScopeIdentity,
     input: &StructuralTransientPhysicalSampleInput,
 ) -> AnalysisExecutionResult<StructuralTransientPhysicalSampleIdentity> {
-    StructuralTransientPhysicalSampleIdentity::derive(
+    StructuralTransientPhysicalSampleIdentity::derive_content(
         "structural-transient-physical-sample",
         &PhysicalSampleIdentityInput {
             schema_version,
@@ -875,7 +875,7 @@ fn physical_sample_input_identity(
 fn physical_sample_identity(
     sample: &StructuralTransientPhysicalSample,
 ) -> AnalysisExecutionResult<StructuralTransientPhysicalSampleIdentity> {
-    StructuralTransientPhysicalSampleIdentity::derive(
+    StructuralTransientPhysicalSampleIdentity::derive_content(
         "structural-transient-physical-sample",
         &PhysicalSampleIdentityInput {
             schema_version: sample.schema_version,
@@ -926,7 +926,7 @@ fn segment_identity(
     initial_sample: Option<StructuralTransientPhysicalSampleIdentity>,
     samples: &[StructuralTransientSegmentEntry],
 ) -> AnalysisExecutionResult<StructuralTransientSegmentIdentity> {
-    StructuralTransientSegmentIdentity::derive(
+    StructuralTransientSegmentIdentity::derive_content(
         "structural-transient-segment",
         &(
             schema_version,
