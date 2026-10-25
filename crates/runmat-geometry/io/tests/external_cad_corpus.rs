@@ -136,7 +136,7 @@ fn pipe_volume_m3(options: &ExactCadImportOptions) -> (f64, runmat_geometry_io::
 //   partial;
 //   boundary: An authored metre unit over a STEP file declaring millimetres reads the coordinates
 //   in metres, records the declared unit as provenance in the geometry document, and survives
-//   closure; without authority the declaration governs. IGES overrides are not covered.
+//   closure; without authority the declaration governs.
 #[test]
 fn authored_step_units_override_a_different_declaration_and_record_it() {
     let pipe_m3 = std::f64::consts::PI * 0.05 * 0.05 * 0.5;
