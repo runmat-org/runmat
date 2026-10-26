@@ -231,10 +231,11 @@ fn lower_expression(
                 },
             };
             match (&draft.spec.target, draft.spec.source_location) {
-                // An element field is piecewise per element: a point samples the native value of
-                // the element that contains it.
-                (ObservationTarget::Point { .. }, FieldLocation::Element) => {
-                    draft.spec.output_location = FieldLocation::Element;
+                // An element field is piecewise per element, and a finite-volume cell field holds
+                // the cell average: a point samples the native value of the element or cell that
+                // contains it.
+                (ObservationTarget::Point { .. }, location @ (FieldLocation::Element | FieldLocation::Cell)) => {
+                    draft.spec.output_location = location;
                     draft.spec.recovery = RecoveryPolicy::Native;
                 }
                 _ => {
@@ -495,5 +496,31 @@ mod tests {
             attach_authored_outputs(&[output], &mut sequence),
             Err(AuthoredObservationError::DuplicateObservation(id)) if id == "displacement"
         ));
+    }
+    // witness: FEA-SHARED-OBSERVATIONS-001/quantity_location_and_cost_contract @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: interpolate(...) of a finite-volume cell field at one point lowers to the containing cell's native value and passes authored validation; path sampling of cell fields is not covered
+    #[test]
+    fn point_interpolation_of_a_cell_field_samples_the_containing_cell() {
+        let step = ProcedureStep::fluid_static("flow");
+        let output = AuthoredOutput {
+            output_id: "p_mid".into(),
+            expression: AuthoredOutputExpression::Interpolation {
+                source: Box::new(AuthoredOutputExpression::AnalysisField {
+                    step_id: "flow".into(),
+                    quantity: ObservationQuantity::FluidPressure,
+                    location: FieldLocation::Cell,
+                }),
+                positions: vec![crate::Position::new([0.3, 0.0, 0.0])],
+            },
+            policy: crate::AuthoredOutputPolicy::default(),
+        };
+        let lowered =
+            lower_authored_observations(std::slice::from_ref(&output), std::slice::from_ref(&step))
+                .unwrap()
+                .remove(0);
+        let spec = lowered.request.spec().unwrap();
+        assert_eq!(spec.source_location, FieldLocation::Cell);
+        assert_eq!(spec.output_location, FieldLocation::Cell);
+        assert_eq!(spec.recovery, RecoveryPolicy::Native);
+        crate::validate_authored_observation_request(&step, &lowered.request).unwrap();
     }
 }
