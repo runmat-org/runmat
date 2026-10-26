@@ -16,6 +16,11 @@ pub struct CanonicalFluidReservation {
     pub faces: u64,
     pub sparse_entries: u64,
     pub resident_bytes_upper_bound: u64,
+    /// Resident bound for verifying a retained result: the full bound minus the
+    /// solver-only workspace (GMRES, ILU, coupled momentum block with its component
+    /// AMG hierarchies, fixed-point acceleration). Verification re-assembles the
+    /// operators and re-evaluates the residual but runs no linear or outer solve.
+    pub verification_resident_bytes_upper_bound: u64,
     pub operator_work_upper_bound: u64,
     pub linear_iterations_upper_bound: u64,
 }
@@ -294,12 +299,21 @@ impl CanonicalFluidReservation {
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 32)?, 96)?)?;
-        bytes = add(bytes, ilu.resident_bytes_upper_bound)?;
-        // Coupled momentum block: the two-ring pattern (at most 41 cells per row for
-        // tetrahedra), its 3 × 3-block values and the linear reconstruction terms, plus one AMG
-        // hierarchy per velocity component (each within the per-system envelope).
-        bytes = add(bytes, mul(n, 9 * 41 * (8 + 8 + 8) + 5 * 216 + 41 * 8)?)?;
-        bytes = add(bytes, mul(ilu.resident_bytes_upper_bound, 3)?)?;
+        // Solver-only workspace, which verification of a retained result never allocates:
+        // the shared ILU envelope, then the coupled momentum block: the two-ring pattern (at
+        // most 41 cells per row for tetrahedra), its 3 × 3-block values and the linear
+        // reconstruction terms, plus one AMG hierarchy per velocity component (each within
+        // the per-system envelope).
+        let solve_workspace = add(
+            add(
+                ilu.resident_bytes_upper_bound,
+                mul(n, 9 * 41 * (8 + 8 + 8) + 5 * 216 + 41 * 8)?,
+            )?,
+            mul(ilu.resident_bytes_upper_bound, 3)?,
+        )?;
+        bytes = add(bytes, solve_workspace)?;
+        // The shared GMRES peak is part of the baseline above.
+        let mut solver_bytes = add(solve_workspace, gmres.resident_bytes_upper_bound)?;
         // Frozen velocity reconstruction: four source/weight records per cell,
         // doubled payload growth plus the owning Vec header. No field is retained.
         bytes = add(
@@ -342,8 +356,13 @@ impl CanonicalFluidReservation {
             // Two images/residuals, U/p/q proposal and shared coefficient workspace;
             // one additional complete physical residual/face-force evaluation.
             // Doubled payload growth plus fixed Vec/record headers.
-            bytes = add(bytes, add(mul(add(mul(n, 26)?, mul(f, 15)?)?, 16)?, 4096)?)?;
+            let acceleration = add(mul(add(mul(n, 26)?, mul(f, 15)?)?, 16)?, 4096)?;
+            bytes = add(bytes, acceleration)?;
+            solver_bytes = add(solver_bytes, acceleration)?;
         }
+        let verification_resident_bytes_upper_bound = bytes
+            .checked_sub(solver_bytes)
+            .ok_or(Error::Resource("verification resident bytes"))?;
         let solves = mul(
             p.maximum_outer_iterations as u64,
             add(3, p.maximum_nonorthogonal_iterations as u64)?,
@@ -425,6 +444,7 @@ impl CanonicalFluidReservation {
             faces: f,
             sparse_entries: nnz,
             resident_bytes_upper_bound: bytes,
+            verification_resident_bytes_upper_bound,
             operator_work_upper_bound: work,
             linear_iterations_upper_bound,
         })
