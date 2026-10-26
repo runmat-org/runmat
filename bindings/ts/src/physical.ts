@@ -28,7 +28,7 @@ export function resolvedSourceLengthUnit(evidence: LengthUnitEvidence): LengthUn
       const first = evidence.contexts[0]?.unit;
       return first && evidence.contexts.every(context => context.unit.scale === first.scale && context.unit.offset === first.offset) ? first : null;
     }
-    case "explicit_fallback": case "format_convention": return evidence.declaration.unit;
+    case "explicit_fallback": case "format_convention": case "authored_override": return evidence.declaration.unit;
     case "missing": case "unsupported": case "conflicting": return null;
   }
 }
@@ -36,6 +36,7 @@ export function sourceLengthUnitLabel(evidence: LengthUnitEvidence): string {
   switch (evidence.status) {
     case "declared": return resolvedSourceLengthUnit(evidence) ? evidence.contexts[0]!.source_symbol : "mixed declared length units";
     case "explicit_fallback": return `${evidence.declaration.source_symbol} (specified)`;
+    case "authored_override": return `${evidence.declaration.source_symbol} (override)`;
     case "format_convention": return `${evidence.declaration.source_symbol} (${evidence.format})`;
     case "missing": return "physical scale not established";
     case "unsupported": return "unsupported length-unit declaration";
