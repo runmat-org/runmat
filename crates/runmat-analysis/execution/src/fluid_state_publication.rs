@@ -146,7 +146,21 @@ fn decode_source(
     Ok((workload, mesh, result))
 }
 
+/// Memoized per exact request, input content and policy: every stage of a study asks for the
+/// same plan, and each derivation decodes and re-prepares the original fluid source.
 pub fn build_prepared_fluid_state_publication_resource_plan(
+    request: &SemanticStatePublicationRequest,
+    inputs: &[PreparedAnalysisObjects],
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
+        crate::fluid_phase_plan_memo::PlanMemo::new();
+    MEMO.get_or_derive("fluid-state-publication", &request.canonical_bytes()?, inputs, policy, || {
+        derive_prepared_fluid_state_publication_resource_plan(request, inputs, policy)
+    })
+}
+
+fn derive_prepared_fluid_state_publication_resource_plan(
     request: &SemanticStatePublicationRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
