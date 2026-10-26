@@ -1,4 +1,5 @@
 use super::*;
+use runmat_canonical_codec::profile_serialized;
 
 #[test]
 fn complete_original_fluid_state_has_exact_profile_and_cold_source() {
@@ -17,9 +18,32 @@ fn complete_original_fluid_state_has_exact_profile_and_cold_source() {
         let state =
             CanonicalSemanticState::from_fluid_publication(&request, &workload, &mesh, &result)
                 .unwrap();
-        assert_eq!(profile, profile_serialized(&state, STATE_LIMITS).unwrap());
+        assert_eq!(
+            profile,
+            runmat_canonical_codec::profile_direct_materialization(&state, STATE_LIMITS).unwrap()
+        );
         let bytes = state.canonical_bytes().unwrap();
         assert!(bytes.len() as u64 <= profile.encoded_bytes_upper_bound);
+        // Direct codec: the charge covers the import-side typed decode of the actual wire and
+        // stays within a small factor of the canonical state, far below the value-tree model
+        // that charged ~80 bytes per embedded result byte.
+        let import =
+            runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&bytes)
+                .unwrap();
+        assert!(profile.materialization_resident_bytes_estimate >= import);
+        let measured = bytes.len() as u64
+            + runmat_canonical_codec::typed_resident_bytes_estimate(&state).unwrap();
+        assert!(
+            profile.materialization_resident_bytes_estimate <= 12 * measured,
+            "state charge {} vs measured {measured}",
+            profile.materialization_resident_bytes_estimate
+        );
+        assert!(
+            profile_serialized(&state, STATE_LIMITS)
+                .unwrap()
+                .materialization_resident_bytes_estimate
+                > 3 * profile.materialization_resident_bytes_estimate
+        );
         let cold = CanonicalSemanticState::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(cold, state);
         assert_eq!(

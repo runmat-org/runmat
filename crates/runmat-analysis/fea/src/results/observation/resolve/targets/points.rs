@@ -94,7 +94,7 @@ pub(super) fn resolve_probe(
                 )),
             }
         }
-        FieldLocation::Element => {
+        FieldLocation::Element | FieldLocation::Cell => {
             let elements = topology.elements(field_domain)?;
             // A point at an element's centroid names that element even outside a solid volume
             // (sampled and face element domains).
@@ -135,7 +135,7 @@ pub(super) fn resolve_probe(
             )
         }
         _ => Err(ObservationError::Unsupported(
-            "this evaluator accepts only nodal and element probes",
+            "this evaluator accepts only nodal, element and cell probes",
         )),
     }
 }

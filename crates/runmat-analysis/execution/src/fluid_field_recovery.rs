@@ -218,7 +218,21 @@ pub fn prepare_fluid_field_recovery(
     })
 }
 
+/// Memoized per exact request, input content and policy: every stage of a study asks for the
+/// same plan, and each derivation decodes and re-prepares the original fluid source.
 pub fn build_prepared_fluid_field_recovery_resource_plan(
+    request: &FieldRecoveryRequest,
+    inputs: &[PreparedAnalysisObjects],
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
+        crate::fluid_phase_plan_memo::PlanMemo::new();
+    MEMO.get_or_derive("fluid-field-recovery", &request.canonical_bytes()?, inputs, policy, || {
+        derive_prepared_fluid_field_recovery_resource_plan(request, inputs, policy)
+    })
+}
+
+fn derive_prepared_fluid_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,

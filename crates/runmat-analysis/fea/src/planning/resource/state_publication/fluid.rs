@@ -19,11 +19,8 @@ pub fn build_fluid_state_publication_resource_plan(
         .map_err(|e| invalid(&e))?;
     let entry = catalog.entry(request).map_err(|e| invalid(&e))?;
     let bytes = result.canonical_bytes().map_err(|e| invalid(&e))?;
-    let topology = result
-        .native_field_topology(workload, mesh)
-        .map_err(|e| invalid(&e))?;
-    let validation = fluid_state_publication_workspace_bytes(workload, mesh, &bytes, &topology)
-        .map_err(|e| invalid(&e))?;
+    let validation =
+        fluid_state_publication_workspace_bytes(workload, mesh, &bytes).map_err(|e| invalid(&e))?;
     let request_identity = Digest::sha256(request.canonical_bytes().map_err(|e| invalid(&e))?);
     let mut ceiling = workload.model.sequence.steps[0].accuracy.resources;
     ceiling.maximum_resident_bytes = workload.resident_ceiling().map_err(|e| invalid(&e))?;

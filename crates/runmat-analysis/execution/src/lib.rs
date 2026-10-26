@@ -11,6 +11,7 @@ mod callable;
 mod error;
 mod field_recovery;
 mod fluid_field_recovery;
+mod fluid_phase_plan_memo;
 mod fluid_state_publication;
 pub use fluid_state_publication::{
     build_prepared_fluid_state_publication_resource_plan, prepare_fluid_state_publication,
