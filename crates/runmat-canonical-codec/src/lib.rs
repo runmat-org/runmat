@@ -36,7 +36,8 @@ mod value;
 
 pub use serialized_profile::{
     profile_canonical_encoding, profile_canonical_encoding_with_control, profile_serialized,
-    profile_serialized_shape, profile_serialized_with_control, profile_typed_resident_bytes,
+    profile_direct_materialization, profile_serialized_shape, profile_serialized_with_control,
+    profile_typed_resident_bytes,
     serialized_materialization_resident_bytes_estimate, CanonicalEncodingProfile,
     SerializedCanonicalProfile,
 };

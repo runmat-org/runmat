@@ -8,7 +8,9 @@ use crate::{
         RecoveredFieldEntityCounts,
     },
 };
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{
+    profile_direct_materialization, profile_serialized, SerializedCanonicalProfile,
+};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
@@ -135,7 +137,7 @@ fn artifact_profile(
     {
         return Err(invalid("fluid native profile original cardinality"));
     }
-    profile_serialized(
+    profile_direct_materialization(
         &ArtifactWire {
             schema_version: 1,
             identity: Digest::from_bytes([0; 32]),
@@ -205,9 +207,12 @@ pub(super) fn requested_bytes(
         samples.len(),
     )
     .map_err(invalid)?;
+    // Recovery validates the retained result (re-preparation and residual re-evaluation)
+    // but runs no linear solve: the numerical verification bound applies, not the solve
+    // reserve with its Krylov/ILU/AMG workspaces.
     let mut required = add(
         source.preparation_resident_bytes,
-        result.reservation().resident_bytes_upper_bound,
+        result.reservation().verification_resident_bytes_upper_bound,
     )?;
     // The original FV validation rederives complete geometry while its source is
     // retained. Reserve that real shared geometry envelope again, not just layout vectors.
@@ -261,13 +266,14 @@ pub(super) fn requested_bytes(
         required = add(required, bytes)?;
     }
     // Full field schema includes owned identifier/shape metadata and original
-    // numeric sequences. Materialization + canonical buffer coexist with copies.
+    // numeric sequences, encoded by the direct codec (no value tree): its direct
+    // materialization and canonical buffer coexist with the typed copies above.
     required = add(required, codec_bytes(artifact)?)?;
     required = add(required, codec_bytes(catalog)?)?;
     // Original retained result also coexists with the field copies and identity encoding.
     required = add(
         required,
-        codec_bytes(profile_serialized(result, LIMITS).map_err(invalid)?)?,
+        codec_bytes(profile_direct_materialization(result, LIMITS).map_err(invalid)?)?,
     )?;
     if required > workload.resident_ceiling()? || required > isize::MAX as u64 {
         return Err(invalid(format!(
@@ -433,14 +439,15 @@ mod tests {
                 entity_counts,
             )
             .unwrap();
-        assert_eq!(projected, profile_serialized(&artifact, LIMITS).unwrap());
+        assert_eq!(
+            projected,
+            profile_direct_materialization(&artifact, LIMITS).unwrap()
+        );
         let bytes = artifact.canonical_bytes().unwrap();
         assert!(bytes.len() as u64 <= projected.encoded_bytes_upper_bound);
         assert!(
-            runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
-                &bytes
-            )
-            .unwrap()
+            runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&bytes)
+                .unwrap()
                 <= projected.materialization_resident_bytes_estimate
         );
     }

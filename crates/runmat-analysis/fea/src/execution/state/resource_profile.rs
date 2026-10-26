@@ -217,6 +217,16 @@ fn profile_state_payload<T: Serialize + ?Sized>(
     )?)
 }
 
+fn profile_state_payload_direct<T: Serialize + ?Sized>(
+    request: &SemanticStatePublicationRequest,
+    payload: &T,
+) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
+    Ok(runmat_canonical_codec::profile_direct_materialization(
+        &StateProjection { request, payload },
+        STATE_LIMITS,
+    )?)
+}
+
 struct StateProjection<'a, T: ?Sized> {
     request: &'a SemanticStatePublicationRequest,
     payload: &'a T,
