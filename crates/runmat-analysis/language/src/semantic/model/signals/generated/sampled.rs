@@ -1,10 +1,11 @@
 //! Explicit physical sample axes and numerical representation of a generated signal.
 use super::*;
+use crate::PhysicalDimension;
 
 pub(super) fn sampling(
     declaration: &CheckedFeaDeclaration,
     domain: &str,
-    quantity_dimension: PhysicalDimension,
+    quantity_kind: runmat_types::physical::QuantityKind,
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<(SignalSamplingPolicy, Option<f64>)> {
@@ -25,7 +26,7 @@ pub(super) fn sampling(
         }
         return Some((
             points(declaration, domain, axis, diagnostics)?,
-            tolerance(declaration, quantity_dimension, statements, diagnostics),
+            tolerance(declaration, quantity_kind, statements, diagnostics),
         ));
     }
     let samples = statements
@@ -46,9 +47,9 @@ pub(super) fn sampling(
     }
     let (start, end, rate) = samples[0];
     if domain != "time"
-        || start.value_type != FeaType::Quantity(PhysicalDimension::TIME)
-        || end.value_type != FeaType::Quantity(PhysicalDimension::TIME)
-        || rate.value_type != FeaType::Quantity(PhysicalDimension::FREQUENCY)
+        || !(start.value_type).is_quantity((PhysicalDimension::TIME).into())
+        || !(end.value_type).is_quantity((PhysicalDimension::TIME).into())
+        || !(rate.value_type).is_quantity((PhysicalDimension::FREQUENCY).into())
     {
         error(
             declaration,
@@ -85,29 +86,39 @@ pub(super) fn sampling(
             end,
             sample_count: rounded as usize + 1,
         },
-        tolerance(declaration, quantity_dimension, statements, diagnostics),
+        tolerance(declaration, quantity_kind, statements, diagnostics),
     ))
 }
 
 fn tolerance(
     declaration: &CheckedFeaDeclaration,
-    quantity_dimension: PhysicalDimension,
+    quantity_kind: runmat_types::physical::QuantityKind,
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
-    let tolerance = assignment(statements, "tolerance").and_then(|value| {
-        if value.value_type != FeaType::Quantity(quantity_dimension) {
-            error(
-                declaration,
-                value.span,
-                "signal tolerance must have the declared signal quantity",
-                diagnostics,
-            );
-            None
-        } else {
-            scalar(value)
-        }
-    });
+    let tolerance =
+        assignment(statements, "tolerance").and_then(|value| {
+            let tolerance_kind =
+                if quantity_kind == runmat_types::physical::QuantityKind::Temperature {
+                    runmat_types::physical::QuantityKind::TemperatureDifference
+                } else {
+                    quantity_kind
+                };
+            if !value.value_type.is_quantity(
+                runmat_types::physical::DynamicDimension::quantity_type(tolerance_kind),
+            ) || value.validate_quantity_kind(tolerance_kind).is_err()
+            {
+                error(
+                    declaration,
+                    value.span,
+                    "signal tolerance must have the declared signal quantity",
+                    diagnostics,
+                );
+                None
+            } else {
+                scalar(value)
+            }
+        });
     if tolerance.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         error(
             declaration,
@@ -143,7 +154,7 @@ pub(super) fn points(
     let points = entries
         .iter()
         .map(|entry| {
-            (entry.value_type == FeaType::Quantity(dimension))
+            ((entry.value_type).is_quantity((dimension).into()))
                 .then(|| scalar(entry))
                 .flatten()
         })

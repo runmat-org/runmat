@@ -15,7 +15,7 @@ const HOT: f64 = 400.0;
 const COLD: f64 = 300.0;
 
 fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
-    let mut target = RegionTarget::boundary(name);
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
     let entities = mesh
         .topology
         .boundary_faces
@@ -34,10 +34,10 @@ fn material(id: &str, k: f64) -> MaterialModel {
     let mut m = fixture_model(FixtureId::CantileverLinearStatic).materials[0].clone();
     m.material_id = id.into();
     m.name = id.into();
-    m.mass_density_kg_per_m3 = Some(1000.0);
+    m.mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(1000.0));
     let thermal = m.thermal.as_mut().unwrap();
-    thermal.conductivity_w_per_mk = k;
-    thermal.specific_heat_j_per_kgk = 500.0;
+    thermal.conductivity_w_per_mk = runmat_types::physical::Quantity::new(k);
+    thermal.specific_heat_j_per_kgk = runmat_types::physical::Quantity::new(500.0);
     m
 }
 
@@ -53,11 +53,11 @@ fn workload(mesh: &SolverMeshArtifact, transfer: ThermalInterfaceTransfer) -> Th
     model.initial_conditions.clear();
     model.materials = vec![material("lower", K_LOWER), material("upper", K_UPPER)];
     let mut lower = model.material_assignments[0].clone();
-    lower.target = PropertyRegionTarget::solid("lower");
+    lower.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("lower"));
     lower.expected_material_id = "lower".into();
     lower.assigned_material_id = "lower".into();
     let mut upper = lower.clone();
-    upper.target = PropertyRegionTarget::solid("upper");
+    upper.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("upper"));
     upper.expected_material_id = "upper".into();
     upper.assigned_material_id = "upper".into();
     model.material_assignments = vec![lower, upper];
@@ -139,7 +139,7 @@ fn contact_conductance_carries_the_series_resistance_flux_and_jump() {
         let upper = |y: f64| COLD + q * (1.0 - y) / K_UPPER;
         let temperature = result.temperature_snapshots[0].as_host_f64().unwrap();
         for (node, &value) in mesh.topology.nodes.iter().zip(temperature) {
-            let y = node.coordinates_m[1];
+            let y = node.coordinates_m.canonical_value()[1];
             // Interface nodes publish the first (lower) side here.
             let expected = if y <= SPLIT + 1e-12 { lower(y) } else { upper(y) };
             assert!((value - expected).abs() < 1e-7 * HOT, "y={y} {value} vs {expected}");
@@ -148,7 +148,7 @@ fn contact_conductance_carries_the_series_resistance_flux_and_jump() {
         let second = result.interface_temperature_snapshots[0].as_host_f64().unwrap();
         for (&id, &value) in result.interface_node_ids.iter().zip(second) {
             let node = mesh.topology.nodes.iter().find(|n| n.node_id == id).unwrap();
-            assert!((node.coordinates_m[1] - SPLIT).abs() < 1e-12);
+            assert!((node.coordinates_m.canonical_value()[1] - SPLIT).abs() < 1e-12);
             let expected = upper(SPLIT);
             assert!((value - expected).abs() < 1e-7 * HOT, "{value} vs {expected}");
         }
@@ -173,7 +173,7 @@ fn perfect_contact_shares_the_interface_temperature() {
     let q = (HOT - COLD) / (SPLIT / K_LOWER + (1.0 - SPLIT) / K_UPPER);
     let temperature = result.temperature_snapshots[0].as_host_f64().unwrap();
     for (node, &value) in mesh.topology.nodes.iter().zip(temperature) {
-        let y = node.coordinates_m[1];
+        let y = node.coordinates_m.canonical_value()[1];
         let expected = if y <= SPLIT {
             HOT - q * y / K_LOWER
         } else {

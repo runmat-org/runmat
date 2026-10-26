@@ -24,18 +24,18 @@ fn material(id: &str, k: f64, density: f64, specific_heat: f64, fluid: bool) -> 
     let mut m = fixture_model(FixtureId::CantileverLinearStatic).materials[0].clone();
     m.material_id = id.into();
     m.name = id.into();
-    m.mass_density_kg_per_m3 = Some(density);
+    m.mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(density));
     m.elasticity = None;
     m.damping = None;
     m.acoustic = None;
     m.electrical = None;
     m.plastic = None;
     m.thermal = Some(MaterialThermalModel {
-        reference_temperature_k: 293.15,
-        modulus_temp_coeff_per_k: 0.0,
-        conductivity_w_per_mk: k,
-        specific_heat_j_per_kgk: specific_heat,
-        expansion_coefficient_per_k: 0.0,
+        reference_temperature_k: runmat_types::physical::Quantity::new(293.15),
+        modulus_temp_coeff_per_k: runmat_types::physical::Quantity::new(0.0),
+        conductivity_w_per_mk: runmat_types::physical::Quantity::new(k),
+        specific_heat_j_per_kgk: runmat_types::physical::Quantity::new(specific_heat),
+        expansion_coefficient_per_k: runmat_types::physical::Quantity::new(0.0),
     });
     m.fluid = fluid.then_some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1e-3),
@@ -58,7 +58,7 @@ fn bind(mesh: &SolverMeshArtifact, target: &mut RegionTarget) {
 }
 
 fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
-    let mut target = RegionTarget::boundary(name);
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
     bind(mesh, &mut target);
     target
 }
@@ -97,11 +97,11 @@ fn case(cells: [usize; 3], transfer: ThermalInterfaceTransfer) -> Case {
         material("water", K_FLUID, 1000.0, 4000.0, true),
     ];
     let mut solid = model.material_assignments[0].clone();
-    solid.target = PropertyRegionTarget::solid("plate");
+    solid.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("plate"));
     solid.expected_material_id = "aluminum".into();
     solid.assigned_material_id = "aluminum".into();
     let mut fluid = solid.clone();
-    fluid.target = PropertyRegionTarget::cell("channel");
+    fluid.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("channel"));
     fluid.expected_material_id = "water".into();
     fluid.assigned_material_id = "water".into();
     model.material_assignments = vec![solid, fluid];
@@ -211,11 +211,11 @@ fn series_conduction_through_solid_and_fluid_is_reproduced_at_every_node() {
     let problem = ConjugateHeatProblem::prepare(input(&c, &p, &flux)).unwrap();
     let result = problem.solve().unwrap();
     for (node, t) in p.projection.nodes.iter().zip(&result.temperature_k) {
-        let reference = exact(node.coordinates_m[1], 0.0);
+        let reference = exact(node.coordinates_m.canonical_value()[1], 0.0);
         assert!(
             (t - reference).abs() < 1e-7 * reference,
             "node at y={} carries {t}, exact {reference}",
-            node.coordinates_m[1]
+            node.coordinates_m.canonical_value()[1]
         );
     }
     let heated_area = 2.0 * 0.5;
@@ -249,7 +249,7 @@ fn contact_resistance_carries_the_exact_temperature_jump_and_conserves_heat() {
     let result = problem.solve().unwrap();
     // Published node values are the first (solid) side; the fluid side is retained separately.
     for (node, t) in p.projection.nodes.iter().zip(&result.temperature_k) {
-        let y = node.coordinates_m[1];
+        let y = node.coordinates_m.canonical_value()[1];
         let reference = if (y - PLATE).abs() < 1e-12 {
             exact(PLATE - 1e-15, resistance)
         } else {
@@ -288,7 +288,7 @@ fn raviart_thomas_lift_reproduces_uniform_flow_exactly() {
     for (element, v) in p.projection.elements.iter().zip(&lifted) {
         if let Some(v) = v {
             for corner in &element.node_indices {
-                let at = v.at(p.projection.nodes[*corner].coordinates_m);
+                let at = v.at(p.projection.nodes[*corner].coordinates_m.canonical_value());
                 for k in 0..3 {
                     assert!((at[k] - u[k]).abs() < 1e-14, "{at:?}");
                 }

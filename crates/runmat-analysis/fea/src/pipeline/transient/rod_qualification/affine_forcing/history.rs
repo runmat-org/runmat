@@ -33,7 +33,7 @@ pub(super) fn errors(
         for (node, vector) in mesh.topology.nodes.iter().zip(reactions.chunks_exact(3)) {
             transverse[0] += vector[1];
             transverse[1] += vector[2];
-            if node.coordinates_m[0] == 0.0 {
+            if node.coordinates_m.canonical_value()[0] == 0.0 {
                 root += vector[0];
             } else {
                 assert!(vector[0].abs() < 1e-11);

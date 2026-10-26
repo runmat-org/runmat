@@ -98,7 +98,9 @@ fn exact_meshing_dag_product_boundary_rejects_mismatched_authority_and_tolerance
     .contains("artifact authority"));
 
     let mut wrong_tolerance = fixture.host.resolved_request.clone();
-    wrong_tolerance.tolerance.absolute_floor_m *= 2.0;
+    wrong_tolerance.tolerance.absolute_floor_m = runmat_types::physical::Quantity::new(
+        wrong_tolerance.tolerance.absolute_floor_m.canonical_value() * (2.0),
+    );
     assert!(crate::ExactMeshingDagPlanner::new(
         &exact,
         wrong_tolerance, crate::serial_tests::ceilings(),
@@ -268,7 +270,13 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .records[0]
         .clone();
     let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
-        coordinate_tolerance_m: curve_host.resolved_request.tolerance.absolute_floor_m,
+        coordinate_tolerance_m: runmat_types::physical::Length::new(
+            curve_host
+                .resolved_request
+                .tolerance
+                .absolute_floor_m
+                .canonical_value(),
+        ),
         maximum_nodes: curve_host.resolved_request.limits.maximum_nodes,
         maximum_triangles: curve_host.resolved_request.limits.maximum_elements,
         maximum_boundary_segments: curve_host.resolved_request.limits.maximum_elements,

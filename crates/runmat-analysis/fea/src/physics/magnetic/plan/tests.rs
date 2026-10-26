@@ -38,8 +38,11 @@ fn magnetic_system_plan_roundtrip_has_exact_symmetric_support_and_no_gauge_block
                 .iter()
                 .map(|e| MagneticVolumeData {
                     element_identity: e.stable_identity,
-                    permeability_h_per_m: mu,
-                    current_density_a_per_m2: [0.0, 0.0, current],
+                    permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(mu),
+                    current_density_a_per_m2: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::ElectricCurrentDensity,
+                        _,
+                    >::new([0.0, 0.0, current]),
                 })
                 .collect();
             let explicit =

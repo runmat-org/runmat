@@ -45,17 +45,18 @@ mod execution;
 
 fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let MaterialElasticityModel::IsotropicLinear(elasticity) =
         model.materials[0].elasticity.as_mut().unwrap()
     else {
         panic!("expected isotropic material");
     };
-    elasticity.youngs_modulus_pa = YOUNGS;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(YOUNGS);
     // With nu=0, u=(u(x),0,0) is an exact three-dimensional solid solution.
     // Holding lateral translations excludes bending/shear modes, not axial strain.
-    elasticity.poisson_ratio = 0.0;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].damping = None;
     model.constraints = mesh
         .topology
@@ -68,7 +69,10 @@ fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
                 StructuralTranslationDof::Uz,
             ]
             .into_iter()
-            .filter(|dof| node.coordinates_m[0] == 0.0 || *dof != StructuralTranslationDof::Ux)
+            .filter(|dof| {
+                node.coordinates_m.canonical_value()[0] == 0.0
+                    || *dof != StructuralTranslationDof::Ux
+            })
             .map(|dof| TranslationDofValue {
                 dof,
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -166,7 +170,7 @@ fn field_error_with(
     let mut error = 0.0;
     let mut norm = 0.0;
     for (index, node) in mesh.topology.nodes.iter().enumerate() {
-        let expected = reference(node.coordinates_m[0]);
+        let expected = reference(node.coordinates_m.canonical_value()[0]);
         error +=
             (real[3 * index] - expected[0]).powi(2) + (imaginary[3 * index] - expected[1]).powi(2);
         norm += expected[0].powi(2) + expected[1].powi(2);
@@ -215,8 +219,8 @@ fn harmonic_continuum(quadratic: bool) {
                 let moments = mesh.topology.nodes.iter().zip(load.chunks_exact(3)).fold(
                     [0.0; 2],
                     |mut m, (node, v)| {
-                        m[0] += node.coordinates_m[2] * v[0];
-                        m[1] -= node.coordinates_m[1] * v[0];
+                        m[0] += node.coordinates_m.canonical_value()[2] * v[0];
+                        m[1] -= node.coordinates_m.canonical_value()[1] * v[0];
                         m
                     },
                 );
@@ -389,16 +393,24 @@ fn modal_continuum(quadratic: bool) {
             &reduced,
             WAVE_SPEED,
             &ModalHarmonicLoad {
-                real: reduced
-                    .project_vector(assembly.real.operator.load())
+                real: (reduced)
+                    .load_field(assembly.real.operator.load())
+                    .and_then(|field| (reduced).project_load(&field))
                     .unwrap(),
-                imaginary: reduced.project_vector(&assembly.imaginary_load).unwrap(),
+                imaginary: (reduced)
+                    .load_field(&assembly.imaginary_load)
+                    .and_then(|field| (reduced).project_load(&field))
+                    .unwrap(),
             },
         )
         .unwrap();
-        let real = reduced.expand_vector(&response.displacement_real).unwrap();
-        let imaginary = reduced
-            .expand_vector(&response.displacement_imaginary)
+        let real = (reduced)
+            .expand_state(&response.displacement_real)
+            .map(|field| field.into_canonical_storage())
+            .unwrap();
+        let imaginary = (reduced)
+            .expand_state(&response.displacement_imaginary)
+            .map(|field| field.into_canonical_storage())
             .unwrap();
         let difference = real
             .iter()

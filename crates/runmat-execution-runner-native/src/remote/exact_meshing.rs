@@ -37,7 +37,7 @@ pub(super) struct CompletedRemoteExactMeshing {
 
 #[derive(Clone)]
 pub(super) enum MeshedGeometryRegions {
-    ImporterAliases(BTreeMap<String, PersistentEntityId>),
+    PersistentEntities(BTreeMap<String, PersistentEntityId>),
     Materialized(runmat_geometry_ops::ResolvedGeometryRegions),
 }
 
@@ -370,37 +370,33 @@ pub(super) async fn execute_for_composition(
         .map(|region| region.region_id.clone())
         .collect::<BTreeSet<_>>();
     validate_source_entity_bijection("region", &source_region_ids, &meshed_region_ids)?;
-    let region_aliases = source_aliases(&source_edge_ids, &source_face_ids, &source_region_ids)?;
+    let region_aliases = source_identities(&source_edge_ids, &source_face_ids, &source_region_ids)?;
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
         CompletedRemoteExactMeshing {
             document: admission.document,
-            regions: MeshedGeometryRegions::ImporterAliases(region_aliases),
+            regions: MeshedGeometryRegions::PersistentEntities(region_aliases),
             materialization: None,
             result,
         },
     )))
 }
 
-fn source_aliases(
+fn source_identities(
     edges: &BTreeMap<u64, PersistentEntityId>,
     faces: &BTreeMap<u64, PersistentEntityId>,
     regions: &BTreeMap<u64, PersistentEntityId>,
 ) -> NativeExecutionResult<BTreeMap<String, PersistentEntityId>> {
-    let mut aliases = BTreeMap::new();
-    for (prefix, identities) in [("edge", edges), ("face", faces), ("solid", regions)] {
-        for (index, identity) in identities {
-            if aliases
-                .insert(
-                    format!("{prefix}_{:06}", index.saturating_add(1)),
-                    identity.clone(),
-                )
-                .is_some()
-            {
-                return Err(protocol("geometry region aliases are not unique"));
-            }
-        }
-    }
-    Ok(aliases)
+    edges
+        .values()
+        .chain(faces.values())
+        .chain(regions.values())
+        .map(|entity| {
+            entity
+                .analysis_selection_id()
+                .map(|key| (key, entity.clone()))
+                .map_err(protocol)
+        })
+        .collect()
 }
 
 fn package_completed(

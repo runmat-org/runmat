@@ -179,7 +179,7 @@ pub(crate) fn realize_with_fields(
                     PhysicalSignal::Displacement(signal) => Some(signal),
                     _ => None,
                 },
-                |value| value.meters,
+                |value| value.canonical_value(),
                 &mut applied_conditions,
             )?,
             InitialCondition::Velocity(condition) => apply_condition(
@@ -198,7 +198,7 @@ pub(crate) fn realize_with_fields(
                     PhysicalSignal::Velocity(signal) => Some(signal),
                     _ => None,
                 },
-                |value| value.meters_per_second,
+                |value| value.canonical_value(),
                 &mut applied_conditions,
             )?,
             InitialCondition::AngularVelocity(condition) => apply_condition(
@@ -217,7 +217,7 @@ pub(crate) fn realize_with_fields(
                     PhysicalSignal::AngularVelocity(signal) => Some(signal),
                     _ => None,
                 },
-                |value| value.radians_per_second,
+                |value| value.canonical_value(),
                 &mut applied_conditions,
             )?,
             _ => {

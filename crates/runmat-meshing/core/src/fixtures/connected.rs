@@ -20,7 +20,10 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
     artifact.topology.nodes.push(SolverMeshNode {
         node_id: centroid_id,
         stable_identity: StableDigest::from_bytes([42; 32]),
-        coordinates_m: [0.25, 0.25, 0.25],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.25, 0.25, 0.25,
+            ]),
         provenance: parent.provenance.clone(),
         exact_parameters: Vec::new(),
     });
@@ -147,7 +150,9 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
                 for (face_index, source_face_id) in source_faces {
                     provenance.push(source_face_id.clone());
                     let midpoint = std::array::from_fn::<_, 3, _>(|axis| {
-                        (endpoints[0].coordinates_m[axis] + endpoints[1].coordinates_m[axis]) * 0.5
+                        (endpoints[0].coordinates_m.canonical_value()[axis]
+                            + endpoints[1].coordinates_m.canonical_value()[axis])
+                            * 0.5
                     });
                     let evaluator_uv = match face_index {
                         0 | 3 => [midpoint[0], midpoint[1]],
@@ -171,9 +176,14 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
                 stable_identity: solver_midside_node_identity(
                     endpoints.map(|node| node.stable_identity),
                 ),
-                coordinates_m: std::array::from_fn(|axis| {
-                    (endpoints[0].coordinates_m[axis] + endpoints[1].coordinates_m[axis]) * 0.5
-                }),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(std::array::from_fn(|axis| {
+                    (endpoints[0].coordinates_m.canonical_value()[axis]
+                        + endpoints[1].coordinates_m.canonical_value()[axis])
+                        * 0.5
+                })),
                 provenance,
                 exact_parameters,
             });

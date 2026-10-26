@@ -2,7 +2,7 @@ use runmat_geometry_core::{GeometryFeatureGraph, GeometryFeatureOperation};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::args::{at_least, exactly, scalar, transform, vector3};
+use super::args::{at_least, exactly, length, position, transform, vector3};
 use super::codec::feature_value;
 use super::combine::{append_operation, unary_operation};
 use crate::BuiltinResult;
@@ -18,9 +18,9 @@ pub async fn geometry_box_builtin(args: crate::call::BuiltinArguments) -> Builti
     let args = exactly(builtin, args, 3)?;
     primitive(
         GeometryFeatureOperation::Box {
-            width_m: scalar(&args[0], builtin, "width")?,
-            depth_m: scalar(&args[1], builtin, "depth")?,
-            height_m: scalar(&args[2], builtin, "height")?,
+            width_m: length(&args[0], builtin, "width")?,
+            depth_m: length(&args[1], builtin, "depth")?,
+            height_m: length(&args[2], builtin, "height")?,
         },
         builtin,
     )
@@ -39,10 +39,10 @@ pub async fn geometry_cylinder_builtin(
     let args = exactly(builtin, args, 4)?;
     primitive(
         GeometryFeatureOperation::Cylinder {
-            radius_m: scalar(&args[0], builtin, "radius")?,
-            height_m: scalar(&args[1], builtin, "height")?,
+            radius_m: length(&args[0], builtin, "radius")?,
+            height_m: length(&args[1], builtin, "height")?,
             axis: vector3(&args[2], builtin, "axis")?,
-            origin_m: vector3(&args[3], builtin, "origin")?,
+            origin_m: position(&args[3], builtin, "origin")?,
         },
         builtin,
     )
@@ -59,8 +59,8 @@ pub async fn geometry_sphere_builtin(args: crate::call::BuiltinArguments) -> Bui
     let args = exactly(builtin, args, 2)?;
     primitive(
         GeometryFeatureOperation::Sphere {
-            radius_m: scalar(&args[0], builtin, "radius")?,
-            center_m: vector3(&args[1], builtin, "center")?,
+            radius_m: length(&args[0], builtin, "radius")?,
+            center_m: position(&args[1], builtin, "center")?,
         },
         builtin,
     )

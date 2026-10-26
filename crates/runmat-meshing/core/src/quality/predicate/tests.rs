@@ -139,7 +139,7 @@ fn circumsphere_radius_is_translation_invariant() {
     ];
     let translated = tetrahedron.map(|point| point.map(|coordinate| coordinate + 1.0e12));
     let tolerance = MeshingTolerance {
-        absolute_m: 0.0,
+        absolute_m: runmat_types::physical::Length::new(0.0),
         relative: 0.0,
     };
     let (_, original_radius_squared) = tetrahedron_circumsphere(tetrahedron, tolerance).unwrap();

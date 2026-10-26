@@ -1828,16 +1828,23 @@ impl PlotOverlay {
             self.draw_geometry_scalar_legend(ui, centered_plot_rect, legend, config.font_scale);
         }
 
+        // Physical annotations belong to the model, even when the host supplies
+        // its own CAD toolbar (browser and embedded native surfaces).
+        let annotations = plot_renderer
+            .geometry_screen_annotations([centered_plot_rect.width(), centered_plot_rect.height()]);
+        self.cad_overlay.render_annotation_labels(
+            ui.ctx(),
+            centered_plot_rect,
+            &annotations,
+            config.font_scale,
+        );
+
         // Result scenes have their own toolbar and mesh-info popover. The CAD
         // strip duplicates those controls and overlaps the scalar legend.
         if let Some(overlay) = plot_renderer
             .geometry_overlay()
             .filter(|overlay| config.show_cad_overlay && overlay.scalar_legend.is_none())
         {
-            let annotations = plot_renderer.geometry_screen_annotations([
-                centered_plot_rect.width(),
-                centered_plot_rect.height(),
-            ]);
             let actions = self.cad_overlay.render(CadOverlayRenderInput {
                 ctx: ui.ctx(),
                 plot_rect: centered_plot_rect,
@@ -1846,7 +1853,6 @@ impl PlotOverlay {
                 xray_enabled: plot_renderer.geometry_xray_enabled(),
                 owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
                 font_scale: config.font_scale,
-                annotations: &annotations,
             });
             self.cad_actions.merge(actions);
         } else {

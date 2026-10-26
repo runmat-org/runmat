@@ -16,7 +16,7 @@ pub(super) fn validate_degenerate_geometry(
     transform: GeometryTransform,
     absolute_error_m: f64,
 ) -> Result<(), SharedCurveError> {
-    let anchor = curve.nodes[0].coordinates_m;
+    let anchor = curve.nodes[0].coordinates_m.canonical_value();
     for index in 0..=8 {
         control
             .checkpoint()
@@ -27,7 +27,7 @@ pub(super) fn validate_degenerate_geometry(
             .map_err(|error| geometry_error(edge, error))?;
         let point = curves
             .point(&edge.curve_evaluator_id, parameter, control)
-            .map(|point| transform.transform_point(point))
+            .map(|point| transform.transform_point(point.canonical_value()))
             .map_err(|error| geometry_error(edge, error))?;
         if length(sub(point, anchor)) > absolute_error_m {
             return Err(mismatch(

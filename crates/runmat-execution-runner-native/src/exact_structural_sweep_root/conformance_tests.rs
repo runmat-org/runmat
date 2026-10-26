@@ -1468,7 +1468,10 @@ pub(crate) fn box_modal_response_spectrum_workloads(
     };
     let spectrum = ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("box-global-x".into()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0e-3, 1.0e8]),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![1.0e-3, 1.0e8])),
         ordinates: runmat_analysis_core::NumericalDataSource::authored(
             vec![1.0e-3, 1.0e-3],
             "sha256:box-global-x",
@@ -1562,7 +1565,9 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
     modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
     let excitation = runmat_analysis_core::RandomExcitationSpectrum {
         excitation_id: runmat_analysis_core::RandomExcitationId("box-broadband-x".into()),
-        frequencies_hz: vec![1.0e-3, 100.0, 1_000.0, 10_000.0],
+        frequencies_hz: runmat_types::physical::Quantity::new(vec![
+            1.0e-3, 100.0, 1_000.0, 10_000.0,
+        ]),
         channels: vec![runmat_analysis_core::RandomExcitationChannel {
             channel_id: runmat_analysis_core::RandomExcitationChannelId("base-x".into()),
             quantity: runmat_analysis_core::RandomExcitationQuantity::BaseAcceleration,
@@ -1572,14 +1577,20 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
             },
         }],
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
-            vec![runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+            vec![
+                runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+                    &runmat_types::physical::Quantity::new([2.5e-4])
+                );
+                4
+            ],
             "sha256:box-broadband-x",
         ),
         convention: runmat_analysis_core::SpectralDensityConvention::OneSidedPerHertz,
         interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
         evidence: runmat_analysis_core::RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     };
@@ -1743,7 +1754,8 @@ fn boundary_centroid(
             .iter()
             .find(|node| node.node_id == *node_id)
             .expect("boundary node must exist")
-            .coordinates_m;
+            .coordinates_m
+            .canonical_value();
         for axis in 0..3 {
             centroid[axis] += coordinates[axis];
         }
@@ -1761,13 +1773,13 @@ fn coarse_box_request() -> MeshingRequest {
     )
     .unwrap();
     request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
-    request.quality.curve.maximum_chordal_deviation_m = 0.1;
+    request.quality.curve.maximum_chordal_deviation_m = runmat_types::physical::Length::new(0.1);
     request.quality.curve.maximum_tangent_change_degrees = 180.0;
     request.quality.curve.minimum_metric_edge_length = 0.01;
     request.quality.curve.maximum_metric_edge_length = 10.0;
     request.quality.surface.minimum_metric_angle_degrees = 0.1;
     request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
-    request.quality.surface.maximum_chordal_deviation_m = 0.1;
+    request.quality.surface.maximum_chordal_deviation_m = runmat_types::physical::Length::new(0.1);
     request.quality.surface.maximum_normal_deviation_degrees = 180.0;
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;

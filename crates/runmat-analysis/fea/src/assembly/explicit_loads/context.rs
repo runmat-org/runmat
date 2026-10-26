@@ -14,5 +14,6 @@ pub(super) struct ExplicitLoadDomain<'a> {
     pub topology: &'a CanonicalStructuralNodeSpace,
     pub authored_node_indices: &'a BTreeMap<u32, usize>,
     pub layout: &'a StructuralDofLayout,
-    pub coordinates_m: &'a [[f64; 3]],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, &'a [[f64; 3]]>,
 }

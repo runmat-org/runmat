@@ -48,7 +48,17 @@ fn constant_metric_reuses_only_physically_unchanged_cells() {
     request.contributions.clear();
     assert_reference(&base, &base, &request, &provenance, 2);
     let mut moved = base.nodes.clone();
-    moved[0].coordinates_m[2] = -0.2;
+    {
+        let quantity_change = -0.2;
+        let quantity_index = 2;
+        let quantity_slot = &mut moved[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     let candidate = build_delaunay_volume_topology_with_regions(
         moved,
         base.tetrahedra
@@ -158,7 +168,7 @@ fn insertion_recomputes_new_cells_and_preserves_original_quality_after_index_shi
             source
                 .vertex_indices
                 .iter()
-                .map(|vertex| base.nodes[*vertex as usize].coordinates_m[axis])
+                .map(|vertex| base.nodes[*vertex as usize].coordinates_m.canonical_value()[axis])
                 .sum::<f64>()
                 / 4.0
         });
@@ -293,7 +303,17 @@ fn local_geometry_change_reuses_unrelated_cells_across_inventory_growth() {
         )
         .unwrap();
         let mut changed = base.nodes.clone();
-        changed[0].coordinates_m[2] = -0.2;
+        {
+            let quantity_change = -0.2;
+            let quantity_index = 2;
+            let quantity_slot = &mut changed[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         let candidate = build_delaunay_volume_topology_with_regions(
             changed,
             cells,

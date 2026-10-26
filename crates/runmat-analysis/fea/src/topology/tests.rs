@@ -11,12 +11,15 @@ fn oblique_both_order_volume_quadrature_reproduces_all_world_affine_gradients() 
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(order);
         for node in &mut mesh.topology.nodes {
-            let [x, y, z] = node.coordinates_m;
-            node.coordinates_m = [
+            let [x, y, z] = node.coordinates_m.canonical_value();
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
                 2.0 * x + y + 3.0 * z + 0.3,
                 4.0 * y + z - 0.7,
                 x + 2.0 * y + 5.0 * z + 1.2,
-            ];
+            ]);
         }
         mesh.seal_canonical_digest().unwrap();
         mesh.validate().unwrap();
@@ -26,7 +29,7 @@ fn oblique_both_order_volume_quadrature_reproduces_all_world_affine_gradients() 
                 for world_axis in 0..3 {
                     for axis in 0..3 {
                         let actual = element.node_indices.iter().zip(point.physical_shape_gradients())
-                            .map(|(&node, gradient)| projection.nodes[node].coordinates_m[world_axis] * gradient[axis])
+                            .map(|(&node, gradient)| projection.nodes[node].coordinates_m.canonical_value()[world_axis] * gradient[axis])
                             .sum::<f64>();
                         let expected = if axis == world_axis { 1.0 } else { 0.0 };
                         assert!((actual - expected).abs() < 1e-12, "order={order:?}, world_axis={world_axis}, axis={axis}, actual={actual}");
@@ -47,7 +50,10 @@ fn curved_boundary_face_rejects_a_folded_signed_jacobian() {
     // This mild shift leaves every seven-point Dunavant sample positive, but
     // reverses signed area close to the u=1 corner (q(1,0) = -0.04).
     let midside_index = projected_face.node_indices[3];
-    nodes[midside_index].coordinates_m = [0.76, 0.0, 0.0];
+    nodes[midside_index].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0.76, 0.0, 0.0]);
 
     let error = project_boundary_face(
         face,
@@ -108,7 +114,7 @@ fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
                 .iter()
                 .zip(&projection.elements[0].node_indices)
                 .fold([0.0; 3], |mut sum, (gradient, &node_index)| {
-                    let x = projection.nodes[node_index].coordinates_m[0];
+                    let x = projection.nodes[node_index].coordinates_m.canonical_value()[0];
                     for axis in 0..3 {
                         sum[axis] += gradient[axis] * x;
                     }
@@ -142,7 +148,7 @@ fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
             .map(|(normal, direction)| normal * direction)
             .sum::<f64>();
         assert!(inward_dot < 0.0);
-        assert!(face.area_m2 > 0.0);
+        assert!(face.area_m2.canonical_value() > 0.0);
         assert_eq!(face.node_indices.len(), 6);
     }
     assert!(projection
@@ -159,7 +165,17 @@ fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
 #[test]
 fn projection_rejects_a_substituted_mesh_digest() {
     let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    mesh.topology.nodes[0].coordinates_m[0] += 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
 
     let error = AnalysisProjection::derive(&mesh).unwrap_err();
 

@@ -103,10 +103,10 @@ pub(super) fn grow(
                         continue;
                     }
                     let points = [
-                        topology.node(face[0]).coordinates_m,
-                        topology.node(face[1]).coordinates_m,
-                        topology.node(face[2]).coordinates_m,
-                        node.coordinates_m,
+                        topology.node(face[0]).coordinates_m.canonical_value(),
+                        topology.node(face[1]).coordinates_m.canonical_value(),
+                        topology.node(face[2]).coordinates_m.canonical_value(),
+                        node.coordinates_m.canonical_value(),
                     ];
                     let score = crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(
                         points,

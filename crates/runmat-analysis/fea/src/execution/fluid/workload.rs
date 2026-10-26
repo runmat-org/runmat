@@ -256,7 +256,7 @@ impl FluidSteadyWorkload {
                     "transient conjugate heat transfer needs a uniform whole-model initial temperature",
                 ));
             };
-            if found.replace(t.kelvin).is_some() || !t.kelvin.is_finite() || t.kelvin <= 0.0 {
+            if found.replace(t.canonical_value()).is_some() || !t.canonical_value().is_finite() || t.canonical_value() <= 0.0 {
                 return Err(invalid("one finite initial temperature"));
             }
         }
@@ -487,14 +487,14 @@ impl FluidSteadyWorkload {
                 super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
             let times = schedule.points_s();
             let first =
-                source.conjugate_heat_at(self, &flow.face_volume_flux_m3_per_s, times[0])?;
+                source.conjugate_heat_at(self, flow.face_volume_flux_m3_per_s.canonical_values(), times[0])?;
             let mut state = first.uniform_state(self.initial_temperature()?);
             drop(first);
             let mut steps = Vec::with_capacity(times.len() - 1);
             let mut departure = state.clone();
             for window in times.windows(2) {
                 let problem =
-                    source.conjugate_heat_at(self, &flow.face_volume_flux_m3_per_s, window[1])?;
+                    source.conjugate_heat_at(self, flow.face_volume_flux_m3_per_s.canonical_values(), window[1])?;
                 let next = problem
                     .step_backward_euler(&state, window[1] - window[0])
                     .map_err(invalid)?;
@@ -521,7 +521,7 @@ impl FluidSteadyWorkload {
         if self.coupling() == FluidCoupling::ConjugateHeat {
             let flow = source.problem(self)?.solve().map_err(invalid)?;
             let energy = source
-                .conjugate_heat(self, &flow.face_volume_flux_m3_per_s)?
+                .conjugate_heat(self, flow.face_volume_flux_m3_per_s.canonical_values())?
                 .solve()
                 .map_err(invalid)?;
             return FluidSteadySolverResult::from_conjugate_heat(self, &source, flow, energy);

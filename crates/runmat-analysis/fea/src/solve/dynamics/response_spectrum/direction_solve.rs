@@ -196,7 +196,7 @@ pub(super) fn solve_spectrum_direction(
             .map_err(FeaRunError::Solve)?
             .to_owned(),
         direction,
-        damping_ratio,
+        damping_ratio: runmat_types::physical::DampingRatio::new(damping_ratio),
         modal_combination: spectrum.modal_combination,
         rigid_response_policy: spectrum.rigid_response,
         rigid_coefficients,

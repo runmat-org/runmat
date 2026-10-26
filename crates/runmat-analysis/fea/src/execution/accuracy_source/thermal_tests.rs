@@ -57,10 +57,10 @@ fn conservation_accuracy_does_not_improve_when_power_units_shrink() {
         let power = 2.0_f64.powi(exponent);
         let fraction = 2.0_f64.powi(-20);
         let balance = crate::contracts::ThermalEnergyBalance::from_powers(
-            power,
-            0.0,
-            power * (1.0 - fraction),
-            0.0,
+            runmat_types::physical::Power::new(power),
+            runmat_types::physical::Power::new(0.0),
+            runmat_types::physical::Power::new(power * (1.0 - fraction)),
+            runmat_types::physical::Power::new(0.0),
         );
         let receipt = receipt_with_energy(ElementOrder::Tet4, Some(balance));
         let source = AccuracySourceReceipt::from_canonical_bytes(

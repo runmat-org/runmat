@@ -260,7 +260,9 @@ pub(super) fn execute_thermal_with_options(
             interface_node_ids: thermal_run.interface_node_ids,
             interface_temperature_snapshots: thermal_run.interface_temperature_snapshots,
             residual_norms: thermal_run.residual_norms,
-            reference_temperature_k: thermal_run.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                thermal_run.reference_temperature_k.canonical_value(),
+            ),
             initial_state: thermal_run.initial_state,
         }),
         transient_results: None,

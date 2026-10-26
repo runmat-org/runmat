@@ -3,6 +3,7 @@
 //! including arity and scalar conversion.
 
 use runmat_geometry_core::GeometryScalarExpression;
+use runmat_types::physical::QuantityKind;
 use runmat_value::Value;
 
 use super::invalid;
@@ -43,14 +44,10 @@ pub(super) fn literal(value: f64) -> GeometryScalarExpression {
 /// Real numeric scalar: `double`, `single`, or an exactly representable
 /// integer-class value. Logical, text, complex, and multi-element values are
 /// rejected. Range checks belong to the feature-graph validator.
-pub(super) fn scalar(
-    value: &Value,
-    builtin: &'static str,
-    name: &str,
-) -> BuiltinResult<GeometryScalarExpression> {
+fn real_scalar(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<f64> {
     let values = numeric_values(value, builtin, name)?;
     match values.as_slice() {
-        [value] => Ok(literal(*value)),
+        [value] => Ok(*value),
         _ => Err(invalid(
             builtin,
             format!("{name} must be a real numeric scalar"),
@@ -58,16 +55,68 @@ pub(super) fn scalar(
     }
 }
 
+/// Public generated-geometry builtins accept canonical SI numerical MATLAB
+/// values. The physical role is explicit before an authored graph is returned.
+pub(super) fn physical(
+    value: f64,
+    kind: QuantityKind,
+    builtin: &'static str,
+) -> BuiltinResult<GeometryScalarExpression> {
+    let descriptor = runmat_types::physical::DynamicDimension::try_with_angle(
+        kind.dimension(),
+        kind.angle_power(),
+        Some(kind),
+    )
+    .map_err(|error| invalid(builtin, error.to_string()))?;
+    let value = runmat_types::physical::DimensionedScalar::try_from_descriptor(descriptor, value)
+        .map_err(|error| invalid(builtin, error.to_string()))?;
+    Ok(GeometryScalarExpression::Canonical { value })
+}
+
+/// Canonical length scalar in metres.
+pub(super) fn length(
+    value: &Value,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<GeometryScalarExpression> {
+    physical(real_scalar(value, builtin, name)?, QuantityKind::Length, builtin)
+}
+
+/// Canonical angle scalar in radians.
+pub(super) fn angle(
+    value: &Value,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<GeometryScalarExpression> {
+    physical(real_scalar(value, builtin, name)?, QuantityKind::Angle, builtin)
+}
+
+/// Canonical position in metres: three length components.
+pub(super) fn position(
+    value: &Value,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<[GeometryScalarExpression; 3]> {
+    let [x, y, z] = real_vector3(value, builtin, name)?;
+    Ok([
+        physical(x, QuantityKind::Length, builtin)?,
+        physical(y, QuantityKind::Length, builtin)?,
+        physical(z, QuantityKind::Length, builtin)?,
+    ])
+}
+
+fn real_vector3(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<[f64; 3]> {
+    numeric_values(value, builtin, name)?
+        .try_into()
+        .map_err(|_| invalid(builtin, format!("{name} must contain exactly three values")))
+}
+
 pub(super) fn vector3(
     value: &Value,
     builtin: &'static str,
     name: &str,
 ) -> BuiltinResult<[GeometryScalarExpression; 3]> {
-    let values = numeric_values(value, builtin, name)?;
-    let values: [f64; 3] = values
-        .try_into()
-        .map_err(|_| invalid(builtin, format!("{name} must contain exactly three values")))?;
-    Ok(values.map(literal))
+    Ok(real_vector3(value, builtin, name)?.map(literal))
 }
 
 /// A MATLAB 4-by-4 homogeneous affine transform (`p' = T(1:3,1:3)*p +
@@ -101,7 +150,18 @@ pub(super) fn transform(
             format!("{name} must have final row [0 0 0 1]"),
         ));
     }
-    Ok(row_major.into_iter().map(literal).collect())
+    // The translation column (row-major indices 3, 7, 11) is a length in metres.
+    row_major
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if matches!(index, 3 | 7 | 11) {
+                physical(value, QuantityKind::Length, builtin)
+            } else {
+                Ok(literal(value))
+            }
+        })
+        .collect()
 }
 
 pub(super) fn text(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<String> {

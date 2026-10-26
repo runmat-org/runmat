@@ -97,15 +97,13 @@ pub(crate) fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -
     match pattern {
         OperationTypePattern::Any => true,
         OperationTypePattern::NumericScalar => value.is_numeric(),
-        OperationTypePattern::Quantity(dimension) => {
-            *value == FeaType::Quantity((*dimension).into())
-        }
+        OperationTypePattern::Quantity(dimension) => (*value).is_quantity((*dimension).into()),
         OperationTypePattern::VectorQuantity { dimension, length } => matches!(
             value,
             FeaType::Vector {
                 element,
                 length: value_length,
-            } if element.as_ref() == &FeaType::Quantity((*dimension).into())
+            } if element.is_quantity(*dimension)
                 && length.is_none_or(|expected| *value_length == Some(expected))
         ),
         OperationTypePattern::IntegerScalar | OperationTypePattern::Size => {
@@ -186,7 +184,7 @@ pub(super) fn operation_output_type(
         }
         OperationQuantityRule::RequiredInput { input, dimension } => {
             if !argument_value(arguments, input)
-                .is_some_and(|value| value.value_type == FeaType::Quantity(dimension.into()))
+                .is_some_and(|value| (value.value_type).is_quantity(dimension.into()))
             {
                 diagnostics.push(FeaDiagnostic::error(
                     "fea.semantic.operation_quantity",

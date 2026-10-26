@@ -17,15 +17,29 @@ pub(super) fn scalar_value<Q>(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<InitialValue<Q>> {
     match value_source(declaration, body, diagnostics)? {
-        ValueSource::Uniform(expression) => constant_scalar(
-            declaration,
-            expression,
-            "uniform",
-            contract.dimension,
-            diagnostics,
-        )
-        .map(construct)
-        .map(InitialValue::Uniform),
+        ValueSource::Uniform(expression) => {
+            if expression
+                .validate_quantity_kind(contract.quantity)
+                .is_err()
+            {
+                diagnostic(
+                    declaration,
+                    expression.span,
+                    "initial values require the declared absolute or difference quantity",
+                    diagnostics,
+                );
+                return None;
+            }
+            constant_scalar(
+                declaration,
+                expression,
+                "uniform",
+                contract.dimension,
+                diagnostics,
+            )
+            .map(construct)
+            .map(InitialValue::Uniform)
+        }
         ValueSource::Sample(body) => sample(
             declaration,
             body,
@@ -237,9 +251,9 @@ fn constant_scalar(
 ) -> Option<f64> {
     let compatible = if dimension == PhysicalDimension::DIMENSIONLESS {
         matches!(expression.value_type, FeaType::Integer | FeaType::Real)
-            || expression.value_type == FeaType::Quantity(dimension)
+            || (expression.value_type).is_quantity((dimension).into())
     } else {
-        expression.value_type == FeaType::Quantity(dimension)
+        (expression.value_type).is_quantity((dimension).into())
     };
     if compatible {
         scalar(expression)

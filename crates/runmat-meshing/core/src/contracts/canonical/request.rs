@@ -70,14 +70,16 @@ pub struct SurfaceQualityTargets {
     pub minimum_metric_edge_length: f64,
     pub minimum_metric_angle_degrees: f64,
     pub maximum_physical_aspect_ratio: f64,
-    pub maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_normal_deviation_degrees: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CurveQualityTargets {
-    pub maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_tangent_change_degrees: f64,
     pub minimum_metric_edge_length: f64,
     pub maximum_metric_edge_length: f64,
@@ -88,7 +90,7 @@ impl CurveQualityTargets {
         for (field, value) in [
             (
                 "maximum curve chordal deviation",
-                self.maximum_chordal_deviation_m,
+                self.maximum_chordal_deviation_m.canonical_value(),
             ),
             (
                 "maximum curve tangent change",
@@ -105,7 +107,7 @@ impl CurveQualityTargets {
         ] {
             validate_finite(field, value)?;
         }
-        if self.maximum_chordal_deviation_m <= 0.0
+        if self.maximum_chordal_deviation_m.canonical_value() <= 0.0
             || !(0.0..=180.0).contains(&self.maximum_tangent_change_degrees)
             || self.maximum_tangent_change_degrees == 0.0
             || self.minimum_metric_edge_length <= 0.0
@@ -137,7 +139,7 @@ impl SurfaceQualityTargets {
             ),
             (
                 "maximum chordal deviation",
-                self.maximum_chordal_deviation_m,
+                self.maximum_chordal_deviation_m.canonical_value(),
             ),
             (
                 "maximum normal deviation",
@@ -150,7 +152,7 @@ impl SurfaceQualityTargets {
             || self.minimum_metric_edge_length == 0.0
             || !(0.0..60.0).contains(&self.minimum_metric_angle_degrees)
             || self.maximum_physical_aspect_ratio < 1.0
-            || self.maximum_chordal_deviation_m <= 0.0
+            || self.maximum_chordal_deviation_m.canonical_value() <= 0.0
             || !(0.0..=180.0).contains(&self.maximum_normal_deviation_degrees)
         {
             return Err(MeshingContractError::invalid(

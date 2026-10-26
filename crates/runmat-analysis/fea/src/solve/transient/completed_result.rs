@@ -57,7 +57,7 @@ pub(crate) fn reconstruct_completed_transient_solve(
     }
     let time_points_s = samples
         .iter()
-        .map(|sample| sample.time_s)
+        .map(|sample| sample.time_s.canonical_value())
         .collect::<Vec<_>>();
     let residual_norms = samples
         .iter()
@@ -65,27 +65,27 @@ pub(crate) fn reconstruct_completed_transient_solve(
         .collect::<Vec<_>>();
     let strain_energy_snapshots = samples
         .iter()
-        .map(|sample| sample.strain_energy_j)
+        .map(|sample| sample.strain_energy_j.canonical_value())
         .collect::<Vec<_>>();
     let kinetic_energy_snapshots = samples
         .iter()
-        .map(|sample| sample.kinetic_energy_j)
+        .map(|sample| sample.kinetic_energy_j.canonical_value())
         .collect::<Vec<_>>();
     let external_work_j = samples
         .iter()
-        .map(|sample| sample.applied_load_work_j)
+        .map(|sample| sample.applied_load_work_j.canonical_value())
         .collect::<Vec<_>>();
     let support_work_j = samples
         .iter()
-        .map(|sample| sample.support_work_j)
+        .map(|sample| sample.support_work_j.canonical_value())
         .collect::<Vec<_>>();
     let damping_dissipation_j = samples
         .iter()
-        .map(|sample| sample.damping_dissipation_j)
+        .map(|sample| sample.damping_dissipation_j.canonical_value())
         .collect::<Vec<_>>();
     let energy_balance_residual_j = samples
         .iter()
-        .map(|sample| sample.energy_balance_residual_j)
+        .map(|sample| sample.energy_balance_residual_j.canonical_value())
         .collect::<Vec<_>>();
     let relative_energy_balance_error = samples
         .iter()
@@ -146,10 +146,10 @@ pub(crate) fn reconstruct_completed_transient_solve(
         integration_intervals: Vec::new(),
         strain_energy_snapshots,
         kinetic_energy_snapshots,
-        external_work_j,
-        support_work_j,
-        damping_dissipation_j,
-        energy_balance_residual_j,
+        external_work_j: runmat_types::physical::Quantity::new(external_work_j),
+        support_work_j: runmat_types::physical::Quantity::new(support_work_j),
+        damping_dissipation_j: runmat_types::physical::Quantity::new(damping_dissipation_j),
+        energy_balance_residual_j: runmat_types::physical::Quantity::new(energy_balance_residual_j),
         relative_energy_balance_error,
         dynamic_balance_snapshots,
     })

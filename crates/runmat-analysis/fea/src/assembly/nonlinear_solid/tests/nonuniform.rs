@@ -5,7 +5,7 @@ use super::*;
 fn displacement(mesh: &SolverMeshArtifact, initial: &AssemblySummary, stage: usize) -> Vec<f64> {
     let mut u = vec![0.0; initial.dof_count];
     for (node, point) in mesh.topology.nodes.iter().enumerate() {
-        let [x, y, z] = point.coordinates_m;
+        let [x, y, z] = point.coordinates_m.canonical_value();
         let values = match stage {
             0 => [0.024 * x + 0.016 * x * x, -0.006 * x * y, 0.004 * x * z],
             1 => [0.012 * x - 0.008 * x * x, 0.023 * x * y, -0.017 * x * z],

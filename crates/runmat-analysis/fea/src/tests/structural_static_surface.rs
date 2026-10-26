@@ -78,6 +78,7 @@ fn solved_tet4_and_tet10_surface_loads_preserve_global_balance_and_work_scaling(
                         .find(|node| node.node_id == *node_id)
                         .unwrap()
                         .coordinates_m
+                        .canonical_value()
                 })
                 .collect::<Vec<_>>();
             let u = std::array::from_fn::<_, 3, _>(|axis| points[1][axis] - points[0][axis]);
@@ -151,7 +152,7 @@ fn solved_tet4_and_tet10_surface_loads_preserve_global_balance_and_work_scaling(
                 for axis in 0..3 {
                     reaction_force[axis] += components[axis];
                 }
-                let [x, y, z] = node.coordinates_m;
+                let [x, y, z] = node.coordinates_m.canonical_value();
                 reaction_moment[0] += y * components[2] - z * components[1];
                 reaction_moment[1] += z * components[0] - x * components[2];
                 reaction_moment[2] += x * components[1] - y * components[0];

@@ -11,13 +11,13 @@ fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         gauge,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         gauge + voltage,
     );
     ElectricalStaticWorkload {
@@ -36,11 +36,11 @@ fn thermal() -> ThermalWorkload {
         reference_temperature: Temperature::new(300.0),
     });
     model.materials[0].thermal = Some(MaterialThermalModel {
-        reference_temperature_k: 300.0,
-        modulus_temp_coeff_per_k: 0.0,
-        conductivity_w_per_mk: 1.0,
-        specific_heat_j_per_kgk: 1.0,
-        expansion_coefficient_per_k: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(300.0),
+        modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(0.0),
+        conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(1.0),
+        specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(1.0),
+        expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(0.0),
     });
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_steady("heat")]);
@@ -50,7 +50,7 @@ fn thermal() -> ThermalWorkload {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: face.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                     value: PrescribedValue::Constant(Temperature::new(300.0)),
                 },
             }));
@@ -90,7 +90,8 @@ fn retained_conduction_drives_independent_quadratic_thermal_patch_and_power() {
                     .iter()
                     .position(|id| *id == terminal.ordered_node_ids[0])
                     .unwrap();
-                cold.response().potential_v[index] * terminal.outward_flux
+                cold.response().potential_v.canonical_values()[index]
+                    * terminal.outward_flux.canonical_value()
             })
             .sum::<f64>();
         assert!((terminal_power - 12.0).abs() < 1e-8);
@@ -104,8 +105,8 @@ fn retained_conduction_drives_independent_quadratic_thermal_patch_and_power() {
         .unwrap();
         assert!((completion.transfer.power_w() - 12.0).abs() < 1e-8);
         let balance = completion.thermal.energy_balances[0];
-        assert!((balance.applied_power_w - 12.0).abs() < 1e-8);
-        assert!((balance.prescribed_boundary_power_w - 12.0).abs() < 1e-8);
+        assert!((balance.applied_power_w.canonical_value() - 12.0).abs() < 1e-8);
+        assert!((balance.prescribed_boundary_power_w.canonical_value() - 12.0).abs() < 1e-8);
         assert!(balance.relative_residual < 1e-10);
         let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
         let values = completion.thermal.temperature_snapshots[0]
@@ -116,7 +117,7 @@ fn retained_conduction_drives_independent_quadratic_thermal_patch_and_power() {
             .iter()
             .zip(values)
             .map(|(node, value)| {
-                let x = node.coordinates_m[0];
+                let x = node.coordinates_m.canonical_value()[0];
                 (value - (300.0 + 6.0 * x * (1.0 - x))).abs()
             })
             .fold(0.0_f64, f64::max);
@@ -274,7 +275,7 @@ fn retained_transfer_and_unsupported_compositions_fail_closed() {
         .electrical
         .as_mut()
         .unwrap()
-        .resistive_heating_coefficient = 0.01;
+        .resistive_heating_coefficient = runmat_types::physical::InverseTemperature::new(0.01);
     assert!(bind_retained_joule_heat(&feedback, &result, source, &thermal(), &mesh).is_err());
     let mut transient = thermal();
     transient.model.sequence =
@@ -284,7 +285,7 @@ fn retained_transfer_and_unsupported_compositions_fail_closed() {
     let mut external_heat = thermal();
     external_heat.model.boundaries.push(AnalysisBoundary {
         boundary_id: "external_heat".into(),
-        target: RegionTarget::boundary("slab_left"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Constant(HeatFlux::new(1.0)),
         },

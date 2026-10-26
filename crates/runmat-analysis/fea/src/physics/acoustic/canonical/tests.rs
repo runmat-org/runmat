@@ -64,7 +64,7 @@ fn velocity_source(model: &mut AnalysisModel, real: f64, imaginary: f64) {
         .excitations
         .push(ExcitationAction::NormalVelocity(AnalysisExcitation {
             excitation_id: ExcitationId("speaker".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary("slab_left")),
+            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
             frame: CoordinateFrame::BoundaryNormalTangent,
             direction: None,
             distribution: ExcitationDistribution::UniformKinematic,
@@ -96,7 +96,7 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
         for cells in [2, 4, 8] {
             let mesh = slab_mesh(cells);
             let mut model = model();
-            model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+            model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
             if velocity {
                 velocity_source(&mut model, -1.0 / 6.0, -0.4 / 6.0);
             } else {
@@ -109,14 +109,14 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
                     .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                         constraint_id: "left_pressure".into(),
                         kind: AcousticConstraintKind::PrescribedPressure {
-                            target: RegionTarget::boundary("slab_left"),
+                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                             value: PrescribedValue::Signal(SignalId("drive".into())),
                         },
                     }));
             }
             model.boundaries.push(AnalysisBoundary {
                 boundary_id: "matched".into(),
-                target: RegionTarget::boundary("slab_right"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                 operator: BoundaryOperator::AcousticImpedance {
                     impedance: SpecificAcousticImpedance::new(6.0),
                 },
@@ -134,21 +134,26 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
             )
             .unwrap();
             let mut squared = 0.0;
-            for (node, pressure) in result.projection.nodes.iter().zip(&result.pressure_pa) {
-                let phase = k * node.coordinates_m[0];
+            for (node, pressure) in result
+                .projection
+                .nodes
+                .iter()
+                .zip(result.pressure_pa.canonical_values())
+            {
+                let phase = k * node.coordinates_m.canonical_value()[0];
                 let real = phase.cos() + 0.4 * phase.sin();
                 let imaginary = 0.4 * phase.cos() - phase.sin();
                 squared +=
                     (pressure.real - real).powi(2) + (pressure.imaginary - imaginary).powi(2);
             }
-            let error = (squared / result.pressure_pa.len() as f64).sqrt();
+            let error = (squared / result.pressure_pa.canonical_values().len() as f64).sqrt();
             errors.push(error);
             assert!(
                 result.power_relative_error < 1e-8,
                 "power closure {}",
                 result.power_relative_error
             );
-            assert!((result.mean_impedance_loss_w - 1.16 / 12.0).abs() < 0.01);
+            assert!((result.mean_impedance_loss_w.canonical_value() - 1.16 / 12.0).abs() < 0.01);
             if velocity {
                 assert_eq!(result.source_evidence.len(), 1);
                 assert!(result.source_evidence[0].accepted);
@@ -160,7 +165,7 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
                     .projection
                     .elements
                     .iter()
-                    .zip(&result.element_velocity_m_per_s)
+                    .zip(result.element_velocity_m_per_s.canonical_values())
                 {
                     let phase = k * element.centroid_m[0];
                     error_velocity += (value.real[0] - (phase.cos() + 0.4 * phase.sin()) / 6.0)
@@ -187,10 +192,11 @@ pub(super) fn model() -> AnalysisModel {
     model.constraints.clear();
     model.boundaries.clear();
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     let step = ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
@@ -209,7 +215,12 @@ fn canonical_tet4_operators_match_exact_integrals() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
-    let assembly = AcousticAssembly::assemble(projection, &properties, 1.0).unwrap();
+    let assembly = AcousticAssembly::assemble(
+        projection,
+        &properties,
+        runmat_types::physical::AngularFrequency::new(1.0),
+    )
+    .unwrap();
     let gradients = [
         [-1.0, -1.0, -1.0],
         [1.0, 0.0, 0.0],
@@ -225,8 +236,17 @@ fn canonical_tet4_operators_match_exact_integrals() {
                 .sum::<f64>()
                 / 18.0;
             let m = if i == j { 1.0 / 60.0 } else { 1.0 / 120.0 } / 12.0;
-            assert!((assembly.stiffness.get(i, j) - k).abs() < 1e-13);
-            assert!((assembly.mass.get(i, j) - m).abs() < 1e-13);
+            assert!(
+                (assembly
+                    .stiffness
+                    .coefficient(i, j)
+                    .unwrap()
+                    .canonical_value()
+                    - k)
+                    .abs()
+                    < 1e-13
+            );
+            assert!((assembly.mass.coefficient(i, j).unwrap().canonical_value() - m).abs() < 1e-13);
         }
     }
 }
@@ -253,7 +273,7 @@ fn prescribed_pressure_and_impedance_solve_close_power() {
         .iter()
         .find(|face| !face.node_indices.contains(&0))
         .unwrap();
-    let target = RegionTarget::boundary(&pressure_face.provenance[0].source_topology_id);
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&pressure_face.provenance[0].source_topology_id)));
     prescribe(&mut model, target, 1.0);
     let impedance_face = projection
         .boundary_faces
@@ -262,7 +282,7 @@ fn prescribed_pressure_and_impedance_solve_close_power() {
         .unwrap();
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "termination".into(),
-        target: RegionTarget::boundary(&impedance_face.provenance[0].source_topology_id),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&impedance_face.provenance[0].source_topology_id))),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -277,10 +297,11 @@ fn prescribed_pressure_and_impedance_solve_close_power() {
     )
     .unwrap();
     assert!(result.relative_residual < 1e-9);
-    assert!(result.mean_input_power_w > 0.0);
+    assert!(result.mean_input_power_w.canonical_value() > 0.0);
     assert!(result.power_relative_error < 1e-9);
     assert!(result
         .pressure_pa
+        .canonical_values()
         .iter()
         .skip(1)
         .all(|p| p.real == 1.0 && p.imaginary == 0.0));
@@ -301,7 +322,8 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
         ),
         Err(AcousticHarmonicError::InvalidInput(_))
     ));
-    model.materials[0].acoustic.as_mut().unwrap().damping_ratio = 1.5;
+    model.materials[0].acoustic.as_mut().unwrap().damping_ratio =
+        runmat_types::physical::DampingRatio::new(1.5);
     assert!(matches!(
         solve_canonical_harmonic(
             &model,
@@ -349,12 +371,12 @@ fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_
     for cells in [2, 4, 8] {
         let mesh = slab_mesh(cells);
         let mut model = model();
-        model.materials[0].acoustic.as_mut().unwrap().damping_ratio = zeta;
-        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.materials[0].acoustic.as_mut().unwrap().damping_ratio = runmat_types::physical::Quantity::new(zeta);
+        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+        prescribe(&mut model, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 1.0);
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "rigid".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticRigidWall,
         });
         let result = solve_canonical_harmonic(
@@ -374,17 +396,17 @@ fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_
             .projection
             .nodes
             .iter()
-            .zip(&result.pressure_pa)
+            .zip(result.pressure_pa.canonical_values())
             .map(|(node, p)| {
-                let exact = k.mul(C(1.0 - node.coordinates_m[0], 0.0)).cos().div(denominator);
+                let exact = k.mul(C(1.0 - node.coordinates_m.canonical_value()[0], 0.0)).cos().div(denominator);
                 (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
             })
             .sum::<f64>()
-            / result.pressure_pa.len() as f64)
+            / result.pressure_pa.canonical_values().len() as f64)
             .sqrt();
         errors.push(error);
         // The driven end supplies exactly the power the lossy air dissipates.
-        assert!(result.mean_impedance_loss_w > 0.0);
+        assert!(result.mean_impedance_loss_w > runmat_types::physical::Quantity::new(0.0));
         assert!(result.power_relative_error < 1e-9);
     }
     assert!(
@@ -401,11 +423,11 @@ fn rigid_duct_converges_to_independent_standing_wave_without_artificial_loss() {
     for cells in [2, 4, 8] {
         let mesh = slab_mesh(cells);
         let mut model = model();
-        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+        prescribe(&mut model, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 1.0);
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "rigid".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticRigidWall,
         });
         let result = solve_canonical_harmonic(
@@ -424,17 +446,18 @@ fn rigid_duct_converges_to_independent_standing_wave_without_artificial_loss() {
             .projection
             .nodes
             .iter()
-            .zip(&result.pressure_pa)
+            .zip(result.pressure_pa.canonical_values())
             .map(|(node, p)| {
-                (p.real - (k * (1.0 - node.coordinates_m[0])).cos() / k.cos()).powi(2)
+                (p.real - (k * (1.0 - node.coordinates_m.canonical_value()[0])).cos() / k.cos())
+                    .powi(2)
                     + p.imaginary.powi(2)
             })
             .sum::<f64>()
-            / result.pressure_pa.len() as f64)
+            / result.pressure_pa.canonical_values().len() as f64)
             .sqrt();
         errors.push(error);
-        assert!(result.mean_impedance_loss_w.abs() < 1e-14);
-        assert!(result.mean_input_power_w.abs() < 1e-12);
+        assert!(result.mean_impedance_loss_w.canonical_value().abs() < 1e-14);
+        assert!(result.mean_input_power_w.canonical_value().abs() < 1e-12);
         assert!(result.power_relative_error < 1e-9);
     }
     assert!(
@@ -449,32 +472,58 @@ fn straight_and_curved_tet10_preserve_integrals_and_affine_velocity_recovery() {
     for warp in [0.0, 0.1, 0.2] {
         let model = model();
         let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-        mesh.topology.nodes[4].coordinates_m[0] += warp;
+        {
+            let quantity_change = warp;
+            let quantity_index = 0;
+            let quantity_slot = &mut mesh.topology.nodes[4].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         mesh.seal_canonical_digest().unwrap();
         let projection = AnalysisProjection::derive(&mesh).unwrap();
         let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
-        let mut assembly = AcousticAssembly::assemble(projection, &properties, 1.0).unwrap();
+        let mut assembly = AcousticAssembly::assemble(
+            projection,
+            &properties,
+            runmat_types::physical::AngularFrequency::new(1.0),
+        )
+        .unwrap();
         let size = assembly.projection.nodes.len();
         let total_mass = (0..size)
             .flat_map(|i| (0..size).map(move |j| (i, j)))
-            .map(|(i, j)| assembly.mass.get(i, j))
+            .map(|(i, j)| assembly.mass.coefficient(i, j).unwrap().canonical_value())
             .sum::<f64>();
         assert!((total_mass - 1.0 / 72.0).abs() < 1e-12);
         for i in 0..size {
             assert!(
                 (0..size)
-                    .map(|j| assembly.stiffness.get(i, j))
+                    .map(|j| assembly
+                        .stiffness
+                        .coefficient(i, j)
+                        .unwrap()
+                        .canonical_value())
                     .sum::<f64>()
                     .abs()
                     < 1e-11
             );
         }
         for (i, node) in assembly.projection.nodes.iter().enumerate() {
-            let [x, y, z] = node.coordinates_m;
-            assembly.prescribed[i] = Some(crate::excitation::ProjectionScalar {
-                real: 1.0 + 2.0 * x + 3.0 * y - 4.0 * z,
-                imaginary: 0.0,
-            });
+            let [x, y, z] = node.coordinates_m.canonical_value();
+            assembly.prescribed = assembly
+                .prescribed
+                .clone()
+                .try_map_canonical_storage(|mut values| {
+                    values[i] = Some(crate::excitation::ProjectionScalar {
+                        real: 1.0 + 2.0 * x + 3.0 * y - 4.0 * z,
+                        imaginary: 0.0,
+                    });
+                    values
+                })
+                .unwrap();
         }
         let result = super::response::solve(
             assembly,
@@ -483,18 +532,25 @@ fn straight_and_curved_tet10_preserve_integrals_and_affine_velocity_recovery() {
             1e-8,
         )
         .unwrap();
-        let velocity = &result.element_velocity_m_per_s[0];
+        let velocity = &result.element_velocity_m_per_s.canonical_values()[0];
         assert!(velocity.real.iter().all(|v| v.abs() < 1e-12));
         for (actual, expected) in velocity.imaginary.iter().zip([2.0 / 3.0, 1.0, -4.0 / 3.0]) {
             assert!((actual - expected).abs() < 1e-10);
         }
-        assert!(result.element_mean_intensity_w_per_m2[0]
+        assert!(result.element_mean_intensity_w_per_m2.canonical_values()[0]
             .iter()
             .all(|i| i.abs() < 1e-12));
         // Straight unit tetrahedron: E[p²]=3 from barycentric second moments,
         // |grad p|²=29; E=(3/12 + 29/3)/4=119/48 J/m³.
         if warp == 0.0 {
-            assert!((result.element_mean_energy_density_j_per_m3[0] - 119.0 / 48.0).abs() < 1e-12);
+            assert!(
+                (result
+                    .element_mean_energy_density_j_per_m3
+                    .canonical_values()[0]
+                    - 119.0 / 48.0)
+                    .abs()
+                    < 1e-12
+            );
         }
     }
 }
@@ -505,15 +561,27 @@ fn quadratic_phasor_recovery_integrates_products_not_products_of_averages() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
-    let mut assembly = AcousticAssembly::assemble(projection, &properties, 1.0).unwrap();
+    let mut assembly = AcousticAssembly::assemble(
+        projection,
+        &properties,
+        runmat_types::physical::AngularFrequency::new(1.0),
+    )
+    .unwrap();
     // p=x²+i*x, omega=1, rho=3, c=2. Every nodal value is prescribed,
     // so this isolates recovery from any numerical field-solve approximation.
     for (i, node) in assembly.projection.nodes.iter().enumerate() {
-        let x = node.coordinates_m[0];
-        assembly.prescribed[i] = Some(crate::excitation::ProjectionScalar {
-            real: x * x,
-            imaginary: x,
-        });
+        let x = node.coordinates_m.canonical_value()[0];
+        assembly.prescribed = assembly
+            .prescribed
+            .clone()
+            .try_map_canonical_storage(|mut values| {
+                values[i] = Some(crate::excitation::ProjectionScalar {
+                    real: x * x,
+                    imaginary: x,
+                });
+                values
+            })
+            .unwrap();
     }
     let result = super::response::solve(
         assembly,
@@ -525,20 +593,27 @@ fn quadratic_phasor_recovery_integrates_products_not_products_of_averages() {
     // v=(-1/3 + 2ix/3,0,0), I=(x²/6,0,0). Unit tetrahedral moments
     // E[x]=1/4, E[x²]=1/10, E[x⁴]=1/35 give I_x=1/60, E=401/3360.
     // Multiplying averaged p and v would incorrectly return I_x=1/240.
-    let intensity = result.element_mean_intensity_w_per_m2[0];
+    let intensity = result.element_mean_intensity_w_per_m2.canonical_values()[0];
     assert!((intensity[0] - 1.0 / 60.0).abs() < 1e-13);
     assert!(intensity[1].abs() < 1e-13 && intensity[2].abs() < 1e-13);
-    assert!((result.element_mean_energy_density_j_per_m3[0] - 401.0 / 3360.0).abs() < 1e-13);
+    assert!(
+        (result
+            .element_mean_energy_density_j_per_m3
+            .canonical_values()[0]
+            - 401.0 / 3360.0)
+            .abs()
+            < 1e-13
+    );
 }
 
 #[test]
 fn boundaries_fail_closed_on_missing_targets_and_overlap() {
     let mesh = slab_mesh(2);
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "wall".into(),
-        target: RegionTarget::boundary("not_a_face"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("not_a_face")),
         operator: BoundaryOperator::AcousticRigidWall,
     });
     let solve = |model: &AnalysisModel| {
@@ -555,7 +630,7 @@ fn boundaries_fail_closed_on_missing_targets_and_overlap() {
         solve(&model),
         Err(AcousticHarmonicError::Boundary(_))
     ));
-    model.boundaries[0].target = RegionTarget::boundary("slab_right");
+    model.boundaries[0].target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"));
     model.boundaries.push(model.boundaries[0].clone());
     assert!(matches!(
         solve(&model),
@@ -570,7 +645,7 @@ fn boundaries_fail_closed_on_missing_targets_and_overlap() {
 fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
     let mesh = slab_mesh(2);
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     velocity_source(&mut model, -1.0, 0.0);
     let mut signal = complex_signal(Pressure::new(1.0), Pressure::new(0.0));
     signal.signal_id = SignalId("pressure_drive".into());
@@ -632,11 +707,11 @@ fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
     for cells in [2, 4, 8] {
         let mesh = slab_mesh(cells);
         let mut model = model();
-        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+        prescribe(&mut model, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 1.0);
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "lined_end".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticImpedanceLaw {
                 law: runmat_analysis_core::AcousticImpedanceLaw::Table {
                     frequencies_hz: vec![0.1, 0.3],
@@ -661,16 +736,16 @@ fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
             .projection
             .nodes
             .iter()
-            .zip(&result.pressure_pa)
+            .zip(result.pressure_pa.canonical_values())
             .map(|(node, p)| {
-                let exact = exact(node.coordinates_m[0]);
+                let exact = exact(node.coordinates_m.canonical_value()[0]);
                 (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
             })
             .sum::<f64>()
-            / result.pressure_pa.len() as f64)
+            / result.pressure_pa.canonical_values().len() as f64)
             .sqrt();
         errors.push(error);
-        assert!(result.mean_impedance_loss_w > 0.0);
+        assert!(result.mean_impedance_loss_w > runmat_types::physical::Quantity::new(0.0));
         assert!(result.power_relative_error < 1e-9);
     }
     assert!(

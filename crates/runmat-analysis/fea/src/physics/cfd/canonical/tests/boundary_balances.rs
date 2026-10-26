@@ -13,7 +13,7 @@ use runmat_analysis_core::{
 fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
     for reference in [0.0, 101325.0] {
         let mut f = case(2, ReferenceCase::Couette, false);
-        let mut walls = RegionTarget::boundary("inlet_and_walls");
+        let mut walls = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("inlet_and_walls"));
         let entities = f
             .constraints
             .iter()
@@ -25,7 +25,7 @@ fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
             })
             .collect();
         walls.bind_resolved_entities(entities).unwrap();
-        let mut outlet = RegionTarget::boundary("outlet");
+        let mut outlet = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("outlet"));
         outlet
             .bind_resolved_entities(
                 f.operators
@@ -36,7 +36,7 @@ fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
             .unwrap();
         let exact = [0.001, 0.0, 0.0];
         let density = 7.0;
-        f.material.density.kilograms_per_cubic_meter = density;
+        f.material.density = runmat_types::physical::Quantity::new(density);
         f.constraints = vec![FluidConstraint {
             constraint_id: "signed_inlet_and_walls".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
@@ -71,20 +71,30 @@ fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
         assert_eq!(reports[0].authority_id, "signed_inlet_and_walls");
         assert_eq!(reports[1].authority_id, "signed_outlet");
         for (report, sign, area) in [(&reports[0], -1.0, 5.0), (&reports[1], 1.0, 1.0)] {
-            assert!((report.area_m2 - area).abs() < 1e-14);
-            assert!((report.volume_flow_rate_m3_per_s - sign * exact[0]).abs() < 1e-15);
-            assert!((report.mass_flow_rate_kg_per_s - density * sign * exact[0]).abs() < 1e-15);
+            assert!((report.area_m2.canonical_value() - area).abs() < 1e-14);
+            assert!(
+                (report.volume_flow_rate_m3_per_s.canonical_value() - sign * exact[0]).abs()
+                    < 1e-15
+            );
+            assert!(
+                (report.mass_flow_rate_kg_per_s.canonical_value() - density * sign * exact[0])
+                    .abs()
+                    < 1e-15
+            );
             assert!(
                 norm(sub(
-                    report.advective_momentum_n,
+                    report.advective_momentum_n.canonical_value(),
                     [density * sign * exact[0].powi(2), 0.0, 0.0]
                 )) < 1e-18
             );
-            assert_eq!(report.viscous_traction_n, [0.0; 3]);
-            assert_eq!(report.pressure_fluctuation_traction_n, [0.0; 3]);
+            assert_eq!(report.viscous_traction_n.canonical_value(), [0.0; 3]);
+            assert_eq!(
+                report.pressure_fluctuation_traction_n.canonical_value(),
+                [0.0; 3]
+            );
             assert!(
                 norm(sub(
-                    report.pressure_traction_n,
+                    report.pressure_traction_n.canonical_value(),
                     [-sign * reference, 0.0, 0.0]
                 )) < 1e-10
             );
@@ -136,10 +146,10 @@ fn original_couette_boundary_shear_and_cold_attribution_are_preserved() {
             })
             .unwrap();
         if (face.centroid_m[1] - 1.0).abs() < 1e-12 {
-            top += report.viscous_traction_n[0];
+            top += report.viscous_traction_n.canonical_value()[0];
         }
         if face.centroid_m[1].abs() < 1e-12 {
-            bottom += report.viscous_traction_n[0];
+            bottom += report.viscous_traction_n.canonical_value()[0];
         }
     }
     assert!((top - 1.0).abs() < 0.25 && (bottom + 1.0).abs() < 0.25);

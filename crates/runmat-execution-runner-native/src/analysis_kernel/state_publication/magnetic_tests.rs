@@ -42,13 +42,13 @@ fn retained_result() -> MagnetostaticSolverResult {
         completeness: StateCompleteness::Complete,
         persistence: StatePersistence::Canonical,
     }];
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 1.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
-        resistive_heating_coefficient: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
         conductivity_frequency_response: vec![],
     });
     for face in 0..4 {
@@ -57,7 +57,7 @@ fn retained_result() -> MagnetostaticSolverResult {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground:{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }
@@ -66,7 +66,7 @@ fn retained_result() -> MagnetostaticSolverResult {
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "gauge".into(),
             kind: MagneticConstraintKind::CoulombGauge {
-                target: RegionTarget::volume("solid"),
+                target: RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("solid")),
             },
         }));
     let result = MagnetostaticWorkload {

@@ -19,7 +19,7 @@ fn workload(phase: [f64; 2]) -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(boundary),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                 },
             }));
     }
@@ -90,6 +90,7 @@ fn both_orders_cold_native_fields_preserve_exact_complex_phase_and_sample_author
         let edge_values = retained
             .response()
             .edge_circulations_v
+            .canonical_values()
             .iter()
             .flat_map(|value| [value.real, value.imaginary])
             .collect::<Vec<_>>();
@@ -104,11 +105,11 @@ fn both_orders_cold_native_fields_preserve_exact_complex_phase_and_sample_author
                 .iter()
                 .flat_map(|sample| {
                     match index {
-                        1 => sample.electric_field_v_per_m,
-                        2 => sample.flux_density_t,
-                        3 => sample.magnetic_field_a_per_m,
-                        4 => sample.electric_displacement_c_per_m2,
-                        5 => sample.conduction_current_density_a_per_m2,
+                        1 => sample.electric_field_v_per_m.canonical_value(),
+                        2 => sample.flux_density_t.canonical_value(),
+                        3 => sample.magnetic_field_a_per_m.canonical_value(),
+                        4 => sample.electric_displacement_c_per_m2.canonical_value(),
+                        5 => sample.conduction_current_density_a_per_m2.canonical_value(),
                         _ => unreachable!(),
                     }
                     .into_iter()
@@ -126,7 +127,11 @@ fn both_orders_cold_native_fields_preserve_exact_complex_phase_and_sample_author
         );
         assert_eq!(
             fields.entity_counts.oriented_edges,
-            retained.response().edge_circulations_v.len()
+            retained
+                .response()
+                .edge_circulations_v
+                .canonical_values()
+                .len()
         );
         assert_eq!(
             fields.topology_digest,

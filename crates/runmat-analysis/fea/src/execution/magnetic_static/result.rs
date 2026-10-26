@@ -129,12 +129,15 @@ impl MagnetostaticSolverResult {
             || !within(r.relative_physical_residual, 8.0 * t)
             || !within(r.relative_gauge_residual, 8.0 * t)
             || !within(r.relative_energy_work_error, 16.0 * t)
-            || !r.magnetic_energy_j.is_finite()
-            || r.magnetic_energy_j < 0.0
-            || !r.source_work_j.is_finite()
+            || !r.magnetic_energy_j.canonical_value().is_finite()
+            || r.magnetic_energy_j.canonical_value() < 0.0
+            || !r.source_work_j.canonical_value().is_finite()
             || r.edge_node_identities.is_empty()
-            || r.edge_circulations_wb.len() != r.edge_node_identities.len()
-            || r.edge_circulations_wb.iter().any(|v| !v.is_finite())
+            || r.edge_circulations_wb.canonical_values().len() != r.edge_node_identities.len()
+            || r.edge_circulations_wb
+                .canonical_values()
+                .iter()
+                .any(|v| !v.is_finite())
             || r.edge_node_identities.iter().any(|[a, b]| a >= b)
             || r.edge_node_identities
                 .windows(2)
@@ -158,25 +161,30 @@ impl MagnetostaticSolverResult {
                     || s.volume_weight_m3 <= 0.0
                     || s.position_m
                         .iter()
-                        .chain(&s.vector_potential_wb_per_m)
-                        .chain(&s.flux_density_t)
-                        .chain(&s.magnetic_field_a_per_m)
+                        .chain(&s.vector_potential_wb_per_m.canonical_value())
+                        .chain(&s.flux_density_t.canonical_value())
+                        .chain(&s.magnetic_field_a_per_m.canonical_value())
                         .any(|v| !v.is_finite())
                 {
                     return Err(invalid("invalid retained magnetic sample inventory"));
                 }
-                let density =
-                    crate::algebra::dot_canonical(&s.flux_density_t, &s.magnetic_field_a_per_m);
+                let density = crate::algebra::dot_canonical(
+                    &s.flux_density_t.canonical_value(),
+                    &s.magnetic_field_a_per_m.canonical_value(),
+                );
                 if !density.is_finite() || density < 0.0 {
                     return Err(invalid("negative magnetic energy density"));
                 }
                 energy += 0.5 * s.volume_weight_m3 * density;
             }
         }
-        if !close(energy, r.magnetic_energy_j, 256.0 * f64::EPSILON)
-            || !close(2.0 * energy, r.source_work_j, 16.0 * t)
+        if !close(
+            energy,
+            r.magnetic_energy_j.canonical_value(),
+            256.0 * f64::EPSILON,
+        ) || !close(2.0 * energy, r.source_work_j.canonical_value(), 16.0 * t)
             || !close(
-                relative_error(2.0 * energy, r.source_work_j),
+                relative_error(2.0 * energy, r.source_work_j.canonical_value()),
                 r.relative_energy_work_error,
                 256.0 * f64::EPSILON,
             )
@@ -255,15 +263,20 @@ impl MagnetostaticSolverResult {
                         || s.position_m != point.position_m
                         || s.volume_weight_m3 != point.volume_weight_m3
                         || s.flux_density_t
+                            .canonical_value()
                             .iter()
-                            .zip(s.magnetic_field_a_per_m)
+                            .zip(s.magnetic_field_a_per_m.canonical_value())
                             .any(|(b, h)| {
-                                !close(*b / law.permeability_h_per_m, h, 256.0 * f64::EPSILON)
+                                !close(
+                                    *b / law.permeability_h_per_m.canonical_value(),
+                                    h,
+                                    256.0 * f64::EPSILON,
+                                )
                             });
                     work += s.volume_weight_m3
                         * crate::algebra::dot_canonical(
-                            &s.vector_potential_wb_per_m,
-                            &law.current_density_a_per_m2,
+                            &s.vector_potential_wb_per_m.canonical_value(),
+                            &law.current_density_a_per_m2.canonical_value(),
                         );
                 })
                 .map_err(invalid)?;
@@ -273,7 +286,11 @@ impl MagnetostaticSolverResult {
                 ));
             }
         }
-        if !close(work, d.response.source_work_j, 256.0 * f64::EPSILON) {
+        if !close(
+            work,
+            d.response.source_work_j.canonical_value(),
+            256.0 * f64::EPSILON,
+        ) {
             return Err(invalid(
                 "magnetic retained source work differs from original volume current",
             ));

@@ -134,7 +134,7 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
         let point = std::array::from_fn(|axis| {
             vertices
                 .iter()
-                .map(|v| trial.topology().node(*v).coordinates_m[axis])
+                .map(|v| trial.topology().node(*v).coordinates_m.canonical_value()[axis])
                 .sum::<f64>()
                 / 4.
         });

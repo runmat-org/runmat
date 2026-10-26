@@ -22,7 +22,7 @@ fn signal(mesh: &SolverMeshArtifact) -> Signal<BodyForceDensity> {
                 .nodes
                 .iter()
                 .flat_map(|node| {
-                    let [x, y, z] = node.coordinates_m;
+                    let [x, y, z] = node.coordinates_m.canonical_value();
                     [x, 2.0 * y, 3.0 * z].map(BodyForceDensity::new)
                 })
                 .collect(),
@@ -45,7 +45,7 @@ fn load(signal: &Signal<BodyForceDensity>) -> RealizedExcitation {
     load.policy.distribution = ExcitationDistribution::TopologyField;
     load.kind = RealizedExcitationKind::BodyForceField(
         NodalVectorField::sample(signal, ExcitationSamplePoint::Static, |value| {
-            value.newtons_per_cubic_meter
+            value.canonical_value()
         })
         .unwrap(),
     );
@@ -78,11 +78,11 @@ fn tet4_and_tet10_affine_density_preserve_continuum_force_moment_and_virtual_wor
                     StructuralDofKind::Uz,
                 ]
                 .map(|kind| rhs[layout.index(i, kind).unwrap()]);
-                let m = cross(node.coordinates_m, f);
+                let m = cross(node.coordinates_m.canonical_value(), f);
                 for axis in 0..3 {
                     resultant[axis] += f[axis];
                     moment[axis] += m[axis];
-                    work[axis] += node.coordinates_m[axis] * f[axis];
+                    work[axis] += node.coordinates_m.canonical_value()[axis] * f[axis];
                 }
             }
             // Independent cube integrals, not production quadrature or assembled matrices:

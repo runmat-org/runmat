@@ -14,12 +14,12 @@ use crate::{
     GeometryInspectionCapability, LogicalSourcePath,
 };
 use runmat_geometry_core::{
-    Ap242ParameterAccess, Ap242PhysicalDimension, CadParameterAccess, CadParameterDefinition,
-    CadParameterPhysicalType, CadParameterSelector, DerivedGeometryDefinition,
-    GeometryAuthoringCapabilities, GeometryDefinition, GeometryDefinitionRef,
-    GeometryDefinitionSource, GeometryDigest, GeometryRegionCardinality, GeometryRegionDefinition,
-    GeometryRegionRole, GeometryRegionSelector, GeometrySourceFormat, ImportedGeometryDefinition,
-    UnitSystem,
+    Ap242ParameterAccess, CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType,
+    CadParameterSelector, DerivedGeometryDefinition, GeometryAuthoringCapabilities,
+    GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
+    GeometryRegionCardinality, GeometryRegionDefinition, GeometryRegionRole,
+    GeometryRegionSelector, GeometrySourceFormat, ImportedGeometryDefinition, LengthUnit,
+    QuantityKind,
 };
 use std::collections::BTreeMap;
 
@@ -124,7 +124,7 @@ fn definition(
         {
             check_authored_names(declaration, &regions, inspection, diagnostics);
         }
-        imported_source(declaration, inspection, diagnostics)
+        imported_source(declaration, inspection, diagnostics)?
     } else if let Some(statements) = construct {
         if declaration.source.is_some() {
             error(
@@ -182,9 +182,8 @@ fn imported_source(
     declaration: &CheckedFeaDeclaration,
     inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> GeometryDefinitionSource {
-    let units =
-        imported_units(declaration, inspection, diagnostics).unwrap_or(UnitSystem::Unspecified);
+) -> Option<GeometryDefinitionSource> {
+    let units = imported_units(declaration, inspection, diagnostics);
     let format = source_format(inspection.source_path.as_str()).unwrap_or_else(|| {
         error(
             declaration,
@@ -194,16 +193,29 @@ fn imported_source(
         );
         GeometrySourceFormat::Step
     });
-    GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
-        logical_path: inspection.source_path.as_str().to_string(),
-        format,
-        units,
-        content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
-        topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
-        capabilities: capabilities(inspection),
-        exchange: inspection.facts.exchange.clone(),
-        shared_interfaces: imported_interfaces(declaration, diagnostics),
-    })
+    Some(GeometryDefinitionSource::Imported(
+        ImportedGeometryDefinition {preview_extent_m: inspection.facts.preview_extent_m, 
+            // Authored units are authoritative over a different file declaration, which the
+            // evidence keeps as provenance.
+            unit_evidence: match units {
+                Some(authored) => inspection
+                    .facts
+                    .unit_evidence
+                    .clone()
+                    .apply_authored(authored, "authored geometry units")
+                    .unwrap_or_else(|unresolved| unresolved),
+                None => inspection.facts.unit_evidence.clone(),
+            },
+            logical_path: inspection.source_path.as_str().to_string(),
+            format,
+            authored_units: units,
+            content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
+            topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
+            capabilities: capabilities(inspection),
+            exchange: inspection.facts.exchange.clone(),
+            shared_interfaces: imported_interfaces(declaration, diagnostics),
+        },
+    ))
 }
 
 /// `interfaces = shared` joins touching bodies so their coincident faces become one shared face
@@ -359,15 +371,12 @@ fn imported_units(
     declaration: &CheckedFeaDeclaration,
     inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<UnitSystem> {
+) -> Option<LengthUnit> {
     let Some(value) = assignment(&declaration.statements, "units") else {
-        // Omitted units use the single length unit the file declares.
-        if let Some(units) = inspection
-            .facts
-            .resolved_units
-            .filter(|units| *units != UnitSystem::Unspecified)
-        {
-            return Some(units);
+        // File declarations (including mixed contexts) establish scale. The
+        // optional authored unit is only a fallback for genuinely unitless input.
+        if inspection.facts.unit_evidence.physical_scale_resolved() {
+            return None;
         }
         error(
             declaration,
@@ -390,9 +399,9 @@ fn imported_units(
         return None;
     };
     let authored = match unit.as_str() {
-        "m" | "meter" | "meters" => UnitSystem::Meter,
-        "mm" | "millimeter" | "millimeters" => UnitSystem::Millimeter,
-        "in" | "inch" | "inches" => UnitSystem::Inch,
+        "m" | "meter" | "meters" => LengthUnit::Meter,
+        "mm" | "millimeter" | "millimeters" => LengthUnit::Millimeter,
+        "in" | "inch" | "inches" => LengthUnit::Inch,
         _ => {
             error(
                 declaration,
@@ -403,11 +412,16 @@ fn imported_units(
             return None;
         }
     };
-    if let Some(declared) = inspection
-        .facts
-        .declared_units
-        .filter(|declared| *declared != UnitSystem::Unspecified && *declared != authored)
-    {
+    let evidence = &inspection.facts.unit_evidence;
+    let declared = evidence.overridden_declared_unit().or_else(|| {
+        matches!(
+            evidence,
+            runmat_geometry_core::physical::LengthUnitEvidence::Declared { .. }
+        )
+        .then(|| evidence.uniform_unit())
+        .flatten()
+    });
+    if let Some(declared) = declared.filter(|declared| *declared != authored) {
         // Authored units are authoritative; an override of the file's own declaration is
         // reported, never silent.
         diagnostics.push(FeaDiagnostic {
@@ -432,15 +446,15 @@ fn imported_units(
     Some(authored)
 }
 
-fn unit_name(units: UnitSystem) -> String {
-    match units {
-        UnitSystem::Meter => "meters".into(),
-        UnitSystem::Millimeter => "millimeters".into(),
-        UnitSystem::Inch => "inches".into(),
-        UnitSystem::Length { meters_per_unit } => {
-            format!("a {} m length unit", meters_per_unit.meters())
-        }
-        UnitSystem::Unspecified => "no unit".into(),
+fn unit_name(units: LengthUnit) -> String {
+    if units == LengthUnit::Meter {
+        "meters".into()
+    } else if units == LengthUnit::Millimeter {
+        "millimeters".into()
+    } else if units == LengthUnit::Inch {
+        "inches".into()
+    } else {
+        format!("a {} m length unit", units.meters_per_unit())
     }
 }
 
@@ -566,7 +580,7 @@ fn lower_cad_parameter(
         );
         return None;
     };
-    if source.value.dimension != physical_dimension(physical_type) {
+    if source.value.kind() != physical_dimension(physical_type) {
         error(
             declaration,
             *header_span,
@@ -574,7 +588,7 @@ fn lower_cad_parameter(
                 "CAD parameter `{}` is declared as `{}` but the source has dimension `{:?}`",
                 name.trim(),
                 physical_type_name(physical_type),
-                source.value.dimension
+                source.value.kind()
             ),
             diagnostics,
         );
@@ -602,15 +616,15 @@ fn lower_cad_parameter(
     })
 }
 
-fn physical_dimension(value: CadParameterPhysicalType) -> Ap242PhysicalDimension {
+fn physical_dimension(value: CadParameterPhysicalType) -> QuantityKind {
     match value {
-        CadParameterPhysicalType::Dimensionless => Ap242PhysicalDimension::Dimensionless,
-        CadParameterPhysicalType::Length => Ap242PhysicalDimension::Length,
-        CadParameterPhysicalType::Angle => Ap242PhysicalDimension::PlaneAngle,
-        CadParameterPhysicalType::Area => Ap242PhysicalDimension::Area,
-        CadParameterPhysicalType::Volume => Ap242PhysicalDimension::Volume,
-        CadParameterPhysicalType::Mass => Ap242PhysicalDimension::Mass,
-        CadParameterPhysicalType::Temperature => Ap242PhysicalDimension::Temperature,
+        CadParameterPhysicalType::Dimensionless => QuantityKind::Dimensionless,
+        CadParameterPhysicalType::Length => QuantityKind::Length,
+        CadParameterPhysicalType::Angle => QuantityKind::Angle,
+        CadParameterPhysicalType::Area => QuantityKind::Area,
+        CadParameterPhysicalType::Volume => QuantityKind::Volume,
+        CadParameterPhysicalType::Mass => QuantityKind::Mass,
+        CadParameterPhysicalType::Temperature => QuantityKind::Temperature,
     }
 }
 

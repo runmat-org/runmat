@@ -13,7 +13,8 @@ pub fn recover_velocity_pressure(
     profile_scales: &[f64],
 ) -> (Vec<f64>, Vec<f64>) {
     let mut boundary_summary = CfdBoundarySummary::implicit_channel();
-    boundary_summary.nominal_inlet_velocity_m_per_s = nominal_velocity_m_per_s;
+    boundary_summary.nominal_inlet_velocity_m_per_s =
+        runmat_types::physical::Velocity::new(nominal_velocity_m_per_s);
     let solution = solve_velocity_pressure(
         domain,
         &boundary_summary,

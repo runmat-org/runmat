@@ -193,7 +193,7 @@ fn terminated_native_producers_preserve_original_history_and_admission_rejects_s
     assert_eq!(split.retained_results().last(), full.retained_results().last());
     for (_, original) in split.retained_results() {
         // Uniform translation is reproduced to the solver's rounding, not bit-exactly.
-        for velocity in &original.velocity_m_per_s {
+        for velocity in original.velocity_m_per_s.canonical_values() {
             let error = (0..3)
                 .map(|k| (velocity[k] - [1., 0., 0.][k]).abs())
                 .fold(0.0, f64::max);

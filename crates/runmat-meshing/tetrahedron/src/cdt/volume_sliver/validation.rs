@@ -26,6 +26,7 @@ pub fn validate_delaunay_volume_sliver_treatment(
                     || relocation
                         .replacement_node
                         .coordinates_m
+                        .canonical_value()
                         .iter()
                         .any(|value| !value.is_finite())
             }
@@ -43,6 +44,7 @@ pub fn validate_delaunay_volume_sliver_treatment(
                     || insertion
                         .inserted_node
                         .coordinates_m
+                        .canonical_value()
                         .iter()
                         .any(|value| !value.is_finite())
                     || !insertion

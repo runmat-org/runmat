@@ -586,7 +586,10 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
                 curve_evaluator_id: CurveEvaluatorId::new(format!("curve:{index}")).unwrap(),
                 start_vertex_id: Some(vertices[endpoints[0]].clone()),
                 end_vertex_id: Some(vertices[endpoints[1]].clone()),
-                tolerance_m: 1.0e-10,
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(1.0e-10),
                 is_closed: false,
                 is_periodic: false,
                 is_degenerate: false,
@@ -602,8 +605,14 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
         .enumerate()
         .map(|(index, point_m)| ExactVertex {
             id: vertices[index].clone(),
-            point_m,
-            tolerance_m: 1.0e-10,
+            point_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    point_m,
+                ),
+            tolerance_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(
+                    1.0e-10,
+                ),
         })
         .collect(),
         interfaces: Vec::new(),
@@ -614,7 +623,7 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
         .iter()
         .map(|vertex| ExactFaceMeshNode {
             node_id: shared_curve_vertex_node_id(&vertex.id),
-            point_m: vertex.point_m,
+            point_m: vertex.point_m.canonical_value(),
             uses: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -656,7 +665,7 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
             is_sheet_shell: false,
             is_watertight: true,
         }],
-        maximum_chordal_deviation_m: 0.0,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
         maximum_normal_deviation_rad: 0.0,
     };
     (topology, surface)

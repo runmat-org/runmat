@@ -75,7 +75,10 @@ pub(crate) fn node_space_workspace_profile(
         // or physics; the shared profiler bounds every scalar by its maximal wire width.
         let node = CanonicalStructuralNode {
             identity: StableDigest::ZERO,
-            coordinates_m: [0.0; 3],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0; 3]),
             owns_solid_translation: true,
             owns_explicit_rotation: true,
         };

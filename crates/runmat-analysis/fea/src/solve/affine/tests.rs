@@ -66,8 +66,10 @@ fn repeated_affine_solves_rebind_lifting_and_invalidate_changed_congruence() {
             constraint_ids: vec!["first".into(), "second".into()],
         };
         let reduction = matrix.affine_reduction().unwrap();
+        let layout = crate::assembly::dofs::StructuralDofLayout::reduced_translational_rows(3);
         let view = StructuralLinearSystemView {
             dof_count: 3,
+            physical_layout: crate::assembly::physical_fields::StructuralSolveLayout::Full(&layout),
             operator: &operator,
             constraint_matrix: Some(&matrix),
             affine_constraint_reduction: Some(&reduction),

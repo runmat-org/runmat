@@ -30,10 +30,16 @@ pub(crate) fn closed_authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
 fn original_closed_wall_fields_receipt_and_gauge_survive_cold_workload_admission() {
     let (w, m) = closed_authored();
     let result = w.execute(&m).unwrap();
-    assert!(result.original().pressure_pa.iter().all(|p| *p == 101325.0));
+    assert!(result
+        .original()
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .all(|p| *p == 101325.0));
     assert!(result
         .original()
         .pressure_fluctuation_pa
+        .canonical_values()
         .iter()
         .all(|p| *p == 0.0));
     let bytes = result.canonical_bytes().unwrap();

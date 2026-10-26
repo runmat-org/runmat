@@ -16,7 +16,7 @@ pub(crate) enum ConstantExcitation {
     ElectricCurrent {
         real_amperes: f64,
         imaginary_amperes: f64,
-        frequency_hz: Option<f64>,
+        frequency_hz: Option<runmat_types::physical::Frequency>,
     },
 }
 
@@ -68,7 +68,7 @@ pub(crate) fn append_constant_excitation(
             ExcitationTarget::Region(RegionTarget::volume(region_id)),
             ElectricCurrent::new(real_amperes),
             ElectricCurrent::new(imaginary_amperes),
-            frequency_hz,
+            frequency_hz.map(|frequency| frequency.canonical_value()),
             ExcitationDistribution::PreserveResultant,
             PhysicalSignal::ElectricCurrent,
             ExcitationAction::ElectricCurrent,

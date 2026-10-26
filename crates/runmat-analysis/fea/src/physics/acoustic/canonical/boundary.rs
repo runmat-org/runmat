@@ -32,6 +32,7 @@ impl AcousticAssembly {
         excitations: &RealizedExcitations,
         sample: ExcitationSamplePoint<'_>,
     ) -> Result<Self, AcousticHarmonicError> {
+        let mut source_error = None;
         let mut impedance = assembler(
             self.projection.nodes.len(),
             OperatorRole::Damping,
@@ -59,14 +60,14 @@ impl AcousticAssembly {
             let admittance = match boundary.operator {
                 BoundaryOperator::AcousticRigidWall => 0.0,
                 BoundaryOperator::AcousticImpedance { impedance } => {
-                    if !impedance.pascal_seconds_per_meter.is_finite()
-                        || impedance.pascal_seconds_per_meter <= 0.0
+                    if !impedance.canonical_value().is_finite()
+                        || impedance.canonical_value() <= 0.0
                     {
                         return Err(AcousticHarmonicError::Boundary(
                             "specific impedance must be positive finite".into(),
                         ));
                     }
-                    impedance.pascal_seconds_per_meter.recip()
+                    impedance.canonical_value().recip()
                 }
                 // Radiation is face-local: its medium is resolved below from the unique
                 // exterior owner, not from the first material in the model.
@@ -92,10 +93,10 @@ impl AcousticAssembly {
                             "impedance law requires exactly one exterior owning element".into(),
                         ));
                     };
-                    let rho = self.density[*owner];
-                    let c = (1.0 / (rho * self.compressibility[*owner])).sqrt();
+                    let rho = self.density.canonical_values()[*owner];
+                    let c = (1.0 / (rho * self.compressibility.canonical_values()[*owner])).sqrt();
                     let (r, x) = law
-                        .evaluate(self.omega / std::f64::consts::TAU, rho, c)
+                        .evaluate(self.derivative_rate.canonical_value() / std::f64::consts::TAU, rho, c)
                         .ok_or_else(|| {
                             AcousticHarmonicError::Boundary(
                                 "impedance law has no finite passive value at this frequency"
@@ -123,7 +124,7 @@ impl AcousticAssembly {
                             "radiation requires exactly one exterior owning element".into(),
                         ));
                     };
-                    let rho = self.density[*owner];
+                    let rho = self.density.canonical_values()[*owner];
                     if !center_m.iter().all(|value| value.is_finite()) {
                         return Err(AcousticHarmonicError::Boundary(
                             "spherical radiation center must be finite".into(),
@@ -167,7 +168,7 @@ impl AcousticAssembly {
                         "overlapping acoustic boundaries".into(),
                     ));
                 }
-                let reactive = -self.omega * susceptance;
+                let reactive = -self.derivative_rate.canonical_value() * susceptance;
                 self.projection
                     .visit_boundary_quadrature(&face, |point| {
                         for (i, &row) in face.node_indices.iter().enumerate() {
@@ -318,8 +319,7 @@ impl AcousticAssembly {
                                     let real = real * point.shape_values()[i];
                                     let imaginary = imaginary * point.shape_values()[i];
                                     evidence.add_projected(node, real, imaginary);
-                                    self.source[node].real += self.omega * imaginary;
-                                    self.source[node].imaginary -= self.omega * real;
+                                    if let Err(error) = crate::physics::acoustic::canonical::quantity_layout::accumulate_source(&mut self.source, node, self.derivative_rate.canonical_value() * imaginary, -(self.derivative_rate.canonical_value() * real)) { source_error = Some(error); }
                                 }
                             })
                             .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
@@ -342,21 +342,35 @@ impl AcousticAssembly {
                 }
             }
         }
-        self.impedance = crate::algebra::RealSparseMatrix::scaled_sum(
-            &[(1.0, &self.volume_admittance), (1.0, &finish(impedance)?)],
-            OperatorRole::Damping,
-            crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        )
-        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let boundary_admittance = finish(impedance)?;
+        self.impedance = super::quantity_layout::pressure_operator(
+            self.volume_admittance
+                .with_canonical_storage(|volume| {
+                    crate::algebra::RealSparseMatrix::scaled_sum(
+                        &[(1.0, volume), (1.0, &boundary_admittance)],
+                        OperatorRole::Damping,
+                        crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                    )
+                })
+                .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?,
+            1,
+        )?;
         let boundary_stiffness = finish(boundary_stiffness)?;
-        self.stiffness = crate::algebra::RealSparseMatrix::scaled_sum(
-            &[(1.0, &self.volume_stiffness), (1.0, &boundary_stiffness)],
-            OperatorRole::Stiffness,
-            crate::algebra::MatrixProperties::SYMMETRIC_INDEFINITE,
-        )
-        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        self.stiffness = super::quantity_layout::pressure_operator(
+            self.volume_stiffness
+                .with_canonical_storage(|volume| {
+                    crate::algebra::RealSparseMatrix::scaled_sum(
+                        &[(1.0, volume), (1.0, &boundary_stiffness)],
+                        OperatorRole::Stiffness,
+                        crate::algebra::MatrixProperties::SYMMETRIC_INDEFINITE,
+                    )
+                })
+                .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?,
+            2,
+        )?;
         if self
             .source
+            .canonical_values()
             .iter()
             .any(|value| !value.real.is_finite() || !value.imaginary.is_finite())
         {
@@ -383,9 +397,10 @@ impl AcousticAssembly {
                 "radiation requires exactly one exterior owning element".into(),
             ));
         };
-        let (Some(&rho), Some(&beta)) =
-            (self.density.get(*owner), self.compressibility.get(*owner))
-        else {
+        let (Some(&rho), Some(&beta)) = (
+            self.density.canonical_values().get(*owner),
+            self.compressibility.canonical_values().get(*owner),
+        ) else {
             return Err(AcousticHarmonicError::Boundary(
                 "radiation owning medium is missing".into(),
             ));
@@ -418,12 +433,14 @@ impl AcousticAssembly {
         }
         for face in self.faces(target)? {
             for node in face.node_indices {
-                if self.prescribed[node].is_some_and(|old| old != value) {
+                if self.prescribed.canonical_values()[node].is_some_and(|old| old != value) {
                     return Err(AcousticHarmonicError::Boundary(
                         "conflicting prescribed pressure".into(),
                     ));
                 }
-                self.prescribed[node] = Some(value);
+                self.prescribed
+                    .try_replace(node, runmat_types::physical::Quantity::new(Some(value)))
+                    .map_err(|e| AcousticHarmonicError::Boundary(e.to_string()))?;
             }
         }
         Ok(())

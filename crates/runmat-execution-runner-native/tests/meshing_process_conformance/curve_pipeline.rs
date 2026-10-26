@@ -430,6 +430,11 @@ fn host(
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageKind::CurveMesh,
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
             geometry_revision: document.revision.revision,
             persistent_mapping_version: document.revision.persistent_mapping_version,

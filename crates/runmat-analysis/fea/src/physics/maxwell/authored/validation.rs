@@ -34,7 +34,7 @@ pub fn validate_canonical_input<'a>(
         None => {}
         Some(ElectromagneticDomain::Harmonic {
             reference_frequency,
-        }) if reference_frequency.hertz.is_finite() && reference_frequency.hertz > 0.0 => {}
+        }) if reference_frequency.canonical_value().is_finite() && reference_frequency.canonical_value() > 0.0 => {}
         Some(ElectromagneticDomain::Harmonic { .. }) => {
             return Err(invalid(
                 "the model's harmonic reference frequency must be finite and positive",

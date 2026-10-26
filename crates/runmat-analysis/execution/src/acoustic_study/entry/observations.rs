@@ -128,7 +128,7 @@ impl AcousticStudyEntryCoordinator {
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: policy.inventory_limits(),
             },
-            RecoveredFieldSample::FrequencyHertz(workload.frequency.hertz),
+            RecoveredFieldSample::FrequencyHertz(workload.frequency.canonical_value()),
         )?;
         match fanout {
             Some(fanout) => {

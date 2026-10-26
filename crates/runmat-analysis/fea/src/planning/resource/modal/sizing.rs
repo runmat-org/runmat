@@ -212,7 +212,13 @@ pub fn structural_modal_result_output_resource_facts(
         retained_modes,
         residual_vectors,
     )?;
-    super::output::result_output(values, retained_modes, residual_vectors)
+    super::output::result_output(
+        values,
+        retained_modes,
+        residual_vectors,
+        count(reduction.full_dof_count, "modal physical DOF rows")?,
+        facts.topology.nodes.0,
+    )
 }
 
 /// Canonical payload ceiling for the compact fixed-shape numerical receipt.

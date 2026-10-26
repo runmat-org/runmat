@@ -46,7 +46,7 @@ pub(super) fn candidate<'ctx>(
         .zip(points)
         .filter_map(|(index, point)| {
             let old = topology.node(index);
-            (old.coordinates_m != point).then(|| {
+            (old.coordinates_m.canonical_value() != point).then(|| {
                 (
                     index,
                     DelaunayVolumeNode::explicit(replacement_identity(old.identity), point),

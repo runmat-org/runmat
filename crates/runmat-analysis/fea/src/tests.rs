@@ -49,7 +49,9 @@ fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisCon
             constraint_id: id.to_string(),
             frame: runmat_analysis_core::CoordinateFrame::Global,
             kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                target: runmat_analysis_core::RegionTarget::authored(region),
+                target: runmat_analysis_core::RegionTarget::authored(
+                    crate::fixtures::fixture_target_selection(region),
+                ),
             },
         },
     )
@@ -120,8 +122,10 @@ fn configure_thermo_mechanical_excitation(
             .thermal
             .as_mut()
             .expect("thermo-mechanical fixture declares thermal capability");
-        thermal.reference_temperature_k = reference_temperature_k;
-        thermal.expansion_coefficient_per_k = expansion_coefficient_per_k;
+        thermal.reference_temperature_k =
+            runmat_types::physical::Temperature::new(reference_temperature_k);
+        thermal.expansion_coefficient_per_k =
+            runmat_types::physical::ThermalExpansion::new(expansion_coefficient_per_k);
     }
     append_fixture_temperature_field(
         model,
@@ -138,11 +142,13 @@ fn configure_electro_thermal_excitation(model: &mut runmat_analysis_core::Analys
     });
     for material in &mut model.materials {
         material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-            reference_temperature_k,
-            conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            relative_permittivity: 1.0,
-            relative_permeability: 1.0,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                reference_temperature_k,
+            ),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.5e7),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(4.0e-4),
+            relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+            relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
             conductivity_frequency_response: Vec::new(),
         });
     }
@@ -151,7 +157,7 @@ fn configure_electro_thermal_excitation(model: &mut runmat_analysis_core::Analys
         "coupled_terminal_voltage",
         36.0,
         runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary("tip"),
+            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
         ),
     );
 }
@@ -575,7 +581,7 @@ fn prescribed_rotations_require_rotational_dofs() {
             frame: runmat_analysis_core::CoordinateFrame::Global,
             kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
                 runmat_analysis_core::PrescribedStructuralDofs {
-                    target: runmat_analysis_core::RegionTarget::boundary("tip"),
+                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
                     translations: Vec::new(),
                     rotations: vec![runmat_analysis_core::RotationDofValue {
                         dof: runmat_analysis_core::StructuralRotationDof::Rx,
@@ -835,7 +841,7 @@ fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
 #[test]
 fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
     let mut mesh = single_tetrahedron_solver_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0]
         .provenance
         .push(PersistentEntityId::new(
@@ -882,7 +888,7 @@ fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
 #[test]
 fn conformal_solid_beam_shell_pipeline_recovers_every_formulation() {
     let mut mesh = single_tetrahedron_solver_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0]
         .provenance
         .push(PersistentEntityId::new(
@@ -950,18 +956,18 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         nodes: vec![
             runmat_analysis_core::StructuralNode {
                 node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             runmat_analysis_core::StructuralNode {
                 node_id: 2,
-                coordinates_m: [length_m, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([length_m, 0.0, 0.0]),
                 solid_attachment: None,
             },
         ],
         elements: vec![runmat_analysis_core::StructuralElement {
             element_id: "beam_1".to_string(),
-            region_id: "beam_span".to_string(),
+            region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
             kind: runmat_analysis_core::StructuralElementKind::Beam(
                 runmat_analysis_core::BeamElementModel {
                     node_ids: [1, 2],
@@ -972,18 +978,18 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         }],
         beam_sections: vec![runmat_analysis_core::BeamSectionModel {
             section_id: "rect".to_string(),
-            area_m2: 2.0e-4,
-            iy_m4: 1.6e-9,
-            iz_m4,
-            torsion_j_m4: 2.4e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.005,
-            torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(2.0e-4),
+            iy_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(1.6e-9),
+            iz_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(iz_m4),
+            torsion_j_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.011_180_339_887_498_949),
         }],
         shell_sections: Vec::new(),
     });
     model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
         expected_material_id: "mat_steel".into(),
         assigned_material_id: "mat_steel".into(),
         confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -1798,14 +1804,12 @@ fn single_tetrahedron_solver_mesh_with_order_for_model(
     add_face_region(&mut mesh, 0, "root");
     add_face_region(&mut mesh, 1, "tip");
     if let Some(assignment) = model.material_assignments.first() {
-        let region = PersistentEntityId::new(
-            PersistentEntityKind::Region,
-            assignment
-                .selected_region_id()
-                .expect("fixture uses selected material region")
-                .to_owned(),
-            vec!["root".to_owned()],
-        );
+        let selection = assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region");
+        let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(selection)
+            .filter(|entity| entity.kind == PersistentEntityKind::Region)
+            .expect("fixture material targets select a fixture region");
         mesh.topology.volume_elements[0].region_id = region.clone();
         mesh.topology.regions[0].region_id = region;
     }
@@ -1816,7 +1820,8 @@ fn single_tetrahedron_solver_mesh_with_order_for_model(
             .iter()
             .filter_map(|condition| condition.target().map(|target| target.region_id.clone()))
             .filter(|region| {
-                region != "free_vertex_y_support" && region != "free_vertex_z_support"
+                *region != crate::fixtures::fixture_target_selection("free_vertex_y_support")
+                    && *region != crate::fixtures::fixture_target_selection("free_vertex_z_support")
             }),
     );
     let mut loaded_regions = std::collections::BTreeSet::from(["tip".to_string()]);
@@ -1833,7 +1838,7 @@ fn single_tetrahedron_solver_mesh_with_order_for_model(
                 }
                 _ => None,
             })
-            .filter(|region| region != "dynamic_force"),
+            .filter(|region| *region != crate::fixtures::fixture_target_selection("dynamic_force")),
     );
     loaded_regions.extend(model.material_assignments.iter().map(|assignment| {
         assignment
@@ -2623,8 +2628,10 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         .position(|node| node.node_id == 4)
         .unwrap();
     let delta = std::array::from_fn::<_, 3, _>(|component| {
-        mesh.topology.nodes[secondary].coordinates_m[component]
-            - mesh.topology.nodes[primary].coordinates_m[component]
+        mesh.topology.nodes[secondary]
+            .coordinates_m
+            .canonical_value()[component]
+            - mesh.topology.nodes[primary].coordinates_m.canonical_value()[component]
     });
     let length = delta.iter().map(|value| value * value).sum::<f64>().sqrt();
     let axis = delta.map(|value| value / length);
@@ -2659,11 +2666,11 @@ pub(crate) fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
 
 fn add_face_region(mesh: &mut SolverMeshArtifact, face_index: usize, region_id: &str) {
     let provenance = &mut mesh.topology.boundary_faces[face_index].provenance;
-    let entity = PersistentEntityId::new(
-        PersistentEntityKind::Face,
-        region_id.to_owned(),
-        vec!["root".to_owned()],
-    );
+    let entity = match runmat_meshing_core::fixtures::fixture_entity_for_selection(region_id) {
+        Some(entity) if entity.kind == PersistentEntityKind::Face => entity,
+        Some(_) => return,
+        None => runmat_meshing_core::fixtures::fixture_entity(PersistentEntityKind::Face, region_id),
+    };
     if !provenance.contains(&entity) {
         provenance.push(entity);
         provenance.sort();
@@ -3954,7 +3961,7 @@ fn steady_thermal_solver_is_a_distinct_static_procedure() {
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "steady_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(fixed_selector),
+                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(fixed_selector))),
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::Temperature::new(315.0),
                     ),
@@ -4064,9 +4071,7 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "time_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(
-                        prescribed_selector.clone(),
-                    ),
+                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(prescribed_selector.clone()))),
                     value: runmat_analysis_core::PrescribedValue::Signal(signal_id),
                 },
             },
@@ -4090,7 +4095,7 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "inactive_time_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(prescribed_selector),
+                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(prescribed_selector))),
                     value: runmat_analysis_core::PrescribedValue::Signal(inactive_id),
                 },
             },
@@ -4148,7 +4153,7 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "fixed_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(fixed_selector),
+                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(fixed_selector))),
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::Temperature::new(293.15),
                     ),
@@ -4159,7 +4164,7 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "applied_heat_flux".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(heated_selector),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(heated_selector))),
             operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::HeatFlux::new(600.0),
@@ -4192,8 +4197,8 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
     assert_eq!(result.energy_balances.len(), 2);
     for balance in &result.energy_balances {
         balance.validate().unwrap();
-        assert!(balance.applied_power_w > 0.0);
-        assert!(balance.prescribed_boundary_power_w.abs() > 0.0);
+        assert!(balance.applied_power_w.canonical_value() > 0.0);
+        assert!(balance.prescribed_boundary_power_w.canonical_value().abs() > 0.0);
         assert!(balance.relative_residual <= result.residual_target);
     }
     assert!(result

@@ -5,7 +5,7 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 
 pub(super) fn target(ids: Vec<StableDigest>) -> ResolvedConstraintTarget {
     ResolvedConstraintTarget {
-        authored: RegionTarget::boundary("pair"),
+        authored: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("pair")),
         matched_entities: Vec::new(),
         matched_node_identities: ids,
         selection_digest: Digest::sha256("pair"),
@@ -129,10 +129,13 @@ fn empty_pairing_targets_reject_without_indexing_an_absent_secondary() {
 fn nonconformal_quadratic_pairing_preserves_full_surface_trace_and_row_identity() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     // Pairing-owner fixture: off-surface secondary sample, no volume solve is claimed.
-    mesh.topology.nodes[3].coordinates_m = [0.3, 0.5, 0.01];
+    mesh.topology.nodes[3].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0.3, 0.5, 0.01]);
     let primary = super::super::target::resolve_nodal_target(
         &mesh,
-        &RegionTarget::boundary("face:0"),
+        &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
         "trace",
     )
     .unwrap();
@@ -166,7 +169,8 @@ fn nonconformal_quadratic_pairing_preserves_full_surface_trace_and_row_identity(
                     .iter()
                     .find(|n| n.stable_identity == id)
                     .unwrap()
-                    .coordinates_m;
+                    .coordinates_m
+                    .canonical_value();
                 // Independent degree-two trace at both original nodes and the new sample.
                 term.coefficient
                     * (2. + 3. * p[0] - 4. * p[1] + p[0] * p[0] + p[0] * p[1] + p[1] * p[1])

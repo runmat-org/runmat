@@ -12,7 +12,11 @@ pub(super) fn facet_footprint_crosses_face(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let coordinates = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let coordinates = |node: u32| {
+        topology.nodes[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let facet_points = facet.map(coordinates);
     let face_points = face.map(coordinates);
     let face_plane_signs = [
@@ -143,7 +147,11 @@ pub(in crate::cdt::facet_recovery) fn segment_hits_triangle_interior(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let point = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let point = |node: u32| {
+        topology.nodes[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let plane_signs = [
         orientation(
             [
@@ -220,7 +228,11 @@ fn point_strictly_inside_triangle(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let coordinates = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let coordinates = |node: u32| {
+        topology.nodes[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let points = triangle.map(coordinates);
     let Some(axes) = projection_axes(points, constraint_index, work)? else {
         return Ok(false);

@@ -128,9 +128,12 @@ impl TrialJournal {
         // edit. Sequential remove/restore would lose that original membership.
         for node in topology.nodes.drain(self.node_len..) {
             topology.node_indices.remove(&node.identity);
-            topology
-                .positions
-                .remove(&node.coordinates_m.map(super::storage::coordinate_bits));
+            topology.positions.remove(
+                &node
+                    .coordinates_m
+                    .canonical_value()
+                    .map(super::storage::coordinate_bits),
+            );
         }
         for index in self
             .nodes
@@ -139,17 +142,22 @@ impl TrialJournal {
         {
             let current = topology.nodes[*index as usize];
             topology.node_indices.remove(&current.identity);
-            topology
-                .positions
-                .remove(&current.coordinates_m.map(super::storage::coordinate_bits));
+            topology.positions.remove(
+                &current
+                    .coordinates_m
+                    .canonical_value()
+                    .map(super::storage::coordinate_bits),
+            );
         }
         for (index, node) in self.nodes {
             if (index as usize) < self.node_len {
                 topology.nodes[index as usize] = node;
                 topology.node_indices.insert(node.identity, index);
-                topology
-                    .positions
-                    .insert(node.coordinates_m.map(super::storage::coordinate_bits));
+                topology.positions.insert(
+                    node.coordinates_m
+                        .canonical_value()
+                        .map(super::storage::coordinate_bits),
+                );
             }
         }
         for (index, cell) in self.cells {

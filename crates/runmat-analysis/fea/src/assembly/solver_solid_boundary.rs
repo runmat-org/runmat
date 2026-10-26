@@ -36,7 +36,7 @@ pub(super) fn apply_solver_mesh_structural_loads(
     let node_coordinates_m = projection
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
 
     let mut moment_projection = Vec::new();
@@ -232,7 +232,7 @@ fn apply_reference_point_structural_loads(
                 load_id: load.excitation_id.0.clone(),
                 reference_point_id: reference_point_id.clone(),
             })?;
-        if plan.reference_points[point_index].position_meters != position.meters {
+        if plan.reference_points[point_index].position_meters != position.canonical_value() {
             return Err(
                 SolverMeshRegionMappingError::ReferencePointPositionMismatch {
                     load_id: load.excitation_id.0.clone(),
@@ -242,28 +242,28 @@ fn apply_reference_point_structural_loads(
         }
         match load.kind {
             RealizedExcitationKind::Force(force) => {
-                let force = resolve_vector(load, force.real, position.meters, None)?;
+                let force = resolve_vector(load, force.real, position.canonical_value(), None)?;
                 add_reference_vector(layout, rhs, point_index, force, false);
                 let mut projection_evidence = SpatialProjectionAccumulator::new(
                     load,
                     projection,
                     SpatialIntegrationRule::ReferencePointGeneralized,
                     1,
-                    position.meters,
+                    position.canonical_value(),
                 );
-                projection_evidence.add_requested_force(position.meters, force);
+                projection_evidence.add_requested_force(position.canonical_value(), force);
                 projection_evidence.add_projected_generalized_force(force);
                 record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
             }
             RealizedExcitationKind::Moment(moment) => {
-                let moment = resolve_vector(load, moment.real, position.meters, None)?;
+                let moment = resolve_vector(load, moment.real, position.canonical_value(), None)?;
                 add_reference_vector(layout, rhs, point_index, moment, true);
                 let mut projection_evidence = SpatialProjectionAccumulator::new(
                     load,
                     projection,
                     SpatialIntegrationRule::ReferencePointGeneralized,
                     1,
-                    position.meters,
+                    position.canonical_value(),
                 );
                 projection_evidence.add_requested_moment(moment);
                 projection_evidence.add_projected_moment(moment);
@@ -334,8 +334,8 @@ fn entity_nodal_weights(
         else {
             continue;
         };
-        let a = mesh.topology.nodes[first].coordinates_m;
-        let b = mesh.topology.nodes[last].coordinates_m;
+        let a = mesh.topology.nodes[first].coordinates_m.canonical_value();
+        let b = mesh.topology.nodes[last].coordinates_m.canonical_value();
         let length = (0..3).map(|k| (b[k] - a[k]).powi(2)).sum::<f64>().sqrt();
         *weights.entry(first).or_default() += 0.5 * length;
         *weights.entry(last).or_default() += 0.5 * length;
@@ -365,7 +365,7 @@ fn apply_entity_force(
     components: [f64; 3],
 ) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
     let point = nodal.iter().fold([0.0; 3], |mut total, (node, weight)| {
-        add_scaled(&mut total, projection.nodes[*node].coordinates_m, *weight);
+        add_scaled(&mut total, projection.nodes[*node].coordinates_m.canonical_value(), *weight);
         total
     });
     let force = resolve_vector(load, components, point, None)?;
@@ -453,8 +453,12 @@ fn projected_boundary_centroid(faces: &[&crate::topology::ProjectedBoundaryFace]
     let mut first_moment = [0.0; 3];
     let mut area = 0.0;
     for face in faces {
-        add_scaled(&mut first_moment, face.centroid_m, face.area_m2);
-        area += face.area_m2;
+        add_scaled(
+            &mut first_moment,
+            face.centroid_m,
+            face.area_m2.canonical_value(),
+        );
+        area += face.area_m2.canonical_value();
     }
     scale_vector(first_moment, 1.0 / area)
 }

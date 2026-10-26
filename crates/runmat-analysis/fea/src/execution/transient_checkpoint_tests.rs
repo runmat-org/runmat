@@ -8,17 +8,17 @@ use super::*;
 fn schedule() -> StructuralTransientSchedule {
     StructuralTransientSchedule::new(vec![
         StructuralTransientSchedulePoint {
-            time_s: 0.0,
+            time_s: runmat_types::physical::Time::new(0.0),
             arrival: StructuralTransientScheduleArrival::Initial,
             continuation: StructuralTransientContinuationApproach::At,
         },
         StructuralTransientSchedulePoint {
-            time_s: 0.5,
+            time_s: runmat_types::physical::Time::new(0.5),
             arrival: StructuralTransientScheduleArrival::LeftLimit,
             continuation: StructuralTransientContinuationApproach::RightLimit,
         },
         StructuralTransientSchedulePoint {
-            time_s: 1.0,
+            time_s: runmat_types::physical::Time::new(1.0),
             arrival: StructuralTransientScheduleArrival::Continuous,
             continuation: StructuralTransientContinuationApproach::At,
         },
@@ -96,7 +96,7 @@ pub(in crate::execution) fn checkpoint(
             block_ordinal: predecessor.map_or(0, |value| value.block_ordinal + 1),
             continuation: StructuralTransientContinuationPoint {
                 schedule_ordinal: ordinal,
-                time_s: if ordinal == 1 { 0.5 } else { 1.0 },
+                time_s: runmat_types::physical::Time::new(if ordinal == 1 { 0.5 } else { 1.0 }),
                 approach: if ordinal == 1 {
                     StructuralTransientContinuationApproach::RightLimit
                 } else {
@@ -110,10 +110,10 @@ pub(in crate::execution) fn checkpoint(
             },
             numerical_state: StructuralTransientNumericalState::Direct,
             balance: StructuralTransientBalanceAccumulator {
-                initial_mechanical_energy_j: 1.0,
-                applied_load_work_j: ordinal as f64,
-                support_work_j: -0.25 * ordinal as f64,
-                damping_dissipation_j: 0.1 * ordinal as f64,
+                initial_mechanical_energy_j: runmat_types::physical::Energy::new(1.0),
+                applied_load_work_j: runmat_types::physical::Energy::new(ordinal as f64),
+                support_work_j: runmat_types::physical::Energy::new(-0.25 * ordinal as f64),
+                damping_dissipation_j: runmat_types::physical::Energy::new(0.1 * ordinal as f64),
             },
             counters: StructuralTransientSolverCounters {
                 host_sync_count: ordinal,

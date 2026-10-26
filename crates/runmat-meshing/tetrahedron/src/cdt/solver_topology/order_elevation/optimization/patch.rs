@@ -121,7 +121,12 @@ pub(in crate::cdt::solver_topology::order_elevation) fn repair_corner_star(
                                 return Ok(false);
                             };
                             let slot = geometry::node_slot(&topology.nodes, nodes[4 + local_edge])?;
-                            topology.nodes[slot].coordinates_m = point.coordinates_m;
+                            topology.nodes[slot].coordinates_m = runmat_types::physical::Quantity::<
+                                runmat_types::physical::kind::Position,
+                                _,
+                            >::new(
+                                point.coordinates_m.canonical_value(),
+                            );
                             topology.nodes[slot].exact_parameters = point.exact_parameters;
                         }
                         match jacobian::validate_elements(

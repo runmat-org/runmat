@@ -181,28 +181,28 @@ fn entry_matches_authored(entry: &CanonicalConnectorEntry, connector: &AnalysisC
                 ..
             },
             ConnectorKind::AxialSpring { stiffness, .. },
-        ) => *stiffness_newtons_per_meter == stiffness.newtons_per_meter,
+        ) => *stiffness_newtons_per_meter == stiffness.canonical_value(),
         (
             CanonicalConnectorEntry::AxialDashpot {
                 damping_newton_seconds_per_meter,
                 ..
             },
             ConnectorKind::AxialDashpot { damping, .. },
-        ) => *damping_newton_seconds_per_meter == damping.newton_seconds_per_meter,
+        ) => *damping_newton_seconds_per_meter == damping.canonical_value(),
         (
             CanonicalConnectorEntry::IsotropicGroundSpring {
                 stiffness_newtons_per_meter,
                 ..
             },
             ConnectorKind::IsotropicGroundSpring { stiffness, .. },
-        ) => *stiffness_newtons_per_meter == stiffness.newtons_per_meter,
+        ) => *stiffness_newtons_per_meter == stiffness.canonical_value(),
         (
             CanonicalConnectorEntry::SurfaceNormalFoundation {
                 modulus_newtons_per_cubic_meter,
                 ..
             },
             ConnectorKind::SurfaceNormalFoundation { modulus, .. },
-        ) => *modulus_newtons_per_cubic_meter == modulus.newtons_per_cubic_meter,
+        ) => *modulus_newtons_per_cubic_meter == modulus.canonical_value(),
         _ => false,
     }
 }

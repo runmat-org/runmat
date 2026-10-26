@@ -3039,7 +3039,8 @@ mod tests {
                 material
                     .require_mechanical()
                     .expect("authored mechanical capability")
-                    .youngs_modulus_pa,
+                    .youngs_modulus_pa
+                    .canonical_value(),
                 expected
             );
         }
@@ -3102,7 +3103,12 @@ mod tests {
         ))
         .expect("a density-only material is valid for compatible formulations");
         let material: MaterialModel = object_payload(&material);
-        assert_eq!(material.mass_density_kg_per_m3, Some(1.225));
+        assert_eq!(
+            material
+                .mass_density_kg_per_m3
+                .map(|quantity| quantity.canonical_value()),
+            Some(1.225)
+        );
         assert!(material.elasticity.is_none());
 
         let empty = block_on(fea_material_builtin(
@@ -4044,7 +4050,7 @@ mod tests {
             .model
             .thermo_mechanical
             .expect("thermo-mechanical domain");
-        assert_eq!(thermo.reference_temperature.kelvin, 293.15);
+        assert_eq!(thermo.reference_temperature.canonical_value(), 293.15);
 
         let mut substituted_model = model.clone();
         let Value::Object(substituted) = &mut substituted_model else {
@@ -4456,7 +4462,7 @@ mod tests {
             model_id: runmat_analysis_core::AnalysisModelId("synthetic_plot.model".to_string()),
             geometry_id: geometry.geometry_id.clone(),
             geometry_revision: geometry.revision,
-            units: geometry.units,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
             frame: runmat_analysis_core::CoordinateFrame::Global,
             materials: Vec::new(),
             material_assignments: Vec::new(),

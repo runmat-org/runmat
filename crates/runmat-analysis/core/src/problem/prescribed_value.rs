@@ -59,12 +59,6 @@ pub trait PrescribedQuantity: FiniteQuantity {
     fn constant_from_signal(signal: &PhysicalSignal) -> Option<&Self>;
 }
 
-impl<Q: FiniteQuantity> FiniteQuantity for [Q; 3] {
-    fn is_finite(&self) -> bool {
-        self.iter().all(FiniteQuantity::is_finite)
-    }
-}
-
 macro_rules! prescribed_quantity {
     ($quantity:ty, $kind:ident, $variant:ident) => {
         impl PrescribedQuantity for $quantity {

@@ -36,15 +36,15 @@ pub fn outward_flux_and_tangent(
         || temperature_k < 0.0
         || !ambient_k.is_finite()
         || ambient_k < 0.0
-        || !emissivity.fraction.is_finite()
-        || !(0.0..=1.0).contains(&emissivity.fraction)
+        || !emissivity.canonical_value().is_finite()
+        || !(0.0..=1.0).contains(&emissivity.canonical_value())
     {
         return Err(RadiationError::InvalidState);
     }
-    if emissivity.fraction == 0.0 {
+    if emissivity.canonical_value() == 0.0 {
         return Ok((0.0, 0.0));
     }
-    let coefficient = emissivity.fraction * STEFAN_BOLTZMANN_W_PER_M2_K4;
+    let coefficient = emissivity.canonical_value() * STEFAN_BOLTZMANN_W_PER_M2_K4;
     let flux = coefficient
         * (temperature_k - ambient_k)
         * (temperature_k + ambient_k)

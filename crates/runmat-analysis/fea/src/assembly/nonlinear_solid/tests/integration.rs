@@ -77,7 +77,7 @@ fn cancelled_original_basis_preparation_preserves_typed_cancellation() {
 fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
     let (model, _, _) = fixture(ElementOrder::Tet10, false);
     let mut mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    mesh.topology.nodes[4].coordinates_m[1] -= 0.05;
+    mesh.topology.nodes[4].coordinates_m.canonical_value()[1] -= 0.05;
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let initial = assemble_structural_system_borrowed(
@@ -95,6 +95,7 @@ fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
             .find(|node| node.node_id == id)
             .unwrap()
             .coordinates_m
+            .canonical_value()
     });
     let shared = runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates).unwrap();
     let expected_rule =
@@ -111,9 +112,9 @@ fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
     let tangent = basis.evaluate(&zero, &basis.zero_state()).unwrap().tangent;
     let linear = crate::assembly::elements::solid::tetrahedron10_global_stiffness_matrix(
         crate::assembly::elements::solid::SolidMaterial {
-            youngs_modulus_pa: 1200.0,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::Quantity::new(1200.0),
+            poisson_ratio: runmat_types::physical::Quantity::new(0.25),
+            density_kg_per_m3: runmat_types::physical::Quantity::new(1.0),
         },
         crate::assembly::elements::solid::Tetrahedron10ElementGeometry {
             nodes_m: coordinates,

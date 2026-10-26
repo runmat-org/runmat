@@ -68,7 +68,7 @@ fn parameters_are_bound_once_and_feature_values_are_resolved() {
     assert_eq!(plan.resource_bounds.maximum_live_artifacts, 1);
     assert!(matches!(
         plan.steps[0].operation,
-        ResolvedGeometryFeatureOperation::Box { width_m: 1.0, .. }
+        ResolvedGeometryFeatureOperation::Box { width_m, .. } if width_m.canonical_value() == 1.0
     ));
 }
 
@@ -92,7 +92,15 @@ fn parameter_references_resolve_defaults_to_canonical_literal_values() {
         parameters
             .resolve_value(&GeometryAuthoringValue::Parameter("width".into()))
             .unwrap(),
-        GeometryAuthoringValue::Scalar(scalar(1.0))
+        GeometryAuthoringValue::Scalar(GeometryScalarExpression::Canonical {
+            value: runmat_types::physical::DimensionedScalar::try_from_descriptor(
+                runmat_types::physical::DynamicDimension::quantity_type(
+                    runmat_types::physical::QuantityKind::Length
+                ),
+                1.0
+            )
+            .unwrap(),
+        })
     );
 }
 
@@ -238,7 +246,7 @@ fn edge_treatments_resolve_exact_target_membership_and_cardinality() {
     let operation = ResolvedGeometryFeatureOperation::Fillet {
         target: GeometryFeatureRef("stock".into()),
         edges: selector,
-        radius_m: 0.1,
+        radius_m: runmat_types::physical::Length::new(0.1),
     };
     assert_eq!(
         resolve_provider_selection(
@@ -259,7 +267,7 @@ fn edge_treatments_resolve_exact_target_membership_and_cardinality() {
             selector: runmat_geometry_core::GeometryRegionSelector::Result,
             cardinality: runmat_geometry_core::GeometryRegionCardinality::ExactlyOne,
         },
-        distance_m: 0.1,
+        distance_m: runmat_types::physical::Length::new(0.1),
     };
     assert!(matches!(
         resolve_provider_selection(
@@ -515,4 +523,64 @@ fn generated_geometry_receives_resolved_arguments() {
     .unwrap();
     assert_eq!(materialized.kind, GeometryMaterializationKind::Generated);
     assert_eq!(materialized.geometry, "generated()");
+}
+
+#[test]
+fn source_geometry_expression_retains_units_through_parameter_arithmetic() {
+    use runmat_types::physical::{parse_unit_expression, DynamicDimension, QuantityKind};
+    let source = GeometryScalarExpression::Quantity {
+        value: Box::new(scalar(25.0)),
+        unit: parse_unit_expression("mm").unwrap(),
+        source_unit_symbol: "mm".into(),
+        semantic_kind: None,
+    };
+    let definitions = [GeometryParameterDefinition {
+        parameter_id: "width".into(),
+        parameter_type: GeometryParameterType::Length,
+        required: false,
+        default: Some(GeometryAuthoringValue::Scalar(source)),
+    }];
+    let parameters = resolve_geometry_parameters(&definitions, &BTreeMap::new()).unwrap();
+    let resolved = parameters
+        .resolve_value(&GeometryAuthoringValue::Parameter("width".into()))
+        .unwrap();
+    let GeometryAuthoringValue::Scalar(GeometryScalarExpression::Canonical { value }) = resolved
+    else {
+        panic!("descriptor was dropped")
+    };
+    assert!(value
+        .descriptor()
+        .is_compatible_with(DynamicDimension::quantity_type(QuantityKind::Length)));
+    assert_eq!(value.canonical_value(), 0.025);
+    let product = GeometryScalarExpression::Binary {
+        operator: GeometryScalarOperator::Multiply,
+        left: Box::new(parameter("width")),
+        right: Box::new(scalar(2.0)),
+    };
+    assert_eq!(parameters.length(&product).unwrap(), 0.05);
+    assert!(parameters.angle(&product).is_err());
+    assert!(parameters.scalar(&product).is_err());
+}
+
+#[test]
+fn angle_cannot_enter_a_direction_or_length_parameter() {
+    use runmat_types::physical::parse_unit_expression;
+    let angle = GeometryScalarExpression::Quantity {
+        value: Box::new(scalar(90.0)),
+        unit: parse_unit_expression("deg").unwrap(),
+        source_unit_symbol: "deg".into(),
+        semantic_kind: None,
+    };
+    let definitions = [GeometryParameterDefinition {
+        parameter_id: "width".into(),
+        parameter_type: GeometryParameterType::Length,
+        required: false,
+        default: Some(GeometryAuthoringValue::Scalar(angle.clone())),
+    }];
+    assert!(resolve_geometry_parameters(&definitions, &BTreeMap::new()).is_err());
+    let parameters = resolve_geometry_parameters(&[], &BTreeMap::new()).unwrap();
+    assert!(parameters
+        .vector(&[angle.clone(), scalar(0.0), scalar(0.0)])
+        .is_err());
+    assert!((parameters.angle(&angle).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-15);
 }

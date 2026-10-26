@@ -134,7 +134,9 @@ pub(crate) fn decode_admitted(
         triangles: rows.triangles,
         boundary_segments: rows.boundary_segments,
         shells: decoded.shells.into_vec(),
-        maximum_chordal_deviation_m: rows.maximum_chordal_deviation_m,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            rows.maximum_chordal_deviation_m.canonical_value(),
+        ),
         maximum_normal_deviation_rad: rows.maximum_normal_deviation_rad,
     })
 }

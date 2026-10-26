@@ -26,7 +26,7 @@ fn both_order_surface_weights_normals_and_coupling_rows_match_independent_geomet
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let target =
-            resolve_nodal_target(&mesh, &RegionTarget::boundary("face:0"), "surface").unwrap();
+            resolve_nodal_target(&mesh, &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")), "surface").unwrap();
         let normals = normal::boundary_node_normals(&mesh, &target, "surface").unwrap();
         for id in &target.matched_node_identities {
             let normal = normals.get(id).unwrap();
@@ -92,9 +92,10 @@ fn both_order_surface_weights_normals_and_coupling_rows_match_independent_geomet
                                     .iter()
                                     .find(|n| n.stable_identity == id)
                                     .unwrap()
-                                    .coordinates_m;
+                                    .coordinates_m
+                                    .canonical_value();
                                 let arm = std::array::from_fn::<_, 3, _>(|i| {
-                                    p[i] - reference.position.meters[i]
+                                    p[i] - reference.position.canonical_value()[i]
                                 });
                                 let cross = [
                                     rotation[1] * arm[2] - rotation[2] * arm[1],
@@ -121,7 +122,7 @@ fn borrowed_reference_point_preparation_preserves_aliases_and_conflict_rejection
             constraint_id: id.into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 reference_point: ReferencePoint {
                     reference_point_id: " reference ".into(),
                     position: Position::new(point),
@@ -150,7 +151,7 @@ fn borrowed_reference_point_preparation_preserves_aliases_and_conflict_rejection
 #[test]
 fn cancelled_construction_rejects_all_profiles_and_compilation_at_entry() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    let region = RegionTarget::boundary("face:0");
+    let region = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"));
     let target = resolve_nodal_target(&mesh, &region, "surface").unwrap();
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let token = crate::progress::FeaCancellationToken::new();
@@ -193,7 +194,7 @@ fn duplicate_reference_points_retain_last_authored_signed_zero_identity() {
                 constraint_id: format!("coupling-{ordinal}"),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                    target: RegionTarget::boundary("face:0"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                     reference_point: ReferencePoint {
                         reference_point_id: " reference ".into(),
                         position: Position::new([x, 0.3, -1.0]),

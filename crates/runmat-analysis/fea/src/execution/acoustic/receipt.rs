@@ -65,7 +65,7 @@ impl AcousticNumericalReceiptArtifact {
         let receipt = AcousticNumericalReceipt {
             producer: result.producer(),
             topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
-            frequency_hz: workload.frequency.hertz,
+            frequency_hz: workload.frequency.canonical_value(),
             relative_residual: result.relative_residual(),
             power_relative_error: result.power_relative_error(),
             solver_relative_tolerance: workload.solver.relative_tolerance,

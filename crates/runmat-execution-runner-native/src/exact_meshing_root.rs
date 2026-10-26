@@ -699,11 +699,11 @@ mod tests {
     fn meshing_request() -> MeshingRequest {
         resolve_meshing_request(
             GeometryTolerancePolicy {
-                source_tolerance_m: 0.0,
-                absolute_floor_m: 1.0e-12,
+                source_tolerance_m: runmat_types::physical::Length::new(0.0),
+                absolute_floor_m: runmat_types::physical::Length::new(1.0e-12),
                 model_relative_term: 1.0e-12,
-                requested_deviation_m: 1.0e-4,
-                maximum_healing_displacement_m: 1.0e-6,
+                requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+                maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
             },
             MeshingRequestSettings::default(),
         )
@@ -957,13 +957,15 @@ mod tests {
         let mut request = meshing_request();
         request.metric.global_metric =
             runmat_meshing_core::MetricTensor3::isotropic_length_m(10.0).unwrap();
-        request.quality.curve.maximum_chordal_deviation_m = 0.1;
+        request.quality.curve.maximum_chordal_deviation_m =
+            runmat_types::physical::Length::new(0.1);
         request.quality.curve.maximum_tangent_change_degrees = 180.0;
         request.quality.curve.minimum_metric_edge_length = 0.01;
         request.quality.curve.maximum_metric_edge_length = 10.0;
         request.quality.surface.minimum_metric_angle_degrees = 0.1;
         request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
-        request.quality.surface.maximum_chordal_deviation_m = 0.1;
+        request.quality.surface.maximum_chordal_deviation_m =
+            runmat_types::physical::Length::new(0.1);
         request.quality.surface.maximum_normal_deviation_degrees = 180.0;
         request.quality.volume.maximum_metric_edge_length = 2.0;
         request.quality.volume.maximum_radius_edge_ratio = 10.0;

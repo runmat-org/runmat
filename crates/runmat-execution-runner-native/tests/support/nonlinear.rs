@@ -22,16 +22,16 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
     model.signals.clear();
     model.excitations.clear();
     model.excitation_cases.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
-            youngs_modulus_pa: 1000.0,
-            poisson_ratio: 0.25,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(1000.0),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
         },
     ));
     model.materials[0].plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-        yield_stress_pa: 5.0,
-        isotropic_hardening_modulus_pa: 30.0,
+        yield_stress_pa: runmat_types::physical::YieldStress::new(5.0),
+        isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(30.0),
     });
     model.sequence = AnalysisSequence::from_steps(
         "native-j2",
@@ -59,7 +59,7 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         .excitations
         .push(ExcitationAction::Traction(AnalysisExcitation {
             excitation_id: ExcitationId("pull".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary("slab_right")),
+            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,
@@ -86,7 +86,7 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         ]
         .into_iter()
         .enumerate()
-        .filter(|(axis, _)| node.coordinates_m[*axis] == 0.0)
+        .filter(|(axis, _)| node.coordinates_m.canonical_value()[*axis] == 0.0)
         .map(|(_, dof)| TranslationDofValue {
             dof,
             value: PrescribedValue::Constant(Displacement::new(0.0)),

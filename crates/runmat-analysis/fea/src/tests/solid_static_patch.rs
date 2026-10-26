@@ -31,8 +31,8 @@ fn patch_model() -> runmat_analysis_core::AnalysisModel {
     else {
         panic!("expected isotropic linear elasticity");
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     model.signals.clear();
     model.excitations.clear();
     model.excitation_cases.clear();
@@ -379,7 +379,7 @@ fn tet10_traction_patch_recovers_quadratic_face_loads_and_affine_stress() {
         .iter()
         .zip(expected_load.chunks_exact(3))
     {
-        let [x, y, z] = node.coordinates_m;
+        let [x, y, z] = node.coordinates_m.canonical_value();
         resultant
             .iter_mut()
             .zip(force)
@@ -404,9 +404,9 @@ fn tet10_traction_patch_recovers_quadratic_face_loads_and_affine_stress() {
         .iter()
         .flat_map(|node| {
             [
-                0.1 * node.coordinates_m[0],
-                0.2 * node.coordinates_m[1],
-                0.3 * node.coordinates_m[2],
+                0.1 * node.coordinates_m.canonical_value()[0],
+                0.2 * node.coordinates_m.canonical_value()[1],
+                0.3 * node.coordinates_m.canonical_value()[2],
             ]
         })
         .collect::<Vec<_>>();
@@ -434,9 +434,9 @@ fn tet10_traction_patch_recovers_quadratic_face_loads_and_affine_stress() {
     assert_eq!(displacement.len(), 30);
     for (actual, node) in displacement.chunks_exact(3).zip(&mesh.topology.nodes) {
         for (&actual, expected) in actual.iter().zip([
-            0.1 * node.coordinates_m[0],
-            0.2 * node.coordinates_m[1],
-            0.3 * node.coordinates_m[2],
+            0.1 * node.coordinates_m.canonical_value()[0],
+            0.2 * node.coordinates_m.canonical_value()[1],
+            0.3 * node.coordinates_m.canonical_value()[2],
         ]) {
             assert!(
                 (actual - expected).abs() < 1.0e-8,
@@ -484,9 +484,9 @@ fn connected_tet10_traction_patch_recovers_affine_solution_and_matches_parallel(
         .iter()
         .flat_map(|node| {
             [
-                0.1 * node.coordinates_m[0],
-                0.2 * node.coordinates_m[1],
-                0.3 * node.coordinates_m[2],
+                0.1 * node.coordinates_m.canonical_value()[0],
+                0.2 * node.coordinates_m.canonical_value()[1],
+                0.3 * node.coordinates_m.canonical_value()[2],
             ]
         })
         .collect::<Vec<_>>();

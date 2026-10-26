@@ -298,7 +298,7 @@ fn rotation_transform_and_every_structural_dof_are_typed() {
         panic!("expected a rotation")
     };
     assert_eq!(axis, [0.0, 0.0, 1.0]);
-    assert!((angle.radians - std::f64::consts::FRAC_PI_4).abs() < 1e-15);
+    assert!((angle.canonical_value() - std::f64::consts::FRAC_PI_4).abs() < 1e-15);
     assert!(block_on(periodic_transform_rotation_builtin(
         None,
         origin(),

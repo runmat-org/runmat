@@ -174,10 +174,10 @@ fn every_offset_and_later_complex_jump_is_checked_without_sampling() {
         kind: StandardWaveformKind::Sine,
         amplitude: value(),
         offset: Some(invalid()),
-        start_seconds: 0.0,
-        duration_seconds: None,
-        frequency_hz: Some(1.0),
-        phase_radians: 0.0,
+        start_seconds: runmat_types::physical::Time::new(0.0),
+        duration_seconds: (None).map(runmat_types::physical::Time::new),
+        frequency_hz: (Some(1.0)).map(runmat_types::physical::Frequency::new),
+        phase_radians: runmat_types::physical::Angle::new(0.0),
         duty_cycle: None,
     });
     assert!(validate_representation(&waveform, 4).is_err());

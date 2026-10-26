@@ -18,12 +18,12 @@ const SOURCE: &str = r#"
 geometry part {
  file = "./box.brep"; units = m
  region bulk : cell { select result; expect exactly_one }
- region outlet : face { select id "face_000002"; expect exactly_one }
- region lid : face { select id "face_000001"; expect exactly_one }
- region wall3 : face { select id "face_000003"; expect exactly_one }
- region wall4 : face { select id "face_000004"; expect exactly_one }
- region wall5 : face { select id "face_000005"; expect exactly_one }
- region wall6 : face { select id "face_000006"; expect exactly_one }
+ region outlet : face { select persistent_id "FACE_2_ID"; expect exactly_one }
+ region lid : face { select persistent_id "FACE_1_ID"; expect exactly_one }
+ region wall3 : face { select persistent_id "FACE_3_ID"; expect exactly_one }
+ region wall4 : face { select persistent_id "FACE_4_ID"; expect exactly_one }
+ region wall5 : face { select persistent_id "FACE_5_ID"; expect exactly_one }
+ region wall6 : face { select persistent_id "FACE_6_ID"; expect exactly_one }
 }
 mesh volume on geometry.part { tetrahedra { order = linear; target_size = 1.5 m; maximum_deviation = 0.02 m } }
 material liquid { mass_density = 1 kg/m^3; fluid { law = incompressible_newtonian; dynamic_viscosity = 1 Pa*s } }
@@ -74,7 +74,7 @@ pub(super) async fn run() {
             include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
         )
         .unwrap();
-        let source = SOURCE
+        let mut source = SOURCE
             .replace(
                 "BOUNDARY_VALUE",
                 if moving {
@@ -84,6 +84,15 @@ pub(super) async fn run() {
                 },
             )
             .replace("BOUNDARY", if moving { "velocity" } else { "no_slip_wall" });
+        let imported = runmat_geometry_io::import_exact_cad(
+            "box.brep", include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
+            runmat_geometry_io::GeometryFormat::Brep,
+            &runmat_geometry_io::ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..Default::default() },
+            &runmat_geometry_io::GeometryImportContext::new(),
+        ).unwrap();
+        for (index, face) in &imported.source_face_ids {
+            source = source.replace(&format!("FACE_{}_ID", index + 1), &face.analysis_selection_id().unwrap());
+        }
         std::fs::write(&path, source).unwrap();
         let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
         let checked = session.load_and_check_fea_source_path(&path).await.unwrap();
@@ -159,18 +168,18 @@ pub(super) async fn run() {
         assert!(original.residual.global_momentum_relative <= 1e-8);
         assert!(worst_cell_momentum <= 1e-8);
         assert_eq!(
-            original.velocity_m_per_s.len(),
+            original.velocity_m_per_s.canonical_values().len(),
             result.mesh.topology.volume_elements.len()
         );
-        assert!(!original.face_volume_flux_m3_per_s.is_empty());
+        assert!(!original.face_volume_flux_m3_per_s.canonical_values().is_empty());
         assert_eq!(result.completion.fields.fields.len(), 3);
         assert_eq!(
             result.completion.fields.entity_counts.volume_elements,
-            original.velocity_m_per_s.len()
+            original.velocity_m_per_s.canonical_values().len()
         );
         assert_eq!(
             result.completion.fields.entity_counts.oriented_faces,
-            original.face_volume_flux_m3_per_s.len()
+            original.face_volume_flux_m3_per_s.canonical_values().len()
         );
         let domains = [
             runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::VolumeElements,
@@ -182,9 +191,9 @@ pub(super) async fn run() {
             let expected = if domain
                 == runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::OrientedFaces
             {
-                original.face_volume_flux_m3_per_s.len()
+                original.face_volume_flux_m3_per_s.canonical_values().len()
             } else {
-                original.velocity_m_per_s.len()
+                original.velocity_m_per_s.canonical_values().len()
             };
             assert_eq!(
                 entry
@@ -240,17 +249,17 @@ pub(super) async fn run() {
         for observation in &result.completion.observation_results {
             let (count, width, location) = match observation.quantity {
                 runmat_analysis_core::ObservationQuantity::FluidVelocity => (
-                    original.velocity_m_per_s.len(),
+                    original.velocity_m_per_s.canonical_values().len(),
                     3,
                     runmat_analysis_core::FieldLocation::Cell,
                 ),
                 runmat_analysis_core::ObservationQuantity::FluidPressure => (
-                    original.pressure_pa.len(),
+                    original.pressure_pa.canonical_values().len(),
                     1,
                     runmat_analysis_core::FieldLocation::Cell,
                 ),
                 runmat_analysis_core::ObservationQuantity::VolumeFlowRate => (
-                    original.face_volume_flux_m3_per_s.len(),
+                    original.face_volume_flux_m3_per_s.canonical_values().len(),
                     1,
                     runmat_analysis_core::FieldLocation::Face,
                 ),
@@ -280,7 +289,7 @@ pub(super) async fn run() {
         }
         let max_velocity = original
             .velocity_m_per_s
-            .iter()
+            .canonical_values().iter()
             .flatten()
             .map(|x| x.abs())
             .fold(0.0, f64::max);
@@ -292,10 +301,10 @@ pub(super) async fn run() {
                 result.completion.workload.geometry_policy,
             )
             .unwrap();
-            assert_eq!(topology.cells.len(), original.velocity_m_per_s.len());
+            assert_eq!(topology.cells.len(), original.velocity_m_per_s.canonical_values().len());
             assert_eq!(
                 topology.faces.len(),
-                original.face_volume_flux_m3_per_s.len()
+                original.face_volume_flux_m3_per_s.canonical_values().len()
             );
             let tolerance = result
                 .completion
@@ -304,25 +313,25 @@ pub(super) async fn run() {
                 .physical_relative_tolerance;
             // Independent rigid-translation patch: U constant, p=0 and q=U dot S
             // at every original owner-oriented face, not only an exterior rendering.
-            for u in &original.velocity_m_per_s {
+            for u in original.velocity_m_per_s.canonical_values() {
                 for (actual, expected) in u.iter().zip([0.001_f64, 0.0, 0.0]) {
                     assert!((*actual - expected).abs() <= tolerance * 0.001);
                 }
             }
             assert!(original
                 .pressure_pa
-                .iter()
+                .canonical_values().iter()
                 .all(|p| p.abs() <= tolerance * 0.001));
             let flux_scale = topology
                 .faces
                 .iter()
-                .map(|f| 0.001 * f.area_m2)
+                .map(|f| 0.001 * f.area_m2.canonical_value())
                 .fold(0.0, f64::max);
             let mut outlet_faces = 0;
             for (face, q) in topology
                 .faces
                 .iter()
-                .zip(&original.face_volume_flux_m3_per_s)
+                .zip(original.face_volume_flux_m3_per_s.canonical_values())
             {
                 let expected = 0.001 * face.owner_area_vector_m2[0];
                 assert!((*q - expected).abs() <= tolerance * flux_scale);
@@ -336,7 +345,7 @@ pub(super) async fn run() {
             assert!(max_velocity > 0.0);
         } else {
             assert_eq!(max_velocity, 0.0);
-            assert!(original.pressure_pa.iter().all(|p| *p == 0.0));
+            assert!(original.pressure_pa.canonical_values().iter().all(|p| *p == 0.0));
         }
         let expected = result.completion.clone();
         let mesh = result.mesh.clone();
@@ -475,8 +484,8 @@ pub(super) async fn run() {
         }) {
             eprintln!(
                 "authored fluid lifecycle: cells={}, all_faces={}, admitted_state_heap={}B",
-                expected.result.original().velocity_m_per_s.len(),
-                expected.result.original().face_volume_flux_m3_per_s.len(),
+                expected.result.original().velocity_m_per_s.canonical_values().len(),
+                expected.result.original().face_volume_flux_m3_per_s.canonical_values().len(),
                 closure
                     .execution
                     .winning_accounting()

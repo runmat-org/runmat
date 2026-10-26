@@ -224,3 +224,31 @@ impl AssemblyExecution<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod physical_admission_tests {
+    use super::*;
+    #[test]
+    fn absent_formulation_cannot_report_success_from_a_synthetic_multiphysics_rhs() {
+        let model =
+            crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+        let error = assemble_linear_system_impl(
+            &model,
+            &RealizedExcitations::default(),
+            None,
+            None,
+            None,
+            AssemblyExecution {
+                structural_requirement: None,
+                supplied_constraint_plan: None,
+                local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
+                solved_nodal_temperature_k: None,
+                solid_energy: None,
+            },
+        )
+        .expect_err("missing physical formulation must reject before assembly");
+        assert!(
+            matches!(error, LinearAssemblyError::CouplingRealization(message) if message.contains("explicit structural formulation"))
+        );
+    }
+}

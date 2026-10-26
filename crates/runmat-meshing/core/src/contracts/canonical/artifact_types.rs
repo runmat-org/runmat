@@ -53,7 +53,9 @@ pub enum BoundaryFaceRole {
 pub struct SolverMeshNode {
     pub node_id: u64,
     pub stable_identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub provenance: Vec<PersistentEntityId>,
     pub exact_parameters: Vec<SolverNodeExactParameter>,
 }

@@ -20,7 +20,7 @@ pub(super) fn rigid_rows(
                 "constraint `{constraint_id}` coupling node is absent from solver topology"
             ))
         })?;
-        let arm = subtract(position, reference_point.position.meters);
+        let arm = subtract(position, reference_point.position.canonical_value());
         for component in 0..3 {
             let mut terms = reserve(4)?;
             terms.push(mesh_term(weight.node_identity, component, 1.0));
@@ -71,7 +71,10 @@ pub(super) fn distributing_rows(
                 "constraint `{constraint_id}` coupling node is absent from solver topology"
             ))
         })?;
-        arms.push(subtract(position, reference_point.position.meters));
+        arms.push(subtract(
+            position,
+            reference_point.position.canonical_value(),
+        ));
     }
     let mean_arm = weights
         .iter()

@@ -1,20 +1,24 @@
 //! Exact affine reduction, then one certified sparse LU of the reduced real block operator.
+use super::super::quantity_layout::{
+    equation_descriptor, ReducedPressureLayout, ReducedPressureOperator,
+};
 use super::*;
 use crate::{
     algebra::{spmv, RealSparseMatrix},
     constraints::{build_phase_reduction, AffineConstraintReduction},
     solve::certificate::{certify_nonsingular, CertificateError, CertifiedFactorization},
 };
+use runmat_types::physical::{Quantity, QuantityLinearOperator, UniformQuantityLayout};
 
 mod operator;
 #[cfg(test)]
 mod tests;
 
 pub(super) struct PreparedReduced {
-    reduction: AffineConstraintReduction,
-    operator: RealSparseMatrix,
-    rhs: Vec<f64>,
-    residual_reference: f64,
+    reduction: std::sync::Arc<AffineConstraintReduction>,
+    operator: ReducedPressureOperator,
+    rhs: Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
+    residual_reference: Quantity<runmat_types::physical::DynamicDimension>,
     factorization: Option<CertifiedFactorization>,
     certificate: AcousticSolveCertificate,
     size: usize,
@@ -29,17 +33,26 @@ impl PreparedReduced {
         check_cancelled()?;
         let reduction = match &assembly.reduction {
             Some(reduction) => reduction.clone(),
-            None => {
-                build_phase_reduction(assembly.projection.nodes.len(), &[], &assembly.prescribed)
-                    .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?
-            }
+            None => build_phase_reduction(
+                assembly.projection.nodes.len(),
+                &[],
+                &assembly.prescribed.canonical_values(),
+            )
+            .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?,
         };
         let full_operator = operator::materialize(assembly)?;
         let source = assembly
             .source
+            .canonical_values()
             .iter()
             .map(|value| value.real)
-            .chain(assembly.source.iter().map(|value| value.imaginary))
+            .chain(
+                assembly
+                    .source
+                    .canonical_values()
+                    .iter()
+                    .map(|value| value.imaginary),
+            )
             .collect::<Vec<_>>();
         let operator = reduction
             .reduce_sparse_operator(&full_operator)
@@ -86,8 +99,21 @@ impl PreparedReduced {
         drop(source);
         drop(lifting);
         drop(shifted);
+
+        let layout = ReducedPressureLayout::try_new(reduction, assembly.projection.nodes.len())?;
+        let operator = QuantityLinearOperator::try_new(
+            layout.clone(),
+            UniformQuantityLayout::from_descriptor(rhs.len(), equation_descriptor(2)),
+            operator,
+        )
+        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let rhs = Quantity::try_from_descriptor(equation_descriptor(2), rhs)
+            .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let residual_reference =
+            Quantity::try_from_descriptor(equation_descriptor(2), residual_reference)
+                .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         Ok(Self {
-            reduction,
+            reduction: layout.reduction.clone(),
             operator,
             rhs,
             residual_reference,
@@ -103,14 +129,21 @@ impl PreparedReduced {
         policy: AcousticHarmonicPolicy,
     ) -> Result<ReducedSolution, AcousticHarmonicError> {
         check_cancelled()?;
-        let mut solution = vec![0.0; self.rhs.len()];
+        let mut solution = vec![0.0; self.rhs.canonical_values().len()];
         let mut refinement_steps = 0;
-        let mut reference = self.residual_reference;
+        let mut reference = self.residual_reference.canonical_value();
         if let Some(factorization) = &self.factorization {
-            let arrays = crate::solve::shared_sparse::CsrArrays::of(&self.operator);
-            let report = factorization
-                .factor
-                .solve_refined(arrays.view().into(), &self.rhs, &mut solution, 1)
+            let report = self
+                .operator
+                .with_canonical_storage(|operator| {
+                    let arrays = crate::solve::shared_sparse::CsrArrays::of(operator);
+                    factorization.factor.solve_refined(
+                        arrays.view().into(),
+                        self.rhs.canonical_values(),
+                        &mut solution,
+                        1,
+                    )
+                })
                 .map_err(|error| match error {
                     runmat_sparse_solvers::SolverError::Cancelled => {
                         AcousticHarmonicError::Cancelled
@@ -137,9 +170,16 @@ impl PreparedReduced {
         applied.extend(applied_imaginary);
         let residual = assembly
             .source
+            .canonical_values()
             .iter()
             .map(|value| value.real)
-            .chain(assembly.source.iter().map(|value| value.imaginary))
+            .chain(
+                assembly
+                    .source
+                    .canonical_values()
+                    .iter()
+                    .map(|value| value.imaginary),
+            )
             .zip(applied)
             .map(|(source, applied)| source - applied)
             .collect::<Vec<_>>();
@@ -173,9 +213,11 @@ impl PreparedReduced {
     fn residual(&self, solution: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
         Ok(self
             .rhs
+            .canonical_values()
             .iter()
             .zip(
-                spmv(&self.operator, solution)
+                self.operator
+                    .with_canonical_storage(|matrix| spmv(matrix, solution))
                     .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?,
             )
             .map(|(source, applied)| source - applied)

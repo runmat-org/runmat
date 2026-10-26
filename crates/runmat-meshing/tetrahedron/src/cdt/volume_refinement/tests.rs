@@ -358,7 +358,10 @@ fn refinement_selects_a_deterministic_interior_metric_circumcenter() {
         anisotropic.kind,
         DelaunayRefinementCandidateKind::MetricCircumcenter
     );
-    assert_ne!(anisotropic.node.coordinates_m, first.node.coordinates_m);
+    assert_ne!(
+        anisotropic.node.coordinates_m.canonical_value(),
+        first.node.coordinates_m.canonical_value()
+    );
     assert_eq!(anisotropic.node.identity, first.node.identity);
 }
 
@@ -391,7 +394,10 @@ fn refinement_selects_the_next_canonical_candidate_after_sliver_deletion() {
     .unwrap();
 
     assert_ne!(second.node.identity, first.node.identity);
-    assert_ne!(second.node.coordinates_m, first.node.coordinates_m);
+    assert_ne!(
+        second.node.coordinates_m.canonical_value(),
+        first.node.coordinates_m.canonical_value()
+    );
     validate_delaunay_volume_refinement_candidate(
         input,
         &Some(second),
@@ -429,7 +435,10 @@ fn refinement_uses_an_interior_centroid_when_circumcenter_is_exterior() {
         selected.kind,
         DelaunayRefinementCandidateKind::InteriorPoint
     );
-    assert_eq!(selected.node.coordinates_m, [0.5, 0.25, 0.25]);
+    assert_eq!(
+        selected.node.coordinates_m.canonical_value(),
+        [0.5, 0.25, 0.25]
+    );
 }
 
 // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
@@ -452,7 +461,7 @@ fn size_refinement_splits_the_longest_edge_with_an_interior_endpoint() {
     let points = |index: usize| {
         topology.tetrahedra[index]
             .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m)
+            .map(|vertex| topology.nodes[vertex as usize].coordinates_m.canonical_value())
     };
     // The hull edges (corner to corner, up to 2.24) are longer than the interior
     // edge to the far corner (1.73), but they cannot be split from inside.
@@ -530,7 +539,17 @@ fn refinement_handles_convergence_tampering_limits_and_cancellation() {
     )
     .unwrap();
     let admitted_candidate = candidate.clone();
-    candidate.as_mut().unwrap().node.coordinates_m[0] += 0.1;
+    {
+        let quantity_change = 0.1;
+        let quantity_index = 0;
+        let quantity_slot = &mut candidate.as_mut().unwrap().node.coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         validate_delaunay_volume_refinement_candidate(
             refinement_input(

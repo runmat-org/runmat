@@ -59,6 +59,11 @@ fn projection_case(levels: usize, order: ElementOrder) {
     drop(wire);
     let projection = topology
         .into_projection(runmat_meshing_core::GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: runmat_meshing_core::StableDigest::from_bytes([17; 32]),
             geometry_revision: 1,
             persistent_mapping_version: 1,
@@ -86,7 +91,9 @@ fn projection_case(levels: usize, order: ElementOrder) {
         .iter()
         .map(|element| {
             let points = std::array::from_fn(|index| {
-                projection.topology.nodes[(element.node_ids[index] - 1) as usize].coordinates_m
+                projection.topology.nodes[(element.node_ids[index] - 1) as usize]
+                    .coordinates_m
+                    .canonical_value()
             });
             runmat_meshing_core::quality::predicate::tetrahedron_signed_volume(points).abs()
         })

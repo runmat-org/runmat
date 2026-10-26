@@ -320,20 +320,20 @@ fn add_boundary_current_density(
     .map_err(|e| ElectricalStaticError::Operator(e.to_string()))?;
     let mut injected = 0.0;
     for face in &faces {
-        if face.role != runmat_meshing_core::BoundaryFaceRole::Exterior || !(face.area_m2 > 0.0) {
+        if face.role != runmat_meshing_core::BoundaryFaceRole::Exterior || !(face.area_m2.canonical_value() > 0.0) {
             return Err(ElectricalStaticError::Boundary(
                 "current density requires exterior faces".into(),
             ));
         }
-        let normal = face.oriented_area_vector_m2.map(|a| a / face.area_m2);
+        let normal = face.oriented_area_vector_m2.map(|a| a / face.area_m2.canonical_value());
         let flux = -(value.real[0] * normal[0] + value.real[1] * normal[1] + value.real[2] * normal[2]);
-        injected += flux * face.area_m2;
+        injected += flux * face.area_m2.canonical_value();
     }
     evidence.add_requested(injected, 0.0);
     source.integrated_source += injected;
     source.absolute_source += injected.abs();
     for face in faces {
-        let normal = face.oriented_area_vector_m2.map(|a| a / face.area_m2);
+        let normal = face.oriented_area_vector_m2.map(|a| a / face.area_m2.canonical_value());
         let flux = -(value.real[0] * normal[0] + value.real[1] * normal[1] + value.real[2] * normal[2]);
         projection
             .visit_boundary_quadrature(face, |point| {

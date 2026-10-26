@@ -3,7 +3,7 @@ use super::*;
 #[cfg(feature = "plot-core")]
 use runmat_builtins::GEOMETRY_MESH_METHOD_ERROR_INPUT as MESH_INPUT;
 use runmat_builtins::GEOMETRY_MESH_METHOD_ERROR_OPERATION as MESH_OPERATION;
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::LengthUnit;
 use runmat_geometry_io::GeometryImportOptions;
 
 pub(super) const GEOMETRY_MESH_METHOD_NAME: &str = "__runmat_geometry_mesh";
@@ -123,11 +123,11 @@ pub(super) fn parse_load_options(
             .to_ascii_lowercase()
             .as_str()
         {
-            "m" | "meter" | "meters" | "metre" | "metres" => UnitSystem::Meter,
+            "m" | "meter" | "meters" | "metre" | "metres" => LengthUnit::Meter,
             "mm" | "millimeter" | "millimeters" | "millimetre" | "millimetres" => {
-                UnitSystem::Millimeter
+                LengthUnit::Millimeter
             }
-            "in" | "inch" | "inches" => UnitSystem::Inch,
+            "in" | "inch" | "inches" => LengthUnit::Inch,
             other => {
                 return Err(builtin_error(
                     GEOMETRY_LOAD_NAME,
@@ -136,6 +136,7 @@ pub(super) fn parse_load_options(
                 ))
             }
         };
+        options.source_units = Some(options.units);
     }
     Ok(options)
 }

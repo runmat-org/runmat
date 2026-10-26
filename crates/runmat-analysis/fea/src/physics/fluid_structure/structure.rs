@@ -127,7 +127,7 @@ impl ElasticStructure {
             let coordinates = element
                 .node_indices
                 .iter()
-                .map(|&node| projection.nodes[node].coordinates_m)
+                .map(|&node| projection.nodes[node].coordinates_m.canonical_value())
                 .collect::<Vec<_>>();
             let rows = |m: &[[f64; 12]; 12]| m.iter().map(|r| r.to_vec()).collect::<Vec<_>>();
             let rows30 = |m: &[[f64; 30]; 30]| m.iter().map(|r| r.to_vec()).collect::<Vec<_>>();
@@ -197,7 +197,7 @@ impl ElasticStructure {
                 StructuralConstraintKind::Symmetry { target } => {
                     for face in exterior_faces(projection, target)? {
                         let f = &projection.boundary_faces[face];
-                        let normal = f.oriented_area_vector_m2.map(|v| v / f.area_m2);
+                        let normal = f.oriented_area_vector_m2.map(|v| v / f.area_m2.canonical_value());
                         let axis = (0..3)
                             .find(|&k| (normal[k].abs() - 1.0).abs() < 1e-9)
                             .ok_or(Error::Unsupported(

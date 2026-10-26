@@ -6,10 +6,19 @@ use crate::{
 };
 use runmat_geometry_core::{
     ExactContactDefinition, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    GeometryHealingOperationKind, MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
-    TrimDomainLocation, UnitSystem,
+    GeometryHealingOperationKind, LengthUnit, MassPropertiesEvaluatorId, SurfaceEvaluatorId,
+    TrimClassifierId, TrimDomainLocation,
 };
+use runmat_types::physical::{Length, Position};
 use sha2::Digest as _;
+
+fn native(coordinate: &runmat_geometry_core::GeometryParameterCoordinate) -> f64 {
+    coordinate.with_native_coordinate(|value, _frame| value)
+}
+
+fn native_uv(uv: &[runmat_geometry_core::GeometryParameterCoordinate; 2]) -> [f64; 2] {
+    [native(&uv[0]), native(&uv[1])]
+}
 
 const BOX: &[u8] = include_bytes!("../../../tests/fixtures/box.brep");
 const BOX_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/box_cavity.brep");
@@ -67,7 +76,7 @@ fn exact_evaluator_reconstructs_from_the_transferable_closure() {
     let direct = OcctExactEvaluator::new(&imported).unwrap();
     let reconstructed = OcctExactEvaluator::from_closure(
         &imported.representation,
-        imported.meters_per_source_unit,
+        imported.kernel_units.meters_per_unit(),
         &imported.topology,
         &imported.evaluators,
     )
@@ -86,7 +95,7 @@ fn exact_evaluator_reconstructs_from_the_transferable_closure() {
     assert_eq!(
         OcctExactEvaluator::from_closure(
             &poisoned_representation,
-            imported.meters_per_source_unit,
+            imported.kernel_units.meters_per_unit(),
             &imported.topology,
             &imported.evaluators,
         )
@@ -190,7 +199,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             .vertices
             .iter()
             .filter(|vertex| vertex.id.assembly_path == translated.id.assembly_path)
-            .map(|vertex| vertex.point_m[0])
+            .map(|vertex| vertex.point_m.canonical_value()[0])
             .max_by(f64::total_cmp),
         Some(0.001),
         "definition-local geometry must not absorb occurrence placement",
@@ -209,6 +218,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             )
             .unwrap()
             .centroid_m
+            .canonical_value()
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -298,9 +308,9 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(solid_mass.volume_m3, 6.0);
-    assert_eq!(solid_mass.surface_area_m2, 22.0);
-    assert_eq!(solid_mass.centroid_m, [0.5, 1.0, 1.5]);
+    assert_eq!(solid_mass.volume_m3.canonical_value(), 6.0);
+    assert_eq!(solid_mass.surface_area_m2.canonical_value(), 22.0);
+    assert_eq!(solid_mass.centroid_m.canonical_value(), [0.5, 1.0, 1.5]);
 
     let sheet_mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
         &evaluator,
@@ -308,9 +318,9 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(sheet_mass.volume_m3, 0.0);
-    assert_eq!(sheet_mass.surface_area_m2, 8.0);
-    assert_eq!(sheet_mass.centroid_m, [1.0, 2.0, 10.0]);
+    assert_eq!(sheet_mass.volume_m3.canonical_value(), 0.0);
+    assert_eq!(sheet_mass.surface_area_m2.canonical_value(), 8.0);
+    assert_eq!(sheet_mass.centroid_m.canonical_value(), [1.0, 2.0, 10.0]);
 
     let mut mislabeled = imported.clone();
     let sheet_record = mislabeled
@@ -431,7 +441,7 @@ fn independent_coincident_faces_require_explicit_contact_authoring() {
                 .iter()
                 .find(|instance| instance.id.assembly_path == face.id.assembly_path)
                 .map(|instance| instance.transform.0[3])?;
-            ((point[0] + translation_x - 0.001).abs() < 1.0e-12).then(|| face.id.clone())
+            ((point.canonical_value()[0] + translation_x - 0.001).abs() < 1.0e-12).then(|| face.id.clone())
         })
         .collect::<Vec<_>>();
     coincident_faces.sort();
@@ -483,9 +493,9 @@ fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(mass.volume_m3, 12.0);
-    assert_eq!(mass.surface_area_m2, 44.0);
-    assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+    assert_eq!(mass.volume_m3.canonical_value(), 12.0);
+    assert_eq!(mass.surface_area_m2.canonical_value(), 44.0);
+    assert_eq!(mass.centroid_m.canonical_value(), [5.5, 1.0, 1.5]);
 }
 
 #[test]
@@ -524,8 +534,8 @@ fn persistent_entity_names_ignore_compound_child_order_and_are_bounded() {
             &Unlimited,
         )
         .unwrap();
-        assert_eq!(mass.volume_m3, 12.0);
-        assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+        assert_eq!(mass.volume_m3.canonical_value(), 12.0);
+        assert_eq!(mass.centroid_m.canonical_value(), [5.5, 1.0, 1.5]);
     }
 
     let limited = ExactCadImportOptions {
@@ -610,8 +620,8 @@ fn duplicate_consolidation_collapses_indistinguishable_compound_children() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(mass.volume_m3, 6.0);
-    assert_eq!(mass.centroid_m, [0.5, 1.0, 1.5]);
+    assert_eq!(mass.volume_m3.canonical_value(), 6.0);
+    assert_eq!(mass.centroid_m.canonical_value(), [0.5, 1.0, 1.5]);
 
     let unchanged = import_exact_cad(
         "box.brep",
@@ -665,7 +675,7 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
 
     let mut options = ExactCadImportOptions::default();
     options.analysis.healing.repair_tolerance_scale_gaps = true;
-    options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    options.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-6);
     let imported = import_exact_cad(
         "gapped_sheet.brep",
         GAPPED_SHEET,
@@ -697,7 +707,8 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
 
     let mut sewing_options = ExactCadImportOptions::default();
     sewing_options.analysis.healing.sew = true;
-    sewing_options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    sewing_options.analysis.maximum_healing_displacement_m =
+        runmat_types::physical::Length::new(1.0e-6);
     let sewn = import_exact_cad(
         "gapped_sheet.brep",
         GAPPED_SHEET,
@@ -713,7 +724,7 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
     );
 
     let mut too_small = options;
-    too_small.analysis.maximum_healing_displacement_m = 1.0e-8;
+    too_small.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-8);
     assert!(matches!(
         import_exact_cad(
             "gapped_sheet.brep",
@@ -744,7 +755,7 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         .analysis
         .healing
         .simplify_short_edges_and_sliver_faces = true;
-    options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    options.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-6);
     let repaired_short_edge = import_exact_cad(
         "short_edge_face.brep",
         SHORT_EDGE_FACE,
@@ -836,7 +847,7 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         .is_some());
 
     let mut too_small = options.clone();
-    too_small.analysis.maximum_healing_displacement_m = 1.0e-8;
+    too_small.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-8);
     let unchanged = import_exact_cad(
         "short_edge_face.brep",
         SHORT_EDGE_FACE,
@@ -1065,10 +1076,11 @@ fn cavity_import_preserves_outer_and_void_shell_nesting() {
         &Unlimited,
     )
     .unwrap();
-    assert!((mass.volume_m3 - 992.0).abs() < 1.0e-10);
-    assert!((mass.surface_area_m2 - 624.0).abs() < 1.0e-10);
+    assert!((mass.volume_m3.canonical_value() - 992.0).abs() < 1.0e-10);
+    assert!((mass.surface_area_m2.canonical_value() - 624.0).abs() < 1.0e-10);
     assert!(mass
         .centroid_m
+        .canonical_value()
         .iter()
         .all(|coordinate| (coordinate - 5.0).abs() < 1.0e-12));
 }
@@ -1137,7 +1149,9 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         GeometryEvaluationErrorKind::Cancelled
     );
     let mut inconsistent_topology = imported.topology.clone();
-    inconsistent_topology.vertices[0].point_m[0] += 1.0;
+    let mut moved = inconsistent_topology.vertices[0].point_m.canonical_value();
+    moved[0] += 1.0;
+    inconsistent_topology.vertices[0].point_m = Position::new(moved);
     assert_eq!(
         evaluator
             .validate_incidence_consistency(&inconsistent_topology, 1.0e-9, &Unlimited)
@@ -1150,8 +1164,8 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &evaluator, mass_id, &Unlimited,
     )
     .unwrap();
-    assert!((mass_properties.volume_m3 - 6.0).abs() < 1.0e-12);
-    assert!((mass_properties.surface_area_m2 - 22.0).abs() < 1.0e-12);
+    assert!((mass_properties.volume_m3.canonical_value() - 6.0).abs() < 1.0e-12);
+    assert!((mass_properties.surface_area_m2.canonical_value() - 22.0).abs() < 1.0e-12);
     assert_eq!(
         runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
             &evaluator, mass_id, &Cancelled,
@@ -1172,13 +1186,13 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     );
     let id = &imported.topology.edges[0].curve_evaluator_id;
     let range = evaluator.parameter_range(id).unwrap();
-    let start = evaluator.point(id, range.start, &Unlimited).unwrap();
-    let end = evaluator.point(id, range.end, &Unlimited).unwrap();
+    let start = evaluator.point(id, range.start, &Unlimited).unwrap().canonical_value();
+    let end = evaluator.point(id, range.end, &Unlimited).unwrap().canonical_value();
     let expected_length = norm([end[0] - start[0], end[1] - start[1], end[2] - start[2]]);
     let length = evaluator
-        .arc_length_m(id, range, 1.0e-12, &Unlimited)
+        .arc_length_m(id, range, Length::new(1.0e-12), &Unlimited)
         .unwrap();
-    assert!((length - expected_length).abs() < 1.0e-12);
+    assert!((length.canonical_value() - expected_length).abs() < 1.0e-12);
 
     let parameter = (range.start + range.end) * 0.5;
     let point = evaluator.point(id, parameter, &Unlimited).unwrap();
@@ -1187,14 +1201,15 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     assert_eq!(
         evaluator
             .curvature_1_per_m(id, parameter, &Unlimited)
-            .unwrap(),
+            .unwrap()
+            .canonical_value(),
         0.0
     );
     let projection = evaluator
-        .inverse_project(id, point, 1.0e-12, &Unlimited)
+        .inverse_project(id, point, Length::new(1.0e-12), &Unlimited)
         .unwrap();
-    assert!((projection.parameter - parameter).abs() < 1.0e-12);
-    assert!(projection.distance_m < 1.0e-12);
+    assert!((native(&projection.parameter) - parameter).abs() < 1.0e-12);
+    assert!(projection.distance_m.canonical_value() < 1.0e-12);
     assert_eq!(
         evaluator
             .point(id, range.end + 1.0, &Unlimited)
@@ -1225,12 +1240,12 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &Unlimited,
     )
     .unwrap();
+    assert!(native_uv(&pcurve.point_uv).into_iter().all(f64::is_finite));
     assert!(pcurve
-        .point_uv
-        .into_iter()
-        .chain(pcurve.first_uv)
-        .chain(pcurve.second_uv)
-        .all(f64::is_finite));
+        .first_uv
+        .iter()
+        .chain(&pcurve.second_uv)
+        .all(|derivative| derivative.with_native_coefficient(|value, _, _| value.is_finite())));
     for coedge in &imported.topology.coedges {
         let range = runmat_geometry_core::ExactPcurveEvaluator::parameter_range(
             &evaluator,
@@ -1279,7 +1294,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         runmat_geometry_core::ExactTrimClassifier::classify(
             &evaluator,
             &face.trim_classifier_id,
-            pcurve.point_uv,
+            native_uv(&pcurve.point_uv),
             1.0e-9,
             &Unlimited,
         )
@@ -1290,7 +1305,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         runmat_geometry_core::ExactTrimClassifier::classify(
             &evaluator,
             &face.trim_classifier_id,
-            [pcurve.point_uv[0] + 1.0e6, pcurve.point_uv[1] + 1.0e6],
+            native_uv(&pcurve.point_uv).map(|value| value + 1.0e6),
             1.0e-9,
             &Unlimited,
         )
@@ -1301,7 +1316,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         runmat_geometry_core::ExactTrimClassifier::classify(
             &evaluator,
             &face.trim_classifier_id,
-            pcurve.point_uv,
+            native_uv(&pcurve.point_uv),
             1.0e-9,
             &Cancelled,
         )
@@ -1313,7 +1328,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         runmat_geometry_core::ExactTrimClassifier::classify(
             &evaluator,
             &TrimClassifierId::new("trim:unknown").unwrap(),
-            pcurve.point_uv,
+            native_uv(&pcurve.point_uv),
             1.0e-9,
             &Unlimited,
         )
@@ -1347,18 +1362,22 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &evaluator, surface_id, surface_uv, &Unlimited,
     )
     .unwrap();
-    assert!(curvature.minimum_1_per_m.abs() < 1.0e-12);
-    assert!(curvature.maximum_1_per_m.abs() < 1.0e-12);
+    assert!(curvature.minimum_1_per_m.canonical_value().abs() < 1.0e-12);
+    assert!(curvature.maximum_1_per_m.canonical_value().abs() < 1.0e-12);
     let displaced =
-        std::array::from_fn(|axis| surface_derivatives.point_m[axis] + normal[axis] * 0.25);
+        std::array::from_fn(|axis| surface_derivatives.point_m.canonical_value()[axis] + normal[axis] * 0.25);
     let surface_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
-        &evaluator, surface_id, displaced, 1.0e-12, &Unlimited,
+        &evaluator,
+        surface_id,
+        Position::new(displaced),
+        Length::new(1.0e-12),
+        &Unlimited,
     )
     .unwrap();
-    assert!((surface_projection.distance_m - 0.25).abs() < 1.0e-12);
+    assert!((surface_projection.distance_m.canonical_value() - 0.25).abs() < 1.0e-12);
     assert!(
         norm(std::array::from_fn(|axis| {
-            surface_projection.point_m[axis] - surface_derivatives.point_m[axis]
+            surface_projection.point_m.canonical_value()[axis] - surface_derivatives.point_m.canonical_value()[axis]
         })) < 1.0e-12
     );
     let u_boundary_uv = [surface_bounds[0].end, surface_uv[1]];
@@ -1369,14 +1388,18 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &Unlimited,
     )
     .unwrap();
-    let u_direction = normalized(surface_derivatives.du_m).unwrap();
-    let beyond_u = std::array::from_fn(|axis| u_boundary[axis] + u_direction[axis] * 0.25);
+    let u_direction = normalized(surface_derivatives.du_m.with_canonical_storage(|values, _frames| *values)).unwrap();
+    let beyond_u = std::array::from_fn(|axis| u_boundary.canonical_value()[axis] + u_direction[axis] * 0.25);
     let boundary_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
-        &evaluator, surface_id, beyond_u, 1.0e-12, &Unlimited,
+        &evaluator,
+        surface_id,
+        Position::new(beyond_u),
+        Length::new(1.0e-12),
+        &Unlimited,
     )
     .unwrap();
-    assert!((boundary_projection.uv[0] - surface_bounds[0].end).abs() < 1.0e-12);
-    assert!((boundary_projection.distance_m - 0.25).abs() < 1.0e-12);
+    assert!((native(&boundary_projection.uv[0]) - surface_bounds[0].end).abs() < 1.0e-12);
+    assert!((boundary_projection.distance_m.canonical_value() - 0.25).abs() < 1.0e-12);
 
     let edge = imported
         .topology
@@ -1387,14 +1410,14 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     let boundary_3d = runmat_geometry_core::ExactSurfaceEvaluator::point(
         &evaluator,
         surface_id,
-        pcurve.point_uv,
+        native_uv(&pcurve.point_uv),
         &Unlimited,
     )
     .unwrap();
     let edge_3d = evaluator
         .point(&edge.curve_evaluator_id, pcurve_parameter, &Unlimited)
         .unwrap();
-    assert!(norm(std::array::from_fn(|axis| boundary_3d[axis] - edge_3d[axis])) < 1.0e-12);
+    assert!(norm(std::array::from_fn(|axis| boundary_3d.canonical_value()[axis] - edge_3d.canonical_value()[axis])) < 1.0e-12);
     assert_eq!(
         runmat_geometry_core::ExactSurfaceEvaluator::point(
             &evaluator,
@@ -1425,7 +1448,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     );
 
     let millimeter_options = ExactCadImportOptions {
-        source_units: UnitSystem::Millimeter,
+        source_units: Some(LengthUnit::Millimeter),
         ..ExactCadImportOptions::default()
     };
     let millimeter_import = import_exact_cad(
@@ -1441,11 +1464,11 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         .arc_length_m(
             &millimeter_import.topology.edges[0].curve_evaluator_id,
             range,
-            1.0e-15,
+            Length::new(1.0e-15),
             &Unlimited,
         )
         .unwrap();
-    assert!((millimeter_length - length * 0.001).abs() < 1.0e-15);
+    assert!((millimeter_length.canonical_value() - length.canonical_value() * 0.001).abs() < 1.0e-15);
     let millimeter_surface_id = &millimeter_import
         .topology
         .faces
@@ -1462,29 +1485,36 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     .unwrap();
     assert!(
         norm(std::array::from_fn(|axis| {
-            millimeter_surface_point[axis] - surface_derivatives.point_m[axis] * 0.001
+            millimeter_surface_point.canonical_value()[axis] - surface_derivatives.point_m.canonical_value()[axis] * 0.001
         })) < 1.0e-15
     );
     let millimeter_displaced =
-        std::array::from_fn(|axis| millimeter_surface_point[axis] + normal[axis] * 0.00025);
+        std::array::from_fn(|axis| millimeter_surface_point.canonical_value()[axis] + normal[axis] * 0.00025);
     let millimeter_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
         &millimeter_evaluator,
         millimeter_surface_id,
-        millimeter_displaced,
-        1.0e-15,
+        Position::new(millimeter_displaced),
+        Length::new(1.0e-15),
         &Unlimited,
     )
     .unwrap();
-    assert!((millimeter_projection.distance_m - 0.00025).abs() < 1.0e-15);
+    assert!((millimeter_projection.distance_m.canonical_value() - 0.00025).abs() < 1.0e-15);
     let millimeter_mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
         &millimeter_evaluator,
         &millimeter_import.topology.bodies[0].mass_properties_evaluator_id,
         &Unlimited,
     )
     .unwrap();
-    assert!((millimeter_mass.volume_m3 - mass_properties.volume_m3 * 1.0e-9).abs() < 1.0e-20);
     assert!(
-        (millimeter_mass.surface_area_m2 - mass_properties.surface_area_m2 * 1.0e-6).abs()
+        (millimeter_mass.volume_m3.canonical_value()
+            - mass_properties.volume_m3.canonical_value() * 1.0e-9)
+            .abs()
+            < 1.0e-20
+    );
+    assert!(
+        (millimeter_mass.surface_area_m2.canonical_value()
+            - mass_properties.surface_area_m2.canonical_value() * 1.0e-6)
+            .abs()
             < 1.0e-18
     );
 
@@ -1501,7 +1531,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     else {
         panic!("box mass properties must be kernel validated")
     };
-    properties.volume_m3 += 1.0;
+    properties.volume_m3 = properties.volume_m3 + runmat_geometry_core::physical::Volume::new(1.0);
     assert_eq!(
         OcctExactEvaluator::new(&corrupt_mass).err().unwrap().kind,
         GeometryEvaluationErrorKind::InconsistentGeometry

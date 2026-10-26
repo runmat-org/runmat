@@ -75,7 +75,14 @@ impl ExactVolumeKernel {
             &reconstruction,
         )?;
         let surface_options = ExactSurfaceJoinOptions {
-            coordinate_tolerance_m: invocation.host.resolved_request.tolerance.absolute_floor_m,
+            coordinate_tolerance_m: runmat_types::physical::Length::new(
+                invocation
+                    .host
+                    .resolved_request
+                    .tolerance
+                    .absolute_floor_m
+                    .canonical_value(),
+            ),
             maximum_nodes: invocation.host.resolved_request.limits.maximum_nodes,
             maximum_triangles: invocation.host.resolved_request.limits.maximum_elements,
             maximum_boundary_segments: invocation.host.resolved_request.limits.maximum_elements,

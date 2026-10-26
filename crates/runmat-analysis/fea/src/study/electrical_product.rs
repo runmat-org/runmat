@@ -75,8 +75,12 @@ fn validate_materials(
             .require_electrical()
             .map_err(|_| ElectricalStudyProductError::UnsupportedMaterial)?;
         let coefficient = match equation {
-            StaticElectricalEquation::Electrostatics => electrical.relative_permittivity,
-            StaticElectricalEquation::SteadyConduction => electrical.conductivity_s_per_m,
+            StaticElectricalEquation::Electrostatics => {
+                electrical.relative_permittivity.canonical_value()
+            }
+            StaticElectricalEquation::SteadyConduction => {
+                electrical.conductivity_s_per_m.canonical_value()
+            }
         };
         // A temperature coefficient is a valid law: standalone conduction evaluates it at
         // the reference temperature; electrothermal conduction at the solved temperature.

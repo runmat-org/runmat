@@ -26,13 +26,13 @@ fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
             prescribe(
                 &mut model,
                 "left".into(),
-                RegionTarget::boundary("slab_left"),
+                RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 0.0,
             );
             prescribe(
                 &mut model,
                 "right".into(),
-                RegionTarget::boundary("slab_right"),
+                RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                 2.0,
             );
             let workload = ElectricalStaticWorkload {

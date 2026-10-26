@@ -21,8 +21,8 @@ use crate::properties::compile_structural_property_map;
 pub struct BoundThermalStateTransfer {
     pub transition: CanonicalStateTransition,
     pub temperature: SolvedTemperatureField,
-    pub reference_temperature_k: f64,
-    pub source_time_s: f64,
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    pub source_time_s: runmat_types::physical::Time,
 }
 
 /// A solved temperature field on the receiving mesh. Nodes of a finite-conductance thermal
@@ -109,11 +109,11 @@ impl BoundThermalStateTransfer {
                 )
             })?
             .reference_temperature
-            .kelvin;
+            .canonical_value();
         let source_payload = source.payload.thermal().ok_or_else(|| {
             AnalysisExecutionError::Invalid("thermal source has no typed temperature field".into())
         })?;
-        if reference_temperature_k != source_payload.reference_temperature_k {
+        if reference_temperature_k != source_payload.reference_temperature_k.canonical_value() {
             return Err(AnalysisExecutionError::Invalid(
                 "thermal producer and thermoelastic consumer use different reference temperatures"
                     .into(),
@@ -212,8 +212,12 @@ impl BoundThermalStateTransfer {
         Ok(Self {
             transition,
             temperature,
-            reference_temperature_k,
-            source_time_s: source_payload.sample_time_s,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                reference_temperature_k,
+            ),
+            source_time_s: runmat_types::physical::Time::new(
+                source_payload.sample_time_s.canonical_value(),
+            ),
         })
     }
 }

@@ -67,7 +67,7 @@ pub(super) fn realize_value<Q>(
                         value: *abscissa,
                         approach: *approach,
                     },
-                    TabulatedSignalDomain::StudyParameter { parameter_id } => {
+                    TabulatedSignalDomain::StudyParameter { parameter_id, .. } => {
                         ExcitationSamplePoint::StudyParameter {
                             parameter_id,
                             canonical_value: *abscissa,

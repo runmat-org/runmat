@@ -263,7 +263,15 @@ fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy
         .thermal
         .as_mut()
         .unwrap()
-        .expansion_coefficient_per_k += 1.0e-5;
+        .expansion_coefficient_per_k = runmat_types::physical::Quantity::new(
+        foreign_model.product.compiled.model.materials[0]
+            .thermal
+            .as_mut()
+            .unwrap()
+            .expansion_coefficient_per_k
+            .canonical_value()
+            + (1.0e-5),
+    );
     foreign_model.product.compiled.properties =
         runmat_analysis_fea::properties::compile_property_map(
             &foreign_model.product.compiled.model,

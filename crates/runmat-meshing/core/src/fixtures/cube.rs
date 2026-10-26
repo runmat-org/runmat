@@ -24,11 +24,14 @@ pub fn slab_mesh(cell_count: usize) -> SolverMeshArtifact {
                 nodes.push(SolverMeshNode {
                     node_id: index as u64 + 1,
                     stable_identity: node_digest(index),
-                    coordinates_m: [
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([
                         x_index as f64 / cell_count as f64,
                         y_index as f64 / cell_count as f64,
                         z_index as f64 / cell_count as f64,
-                    ],
+                    ]),
                     provenance: vec![solid.clone()],
                     exact_parameters: Vec::new(),
                 });
@@ -114,7 +117,8 @@ pub fn slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         .filter(|(_, owners)| owners.len() == 1)
         .enumerate()
         .map(|(index, (node_ids, owners))| {
-            let x_values = node_ids.map(|id| nodes[id as usize - 1].coordinates_m[0]);
+            let x_values =
+                node_ids.map(|id| nodes[id as usize - 1].coordinates_m.canonical_value()[0]);
             let source = if x_values.iter().all(|x| x.abs() <= 1.0e-12) {
                 "slab_left"
             } else if x_values.iter().all(|x| (*x - 1.0).abs() <= 1.0e-12) {
@@ -188,7 +192,9 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
             }
             let endpoints = edge.map(|id| &mesh.topology.nodes[id as usize - 1]);
             let coordinates_m = std::array::from_fn(|axis| {
-                (endpoints[0].coordinates_m[axis] + endpoints[1].coordinates_m[axis]) * 0.5
+                (endpoints[0].coordinates_m.canonical_value()[axis]
+                    + endpoints[1].coordinates_m.canonical_value()[axis])
+                    * 0.5
             });
             let stable_identity =
                 solver_midside_node_identity(endpoints.map(|n| n.stable_identity));
@@ -196,7 +202,10 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
             mesh.topology.nodes.push(SolverMeshNode {
                 node_id,
                 stable_identity,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 provenance: element.provenance.clone(),
                 exact_parameters: Vec::new(),
             });
@@ -219,8 +228,11 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         let corners = face.node_ids.clone();
         let midsides = [[0, 1], [1, 2], [2, 0]].map(|[a, b]| midpoint(corners[a], corners[b]));
         // Planar fixture charts use physical tangent coordinates and actual source IDs.
-        let coordinates =
-            [0, 1, 2].map(|i| mesh.topology.nodes[corners[i] as usize - 1].coordinates_m);
+        let coordinates = [0, 1, 2].map(|i| {
+            mesh.topology.nodes[corners[i] as usize - 1]
+                .coordinates_m
+                .canonical_value()
+        });
         let normal_axis = (0..3)
             .find(|&axis| coordinates.iter().all(|p| p[axis] == coordinates[0][axis]))
             .unwrap();
@@ -237,7 +249,8 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
                     .push(SolverNodeExactParameter::Surface {
                         source_face_id: source_face_id.clone(),
                         chart_id: face.stable_identity,
-                        evaluator_uv: tangent_axes.map(|axis| node.coordinates_m[axis]),
+                        evaluator_uv: tangent_axes
+                            .map(|axis| node.coordinates_m.canonical_value()[axis]),
                     });
             }
             node.provenance.sort();
@@ -259,7 +272,7 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
 }
 
 pub(super) fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
-    let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m);
+    let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m.canonical_value());
     let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
     let ad = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
@@ -274,7 +287,7 @@ pub(super) fn node_digest(index: usize) -> StableDigest {
 }
 
 pub(super) fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId::new(kind, source.into(), vec!["root".into()])
+    super::fixture_entity(kind, source)
 }
 
 pub(super) fn field(

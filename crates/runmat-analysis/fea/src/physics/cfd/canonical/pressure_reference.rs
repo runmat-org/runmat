@@ -83,7 +83,10 @@ impl PressureReferencePlan {
                         "duplicate gauge or gauge on physical outlet component",
                     ));
                 }
-                let area = faces.iter().map(|i| t.faces[*i].area_m2).sum::<f64>();
+                let area = faces
+                    .iter()
+                    .map(|i| t.faces[*i].area_m2.canonical_value())
+                    .sum::<f64>();
                 if !area.is_finite() || area <= 0.0 {
                     return Err(Error::Invalid("pressure gauge area"));
                 }
@@ -94,7 +97,7 @@ impl PressureReferencePlan {
                         cells: components[label].clone(),
                         faces: faces
                             .into_iter()
-                            .map(|i| (i, t.faces[i].area_m2 / area))
+                            .map(|i| (i, t.faces[i].area_m2.canonical_value() / area))
                             .collect(),
                     },
                 ));

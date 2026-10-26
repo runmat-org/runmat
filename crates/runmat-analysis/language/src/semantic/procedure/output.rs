@@ -263,7 +263,7 @@ fn lower_expression(
                                 None
                             })?;
                             AuthoredSpatialReduction::Moment {
-                                about: Position { meters },
+                                about: Position::new(meters),
                             }
                         }
                         _ => unreachable!(),

@@ -15,13 +15,21 @@ pub(super) fn lifting_change(
                 .tetrahedron(*index as u32)
                 .expect("live lifting cavity")
                 .vertex_indices
-                .map(|vertex| topology.nodes()[vertex as usize].coordinates_m),
+                .map(|vertex| {
+                    topology.nodes()[vertex as usize]
+                        .coordinates_m
+                        .canonical_value()
+                }),
         );
     }
     let mut new = Vec::with_capacity(created.len());
     for vertices in created {
         work.predicate()?;
-        new.push(vertices.map(|vertex| topology.nodes()[vertex as usize].coordinates_m));
+        new.push(vertices.map(|vertex| {
+            topology.nodes()[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        }));
     }
     runmat_meshing_core::quality::predicate::tetrahedral_lifting_change(&old, &new)
         .map_err(super::predicate_error)

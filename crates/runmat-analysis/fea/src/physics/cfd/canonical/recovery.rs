@@ -13,15 +13,24 @@ pub struct CanonicalFluidResidual {
     pub cell_vorticity_per_s: Vec<V>,
     /// Sorted exact authored boundary IDs, with original outward force/flow terms.
     pub boundary_balances: Vec<super::CanonicalFluidBoundaryBalance>,
-    pub cell_momentum_n: Vec<V>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub cell_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<V>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Unrelaxed sparse-action residual, distinct from original face-flux balance.
-    pub cell_algebraic_momentum_n: Vec<V>,
+    pub cell_algebraic_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<V>>,
     pub cell_momentum_relative: Vec<f64>,
-    pub cell_continuity_m3_per_s: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub cell_continuity_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, Vec<f64>>,
     pub cell_continuity_relative: Vec<f64>,
-    pub global_momentum_n: V,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub global_momentum_n: runmat_types::physical::Quantity<runmat_types::physical::kind::Force, V>,
     pub global_momentum_relative: f64,
-    pub global_boundary_flux_m3_per_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub global_boundary_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, f64>,
     pub momentum_relative: f64,
     pub continuity_relative: f64,
     pub flux_constitutive_relative: f64,
@@ -67,18 +76,21 @@ pub(super) fn recover_with_time(
     {
         return Err(Error::Invalid("retained iteration authority"));
     }
-    if original.pressure_reference_pa != p.pressure_reference_pa {
+    if original.pressure_reference_pa.canonical_values()
+        != p.pressure_reference_pa.canonical_values()
+    {
         return Err(Error::Invalid(
             "retained original pressure reference substitution",
         ));
     }
-    if original.pressure_pa.len() != p.topology.cells.len()
-        || original.pressure_fluctuation_pa.len() != p.topology.cells.len()
+    if original.pressure_pa.canonical_values().len() != p.topology.cells.len()
+        || original.pressure_fluctuation_pa.canonical_values().len() != p.topology.cells.len()
         || original
             .pressure_pa
+            .canonical_values()
             .iter()
-            .zip(&original.pressure_fluctuation_pa)
-            .zip(&p.pressure_reference_pa)
+            .zip(original.pressure_fluctuation_pa.canonical_values())
+            .zip(p.pressure_reference_pa.canonical_values())
             .any(|((absolute, fluctuation), reference)| {
                 !absolute.is_finite()
                     || !fluctuation.is_finite()
@@ -88,12 +100,12 @@ pub(super) fn recover_with_time(
         return Err(Error::Invalid("retained original pressure projection"));
     }
     p.pressure_reference_plan
-        .validate(p, &original.pressure_fluctuation_pa)?;
+        .validate(p, original.pressure_fluctuation_pa.canonical_values())?;
     let r = evaluate_with_time(
         p,
-        &original.velocity_m_per_s,
-        &original.pressure_fluctuation_pa,
-        &original.face_volume_flux_m3_per_s,
+        original.velocity_m_per_s.canonical_values(),
+        original.pressure_fluctuation_pa.canonical_values(),
+        original.face_volume_flux_m3_per_s.canonical_values(),
         time,
     )?;
     if !r.accepted(p.policy.physical_relative_tolerance) {
@@ -190,14 +202,20 @@ pub(super) fn evaluate_with_time(
     for (i, f) in p.topology.faces.iter().enumerate() {
         let force = sub(
             sub(
-                face_forces.advective_momentum_n[i],
-                face_forces.viscous_traction_n[i],
+                face_forces.advective_momentum_n.canonical_values()[i],
+                face_forces.viscous_traction_n.canonical_values()[i],
             ),
-            face_forces.pressure_fluctuation_traction_n[i],
+            face_forces
+                .pressure_fluctuation_traction_n
+                .canonical_values()[i],
         );
-        let scale = norm(face_forces.advective_momentum_n[i])
-            + norm(face_forces.viscous_traction_n[i])
-            + norm(face_forces.pressure_fluctuation_traction_n[i]);
+        let scale = norm(face_forces.advective_momentum_n.canonical_values()[i])
+            + norm(face_forces.viscous_traction_n.canonical_values()[i])
+            + norm(
+                face_forces
+                    .pressure_fluctuation_traction_n
+                    .canonical_values()[i],
+            );
         independent_cells[f.owner] = add(independent_cells[f.owner], force);
         local_scales[f.owner] += scale;
         if let Some(c) = f.neighbor {
@@ -247,14 +265,29 @@ pub(super) fn evaluate_with_time(
         face_forces,
         cell_vorticity_per_s,
         boundary_balances,
-        cell_momentum_n: independent_cells,
-        cell_algebraic_momentum_n: rm,
+        cell_momentum_n:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Force, _>::new(
+                independent_cells,
+            ),
+        cell_algebraic_momentum_n: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Force,
+            _,
+        >::new(rm),
         cell_momentum_relative,
-        cell_continuity_m3_per_s: continuity.cell,
+        cell_continuity_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(continuity.cell),
         cell_continuity_relative: continuity.relative,
-        global_momentum_n: global_momentum,
+        global_momentum_n:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Force, _>::new(
+                global_momentum,
+            ),
         global_momentum_relative,
-        global_boundary_flux_m3_per_s: continuity.global,
+        global_boundary_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(continuity.global),
         momentum_relative,
         continuity_relative,
         flux_constitutive_relative,

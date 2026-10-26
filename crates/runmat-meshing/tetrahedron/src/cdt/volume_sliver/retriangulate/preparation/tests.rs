@@ -61,9 +61,11 @@ fn vertex_star_inventory_preserves_complete_cavity_and_outside_owners() {
         .iter()
         .enumerate()
         .map(|(index, cell)| {
-            let points = cell
-                .vertex_indices
-                .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            let points = cell.vertex_indices.map(|vertex| {
+                topology.nodes[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            });
             CavityTetrahedron {
                 tetrahedron_id: index as u32,
                 component_id: 0,

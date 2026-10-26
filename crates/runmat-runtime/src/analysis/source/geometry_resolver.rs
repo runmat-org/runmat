@@ -5,6 +5,7 @@ use runmat_analysis_language::{
     SourceAvailability, SourceDiagnostic, SourceDigest,
 };
 use runmat_geometry_core::{Ap242Capability, Ap242CapabilityDisposition, Ap242ExchangeInventory};
+use runmat_geometry_io::import::GeometryImportError;
 use runmat_geometry_io::{
     detect_geometry_format, import_exact_cad, import_geometry, ExactCadImportOptions,
     GeometryFormat, GeometryImportContext, GeometryImportOptions, SourceUnitsAuthority,
@@ -65,18 +66,28 @@ fn inspect_uncached(
     logical_path: &str,
     content_digest: SourceDigest,
 ) -> Result<GeometryInspection, SourceDiagnostic> {
-    let file_declared_units = file_declared_units(bytes, logical_path);
+    // Authored `units` are authoritative: they reinterpret a file declaring a different single
+    // length unit (the declaration stays in the evidence as provenance). Without authored units
+    // the file's own single declared unit applies.
+    let inspected = runmat_geometry_io::source_unit_evidence(logical_path, bytes);
+    let unit_evidence = match request.source_units {
+        Some(authored) => inspected
+            .apply_authored(authored, "authored geometry units")
+            .unwrap_or_else(|unresolved| unresolved),
+        None => inspected,
+    };
     let units = match request.source_units {
-        runmat_geometry_core::UnitSystem::Unspecified => {
-            file_declared_units.ok_or_else(|| undeclared_units(bytes, logical_path))?
-        }
-        authored => authored,
+        Some(authored) => authored,
+        None => unit_evidence
+            .uniform_unit()
+            .ok_or_else(|| undeclared_units(bytes, logical_path))?,
     };
     let imported = import_geometry(
         logical_path,
         bytes,
         GeometryImportOptions {
             units,
+            source_units: request.source_units,
             ..GeometryImportOptions::default()
         },
     )
@@ -100,7 +111,7 @@ fn inspect_uncached(
             format,
             &{
                 let mut options = ExactCadImportOptions {
-                    source_units: units,
+                    source_units: Some(units),
                     source_units_authority: SourceUnitsAuthority::Authored,
                     ..ExactCadImportOptions::default()
                 };
@@ -142,6 +153,12 @@ fn inspect_uncached(
             )
         }
         Ok(None) => (preview_topology_digest(&imported.asset)?, false),
+        // Browser hosts can inspect/tessellate imported CAD without a native
+        // exact-BREP backend. Keep those facts available for setup and preview;
+        // do not advertise exact topology or persistent IDs from this fallback.
+        Err(GeometryImportError::BackendUnavailable(_)) => {
+            (preview_topology_digest(&imported.asset)?, false)
+        }
         Err(_error)
             if imported.asset.source_geometry.cad_evaluators.is_empty()
                 && imported.asset.region_entity_mappings.is_empty() =>
@@ -156,30 +173,15 @@ fn inspect_uncached(
             ));
         }
     };
-    Ok(GeometryInspection {
+    Ok(GeometryInspection {preview_extent_m: preview_extent_m(&imported.asset), 
         content_digest,
         topology_digest,
         capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
         exchange,
         resolved_units: Some(units),
-        declared_units: file_declared_units,
         authored_names,
+        unit_evidence,
     })
-}
-
-/// The single length unit a STEP or IGES file declares; BREP declares none.
-fn file_declared_units(
-    bytes: &[u8],
-    logical_path: &str,
-) -> Option<runmat_geometry_core::UnitSystem> {
-    match detect_geometry_format(logical_path, bytes) {
-        GeometryFormat::Step => {
-            runmat_geometry_io::ap242::declared_length_unit(&String::from_utf8_lossy(bytes))
-        }
-        GeometryFormat::Iges => runmat_geometry_io::iges_units::iges_declared_length_unit(bytes),
-        _ => None,
-    }
-    .filter(|units| *units != runmat_geometry_core::UnitSystem::Unspecified)
 }
 
 /// An imported geometry without authored `units` uses the single length unit its STEP or IGES
@@ -203,6 +205,18 @@ fn undeclared_units(bytes: &[u8], logical_path: &str) -> SourceDiagnostic {
         },
         SourceAvailability::Available,
     )
+}
+
+fn preview_extent_m(asset: &runmat_geometry_core::GeometryAsset) -> Option<[f64; 3]> {
+    let scale = asset.coordinate_units?.meters_per_unit();
+    let mut points = asset.surface_meshes.iter().flat_map(|mesh| mesh.vertices.iter());
+    let first = *points.next()?;
+    let (mut min, mut max) = (first, first);
+    for point in points {
+        for axis in 0..3 { min[axis] = min[axis].min(point[axis]); max[axis] = max[axis].max(point[axis]); }
+    }
+    let extent = std::array::from_fn(|axis| (max[axis] - min[axis]) * scale);
+    extent.iter().all(|x| x.is_finite() && *x > 0.0).then_some(extent)
 }
 
 fn preview_topology_digest(
@@ -306,5 +320,24 @@ mod inspection_cache {
             entries.pop_front();
         }
         entries.push_back((key, inspection));
+    }
+}
+
+#[cfg(test)]
+mod preflight_extent_tests {
+    #[test]
+    fn preview_extents_use_resolved_physical_scale() {
+        let imported = runmat_geometry_io::import_geometry(
+            "tetra.obj", b"v 0 0 0\nv 10 0 0\nv 0 20 0\nv 0 0 30\nf 1 2 3\nf 1 4 2\nf 1 3 4\nf 2 4 3\n",
+            runmat_geometry_io::GeometryImportOptions {
+                units: runmat_geometry_core::LengthUnit::Millimeter,
+                source_units: Some(runmat_geometry_core::LengthUnit::Millimeter),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert_eq!(super::preview_extent_m(&imported.asset), Some([0.01, 0.02, 0.03]));
+        let mut empty = imported.asset;
+        empty.surface_meshes.clear();
+        assert_eq!(super::preview_extent_m(&empty), None);
     }
 }

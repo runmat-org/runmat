@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
 mod evidence;
+mod feedback_observation;
 mod exploration;
 #[cfg(test)]
 mod graph_permit_fixture;

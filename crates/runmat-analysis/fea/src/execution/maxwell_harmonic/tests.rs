@@ -114,7 +114,7 @@ pub(super) fn workload() -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(boundary),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                 },
             }));
     }
@@ -190,12 +190,15 @@ fn authored_complex_current_materials_and_cold_retained_fields_preserve_original
         assert_eq!(workload.identity().unwrap(), cold.identity().unwrap());
         let result = cold.execute(&mesh).unwrap();
         assert_eq!(
-            result.response().angular_frequency_rad_per_s,
+            result
+                .response()
+                .angular_frequency_rad_per_s
+                .canonical_value(),
             std::f64::consts::TAU * FREQUENCY
         );
         for source in &result.input().source_current {
             assert_eq!(
-                source.current_density_a_per_m2,
+                source.current_density_a_per_m2.canonical_value(),
                 [
                     ComplexPhasor::ZERO,
                     ComplexPhasor::new(0.6, 0.8),
@@ -205,16 +208,16 @@ fn authored_complex_current_materials_and_cold_retained_fields_preserve_original
         }
         for law in &result.input().volumes {
             assert_eq!(
-                law.permeability_h_per_m,
-                crate::physics::magnetic::VACUUM_PERMEABILITY_H_PER_M
+                law.permeability_h_per_m.canonical_value(),
+                crate::physics::magnetic::VACUUM_PERMEABILITY_H_PER_M.canonical_value()
             );
             assert_eq!(
-                law.permittivity_f_per_m,
-                4.0 * crate::physics::electrical::VACUUM_PERMITTIVITY_F_PER_M
+                law.permittivity_f_per_m.canonical_value(),
+                4.0 * crate::physics::electrical::VACUUM_PERMITTIVITY_F_PER_M.canonical_value()
             );
-            assert_eq!(law.conductivity_s_per_m, 3.0);
+            assert_eq!(law.conductivity_s_per_m.canonical_value(), 3.0);
         }
-        assert!(result.response().ohmic_power_w > 0.0);
+        assert!(result.response().ohmic_power_w.canonical_value() > 0.0);
         assert!(result.response().relative_physical_residual < 8e-10);
         assert!(result.response().relative_complex_power_error < 1.6e-9);
         let bytes = result.canonical_bytes().unwrap();
@@ -236,7 +239,7 @@ fn authored_complex_current_materials_and_cold_retained_fields_preserve_original
             .electrical
             .as_mut()
             .unwrap()
-            .conductivity_s_per_m = 4.0;
+            .conductivity_s_per_m = runmat_types::physical::ElectricalConductivity::new(4.0);
         assert!(recovered.validate_for(&foreign, &mesh).is_err());
         let mut substituted = serde_json::to_value(&recovered).unwrap();
         substituted["response"]["samples"][0]["electric_field_v_per_m"][0]["real"] =
@@ -259,7 +262,7 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
     changed.model.constraints[0] = AnalysisConstraint::Electrical(ElectricalConstraint {
         constraint_id: "potential".into(),
         kind: ElectricalConstraintKind::PrescribedPotential {
-            target: RegionTarget::boundary("slab_left"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
             value: PrescribedValue::Constant(ElectricPotential::new(0.0)),
         },
     });
@@ -280,13 +283,13 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
         .electrical
         .as_mut()
         .unwrap()
-        .resistive_heating_coefficient = 0.1;
+        .resistive_heating_coefficient = runmat_types::physical::InverseTemperature::new(0.1);
     accept(changed);
     let mut changed = original.clone();
     changed.model.constraints[0] = AnalysisConstraint::Magnetic(MagneticConstraint {
         constraint_id: "magnetic".into(),
         kind: MagneticConstraintKind::VectorPotentialGround {
-            target: RegionTarget::boundary("slab_left"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         },
     });
     accept(changed);

@@ -108,8 +108,8 @@ fn bound_transition(
             state: Box::new(CanonicalThermalStatePayload {
                 temperature: AnalysisField::host_f64("thermal.temperature", vec![1], vec![303.15]),
                 ordered_node_ids: vec![1],
-                reference_temperature_k: 293.15,
-                sample_time_s: 0.0,
+                reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                sample_time_s: runmat_types::physical::Time::new(0.0),
                 maximum_relative_linear_residual: 0.0,
                 interface_node_ids: Vec::new(),
                 interface_temperature: None,

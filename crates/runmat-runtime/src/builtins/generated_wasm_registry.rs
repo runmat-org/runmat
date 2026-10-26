@@ -1949,6 +1949,9 @@ __runmat_wasm_register_builtin_frequency_domain();
     // @runmat-wasm-registration-v2	builtin	fea.SignalDomain.studyParameter	some	default	crate::builtins::fea::generator_policies
     crate :: builtins :: fea :: generator_policies ::
 __runmat_wasm_register_builtin_study_parameter_domain();
+    // @runmat-wasm-registration-v2	builtin	fea.SignalDomain.studyParameterWithUnits	some	default	crate::builtins::fea::generator_policies
+    crate :: builtins :: fea :: generator_policies ::
+__runmat_wasm_register_builtin_study_parameter_domain_with_units();
     // @runmat-wasm-registration-v2	builtin	fea.SignalSampling.uniform	some	default	crate::builtins::fea::generator_policies
     crate :: builtins :: fea :: generator_policies ::
 __runmat_wasm_register_builtin_uniform_sampling();

@@ -35,6 +35,7 @@ fn revision() -> ProgramRevision {
 
 fn admitted() -> AdmittedSignalGenerator {
     AdmittedSignalGenerator {
+        schema_version: 2,
         value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: revision(),
         callable: BundleCallable {
@@ -57,7 +58,13 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("sampling"),
         )
         .unwrap(),
-        sample_points: vec![0.0, 1.0],
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            runmat_analysis_core::GeneratorDomain::TimeSeconds
+                .axis_descriptor(None)
+                .unwrap(),
+            vec![0.0, 1.0],
+        )
+        .unwrap(),
         required_capabilities: BTreeSet::new(),
         provenance: GeneratorProvenance {
             project_revision: "project".into(),

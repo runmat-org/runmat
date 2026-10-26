@@ -7,7 +7,7 @@ fn profile_bounds_original_coupling_buffers_for_both_orders_and_rejects_overflow
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let target = super::super::super::target::resolve_nodal_target(
             &mesh,
-            &RegionTarget::boundary("face:0"),
+            &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
             "surface",
         )
         .unwrap();

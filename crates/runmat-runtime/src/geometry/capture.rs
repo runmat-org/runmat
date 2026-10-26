@@ -56,7 +56,7 @@ impl GeometryViewCaptureAdapter for DefaultSvgCaptureAdapter {
             t4 = (height as f32 * 0.90) as u32,
             t5 = (height as f32 * 0.95) as u32,
             geometry_id = xml_escape(&asset.geometry_id),
-            units = xml_escape(&format!("{:?}", asset.units)).to_lowercase(),
+            units = xml_escape(&asset.coordinate_units.map(|units| format!("{:?}", units.unit())).unwrap_or_else(|| "unscaled source coordinates".into())),
             mesh_count = stats.mesh_count,
             vertices = stats.total_vertices,
             elements = stats.total_elements,

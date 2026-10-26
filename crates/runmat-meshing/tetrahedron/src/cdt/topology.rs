@@ -48,7 +48,9 @@ impl Default for DelaunayTopologyOptions {
 #[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeNode {
     pub identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub construction: Point3Construction,
 }
 
@@ -56,7 +58,10 @@ impl DelaunayVolumeNode {
     pub fn explicit(identity: StableDigest, coordinates_m: [f64; 3]) -> Self {
         Self {
             identity,
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             construction: Point3Construction::Explicit,
         }
     }
@@ -64,7 +69,7 @@ impl DelaunayVolumeNode {
     pub(crate) fn predicate_point(self) -> SpatialPredicatePoint {
         SpatialPredicatePoint {
             identity: self.identity,
-            coordinates: self.coordinates_m,
+            coordinates: self.coordinates_m.canonical_value(),
             construction: self.construction,
         }
     }
@@ -72,7 +77,7 @@ impl DelaunayVolumeNode {
     /// Predicates for connectivity consumed by the solver use its stored
     /// coordinates. Exact construction provenance remains available separately.
     pub(crate) fn materialized_predicate_point(self) -> SpatialPredicatePoint {
-        Self::explicit(self.identity, self.coordinates_m).predicate_point()
+        Self::explicit(self.identity, self.coordinates_m.canonical_value()).predicate_point()
     }
 }
 
@@ -190,7 +195,11 @@ pub(in crate::cdt) fn build_canonical_volume_topology(
     for (index, node) in nodes.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || index > 0 && nodes[index - 1].identity >= node.identity
         {
             return Err(error(
@@ -352,11 +361,13 @@ mod tests {
         );
         for tetrahedron in &topology.tetrahedra {
             assert_eq!(
-                runmat_meshing_core::quality::predicate::orient3d(
-                    tetrahedron
-                        .vertex_indices
-                        .map(|index| topology.nodes[index as usize].coordinates_m)
-                )
+                runmat_meshing_core::quality::predicate::orient3d(tetrahedron.vertex_indices.map(
+                    |index| {
+                        topology.nodes[index as usize]
+                            .coordinates_m
+                            .canonical_value()
+                    }
+                ))
                 .unwrap(),
                 PredicateSign::Positive
             );
@@ -417,7 +428,10 @@ mod tests {
             identity: StableDigest::from_bytes([4; 32]),
             // The exact dyadic midpoint is one unit above the plane, but that offset is below one
             // binary64 ULP at this magnitude and therefore is not present in solver coordinates.
-            coordinates_m: [0.25, 0.25, plane],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, plane]),
             construction: runmat_meshing_core::quality::predicate::Point3Construction::Segment {
                 endpoints: [[0.25, 0.25, plane], [0.25, 0.25, plane + 2.0]],
                 parameter_numerator: 1,

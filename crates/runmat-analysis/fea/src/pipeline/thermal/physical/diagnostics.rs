@@ -11,7 +11,7 @@ pub(super) struct ThermalDiagnosticsInput<'a> {
     pub(super) model: &'a AnalysisModel,
     pub(super) initial: &'a crate::contracts::ThermalInitialStateEvidence,
     pub(super) assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
-    pub(super) last_solve: &'a LinearSolveResult,
+    pub(super) last_solve: &'a LinearSolveResult<()>,
     pub(super) temperature_snapshots: &'a [Vec<f64>],
     pub(super) residual_norms: &'a [f64],
     pub(super) energy_balances: &'a [ThermalEnergyBalance],
@@ -47,18 +47,24 @@ pub(super) fn diagnostics(
         .flatten()
         .copied()
         .fold(f64::NEG_INFINITY, f64::max);
-    let final_energy = energy_balances
-        .last()
-        .copied()
-        .unwrap_or(ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0));
+    let final_energy =
+        energy_balances
+            .last()
+            .copied()
+            .unwrap_or(ThermalEnergyBalance::from_powers(
+                runmat_types::physical::Power::new(0.0),
+                runmat_types::physical::Power::new(0.0),
+                runmat_types::physical::Power::new(0.0),
+                runmat_types::physical::Power::new(0.0),
+            ));
     let constitutive = assembly.constitutive_stats;
     let thermal = [
         ThermalDiagnosticMessage::Initial {
             step: &initial.procedure_step_id,
             temperatures: [
-                initial.reference_temperature_k,
-                initial.minimum_temperature_k,
-                initial.maximum_temperature_k,
+                initial.reference_temperature_k.canonical_value(),
+                initial.minimum_temperature_k.canonical_value(),
+                initial.maximum_temperature_k.canonical_value(),
             ],
             counts: [
                 initial.applied_initial_condition_ids.len(),
@@ -92,11 +98,11 @@ pub(super) fn diagnostics(
         }
         .diagnostic(FeaDiagnosticSeverity::Info),
         ThermalDiagnosticMessage::Energy([
-            final_energy.storage_rate_w,
-            final_energy.boundary_loss_w,
-            final_energy.applied_power_w,
-            final_energy.prescribed_boundary_power_w,
-            final_energy.residual_w,
+            final_energy.storage_rate_w.canonical_value(),
+            final_energy.boundary_loss_w.canonical_value(),
+            final_energy.applied_power_w.canonical_value(),
+            final_energy.prescribed_boundary_power_w.canonical_value(),
+            final_energy.residual_w.canonical_value(),
             final_energy.relative_residual,
             maximum_energy_residual,
         ])

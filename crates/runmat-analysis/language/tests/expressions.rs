@@ -57,7 +57,7 @@ fn expression_checking_preserves_dimensions_and_resolves_catalog_overloads() {
     let mut scope = ExpressionScope::new();
     scope.insert_reference(
         ["input".to_string(), "load".to_string()],
-        FeaType::Quantity(PhysicalDimension::FORCE),
+        FeaType::Quantity((PhysicalDimension::FORCE).into()),
     );
     let catalog = Catalog {
         operation: OperationFacts {
@@ -92,7 +92,7 @@ fn expression_checking_preserves_dimensions_and_resolves_catalog_overloads() {
         assert!(diagnostics.is_empty(), "{diagnostics:#?}");
         assert_eq!(
             checked.value_type,
-            FeaType::Quantity(PhysicalDimension::FORCE)
+            FeaType::Quantity((PhysicalDimension::FORCE).into())
         );
     }
 }
@@ -161,7 +161,7 @@ fn vector_quantities_retain_shape_and_dimension() {
     assert_eq!(
         checked.value_type,
         FeaType::Vector {
-            element: Box::new(FeaType::Quantity(PhysicalDimension::FORCE)),
+            element: Box::new(FeaType::Quantity((PhysicalDimension::FORCE).into())),
             length: Some(3),
         }
     );

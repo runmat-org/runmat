@@ -124,7 +124,7 @@ pub(super) fn smooth_edge_star_point(
         for face in boundary_faces.iter().take(MAXIMUM_CAVITY_SEARCH_DIRECTIONS) {
             let centroid = average(
                 face.iter()
-                    .map(|vertex| topology.node(*vertex).coordinates_m),
+                    .map(|vertex| topology.node(*vertex).coordinates_m.canonical_value()),
             );
             let candidate =
                 std::array::from_fn(|axis| point[axis] + step * (centroid[axis] - point[axis]));
@@ -175,7 +175,7 @@ pub(super) fn pattern_search_edge_star(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<[f64; 3]>, DelaunayVolumeSliverError> {
     let local_scale = edge
-        .map(|vertex| topology.node(vertex).coordinates_m)
+        .map(|vertex| topology.node(vertex).coordinates_m.canonical_value())
         .into_iter()
         .reduce(|left, right| std::array::from_fn(|axis| left[axis] - right[axis]))
         .map(|delta| {
@@ -289,7 +289,10 @@ pub(super) fn point_is_in_edge_star_kernel(
 ) -> Result<bool, DelaunayVolumeSliverError> {
     let probe = DelaunayVolumeNode {
         identity: kernel_probe_identity(point),
-        coordinates_m: point,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                point,
+            ),
         construction,
     };
     for tetrahedron in star {

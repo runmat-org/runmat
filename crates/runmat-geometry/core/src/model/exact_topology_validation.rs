@@ -451,7 +451,9 @@ impl ExactBRepTopology {
         for edge in &self.edges {
             work.checkpoint()?;
             edge.curve_evaluator_id.validate()?;
-            if !edge.tolerance_m.is_finite() || edge.tolerance_m < 0.0 {
+            if !edge.tolerance_m.canonical_value().is_finite()
+                || edge.tolerance_m.canonical_value() < 0.0
+            {
                 return Err(invalid(
                     "exact edge geometry",
                     "edge tolerance must be finite and nonnegative",
@@ -500,9 +502,13 @@ impl ExactBRepTopology {
         }
         for vertex in &self.vertices {
             work.checkpoint()?;
-            if vertex.point_m.iter().any(|value| !value.is_finite())
-                || !vertex.tolerance_m.is_finite()
-                || vertex.tolerance_m < 0.0
+            if vertex
+                .point_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
+                || !vertex.tolerance_m.canonical_value().is_finite()
+                || vertex.tolerance_m.canonical_value() < 0.0
             {
                 return Err(invalid(
                     "exact vertex geometry",

@@ -112,17 +112,17 @@ fn modal_case() -> (
     .unwrap();
     let schedule = StructuralTransientSchedule::new(vec![
         StructuralTransientSchedulePoint {
-            time_s: 0.0,
+            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time,_>::new(0.0),
             arrival: StructuralTransientScheduleArrival::Initial,
             continuation: StructuralTransientContinuationApproach::At,
         },
         StructuralTransientSchedulePoint {
-            time_s: 0.5,
+            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time,_>::new(0.5),
             arrival: StructuralTransientScheduleArrival::Continuous,
             continuation: StructuralTransientContinuationApproach::At,
         },
         StructuralTransientSchedulePoint {
-            time_s: 1.0,
+            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time,_>::new(1.0),
             arrival: StructuralTransientScheduleArrival::Continuous,
             continuation: StructuralTransientContinuationApproach::At,
         },
@@ -170,9 +170,18 @@ fn modal_transient_scope_binds_exact_basis_projection_and_coordinate_count() {
     let numerical_state = crate::execution::StructuralTransientNumericalState::ModalReduced {
         basis_state: state.identity,
         coordinates: crate::execution::ModalTransientCoordinateState {
-            displacement: vec![0.0; *coordinate_count],
-            velocity: vec![0.0; *coordinate_count],
-            acceleration: vec![0.0; *coordinate_count],
+            displacement: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Displacement,
+                _,
+            >::new(vec![0.0; *coordinate_count]),
+            velocity:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                    vec![0.0; *coordinate_count],
+                ),
+            acceleration: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Acceleration,
+                _,
+            >::new(vec![0.0; *coordinate_count]),
         },
     };
     let checkpoint = crate::execution::StructuralTransientCheckpoint::new(
@@ -181,16 +190,16 @@ fn modal_transient_scope_binds_exact_basis_projection_and_coordinate_count() {
             block_ordinal: 0,
             continuation: crate::execution::StructuralTransientContinuationPoint {
                 schedule_ordinal: 1,
-                time_s: 0.5,
+                time_s: runmat_types::physical::Time::new(0.5),
                 approach: crate::execution::StructuralTransientContinuationApproach::At,
             },
             state: physical_state.clone(),
             numerical_state: numerical_state.clone(),
             balance: crate::execution::StructuralTransientBalanceAccumulator {
-                initial_mechanical_energy_j: 0.0,
-                applied_load_work_j: 0.0,
-                support_work_j: 0.0,
-                damping_dissipation_j: 0.0,
+                initial_mechanical_energy_j: runmat_types::physical::Energy::new(0.0),
+                applied_load_work_j: runmat_types::physical::Energy::new(0.0),
+                support_work_j: runmat_types::physical::Energy::new(0.0),
+                damping_dissipation_j: runmat_types::physical::Energy::new(0.0),
             },
             counters: crate::execution::StructuralTransientSolverCounters {
                 dense_factorization_count: 1,

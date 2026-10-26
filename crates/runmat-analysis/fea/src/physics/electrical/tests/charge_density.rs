@@ -6,13 +6,13 @@ pub(crate) fn charged_model(charge: f64, gauge: f64) -> AnalysisModel {
     prescribe(
         &mut input,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         gauge,
     );
     prescribe(
         &mut input,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         gauge,
     );
     input.signals = vec![PhysicalSignal::ElectricChargeDensity(Signal {
@@ -65,14 +65,18 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
     for sign in [-1.0, 1.0] {
         for gauge in [0.0, 1000.0, 1e12] {
             let response = solve(&charged_model(sign * 2.0 * epsilon, gauge), &mesh);
-            for (node, departure) in projection.nodes.iter().zip(&response.potential_increment_v) {
-                let x = node.coordinates_m[0];
+            for (node, departure) in projection
+                .nodes
+                .iter()
+                .zip(response.potential_increment_v.canonical_values())
+            {
+                let x = node.coordinates_m.canonical_value()[0];
                 assert!((departure - sign * x * (1.0 - x)).abs() < 1e-9);
             }
             for (element, field) in projection
                 .elements
                 .iter()
-                .zip(&response.element_electric_field_v_per_m)
+                .zip(response.element_electric_field_v_per_m.canonical_values())
             {
                 assert!((field[0] - sign * (2.0 * element.centroid_m[0] - 1.0)).abs() < 1e-9);
                 assert!(field[1].abs() < 1e-9 && field[2].abs() < 1e-9);
@@ -81,16 +85,24 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
             assert_relative(source.integrated_source, sign * 2.0 * epsilon, 1e-10);
             assert!(source.projection_evidence.iter().all(|e| e.accepted));
             for terminal in &response.terminals {
-                assert_relative(terminal.outward_flux, sign * epsilon, 1e-9);
+                assert_relative(
+                    terminal.outward_flux.canonical_value(),
+                    sign * epsilon,
+                    1e-9,
+                );
             }
             let ElectricalConstitutiveResponse::Electrostatics { total_energy_j, .. } =
                 response.constitutive
             else {
                 unreachable!()
             };
-            assert_relative(total_energy_j, epsilon / 6.0, 1e-9);
-            assert_relative(response.volume_source_work, epsilon / 3.0, 1e-9);
-            assert_eq!(response.terminal_work, 0.0);
+            assert_relative(total_energy_j.canonical_value(), epsilon / 6.0, 1e-9);
+            assert_relative(
+                response.volume_source_work.canonical_value(),
+                epsilon / 3.0,
+                1e-9,
+            );
+            assert_eq!(response.terminal_work.canonical_value(), 0.0);
             assert!(response.relative_flux_imbalance < 1e-9);
             assert!(response.relative_energy_identity_error < 1e-9);
         }
@@ -119,7 +131,9 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
                         .node_indices
                         .iter()
                         .zip(point.shape_values())
-                        .map(|(&node, &shape)| shape * response.potential_increment_v[node])
+                        .map(|(&node, &shape)| {
+                            shape * response.potential_increment_v.canonical_values()[node]
+                        })
                         .sum::<f64>();
                     let field = (0..3)
                         .map(|axis| {
@@ -128,7 +142,8 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
                                 .iter()
                                 .zip(point.physical_shape_gradients())
                                 .map(|(&node, gradient)| {
-                                    response.potential_increment_v[node] * gradient[axis]
+                                    response.potential_increment_v.canonical_values()[node]
+                                        * gradient[axis]
                                 })
                                 .sum::<f64>()
                         })
@@ -147,7 +162,7 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
         else {
             unreachable!()
         };
-        let energy_error = (total_energy_j / (epsilon / 6.0) - 1.0).abs();
+        let energy_error = (total_energy_j.canonical_value() / (epsilon / 6.0) - 1.0).abs();
         errors.push((temperature_error.sqrt(), field_error.sqrt(), energy_error));
         assert_relative(
             response
@@ -187,7 +202,7 @@ fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
             .iter()
             .all(|e| e.region_id == region));
         let mut input = charged_model(3.0 * epsilon, 0.0);
-        let mut target = RegionTarget::volume("resolved-charge-volume");
+        let mut target = RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("resolved-charge-volume"));
         target.bind_resolved_entities(vec![region]).unwrap();
         input.excitations[0].excitation_mut().target = ExcitationTarget::Region(target);
         let mut negative = charged_model(-epsilon, 0.0);
@@ -206,8 +221,9 @@ fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
         let actual = solve(&input, &mesh);
         for (a, b) in actual
             .potential_increment_v
+            .canonical_values()
             .iter()
-            .zip(&baseline.potential_increment_v)
+            .zip(baseline.potential_increment_v.canonical_values())
         {
             assert!((a - b).abs() < 1e-9);
         }
@@ -228,8 +244,8 @@ fn charge_sources_reject_conduction_unmatched_region_complex_and_wrong_target() 
     });
     assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
     for target in [
-        RegionTarget::volume("missing"),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("missing")),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
     ] {
         let mut wrong = input.clone();
         wrong.excitations[0].excitation_mut().target = ExcitationTarget::Region(target);

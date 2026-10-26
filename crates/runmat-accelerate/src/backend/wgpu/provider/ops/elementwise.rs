@@ -2032,7 +2032,7 @@ impl WgpuProvider {
                     });
                 let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                    self.binary_linear_launch()?.workgroup(),
                 );
                 crate::backend::wgpu::dispatch::elementwise::run(
                     emission,
@@ -2083,12 +2083,12 @@ impl WgpuProvider {
         let selected_precision = entry_a.precision;
         let pipeline = self.real_binary_pipeline(selected_precision, true, op)?;
         // Compute broadcasted output shape
-        let route = broadcast_plan::BroadcastRoute::with_enabled_limit(
+        let route = broadcast_plan::BroadcastRoute::with_launch(
             &entry_a.shape,
             &entry_b.shape,
             BCAST_MAX_RANK,
             entry_a.element_type.element_size() as u64,
-            self.adapter_limits.max_compute_workgroups_per_dimension,
+            self.binary_linear_launch()?,
         )?;
         let (shape_a, shape_b, out_shape) = (&route.shape_a, &route.shape_b, &route.out_shape);
         let rank = out_shape.len();
@@ -2214,7 +2214,7 @@ impl WgpuProvider {
                 emission.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
                 let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                    self.binary_linear_launch()?.workgroup(),
                 );
                 crate::backend::wgpu::dispatch::elementwise::run(
                     emission,

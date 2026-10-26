@@ -4,7 +4,7 @@ use runmat_geometry_core::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::args::{exactly, scalar, vector3};
+use super::args::{angle, exactly, length, position, vector3};
 use super::codec::{feature_value, region_output_from_value};
 use super::combine::{append_operation, merge_values, unary_operation};
 use super::invalid;
@@ -22,7 +22,7 @@ pub async fn geometry_extrude_builtin(args: crate::call::BuiltinArguments) -> Bu
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
     let operation = GeometryFeatureOperation::Extrude {
         profile: graph.result.clone(),
-        distance_m: scalar(&args[1], builtin, "distance")?,
+        distance_m: length(&args[1], builtin, "distance")?,
         direction: vector3(&args[2], builtin, "direction")?,
     };
     feature_value(unary_operation(graph, operation, builtin)?, builtin)
@@ -38,11 +38,11 @@ pub async fn geometry_revolve_builtin(args: crate::call::BuiltinArguments) -> Bu
     let builtin = "geometry.revolve";
     let args = exactly(builtin, args, 4)?;
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
-    let angle = scalar(&args[3], builtin, "angle")?;
+    let angle = angle(&args[3], builtin, "angle")?;
     let operation = GeometryFeatureOperation::Revolve {
         profile: graph.result.clone(),
         axis: vector3(&args[1], builtin, "axis")?,
-        origin_m: vector3(&args[2], builtin, "origin")?,
+        origin_m: position(&args[2], builtin, "origin")?,
         angle_rad: angle,
     };
     feature_value(unary_operation(graph, operation, builtin)?, builtin)
@@ -60,10 +60,10 @@ pub async fn geometry_hole_builtin(args: crate::call::BuiltinArguments) -> Built
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
     let operation = GeometryFeatureOperation::Hole {
         target: graph.result.clone(),
-        radius_m: scalar(&args[1], builtin, "radius")?,
-        depth_m: scalar(&args[2], builtin, "depth")?,
+        radius_m: length(&args[1], builtin, "radius")?,
+        depth_m: length(&args[2], builtin, "depth")?,
         axis: vector3(&args[3], builtin, "axis")?,
-        origin_m: vector3(&args[4], builtin, "origin")?,
+        origin_m: position(&args[4], builtin, "origin")?,
     };
     feature_value(unary_operation(graph, operation, builtin)?, builtin)
 }
@@ -78,7 +78,7 @@ pub async fn geometry_pocket_builtin(args: crate::call::BuiltinArguments) -> Bui
     let builtin = "geometry.pocket";
     let mut args = exactly(builtin, args, 4)?;
     let direction = vector3(&args[3], builtin, "direction")?;
-    let depth = scalar(&args[2], builtin, "depth")?;
+    let depth = length(&args[2], builtin, "depth")?;
     args.truncate(2);
     let (graph, operands) = merge_values(args, builtin)?;
     let operation = GeometryFeatureOperation::Pocket {
@@ -99,7 +99,7 @@ pub async fn geometry_fillet_builtin(args: crate::call::BuiltinArguments) -> Bui
     let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.fillet";
     let args = exactly(builtin, args, 3)?;
-    let radius = scalar(&args[2], builtin, "radius")?;
+    let radius = length(&args[2], builtin, "radius")?;
     edge_treatment(&args[0], &args[1], builtin, |target, edges| {
         GeometryFeatureOperation::Fillet {
             target,
@@ -118,7 +118,7 @@ pub async fn geometry_chamfer_builtin(args: crate::call::BuiltinArguments) -> Bu
     let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.chamfer";
     let args = exactly(builtin, args, 3)?;
-    let distance = scalar(&args[2], builtin, "distance")?;
+    let distance = length(&args[2], builtin, "distance")?;
     edge_treatment(&args[0], &args[1], builtin, |target, edges| {
         GeometryFeatureOperation::Chamfer {
             target,

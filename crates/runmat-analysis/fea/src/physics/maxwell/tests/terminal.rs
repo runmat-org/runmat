@@ -9,7 +9,7 @@ use super::layered;
 use super::super::*;
 use runmat_analysis_core::*;
 
-const MU0: f64 = crate::physics::magnetic::VACUUM_PERMEABILITY_H_PER_M;
+const MU0: f64 = crate::physics::magnetic::VACUUM_PERMEABILITY_H_PER_M.canonical_value();
 
 struct Line {
     width: f64,
@@ -99,22 +99,22 @@ impl Line {
         let conductor = &mut model.materials[0];
         conductor.material_id = "conductor".into();
         conductor.electrical = Some(MaterialElectricalModel {
-            reference_temperature_k: 293.15,
-            conductivity_s_per_m: self.sigma,
-            relative_permittivity: 1.0,
-            relative_permeability: 1.0,
-            resistive_heating_coefficient: 0.0,
+            reference_temperature_k: runmat_types::physical::Quantity::new(293.15),
+            conductivity_s_per_m: runmat_types::physical::Quantity::new(self.sigma),
+            relative_permittivity: runmat_types::physical::Quantity::new(1.0),
+            relative_permeability: runmat_types::physical::Quantity::new(1.0),
+            resistive_heating_coefficient: runmat_types::physical::Quantity::new(0.0),
             conductivity_frequency_response: Vec::new(),
         });
         let mut air = model.materials[0].clone();
         air.material_id = "air".into();
-        air.electrical.as_mut().unwrap().conductivity_s_per_m = 0.0;
+        air.electrical.as_mut().unwrap().conductivity_s_per_m = runmat_types::physical::Quantity::new(0.0);
         model.materials.push(air);
-        model.material_assignments[0].target = PropertyRegionTarget::solid("conductor");
+        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("conductor"));
         model.material_assignments[0].expected_material_id = "conductor".into();
         model.material_assignments[0].assigned_material_id = "conductor".into();
         let mut assignment = model.material_assignments[0].clone();
-        assignment.target = PropertyRegionTarget::solid("air");
+        assignment.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("air"));
         assignment.expected_material_id = "air".into();
         assignment.assigned_material_id = "air".into();
         model.material_assignments.push(assignment);
@@ -124,7 +124,7 @@ impl Line {
                 .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                     constraint_id: format!("ground_{face}"),
                     kind: MagneticConstraintKind::VectorPotentialGround {
-                        target: RegionTarget::boundary(face),
+                        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                     },
                 }));
         }
@@ -134,7 +134,7 @@ impl Line {
                 .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                     constraint_id: id.into(),
                     kind: ElectricalConstraintKind::PrescribedPotential {
-                        target: RegionTarget::boundary(face),
+                        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                         value: PrescribedValue::Constant(ElectricPotential::new(volts)),
                     },
                 }));
@@ -160,7 +160,7 @@ impl Line {
                 }));
                 model.excitations.push(ExcitationAction::ElectricCurrent(AnalysisExcitation {
                     excitation_id: ExcitationId("drive".into()),
-                    target: ExcitationTarget::Region(RegionTarget::boundary("y_min_conductor")),
+                    target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("y_min_conductor"))),
                     frame: CoordinateFrame::Global,
                     direction: None,
                     distribution: ExcitationDistribution::PreserveResultant,
@@ -252,9 +252,9 @@ fn current_driven_strip_impedance_converges_to_the_skin_effect_solution() {
             // Joule loss equals (1/2) Re(U conj I) and the Poynting balance closes.
             let delivered = drive.complex_power_va.real;
             assert!(
-                (response.ohmic_power_w - delivered).abs() <= 1e-8 * delivered,
+                (response.ohmic_power_w - runmat_types::physical::Quantity::new(delivered)).abs() <= runmat_types::physical::Quantity::new(1e-8 * delivered),
                 "loss {} vs delivered {}",
-                response.ohmic_power_w,
+                response.ohmic_power_w.canonical_value(),
                 delivered
             );
             assert!(response.relative_complex_power_error < 1e-8);
@@ -346,20 +346,20 @@ fn gap_fed_conductor_closes_its_terminal_current_through_air() {
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "far_field".into(),
             kind: MagneticConstraintKind::VectorPotentialGround {
-                target: RegionTarget::boundary("outer"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("outer")),
             },
         }));
     for constraint in &mut model.constraints {
         if let AnalysisConstraint::Electrical(constraint) = constraint {
             if let ElectricalConstraintKind::PrescribedPotential { target, .. } = &mut constraint.kind
             {
-                *target = RegionTarget::boundary("terminal_out");
+                *target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("terminal_out"));
             }
         }
     }
     for action in &mut model.excitations {
         if let ExcitationAction::ElectricCurrent(action) = action {
-            action.target = ExcitationTarget::Region(RegionTarget::boundary("terminal_in"));
+            action.target = ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("terminal_in")));
         }
     }
     let response = solve_canonical_harmonic(
@@ -382,10 +382,10 @@ fn gap_fed_conductor_closes_its_terminal_current_through_air() {
     let delivered = drive.complex_power_va.real;
     eprintln!(
         "gap feed: U={:?} R_dc={r_dc:e} delivered={delivered:e} loss={:e}",
-        drive.voltage_v, response.ohmic_power_w
+        drive.voltage_v, response.ohmic_power_w.canonical_value()
     );
     // The closure flow in the air is a modeling device that carries no physical power.
-    assert!((response.ohmic_power_w - delivered).abs() < 1e-4 * delivered);
+    assert!((response.ohmic_power_w - runmat_types::physical::Quantity::new(delivered)).abs() < runmat_types::physical::Quantity::new(1e-4 * delivered));
     assert!((delivered - 0.5 * 25.0 * r_dc).abs() < 1e-2 * delivered);
 }
 
@@ -401,14 +401,14 @@ fn tabulated_frequency_response_scales_the_conductor_at_the_analysis_frequency()
         .unwrap()
         .conductivity_frequency_response = vec![
         runmat_analysis_core::ConductivityFrequencyPoint {
-            frequency_hz: 1.0e4,
+            frequency_hz: runmat_types::physical::Quantity::new(1.0e4),
             conductivity_scale: 0.25,
             dispersive_loss_scale: None,
             relative_permittivity_scale: None,
             relative_permeability_scale: None,
         },
         runmat_analysis_core::ConductivityFrequencyPoint {
-            frequency_hz: 3.0e4,
+            frequency_hz: runmat_types::physical::Quantity::new(3.0e4),
             conductivity_scale: 0.75,
             dispersive_loss_scale: None,
             relative_permittivity_scale: None,

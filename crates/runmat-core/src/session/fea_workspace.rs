@@ -80,7 +80,7 @@ impl RunMatSession {
                 Some("fea" | "m")
             )
         }) {
-            return Err("FEA source changes may only mutate admitted .fea and .m sources".into());
+            return Err("FEA source changes may only mutate admitted .fea/.m sources".into());
         }
         let mut captured = BTreeMap::new();
         for (logical, bytes) in candidate.files() {

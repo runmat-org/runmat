@@ -46,7 +46,10 @@ fn scoped_beam_and_shell_resultants_match_serial_in_canonical_element_order() {
                 .map(|index| {
                     let mut element = beam.clone();
                     element.element_id = format!("beam_recovery_{index}");
-                    element.material.youngs_modulus_pa *= 1.0 + index as f64 * 0.1;
+                    element.material.youngs_modulus_pa = runmat_types::physical::Quantity::new(
+                        element.material.youngs_modulus_pa.canonical_value()
+                            * (1.0 + index as f64 * 0.1),
+                    );
                     element
                 })
                 .collect();
@@ -96,7 +99,10 @@ fn scoped_two_element_beam_recovery_preserves_physical_assembly_fields() {
     let structural = model.structural.as_mut().expect("beam fixture topology");
     structural.nodes.push(StructuralNode {
         node_id: 3,
-        coordinates_m: [2.0, 0.0, 0.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                2.0, 0.0, 0.0,
+            ]),
         solid_attachment: None,
     });
     let mut second = structural.elements[0].clone();
@@ -341,7 +347,7 @@ fn solid_tetrahedron10_recovery_uses_midside_displacements() {
         .topology
         .nodes
         .iter()
-        .flat_map(|node| [node.coordinates_m[0].powi(2), 0.0, 0.0])
+        .flat_map(|node| [node.coordinates_m.canonical_value()[0].powi(2), 0.0, 0.0])
         .collect::<Vec<_>>();
     let summary = assemble_structural_system(
         &model,

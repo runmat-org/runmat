@@ -64,25 +64,29 @@ fn incoming_pressure_reflection_transmission_and_net_power_refine() {
                         .projection
                         .nodes
                         .iter()
-                        .zip(&result.pressure_pa)
+                        .zip(result.pressure_pa.canonical_values())
                         .map(|(node, value)| {
-                            let reference =
-                                interface::exact_pressure(axial(node.coordinates_m), amplitude);
+                            let reference = interface::exact_pressure(
+                                axial(node.coordinates_m.canonical_value()),
+                                amplitude,
+                            );
                             (value.real - reference[0]).powi(2)
                                 + (value.imaginary - reference[1]).powi(2)
                         })
                         .sum::<f64>()
-                        / result.pressure_pa.len() as f64)
+                        / result.pressure_pa.canonical_values().len() as f64)
                         .sqrt();
                     let velocity_error = (result
                         .projection
                         .elements
                         .iter()
-                        .zip(&result.element_velocity_m_per_s)
+                        .zip(result.element_velocity_m_per_s.canonical_values())
                         .map(|(element, value)| {
                             let xs = std::array::from_fn(|i| {
                                 axial(
-                                    result.projection.nodes[element.node_indices[i]].coordinates_m,
+                                    result.projection.nodes[element.node_indices[i]]
+                                        .coordinates_m
+                                        .canonical_value(),
                                 )
                             });
                             let reference = interface::exact_mean_velocity(
@@ -112,11 +116,17 @@ fn incoming_pressure_reflection_transmission_and_net_power_refine() {
                     );
                     assert_eq!(evidence.signal_id, "drive");
                     assert!(result.relative_residual < 1e-10 && result.power_relative_error < 1e-8);
-                    eprintln!("incident q={quadratic} rotated={rotated} phase={phase} cells={cells} p={pressure_error:e} v={velocity_error:e} net={:e} loss={:e}", result.mean_input_power_w, result.mean_impedance_loss_w);
+                    eprintln!("incident q={quadratic} rotated={rotated} phase={phase} cells={cells} p={pressure_error:e} v={velocity_error:e} net={:e} loss={:e}", result.mean_input_power_w.canonical_value(), result.mean_impedance_loss_w.canonical_value());
                     if cells == 8 {
                         assert!(pressure_error < 0.004 * 1.16_f64.sqrt() && velocity_error < 0.01);
-                        assert!((result.mean_input_power_w - expected_power).abs() < 0.005);
-                        assert!((result.mean_impedance_loss_w - expected_power).abs() < 0.005);
+                        assert!(
+                            (result.mean_input_power_w.canonical_value() - expected_power).abs()
+                                < 0.005
+                        );
+                        assert!(
+                            (result.mean_impedance_loss_w.canonical_value() - expected_power).abs()
+                                < 0.005
+                        );
                     }
                 }
                 assert!(
@@ -141,10 +151,10 @@ fn incoming_pressure_reflection_transmission_and_net_power_refine() {
 fn matched_incident_power_is_not_double_counted_at_small_amplitude() {
     for amplitude in [[1.0, 0.4], [1e-12, 4e-13]] {
         let mut model = model();
-        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "outlet".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticImpedance {
                 impedance: SpecificAcousticImpedance::new(6.0),
             },
@@ -155,8 +165,8 @@ fn matched_incident_power_is_not_double_counted_at_small_amplitude() {
             &crate::topology::test_meshes::quadratic_slab_mesh(4),
         );
         let expected = amplitude.into_iter().map(|x| x * x).sum::<f64>() / 12.0;
-        assert!((result.mean_input_power_w / expected - 1.0).abs() < 1e-4);
-        assert!((result.mean_impedance_loss_w / expected - 1.0).abs() < 1e-4);
+        assert!((result.mean_input_power_w.canonical_value() / expected - 1.0).abs() < 1e-4);
+        assert!((result.mean_impedance_loss_w.canonical_value() / expected - 1.0).abs() < 1e-4);
         assert!(result.power_relative_error < 1e-8);
     }
 }
@@ -199,7 +209,7 @@ fn incident_rejects_nonplanar_target_and_boundary_overlap() {
     source(&mut model, [1.0, 0.4]);
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "conflict".into(),
-        target: RegionTarget::boundary("slab_left"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: BoundaryOperator::AcousticRigidWall,
     });
     assert!(matches!(
@@ -215,7 +225,7 @@ fn incident_rejects_nonplanar_target_and_boundary_overlap() {
     ));
     model.boundaries.pop();
     model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("slab"));
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab")));
     assert!(solve_canonical_harmonic(
         &model,
         &mesh,

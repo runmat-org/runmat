@@ -49,7 +49,9 @@ pub(super) fn clone_faces(
             triangles: clone_items(&face.triangles, control)?,
             boundary_segments: clone_items(&face.boundary_segments, control)?,
             joined_chart_cuts: clone_items(&face.joined_chart_cuts, control)?,
-            maximum_chordal_deviation_m: face.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                face.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_normal_deviation_rad: face.maximum_normal_deviation_rad,
         });
     }

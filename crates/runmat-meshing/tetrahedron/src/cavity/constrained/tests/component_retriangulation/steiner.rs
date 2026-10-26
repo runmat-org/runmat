@@ -11,13 +11,16 @@ fn constructive_interior_candidates_refill_a_schonhardt_cavity() {
             let angle = std::f64::consts::TAU * index as f64 / 3.0 + rotation * layer as f64;
             ConstrainedCavityNode {
                 node_id: node_id as u32,
-                coordinates_m: [angle.cos(), angle.sin(), layer as f64],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([angle.cos(), angle.sin(), layer as f64]),
             }
         })
         .collect::<Vec<_>>();
     let node_map = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut cavity = ConstrainedCavity {
         removed_tetrahedron_ids: vec![0],
@@ -137,7 +140,10 @@ fn constructive_interior_candidates_refill_a_schonhardt_cavity() {
             let mut candidate_nodes = nodes.clone();
             candidate_nodes.push(ConstrainedCavityNode {
                 node_id: nodes.len() as u32,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             });
             retriangulate_constrained_cavity_from_nodes(
                 &cavity,

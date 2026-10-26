@@ -227,7 +227,7 @@ study response {
     assert_eq!(
         declaration.outputs["maximum_principal"],
         FeaType::Field(FeaFieldType {
-            value: Box::new(FeaType::Quantity(PhysicalDimension::PRESSURE)),
+            value: Box::new(FeaType::Quantity((PhysicalDimension::PRESSURE).into())),
             location: Some(runmat_analysis_core::FieldLocation::Element),
             quantity: Some(runmat_analysis_core::ObservationQuantity::Stress),
         })
@@ -236,9 +236,10 @@ study response {
         declaration.outputs["integrated_displacement"],
         FeaType::Vector {
             element: Box::new(FeaType::Quantity(
-                PhysicalDimension::LENGTH
+                (PhysicalDimension::LENGTH
                     .multiply(PhysicalDimension::VOLUME)
-                    .unwrap()
+                    .unwrap())
+                .into()
             )),
             length: Some(3),
         }
@@ -246,14 +247,14 @@ study response {
     assert_eq!(
         declaration.outputs["force"],
         FeaType::Vector {
-            element: Box::new(FeaType::Quantity(PhysicalDimension::FORCE)),
+            element: Box::new(FeaType::Quantity((PhysicalDimension::FORCE).into())),
             length: Some(3),
         }
     );
     assert_eq!(
         declaration.outputs["force_moment"],
         FeaType::Vector {
-            element: Box::new(FeaType::Quantity(PhysicalDimension::MOMENT)),
+            element: Box::new(FeaType::Quantity((PhysicalDimension::MOMENT).into())),
             length: Some(3),
         }
     );

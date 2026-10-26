@@ -30,6 +30,7 @@ const ADMISSION_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedSignalGenerator {
+    pub schema_version: u16,
     pub value_layout: crate::CanonicalGeneratorValueLayout,
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
@@ -38,7 +39,8 @@ pub struct AdmittedSignalGenerator {
     pub captures: Vec<ValuePayload>,
     pub generator_identity: GeneratorIdentity,
     pub materialization_identity: SignalMaterializationIdentity,
-    pub sample_points: Vec<f64>,
+    pub sample_points:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
     pub required_capabilities: BTreeSet<CapabilityRequirement>,
     pub provenance: GeneratorProvenance,
 }
@@ -71,10 +73,12 @@ pub enum NumericalGeneratorKind {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedNumericalGenerator {
+    pub schema_version: u16,
     pub invocation: AdmittedGeneratorInvocation,
     pub materialization_identity: NumericalMaterializationIdentity,
     pub kind: NumericalGeneratorKind,
-    pub sample_points: Vec<f64>,
+    pub sample_points:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +117,7 @@ struct CallableAdmission<'a> {
 struct NumericalGeneratorAdmission<'a> {
     output_domain: GeneratorOutputDomain,
     sample_points: &'a [f64],
+    axis: runmat_types::physical::DynamicDimension,
     kind: NumericalGeneratorKind,
     authored_contract_digest: Digest,
 }
@@ -237,6 +242,7 @@ pub fn admit_named_response_spectrum_generator(
         NumericalGeneratorAdmission {
             output_domain: GeneratorOutputDomain::Real,
             sample_points: spectrum_axis(&spectrum.abscissa),
+            axis: spectrum_axis_descriptor(&spectrum.abscissa)?,
             kind: NumericalGeneratorKind::ResponseSpectrum {
                 spectrum_id: spectrum.spectrum_id.clone(),
             },
@@ -285,7 +291,10 @@ pub fn admit_named_random_spectrum_generator(
         },
         NumericalGeneratorAdmission {
             output_domain: GeneratorOutputDomain::RealOrComplex,
-            sample_points: &spectrum.frequencies_hz,
+            sample_points: spectrum.frequencies_hz.canonical_values(),
+            axis: runmat_analysis_core::GeneratorDomain::FrequencyHertz
+                .axis_descriptor(None)
+                .map_err(AnalysisBridgeError::Invalid)?,
             kind: NumericalGeneratorKind::RandomSpectrum {
                 excitation_id: spectrum.excitation_id.clone(),
                 channel_count: spectrum.channels.len(),
@@ -294,7 +303,7 @@ pub fn admit_named_random_spectrum_generator(
                 "random-spectrum-materialization-contract",
                 &(
                     &spectrum.excitation_id,
-                    &spectrum.frequencies_hz,
+                    spectrum.frequencies_hz.canonical_values(),
                     &spectrum.channels,
                     spectrum.convention,
                     spectrum.interpolation,
@@ -332,18 +341,35 @@ fn admit_named_numerical_generator(
         invocation.generator_identity,
     )?;
     Ok(AdmittedNumericalGenerator {
+        schema_version: 2,
         invocation,
         materialization_identity,
         kind: numerical.kind,
-        sample_points: numerical.sample_points.to_vec(),
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            numerical.axis,
+            numerical.sample_points.to_vec(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     })
 }
 
-fn spectrum_axis(axis: &runmat_analysis_core::SpectrumAbscissa) -> &[f64] {
+pub(crate) fn spectrum_axis(axis: &runmat_analysis_core::SpectrumAbscissa) -> &[f64] {
+    axis.canonical_points()
+}
+
+pub(crate) fn spectrum_axis_descriptor(
+    axis: &runmat_analysis_core::SpectrumAbscissa,
+) -> AnalysisBridgeResult<runmat_types::physical::DynamicDimension> {
     match axis {
-        runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(values)
-        | runmat_analysis_core::SpectrumAbscissa::PeriodSeconds(values) => values,
+        runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(_) => {
+            runmat_analysis_core::GeneratorDomain::FrequencyHertz
+        }
+        runmat_analysis_core::SpectrumAbscissa::PeriodSeconds(_) => {
+            runmat_analysis_core::GeneratorDomain::TimeSeconds
+        }
     }
+    .axis_descriptor(None)
+    .map_err(AnalysisBridgeError::Invalid)
 }
 
 fn validate_canonical_points(points: &[f64]) -> AnalysisBridgeResult<()> {
@@ -400,6 +426,7 @@ fn admit_signal_generator(
         realization_policy_digest,
     )?;
     Ok(AdmittedSignalGenerator {
+        schema_version: 2,
         value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: admitted.program_revision,
         callable: admitted.callable,
@@ -408,7 +435,14 @@ fn admit_signal_generator(
         captures: admitted.captures,
         generator_identity: admitted.generator_identity,
         materialization_identity,
-        sample_points: sample_points(&generator.sampling)?,
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            generator
+                .domain
+                .axis_descriptor(None)
+                .map_err(AnalysisBridgeError::Invalid)?,
+            sample_points(&generator.sampling)?,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         required_capabilities: admitted.required_capabilities,
         provenance: admitted.provenance,
     })
@@ -847,7 +881,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first, second);
-        assert_eq!(first.sample_points, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(
+            first.sample_points.canonical_values(),
+            &vec![0.0, 0.25, 0.5, 0.75, 1.0]
+        );
         assert_eq!(first.function, ProgramFunctionId(7));
     }
 

@@ -124,7 +124,7 @@ impl SolverMeshTopology {
 
         for node in &self.nodes {
             validation_checkpoint(cancellation)?;
-            for coordinate in node.coordinates_m {
+            for coordinate in node.coordinates_m.canonical_value() {
                 validate_finite("mesh node coordinate", coordinate)?;
             }
             validate_provenance("mesh node", &node.provenance)?;

@@ -1,7 +1,7 @@
 use super::{diagnostic, properties::*};
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
-    CheckedFeaStatementKind, FeaDiagnostic, FeaType, PhysicalDimension,
+    CheckedFeaStatementKind, FeaDiagnostic, FeaType,
 };
 use runmat_analysis_core::{
     CanonicalQuantity, CoordinateFrame, PhysicalSignal, Signal, SignalApproximationEvidence,
@@ -56,7 +56,7 @@ fn signal(
     body: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
-    let (dimension, wrap) = signal_kind(declaration, quantity, diagnostics)?;
+    let (kind, wrap) = signal_kind(declaration, quantity, diagnostics)?;
     let generated = body.iter().any(|statement| {
         matches!(
             statement.kind,
@@ -85,7 +85,7 @@ fn signal(
             generated::LowerSignal {
                 declaration,
                 bound,
-                quantity_dimension: dimension,
+                quantity_kind: kind,
                 wrap,
                 diagnostics,
             },
@@ -95,12 +95,12 @@ fn signal(
         );
     }
     if tabulated {
-        return tabulated::lower(declaration, id, domain, body, dimension, wrap, diagnostics);
+        return tabulated::lower(declaration, id, domain, body, kind, wrap, diagnostics);
     }
     if waveform {
-        return waveform::lower(declaration, id, domain, body, dimension, wrap, diagnostics);
+        return waveform::lower(declaration, id, domain, body, kind, wrap, diagnostics);
     }
-    constant_signal(declaration, id, quantity, domain, body, dimension, wrap, diagnostics)
+    constant_signal(declaration, id, quantity, domain, body, kind, wrap, diagnostics)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -110,7 +110,7 @@ fn constant_signal(
     quantity: &str,
     domain: &str,
     body: &[CheckedFeaStatement],
-    dimension: PhysicalDimension,
+    kind: runmat_types::physical::QuantityKind,
     wrap: SignalWrapper,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
@@ -127,8 +127,8 @@ fn constant_signal(
     }
     validate_assignments(declaration, body, &["value", "frame"], diagnostics);
     let expression = required_assignment(declaration, body, "value", diagnostics)?;
-    authored_unit_matches(declaration, quantity, expression, dimension, diagnostics)?;
-    let raw = signal_value(declaration, expression, dimension, diagnostics)?;
+    authored_unit_matches(declaration, quantity, expression, kind.dimension(), diagnostics)?;
+    let raw = signal_value(declaration, expression, kind, diagnostics)?;
     let frame = optional_frame(declaration, body, raw.is_vector(), diagnostics)?;
     Some(wrap(signal_contract(
         id,
@@ -153,87 +153,74 @@ fn signal_kind(
     declaration: &CheckedFeaDeclaration,
     quantity: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<(PhysicalDimension, SignalWrapper)> {
+) -> Option<(runmat_types::physical::QuantityKind, SignalWrapper)> {
+    use runmat_types::physical::QuantityKind as K;
     Some(match quantity {
-        "displacement" => (PhysicalDimension::LENGTH, |value| {
+        "displacement" => (K::Displacement, |value| {
             convert(value, PhysicalSignal::Displacement)
         }),
-        "rotation" => (PhysicalDimension::DIMENSIONLESS, |value| {
+        "rotation" => (K::Rotation, |value| {
             convert(value, PhysicalSignal::Rotation)
         }),
-        "velocity" => (PhysicalDimension::VELOCITY, |value| {
+        "velocity" => (K::Velocity, |value| {
             convert(value, PhysicalSignal::Velocity)
         }),
-        "acceleration" => (PhysicalDimension::ACCELERATION, |value| {
+        "acceleration" => (K::Acceleration, |value| {
             convert(value, PhysicalSignal::Acceleration)
         }),
-        "angular_velocity" => (PhysicalDimension::FREQUENCY, |value| {
+        "angular_velocity" => (K::AngularVelocity, |value| {
             convert(value, PhysicalSignal::AngularVelocity)
         }),
-        "angular_acceleration" => (PhysicalDimension::TIME.power(-2)?, |value| {
+        "angular_acceleration" => (K::AngularAcceleration, |value| {
             convert(value, PhysicalSignal::AngularAcceleration)
         }),
-        "force" => (PhysicalDimension::FORCE, |value| {
-            convert(value, PhysicalSignal::Force)
-        }),
-        "moment" => (PhysicalDimension::MOMENT, |value| {
-            convert(value, PhysicalSignal::Moment)
-        }),
-        "traction" => (PhysicalDimension::PRESSURE, |value| {
+        "force" => (K::Force, |value| convert(value, PhysicalSignal::Force)),
+        "moment" => (K::Moment, |value| convert(value, PhysicalSignal::Moment)),
+        "traction" => (K::Traction, |value| {
             convert(value, PhysicalSignal::Traction)
         }),
-        "pressure" => (PhysicalDimension::PRESSURE, |value| {
+        "pressure" => (K::Pressure, |value| {
             convert(value, PhysicalSignal::Pressure)
         }),
-        "body_force_density" => (
-            PhysicalDimension::FORCE.divide(PhysicalDimension::VOLUME)?,
-            |value| convert(value, PhysicalSignal::BodyForceDensity),
-        ),
-        "temperature" => (PhysicalDimension::TEMPERATURE, |value| {
+        "body_force_density" => (K::BodyForceDensity, |value| {
+            convert(value, PhysicalSignal::BodyForceDensity)
+        }),
+        "temperature" => (K::Temperature, |value| {
             convert(value, PhysicalSignal::Temperature)
         }),
-        "temperature_difference" => (PhysicalDimension::TEMPERATURE, |value| {
+        "temperature_difference" => (K::TemperatureDifference, |value| {
             convert(value, PhysicalSignal::TemperatureDifference)
         }),
-        "heat_flux" => (PhysicalDimension::HEAT_FLUX, |value| {
+        "heat_flux" => (K::HeatFlux, |value| {
             convert(value, PhysicalSignal::HeatFlux)
         }),
-        "heat_generation_density" => (
-            PhysicalDimension::POWER.divide(PhysicalDimension::VOLUME)?,
-            |value| convert(value, PhysicalSignal::HeatGenerationDensity),
-        ),
-        "electric_potential" => (PhysicalDimension::ELECTRIC_POTENTIAL, |value| {
+        "heat_generation_density" => (K::HeatGenerationDensity, |value| {
+            convert(value, PhysicalSignal::HeatGenerationDensity)
+        }),
+        "electric_potential" => (K::ElectricPotential, |value| {
             convert(value, PhysicalSignal::ElectricPotential)
         }),
-        "electric_current" => (PhysicalDimension::ELECTRIC_CURRENT, |value| {
+        "electric_current" => (K::ElectricCurrent, |value| {
             convert(value, PhysicalSignal::ElectricCurrent)
         }),
-        "electric_charge" => (
-            PhysicalDimension::ELECTRIC_CURRENT.multiply(PhysicalDimension::TIME)?,
-            |value| convert(value, PhysicalSignal::ElectricCharge),
-        ),
-        "electric_current_density" => (
-            PhysicalDimension::ELECTRIC_CURRENT.divide(PhysicalDimension::AREA)?,
-            |value| convert(value, PhysicalSignal::ElectricCurrentDensity),
-        ),
-        "electric_charge_density" => (
-            PhysicalDimension::ELECTRIC_CURRENT
-                .multiply(PhysicalDimension::TIME)?
-                .divide(PhysicalDimension::VOLUME)?,
-            |value| convert(value, PhysicalSignal::ElectricChargeDensity),
-        ),
-        "magnetic_vector_potential" => (
-            PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
-            |value| convert(value, PhysicalSignal::MagneticVectorPotential),
-        ),
-        "volume_flow_rate" => (
-            PhysicalDimension::VOLUME.divide(PhysicalDimension::TIME)?,
-            |value| convert(value, PhysicalSignal::VolumeFlowRate),
-        ),
-        "mass_flow_rate" => (
-            PhysicalDimension::MASS.divide(PhysicalDimension::TIME)?,
-            |value| convert(value, PhysicalSignal::MassFlowRate),
-        ),
+        "electric_charge" => (K::ElectricCharge, |value| {
+            convert(value, PhysicalSignal::ElectricCharge)
+        }),
+        "electric_current_density" => (K::ElectricCurrentDensity, |value| {
+            convert(value, PhysicalSignal::ElectricCurrentDensity)
+        }),
+        "electric_charge_density" => (K::ElectricChargeDensity, |value| {
+            convert(value, PhysicalSignal::ElectricChargeDensity)
+        }),
+        "magnetic_vector_potential" => (K::MagneticVectorPotential, |value| {
+            convert(value, PhysicalSignal::MagneticVectorPotential)
+        }),
+        "volume_flow_rate" => (K::VolumeFlowRate, |value| {
+            convert(value, PhysicalSignal::VolumeFlowRate)
+        }),
+        "mass_flow_rate" => (K::MassFlowRate, |value| {
+            convert(value, PhysicalSignal::MassFlowRate)
+        }),
         _ => {
             diagnostic(
                 declaration,
@@ -253,9 +240,9 @@ pub(super) fn constant_from_expression(
     value: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
-    let (dimension, wrap) = signal_kind(declaration, quantity, diagnostics)?;
-    authored_unit_matches(declaration, quantity, value, dimension, diagnostics)?;
-    let raw = signal_value(declaration, value, dimension, diagnostics)?;
+    let (kind, wrap) = signal_kind(declaration, quantity, diagnostics)?;
+    authored_unit_matches(declaration, quantity, value, kind.dimension(), diagnostics)?;
+    let raw = signal_value(declaration, value, kind, diagnostics)?;
     let frame = raw.is_vector().then_some(CoordinateFrame::Global);
     Some(wrap(signal_contract(
         id,
@@ -273,8 +260,12 @@ pub(super) fn parameterized_from_expression(
     value: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<runmat_analysis_core::AuthoredParameterizedSignal> {
-    let (dimension, _) = signal_kind(declaration, quantity_name, diagnostics)?;
-    parameterized::lower(declaration, id, quantity, dimension, value, diagnostics)
+    let (kind, _) = signal_kind(declaration, quantity_name, diagnostics)?;
+    if kind != quantity || value.validate_quantity_kind(quantity).is_err() {
+        invalid_signal_value(declaration, value, diagnostics);
+        return None;
+    }
+    parameterized::lower(declaration, id, quantity, value, diagnostics)
 }
 
 pub(super) fn depends_on_model_input(value: &CheckedExpression) -> bool {
@@ -331,14 +322,19 @@ impl RawSignalValue for SignalValue<f64> {
 pub(super) fn signal_value(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
-    dimension: PhysicalDimension,
+    kind: runmat_types::physical::QuantityKind,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<SignalValue<f64>> {
     if value.value_type == FeaType::Error {
         // The expression checker already reported why this value has no type.
         return None;
     }
-    if value.value_type == FeaType::Quantity(dimension) {
+    if value.validate_quantity_kind(kind).is_err() {
+        diagnostic(declaration, value.span, "absolute temperatures and temperature differences must use their respective units and arithmetic", diagnostics);
+        return None;
+    }
+    let dimension = runmat_types::physical::DynamicDimension::quantity_type(kind);
+    if (value.value_type).is_quantity((dimension).into()) {
         if let Some(value) = scalar(value) {
             return Some(SignalValue::Scalar(value));
         }
@@ -346,12 +342,11 @@ pub(super) fn signal_value(
     if matches!(
         &value.value_type,
         FeaType::Vector { element, length: Some(3) }
-            if element.as_ref() == &FeaType::Quantity(dimension)
+            if element.is_quantity(dimension)
     ) {
         if let CheckedExpressionKind::Quantity {
             value: components,
-            scale_bits,
-            offset_bits,
+            unit,
             ..
         } = &value.kind
         {
@@ -360,8 +355,8 @@ pub(super) fn signal_value(
                     invalid_signal_value(declaration, value, diagnostics);
                     return None;
                 }
-                let scale = f64::from_bits(*scale_bits);
-                let offset = f64::from_bits(*offset_bits);
+                let scale = unit.scale();
+                let offset = unit.offset();
                 let mut result = [0.0; 3];
                 for (index, component) in values.iter().enumerate() {
                     result[index] = scalar(component)? * scale + offset;
@@ -380,7 +375,7 @@ pub(super) fn signal_value(
     }
     let mut result = [0.0; 3];
     for (index, value) in values.iter().enumerate() {
-        if value.value_type != FeaType::Quantity(dimension) {
+        if !(value.value_type).is_quantity((dimension).into()) {
             invalid_signal_value(declaration, value, diagnostics);
             return None;
         }
@@ -465,7 +460,7 @@ fn authored_unit_matches(
     declaration: &CheckedFeaDeclaration,
     quantity: &str,
     value: &CheckedExpression,
-    dimension: PhysicalDimension,
+    dimension: runmat_types::PhysicalDimension,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<()> {
     let Some((message, label)) = crate::semantic::units::unit_mismatch(quantity, value, dimension)
@@ -535,10 +530,20 @@ fn convert<Q: CanonicalQuantity>(
                     kind: waveform.kind,
                     amplitude: map_value(waveform.amplitude),
                     offset: waveform.offset.map(map_value),
-                    start_seconds: waveform.start_seconds,
-                    duration_seconds: waveform.duration_seconds,
-                    frequency_hz: waveform.frequency_hz,
-                    phase_radians: waveform.phase_radians,
+                    start_seconds: runmat_types::physical::Time::new(
+                        waveform.start_seconds.canonical_value(),
+                    ),
+                    duration_seconds: (waveform
+                        .duration_seconds
+                        .map(|quantity| quantity.canonical_value()))
+                    .map(runmat_types::physical::Time::new),
+                    frequency_hz: (waveform
+                        .frequency_hz
+                        .map(|quantity| quantity.canonical_value()))
+                    .map(runmat_types::physical::Frequency::new),
+                    phase_radians: runmat_types::physical::Angle::new(
+                        waveform.phase_radians.canonical_value(),
+                    ),
                     duty_cycle: waveform.duty_cycle,
                 })
             }

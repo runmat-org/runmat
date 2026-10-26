@@ -88,7 +88,7 @@ test("omitting the referenced STEP geometry rejects the package", () => {
     try {
         const path = join(root, "docs/simulation/examples/catalog.json");
         const catalog = JSON.parse(readFileSync(path));
-        catalog.examples[0].files = [catalog.examples[0].entry];
+        catalog.examples[0].files = catalog.examples[0].files.filter(file => !file.endsWith(".step"));
         writeFileSync(path, JSON.stringify(catalog));
         assert.throws(() => buildSourceDocs(options), /Undeclared example dependency/);
     }

@@ -111,7 +111,8 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
             .iter()
             .find(|node| node.node_id == *node_id)
             .unwrap()
-            .coordinates_m;
+            .coordinates_m
+            .canonical_value();
         for component in 0..3 {
             face_center[component] += point[component] / 3.0;
         }
@@ -122,21 +123,27 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
         .iter_mut()
         .find(|node| node.node_id == 101)
         .unwrap();
-    root.coordinates_m = face_center;
+    root.coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new(face_center);
     root.solid_attachment = None;
     structural
         .nodes
         .iter_mut()
         .find(|node| node.node_id == 102)
         .unwrap()
-        .coordinates_m = [face_center[0] + 1.0, face_center[1], face_center[2]];
+        .coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([face_center[0] + 1.0, face_center[1], face_center[2]]);
     model
         .constraints
         .push(AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "nonconformal_beam_root_tie".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Tie(PairedConstraint {
-                primary: runmat_analysis_core::RegionTarget::boundary("solid_load"),
+                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("solid_load")),
                 secondary: runmat_analysis_core::RegionTarget::point("node:101"),
                 pairing: PairingPolicy::GeometricTolerance(Length::new(1.0e-9)),
             }),
@@ -180,7 +187,7 @@ fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
             constraint_id: "shell_symmetry".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::Symmetry {
-                target: runmat_analysis_core::RegionTarget::boundary("skin"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
             },
         }));
 
@@ -213,7 +220,7 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
             constraint_id: "shell_reference_coupling".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-                target: runmat_analysis_core::RegionTarget::boundary("skin"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
                 reference_point: ReferencePoint {
                     reference_point_id: "shell_control".into(),
                     position: Position::new([0.0, 0.0, 0.0]),
@@ -316,7 +323,7 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
             constraint_id: "panel_reference_coupling".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                target: runmat_analysis_core::RegionTarget::boundary("shell_panel"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("shell_panel")),
                 reference_point: ReferencePoint {
                     reference_point_id: "panel_control".into(),
                     position: Position::new([0.25, 0.25, 0.0]),
@@ -340,7 +347,7 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
 
 fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let (_, mesh) = model_and_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     (
         crate::fixtures::mixed_solid_beam_shell_model(attached_coordinates),
         mesh,
@@ -349,7 +356,7 @@ fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
 
 fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0]
         .provenance
         .push(PersistentEntityId::new(
@@ -391,7 +398,7 @@ fn mixed_dispatch_preserves_target_failure_and_cancellation_instead_of_falling_t
         constraint_id: "absent".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: runmat_analysis_core::RegionTarget::boundary("absent"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("absent")),
         },
     };
     let direct = super::super::prepared::PreparedTargets::derive(

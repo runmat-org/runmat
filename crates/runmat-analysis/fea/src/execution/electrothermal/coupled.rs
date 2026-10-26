@@ -70,14 +70,15 @@ impl CoupledElectrothermalCompletion {
     /// Joule power delivered by the terminals, sum of potential x injected current
     /// (equals the integral of sigma |grad V|^2 by the conduction energy identity).
     pub fn terminal_power_w(sample: &ElectrothermalElectricalSample) -> f64 {
-        sample.response.volume_source_work + sample.response.terminal_work
+        sample.response.volume_source_work.canonical_value()
+            + sample.response.terminal_work.canonical_value()
     }
     pub fn joule_power_w(sample: &ElectrothermalElectricalSample) -> f64 {
         match &sample.response.constitutive {
             ElectricalConstitutiveResponse::SteadyConduction {
                 total_joule_power_w,
                 ..
-            } => *total_joule_power_w,
+            } => total_joule_power_w.canonical_value(),
             ElectricalConstitutiveResponse::Electrostatics { .. } => 0.0,
         }
     }
@@ -199,13 +200,15 @@ pub fn conductivity_at(
     law: &MaterialElectricalModel,
     temperature_k: f64,
 ) -> AnalysisExecutionResult<f64> {
-    let factor = 1.0 + law.resistive_heating_coefficient * (temperature_k - law.reference_temperature_k);
+    let factor = 1.0
+        + law.resistive_heating_coefficient.canonical_value()
+            * (temperature_k - law.reference_temperature_k.canonical_value());
     if !factor.is_finite() || factor <= 0.0 {
         return Err(invalid(format!(
             "temperature {temperature_k} K is outside the linear resistivity law (1 + alpha (T - T_ref) <= 0)"
         )));
     }
-    Ok(law.conductivity_s_per_m / factor)
+    Ok(law.conductivity_s_per_m.canonical_value() / factor)
 }
 
 /// Element mean temperatures of one thermal snapshot. Elements on the second side of a
@@ -428,7 +431,7 @@ pub fn execute_coupled_electrothermal(
         .model
         .thermal
         .as_ref()
-        .map(|domain| domain.reference_temperature.kelvin)
+        .map(|domain| domain.reference_temperature.canonical_value())
         .ok_or_else(|| invalid("electrothermal analysis needs a thermal reference temperature"))?;
     let schedule = thermal_template.solve_schedule().map_err(invalid)?;
     let times: Vec<f64> = schedule.points_s().to_vec();
@@ -469,7 +472,8 @@ pub fn execute_coupled_electrothermal(
             else {
                 return Err(invalid("conduction response expected"));
             };
-            samples.push((*time, joule_density_w_per_m3.clone()));
+            // The authored heat source carries canonical W/m^3 values.
+            samples.push((*time, joule_density_w_per_m3.canonical_values().clone()));
             electrical.push(ElectrothermalElectricalSample {
                 time_s: *time,
                 element_temperature_k: element_temperature.clone(),

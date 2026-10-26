@@ -6,15 +6,23 @@ use super::{
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidFaceForces {
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// ρ q u_upwind, oriented from owner; paired incidence reverses this vector.
-    pub advective_momentum_n: Vec<V>,
+    pub advective_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<V>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Original μ(∇u+∇uᵀ)·S, including αΔu and geometric nonorthogonal remainder.
-    pub viscous_traction_n: Vec<V>,
+    pub viscous_traction_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<V>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// −p_f S, physical pressure Pa × area m², force exerted on owner fluid.
-    pub pressure_traction_n: Vec<V>,
+    pub pressure_traction_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<V>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Pressure fluctuation relative to the authored component outlet or gauge, for
     /// gauge-independent convergence scaling, NOT a substituted physical pressure.
-    pub pressure_fluctuation_traction_n: Vec<V>,
+    pub pressure_fluctuation_traction_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<V>>,
 }
 
 /// Face forces and the cell vorticity ∇×u, both from the same boundary-aware velocity
@@ -62,7 +70,7 @@ pub(super) fn evaluate(
         }
         pressure_force.push(scale(
             f.owner_area_vector_m2,
-            -(pf + p.pressure_reference_pa[f.owner]),
+            -(pf + p.pressure_reference_pa.canonical_values()[f.owner]),
         ));
         fluctuation.push(scale(f.owner_area_vector_m2, -pf));
     }
@@ -78,10 +86,22 @@ pub(super) fn evaluate(
     }
     Ok((
         CanonicalFluidFaceForces {
-            advective_momentum_n: advective,
-            viscous_traction_n: viscous,
-            pressure_traction_n: pressure_force,
-            pressure_fluctuation_traction_n: fluctuation,
+            advective_momentum_n: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Force,
+            _,
+        >::new(advective),
+            viscous_traction_n: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Force,
+            _,
+        >::new(viscous),
+            pressure_traction_n: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Force,
+            _,
+        >::new(pressure_force),
+            pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Force,
+            _,
+        >::new(fluctuation),
         },
         vorticity,
     ))

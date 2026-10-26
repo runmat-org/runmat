@@ -56,7 +56,7 @@ fn shear_thinning_power_law_channel_converges_to_the_closed_form_profile() {
             .topology
             .cells
             .iter()
-            .zip(&r.velocity_m_per_s)
+            .zip(r.velocity_m_per_s.canonical_values())
             .map(|(cell, u)| {
                 (u[0] - power_law_velocity(cell.centroid_m[1], consistency, index, 1.0)).powi(2)
                     + u[1].powi(2)
@@ -90,7 +90,7 @@ fn newtonian_limit_of_the_law_reproduces_the_newtonian_solution() {
         .unwrap()
         .solve()
         .unwrap();
-    for (u, v) in actual.velocity_m_per_s.iter().zip(&expected.velocity_m_per_s) {
+    for (u, v) in actual.velocity_m_per_s.canonical_values().iter().zip(expected.velocity_m_per_s.canonical_values()) {
         assert!(norm(sub(*u, *v)) < 1e-9);
     }
 }

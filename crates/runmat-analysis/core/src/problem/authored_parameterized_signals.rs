@@ -12,7 +12,6 @@ use super::{
         SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
     },
 };
-use runmat_types::QuantityDimension;
 
 /// A constant physical signal whose value depends on reusable-model inputs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,7 +55,7 @@ impl AuthoredParameterizedSignal {
             expression
                 .validate(inputs)
                 .map_err(AuthoredParameterizedSignalError::InvalidExpression)?;
-            if expression.value_type != expected {
+            if !expected.accepts_type(expression.value_type) {
                 return Err(AuthoredParameterizedSignalError::WrongExpressionType);
             }
         }
@@ -74,18 +73,18 @@ impl AuthoredParameterizedSignal {
         let value = match &self.value {
             AuthoredSignalExpression::Scalar(value) => SignalValue::Scalar(
                 value
-                    .evaluate(inputs)
+                    .evaluate_for_quantity(inputs, self.quantity)
                     .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
             ),
             AuthoredSignalExpression::Vector3(values) => SignalValue::Vector3([
                 values[0]
-                    .evaluate(inputs)
+                    .evaluate_for_quantity(inputs, self.quantity)
                     .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
                 values[1]
-                    .evaluate(inputs)
+                    .evaluate_for_quantity(inputs, self.quantity)
                     .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
                 values[2]
-                    .evaluate(inputs)
+                    .evaluate_for_quantity(inputs, self.quantity)
                     .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
             ]),
         };
@@ -111,20 +110,45 @@ impl AuthoredParameterizedSignal {
             PhysicalQuantityKind::AngularVelocity => {
                 physical(signal, PhysicalSignal::AngularVelocity)
             }
+            PhysicalQuantityKind::AngularAcceleration => {
+                physical(signal, PhysicalSignal::AngularAcceleration)
+            }
             PhysicalQuantityKind::Force => physical(signal, PhysicalSignal::Force),
             PhysicalQuantityKind::Moment => physical(signal, PhysicalSignal::Moment),
             PhysicalQuantityKind::Traction => physical(signal, PhysicalSignal::Traction),
             PhysicalQuantityKind::Pressure => physical(signal, PhysicalSignal::Pressure),
+            PhysicalQuantityKind::BodyForceDensity => {
+                physical(signal, PhysicalSignal::BodyForceDensity)
+            }
             PhysicalQuantityKind::Temperature => physical(signal, PhysicalSignal::Temperature),
             PhysicalQuantityKind::TemperatureDifference => {
                 physical(signal, PhysicalSignal::TemperatureDifference)
             }
             PhysicalQuantityKind::HeatFlux => physical(signal, PhysicalSignal::HeatFlux),
+            PhysicalQuantityKind::HeatGenerationDensity => {
+                physical(signal, PhysicalSignal::HeatGenerationDensity)
+            }
             PhysicalQuantityKind::ElectricPotential => {
                 physical(signal, PhysicalSignal::ElectricPotential)
             }
             PhysicalQuantityKind::ElectricCurrent => {
                 physical(signal, PhysicalSignal::ElectricCurrent)
+            }
+            PhysicalQuantityKind::ElectricCharge => {
+                physical(signal, PhysicalSignal::ElectricCharge)
+            }
+            PhysicalQuantityKind::ElectricCurrentDensity => {
+                physical(signal, PhysicalSignal::ElectricCurrentDensity)
+            }
+            PhysicalQuantityKind::ElectricChargeDensity => {
+                physical(signal, PhysicalSignal::ElectricChargeDensity)
+            }
+            PhysicalQuantityKind::MagneticVectorPotential => {
+                physical(signal, PhysicalSignal::MagneticVectorPotential)
+            }
+            PhysicalQuantityKind::MassFlowRate => physical(signal, PhysicalSignal::MassFlowRate),
+            PhysicalQuantityKind::VolumeFlowRate => {
+                physical(signal, PhysicalSignal::VolumeFlowRate)
             }
             _ => return Err(AuthoredParameterizedSignalError::UnsupportedQuantity),
         })
@@ -156,26 +180,38 @@ fn physical<Q: CanonicalQuantity>(
 }
 
 fn quantity_input_type(quantity: PhysicalQuantityKind) -> Option<AuthoredInputType> {
-    let dimension = match quantity {
-        PhysicalQuantityKind::Displacement => QuantityDimension::Length,
-        PhysicalQuantityKind::Rotation => QuantityDimension::Dimensionless,
-        PhysicalQuantityKind::Velocity => QuantityDimension::Velocity,
-        PhysicalQuantityKind::Acceleration => QuantityDimension::Acceleration,
-        PhysicalQuantityKind::AngularVelocity => QuantityDimension::Frequency,
-        PhysicalQuantityKind::Force => QuantityDimension::Force,
-        PhysicalQuantityKind::Moment => QuantityDimension::Moment,
-        PhysicalQuantityKind::Traction | PhysicalQuantityKind::Pressure => {
-            QuantityDimension::Pressure
-        }
-        PhysicalQuantityKind::Temperature | PhysicalQuantityKind::TemperatureDifference => {
-            QuantityDimension::Temperature
-        }
-        PhysicalQuantityKind::HeatFlux => QuantityDimension::HeatFlux,
-        PhysicalQuantityKind::ElectricPotential => QuantityDimension::ElectricPotential,
-        PhysicalQuantityKind::ElectricCurrent => QuantityDimension::ElectricCurrent,
-        _ => return None,
-    };
-    Some(AuthoredInputType::Quantity(dimension))
+    if !matches!(
+        quantity,
+        PhysicalQuantityKind::Displacement
+            | PhysicalQuantityKind::Rotation
+            | PhysicalQuantityKind::Velocity
+            | PhysicalQuantityKind::Acceleration
+            | PhysicalQuantityKind::AngularVelocity
+            | PhysicalQuantityKind::AngularAcceleration
+            | PhysicalQuantityKind::Force
+            | PhysicalQuantityKind::Moment
+            | PhysicalQuantityKind::Traction
+            | PhysicalQuantityKind::Pressure
+            | PhysicalQuantityKind::BodyForceDensity
+            | PhysicalQuantityKind::Temperature
+            | PhysicalQuantityKind::TemperatureDifference
+            | PhysicalQuantityKind::HeatFlux
+            | PhysicalQuantityKind::HeatGenerationDensity
+            | PhysicalQuantityKind::ElectricPotential
+            | PhysicalQuantityKind::ElectricCurrent
+            | PhysicalQuantityKind::ElectricCharge
+            | PhysicalQuantityKind::ElectricCurrentDensity
+            | PhysicalQuantityKind::ElectricChargeDensity
+            | PhysicalQuantityKind::MagneticVectorPotential
+            | PhysicalQuantityKind::MassFlowRate
+            | PhysicalQuantityKind::VolumeFlowRate
+    ) {
+        return None;
+    }
+    Some(AuthoredInputType::Quantity(
+        runmat_types::physical::DynamicDimension::try_new(quantity.dimension(), Some(quantity))
+            .expect("catalog kind"),
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

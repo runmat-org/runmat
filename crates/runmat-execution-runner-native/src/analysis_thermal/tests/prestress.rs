@@ -122,6 +122,7 @@ macro_rules! preload {
             .require_mechanical()
             .unwrap()
             .youngs_modulus_pa
+            .canonical_value()
             * 1.0e-4;
         for tensor in stress.chunks_exact(6) {
             assert!((tensor[0] - expected).abs() < expected.abs() * 1.0e-7);
@@ -201,7 +202,15 @@ fn replayed_named_thermal_publication_drives_real_modal_and_buckling_workers() {
                 .thermal
                 .as_mut()
                 .unwrap()
-                .expansion_coefficient_per_k *= 2.0;
+                .expansion_coefficient_per_k = runmat_types::physical::Quantity::new(
+                foreign.product.compiled.model.materials[0]
+                    .thermal
+                    .as_mut()
+                    .unwrap()
+                    .expansion_coefficient_per_k
+                    .canonical_value()
+                    * (2.0),
+            );
             foreign.product.compiled.properties =
                 compile_property_map(&foreign.product.compiled.model, Some(&foreign.mesh)).unwrap();
             foreign.product.workload =

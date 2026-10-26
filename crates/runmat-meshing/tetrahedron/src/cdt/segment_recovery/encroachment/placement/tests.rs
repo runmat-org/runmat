@@ -22,13 +22,13 @@ fn rejected_corner_radius_uses_inherited_spacing_in_both_orientations() {
                 constraint_index: 3,
                 first_identity: endpoints[0].identity,
                 last_identity: endpoints[1].identity,
-                first_coordinates: endpoints[0].coordinates_m,
-                last_coordinates: endpoints[1].coordinates_m,
+                first_coordinates: endpoints[0].coordinates_m.canonical_value(),
+                last_coordinates: endpoints[1].coordinates_m.canonical_value(),
             };
             let witness = node(3, coordinates(map(0.8), 0.21));
             let hints = preferred(
-                endpoints.map(|n| n.coordinates_m),
-                witness.coordinates_m,
+                endpoints.map(|n| n.coordinates_m.canonical_value()),
+                witness.coordinates_m.canonical_value(),
                 context,
                 [0., 1.],
                 if reverse {

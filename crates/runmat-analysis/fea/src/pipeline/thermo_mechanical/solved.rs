@@ -18,10 +18,10 @@ pub(crate) fn recover_solved_static_fields(
             .as_ref()
             .ok_or("solved thermal recovery requires a complete element field")?;
         for point in 0..4 {
-            temperature.push(thermal.temperature_k[point]);
+            temperature.push(thermal.temperature_k.canonical_values()[point]);
             let eigenstrain = thermal.eigenstrain[point];
-            let eigenstress = element.material.youngs_modulus_pa * eigenstrain
-                / (1.0 - 2.0 * element.material.poisson_ratio);
+            let eigenstress = element.material.youngs_modulus_pa.canonical_value() * eigenstrain
+                / (1.0 - 2.0 * element.material.poisson_ratio.canonical_value());
             strain.extend([eigenstrain, eigenstrain, eigenstrain, 0.0, 0.0, 0.0]);
             stress.extend([eigenstress, eigenstress, eigenstress, 0.0, 0.0, 0.0]);
         }

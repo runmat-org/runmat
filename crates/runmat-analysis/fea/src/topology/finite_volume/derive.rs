@@ -210,7 +210,7 @@ pub(super) fn derive(
                         corner_identities: key,
                         centroid_m: face_centroid,
                         owner_area_vector_m2: area,
-                        area_m2: magnitude,
+                        area_m2: runmat_types::physical::Area::new(magnitude),
                         owner: cell_index,
                         neighbor: None,
                         boundary_source: None,
@@ -312,7 +312,7 @@ pub(super) fn derive(
             for (sum, value) in area_sums[cell].iter_mut().zip(area) {
                 *sum += value;
             }
-            area_scales[cell] += face.area_m2;
+            area_scales[cell] += face.area_m2.canonical_value();
             // Translation invariant divergence theorem relative to this cell centroid.
             volumes[cell] += dot(subtract(face.centroid_m, cells[cell].centroid_m), area) / 3.0;
         }
@@ -389,7 +389,7 @@ fn identity(
             .centroid_m
             .into_iter()
             .chain(face.owner_area_vector_m2)
-            .chain([face.area_m2])
+            .chain([face.area_m2.canonical_value()])
         {
             hash.update(value.to_bits().to_le_bytes());
         }

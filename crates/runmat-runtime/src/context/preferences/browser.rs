@@ -72,7 +72,7 @@ impl BrowserPreferenceService {
         budget: &mut CpuCooperationBudget,
         mutation: DocumentMutation,
         profiling: Option<&CommandProfilingReceipt>,
-    ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
+    ) -> Result<transaction::BrowserCheckedSource, PreferenceServiceError> {
         let result = self
             .mutate_request(
                 budget,
@@ -93,7 +93,7 @@ impl BrowserPreferenceService {
         budget: &mut CpuCooperationBudget,
         mutation: transaction::BrowserMutation,
         profiling: Option<&CommandProfilingReceipt>,
-    ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
+    ) -> Result<transaction::BrowserCheckedSource, PreferenceServiceError> {
         let gate = budget
             .await_cancellable(self.gate.clone().lock_owned())
             .await

@@ -20,11 +20,11 @@ pub(crate) fn fixture(
         reference_temperature: Temperature::new(300.0),
     });
     model.materials[0].thermal = Some(MaterialThermalModel {
-        reference_temperature_k: 300.0,
-        modulus_temp_coeff_per_k: 0.0,
-        conductivity_w_per_mk: 1.0,
-        specific_heat_j_per_kgk: 1.0,
-        expansion_coefficient_per_k: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(300.0),
+        modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(0.0),
+        conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(1.0),
+        specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(1.0),
+        expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(0.0),
     });
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_steady("heat")]);
@@ -34,7 +34,7 @@ pub(crate) fn fixture(
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: face.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                     value: PrescribedValue::Constant(Temperature::new(300.0)),
                 },
             }));

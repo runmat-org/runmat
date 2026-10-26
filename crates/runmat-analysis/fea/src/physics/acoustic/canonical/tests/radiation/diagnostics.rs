@@ -37,20 +37,25 @@ pub(super) fn measure(
     let (model, mesh) = fixture(cells, quadratic, frequency, amplitude, rotated);
     let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
     let omega = std::f64::consts::TAU * frequency;
-    let assembly =
-        AcousticAssembly::assemble(result.projection.clone(), &properties, omega).unwrap();
+    let assembly = AcousticAssembly::assemble(
+        result.projection.clone(),
+        &properties,
+        runmat_types::physical::AngularFrequency::new(omega),
+    )
+    .unwrap();
     let c = model.materials[0]
         .acoustic
         .as_ref()
         .unwrap()
-        .speed_of_sound_m_per_s;
+        .speed_of_sound_m_per_s
+        .canonical_value();
     let k = omega / c;
     let exact_nodes = result
         .projection
         .nodes
         .iter()
         .map(|node| {
-            let x = dot(node.coordinates_m, direction);
+            let x = dot(node.coordinates_m.canonical_value(), direction);
             multiply(amplitude, [(k * x).cos(), -(k * x).sin()])
         })
         .collect::<Vec<_>>();
@@ -66,8 +71,11 @@ pub(super) fn measure(
         independent_total_rms: 0.0,
     };
     for (index, element) in result.projection.elements.iter().enumerate() {
-        let corners: [[f64; 3]; 4] =
-            std::array::from_fn(|i| result.projection.nodes[element.node_indices[i]].coordinates_m);
+        let corners: [[f64; 3]; 4] = std::array::from_fn(|i| {
+            result.projection.nodes[element.node_indices[i]]
+                .coordinates_m
+                .canonical_value()
+        });
         let volume = dot(
             subtract(corners[1], corners[0]),
             cross(
@@ -109,7 +117,7 @@ pub(super) fn measure(
                 }
             }
         }
-        let rho = assembly.density[index];
+        let rho = assembly.density.canonical_values()[index];
         let face_velocity = [
             integral[1].map(|g| -g / (volume * omega * rho)),
             integral[0].map(|g| g / (volume * omega * rho)),
@@ -121,8 +129,8 @@ pub(super) fn measure(
                 recovered.velocity[index].imaginary[axis],
             ];
             let actual = [
-                result.element_velocity_m_per_s[index].real[axis],
-                result.element_velocity_m_per_s[index].imaginary[axis],
+                result.element_velocity_m_per_s.canonical_values()[index].real[axis],
+                result.element_velocity_m_per_s.canonical_values()[index].imaginary[axis],
             ];
             for (component, interpolated) in interpolation.iter().enumerate() {
                 let exact = axial_direction * reference[component] / (rho * c);

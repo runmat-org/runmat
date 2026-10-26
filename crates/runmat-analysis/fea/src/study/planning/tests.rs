@@ -164,7 +164,7 @@ fn state_sequence(
 fn random_excitation() -> RandomExcitationSpectrum {
     RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("base".into()),
-        frequencies_hz: vec![1.0, 10.0, 100.0],
+        frequencies_hz: runmat_types::physical::Quantity::new(vec![1.0, 10.0, 100.0]),
         channels: vec![RandomExcitationChannel {
             channel_id: RandomExcitationChannelId("base-x".into()),
             quantity: RandomExcitationQuantity::BaseAcceleration,
@@ -174,14 +174,18 @@ fn random_excitation() -> RandomExcitationSpectrum {
             },
         }],
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
-            vec![CrossPowerSpectralDensity::diagonal(&[1.0]); 3],
+            vec![
+                CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([1.0]));
+                3
+            ],
             "sha256:planning-random",
         ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     }

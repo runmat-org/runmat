@@ -53,7 +53,7 @@ impl MaxwellHarmonicWorkload {
         .map_err(invalid)?;
         if !frequencies
             .iter()
-            .any(|value| value.to_bits() == self.frequency.hertz.to_bits())
+            .any(|value| value.to_bits() == self.frequency.canonical_value().to_bits())
         {
             return Err(invalid(
                 "Maxwell workload frequency is not one of the step's authored frequencies",
@@ -71,7 +71,7 @@ impl MaxwellHarmonicWorkload {
             mesh,
             self.step_id.as_str(),
             self.relative_residual_target,
-            self.frequency.hertz,
+            self.frequency.canonical_value(),
         )
         .map_err(invalid)
     }

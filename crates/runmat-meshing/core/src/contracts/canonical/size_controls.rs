@@ -262,7 +262,7 @@ pub fn size_control_evidence(
     let coordinates = topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let length = |a: u64, b: u64| -> Option<f64> {
         let (a, b) = (coordinates.get(&a)?, coordinates.get(&b)?);
@@ -329,11 +329,11 @@ mod tests {
 
     fn tolerance() -> GeometryTolerancePolicy {
         GeometryTolerancePolicy {
-            source_tolerance_m: 0.0,
-            absolute_floor_m: 1.0e-12,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_term: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         }
     }
 

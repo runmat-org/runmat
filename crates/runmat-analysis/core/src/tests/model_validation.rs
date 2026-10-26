@@ -8,11 +8,11 @@ fn magnetostatic_domain_requires_positive_permeability_without_frequency_or_cond
     });
     assert!(crate::validate_domains::validate_domains(&model).is_err());
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 0.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
         conductivity_frequency_response: Vec::new(),
     });
     crate::validate_domains::validate_domains(&model).unwrap();
@@ -21,7 +21,8 @@ fn magnetostatic_domain_requires_positive_permeability_without_frequency_or_cond
             .electrical
             .as_mut()
             .unwrap()
-            .relative_permeability = permeability;
+            .relative_permeability =
+            runmat_types::physical::RelativePermeability::new(permeability);
         assert!(matches!(
             crate::validate_domains::validate_domains(&model),
             Err(AnalysisValidationError::InvalidMaterial { .. })
@@ -33,11 +34,11 @@ fn magnetostatic_domain_requires_positive_permeability_without_frequency_or_cond
 fn static_electrical_domain_does_not_invent_frequency_and_conduction_requires_positive_sigma() {
     let mut model = valid_model();
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 0.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 2.0,
-        relative_permeability: 1.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(2.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
         conductivity_frequency_response: Vec::new(),
     });
     model.electromagnetic = Some(ElectromagneticDomain::Static {
@@ -55,7 +56,7 @@ fn static_electrical_domain_does_not_invent_frequency_and_conduction_requires_po
         .electrical
         .as_mut()
         .unwrap()
-        .conductivity_s_per_m = 1.0;
+        .conductivity_s_per_m = runmat_types::physical::ElectricalConductivity::new(1.0);
     crate::validate_domains::validate_domains(&model).unwrap();
     for frequency in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
@@ -127,19 +128,7 @@ fn solver_identity_excludes_material_reconciliation_audit_fields() {
 }
 
 #[test]
-fn unit_frame_mismatch_rejection() {
-    let mut model = valid_model();
-    model.units = UnitSystem::Inch;
-    let err = validate_model_against_geometry(&model, UnitSystem::Meter, &CoordinateFrame::Global)
-        .expect_err("expected unit mismatch");
-    assert!(matches!(
-        err,
-        AnalysisValidationError::UnitMismatch {
-            model: UnitSystem::Inch,
-            geometry: UnitSystem::Meter
-        }
-    ));
-
+fn frame_mismatch_rejection() {
     let mut model = valid_model();
     model.frame = CoordinateFrame::Cartesian(CartesianFrame {
         frame_id: "fixture_frame".to_string(),
@@ -147,7 +136,7 @@ fn unit_frame_mismatch_rejection() {
         x_axis: [1.0, 0.0, 0.0],
         y_axis: [0.0, 1.0, 0.0],
     });
-    let err = validate_model_against_geometry(&model, UnitSystem::Meter, &CoordinateFrame::Global)
+    let err = validate_model_against_geometry(&model, &CoordinateFrame::Global)
         .expect_err("expected frame mismatch");
     let AnalysisValidationError::FrameMismatch { model, geometry } = err else {
         panic!("expected typed frame mismatch");
@@ -160,7 +149,7 @@ fn unit_frame_mismatch_rejection() {
 fn valid_model_is_accepted() {
     let model = valid_model();
     validate_model(&model).expect("model should be valid");
-    validate_model_against_geometry(&model, UnitSystem::Meter, &CoordinateFrame::Global)
+    validate_model_against_geometry(&model, &CoordinateFrame::Global)
         .expect("model should match geometry context");
 }
 
@@ -197,12 +186,12 @@ fn structural_beam_model_round_trips() {
         nodes: vec![
             StructuralNode {
                 node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
-                coordinates_m: [1.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -217,13 +206,13 @@ fn structural_beam_model_round_trips() {
         }],
         beam_sections: vec![BeamSectionModel {
             section_id: "section_1".to_string(),
-            area_m2: 2.0e-4,
-            iy_m4: 1.6e-9,
-            iz_m4: 6.4e-9,
-            torsion_j_m4: 2.4e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.005,
-            torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(2.0e-4),
+            iy_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(1.6e-9),
+            iz_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(6.4e-9),
+            torsion_j_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.011_180_339_887_498_949),
         }],
         shell_sections: Vec::new(),
     });
@@ -245,17 +234,17 @@ fn structural_shell_model_round_trips() {
         nodes: vec![
             StructuralNode {
                 node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
-                coordinates_m: [1.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 3,
-                coordinates_m: [0.0, 1.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 1.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -272,7 +261,7 @@ fn structural_shell_model_round_trips() {
         shell_sections: vec![ShellSectionModel::Homogeneous(
             HomogeneousShellSectionModel {
                 section_id: "panel_2mm".to_string(),
-                thickness_m: 0.002,
+                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.002),
                 reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                 shear_correction: 5.0 / 6.0,
             },
@@ -292,11 +281,11 @@ fn structural_shell_model_round_trips() {
 #[test]
 fn electrical_frequency_response_is_explicitly_empty() {
     let electrical = MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 1.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
         conductivity_frequency_response: Vec::new(),
     };
     assert!(electrical.conductivity_frequency_response.is_empty());

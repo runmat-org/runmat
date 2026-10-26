@@ -19,7 +19,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
         .iter()
         .map(|node_id| ConnectivityPoint {
             node_id: *node_id,
-            coordinates_m: boundary_node_map[node_id],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(boundary_node_map[node_id]),
             is_super: false,
         })
         .collect::<Vec<_>>();
@@ -28,7 +31,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
         let node_ids = tetrahedron.vertices.map(|index| points[index].node_id);
         let tetrahedron_points = tetrahedron
             .vertices
-            .map(|index| points[index].coordinates_m);
+            .map(|index| points[index].coordinates_m.canonical_value());
         if point_in_closed_triangle_surface(
             tetrahedron_centroid(tetrahedron_points),
             &boundary_triangles,
@@ -78,7 +81,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 boundary_node_map[&face[0]],
                 boundary_node_map[&face[1]],
                 boundary_node_map[&face[2]],
-                apex.coordinates_m,
+                apex.coordinates_m.canonical_value(),
             ];
             if point_in_closed_triangle_surface(
                 tetrahedron_centroid(tetrahedron_points),

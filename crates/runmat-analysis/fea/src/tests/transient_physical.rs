@@ -172,7 +172,7 @@ fn support_motion_model() -> runmat_analysis_core::AnalysisModel {
         constraint_id: "moving_root_x".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             translations: vec![TranslationDofMotion {
                 dof: StructuralTranslationDof::Ux,
                 history: StructuralKinematicHistory::AccelerationDriven {
@@ -191,7 +191,7 @@ fn support_motion_model() -> runmat_analysis_core::AnalysisModel {
             constraint_id: "fixed_root_yz".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 translations: vec![
                     TranslationDofValue {
                         dof: StructuralTranslationDof::Uy,
@@ -839,13 +839,13 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
                 .unwrap()
         );
         assert_eq!(
-            sample.physical.support_work_j,
+            sample.physical.support_work_j.canonical_value(),
             uninterrupted.support_work_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]
         );
         assert_eq!(
-            sample.physical.energy_balance_residual_j,
+            sample.physical.energy_balance_residual_j.canonical_value(),
             uninterrupted.energy_balance_residual_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]
@@ -974,7 +974,7 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
         .iter()
         .flat_map(|segment| segment.samples())
         .any(|sample| {
-            sample.physical.time_s == 0.5
+            sample.physical.time_s.canonical_value() == 0.5
                 && scope.schedule.points[sample.physical.schedule_ordinal as usize].arrival
                     == crate::execution::StructuralTransientScheduleArrival::LeftLimit
         }));
@@ -1034,7 +1034,7 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     };
     let history = root_motion.translations[0].history.clone();
     model.constraints = [
-        ("moving_root", RegionTarget::boundary("root")),
+        ("moving_root", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root"))),
         ("moving_free_node", RegionTarget::point("node:4")),
     ]
     .into_iter()
@@ -1154,7 +1154,7 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
                 .unwrap()
         );
         assert_eq!(
-            sample.physical.support_work_j,
+            sample.physical.support_work_j.canonical_value(),
             result.support_work_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]

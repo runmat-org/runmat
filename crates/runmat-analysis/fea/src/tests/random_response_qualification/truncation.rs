@@ -13,7 +13,9 @@ fn cumulative_mass_threshold_selects_the_expected_modal_prefix() {
     let excitation = constant_spectrum(
         full_frequency_bounds(&basis),
         vec![channel("prefix", direction)],
-        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.0e-4]),
+        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+            &runmat_types::physical::Quantity::new([2.0e-4]),
+        ),
     );
 
     for expected_count in 1..=basis.modes().len() {

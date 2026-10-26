@@ -42,8 +42,8 @@ fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, Solv
         reference_temperature: Temperature::new(REFERENCE),
     });
     let thermal = model.materials[0].thermal.as_mut().unwrap();
-    thermal.reference_temperature_k = REFERENCE;
-    thermal.expansion_coefficient_per_k = ALPHA;
+    thermal.reference_temperature_k = runmat_types::physical::Temperature::new(REFERENCE);
+    thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(ALPHA);
     let producer = ProcedureStep::thermal_steady("qualification_heat");
     let mut consumer = ProcedureStep::coupled(
         "qualification_expansion",
@@ -81,7 +81,7 @@ fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, Solv
         .find(|face| {
             face.node_indices
                 .iter()
-                .all(|&node| mesh.topology.nodes[node].coordinates_m[0] == 0.0)
+                .all(|&node| mesh.topology.nodes[node].coordinates_m.canonical_value()[0] == 0.0)
         })
         .unwrap();
     model
@@ -96,15 +96,16 @@ fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, Solv
     for node in &mesh.topology.nodes {
         // Exactly six zero components remove rigid modes without constraining dilation:
         // origin xyz, x-axis corner yz, y-axis corner z. All other DOFs are solved.
-        let axes: &[usize] = if restrained || node.coordinates_m == [0.0, 0.0, 0.0] {
-            &[0, 1, 2]
-        } else if node.coordinates_m == [1.0, 0.0, 0.0] {
-            &[1, 2]
-        } else if node.coordinates_m == [0.0, 1.0, 0.0] {
-            &[2]
-        } else {
-            &[]
-        };
+        let axes: &[usize] =
+            if restrained || node.coordinates_m.canonical_value() == [0.0, 0.0, 0.0] {
+                &[0, 1, 2]
+            } else if node.coordinates_m.canonical_value() == [1.0, 0.0, 0.0] {
+                &[1, 2]
+            } else if node.coordinates_m.canonical_value() == [0.0, 1.0, 0.0] {
+                &[2]
+            } else {
+                &[]
+            };
         if axes.is_empty() {
             continue;
         }
@@ -162,7 +163,10 @@ fn solve_temperature_profile(
         .unwrap();
     assert_eq!(temperatures.len(), mesh.topology.nodes.len());
     for (node, value) in mesh.topology.nodes.iter().zip(temperatures) {
-        assert!((value - REFERENCE - DELTA - gradient * node.coordinates_m[0]).abs() < 1.0e-9);
+        assert!(
+            (value - REFERENCE - DELTA - gradient * node.coordinates_m.canonical_value()[0]).abs()
+                < 1.0e-9
+        );
     }
     source
 }
@@ -177,14 +181,22 @@ fn solved_linear_temperature_drives_compatible_quadratic_tet10_deformation() {
         .iter()
         .find(|face| {
             face.node_indices.iter().all(|&index| {
-                (mesh.topology.nodes[index].coordinates_m.iter().sum::<f64>() - 1.0).abs() < 1.0e-12
+                (mesh.topology.nodes[index]
+                    .coordinates_m
+                    .canonical_value()
+                    .iter()
+                    .sum::<f64>()
+                    - 1.0)
+                    .abs()
+                    < 1.0e-12
             })
         })
         .unwrap();
     let conductivity = model.materials[0]
         .require_thermal()
         .unwrap()
-        .conductivity_w_per_mk;
+        .conductivity_w_per_mk
+        .canonical_value();
     // T=Tref+DELTA+b*x satisfies Laplace's equation. Its inward applied heat flux
     // on x+y+z=1 is k*b/sqrt(3); y=0,z=0 are naturally insulated, x=0 is prescribed.
     model.boundaries.push(AnalysisBoundary {
@@ -209,7 +221,7 @@ fn solved_linear_temperature_drives_compatible_quadratic_tet10_deformation() {
     // It obeys exactly the six rigid-mode pins and has curvature d²u_x/dy²=-alpha*b.
     // All remaining components, including midside displacements, are solved unknowns.
     for (node, actual) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
-        let [x, y, z] = node.coordinates_m;
+        let [x, y, z] = node.coordinates_m.canonical_value();
         let expected = [
             ALPHA * (DELTA * x + 0.5 * gradient * (x * x - y * y - z * z)),
             ALPHA * (DELTA * y + gradient * x * y),
@@ -229,6 +241,7 @@ fn solved_linear_temperature_drives_compatible_quadratic_tet10_deformation() {
         .require_mechanical()
         .unwrap()
         .youngs_modulus_pa
+        .canonical_value()
         * ALPHA
         * (DELTA + gradient);
     assert!(field(&result.run, crate::FEA_FIELD_STRUCTURAL_STRESS)
@@ -287,7 +300,7 @@ fn solved_uniform_temperature_produces_free_tet4_and_tet10_dilation() {
         assert_eq!(displacement.len(), mesh.topology.nodes.len() * 3);
         for (node, actual) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
             for (axis, actual_value) in actual.iter().enumerate() {
-                let expected = ALPHA * DELTA * node.coordinates_m[axis];
+                let expected = ALPHA * DELTA * node.coordinates_m.canonical_value()[axis];
                 assert!(
                     (actual_value - expected).abs() < 1.0e-11,
                     "{order:?} node {} axis {axis}: {} != {expected}",
@@ -301,6 +314,7 @@ fn solved_uniform_temperature_produces_free_tet4_and_tet10_dilation() {
             .require_mechanical()
             .unwrap()
             .youngs_modulus_pa
+            .canonical_value()
             * ALPHA
             * DELTA;
         assert!(result
@@ -345,8 +359,8 @@ fn solved_uniform_temperature_produces_restrained_hydrostatic_compression() {
             .all(|value| value.abs() < 1.0e-14));
         let mechanical = model.materials[0].require_mechanical().unwrap();
         let strain = ALPHA * DELTA;
-        let pressure =
-            mechanical.youngs_modulus_pa * strain / (1.0 - 2.0 * mechanical.poisson_ratio);
+        let pressure = mechanical.youngs_modulus_pa.canonical_value() * strain
+            / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         // Independent geometric virtual work for v=(x,0,0): integral sigma_xx dV=-p/6.
         let geometric = result.linearization.geometric_stiffness();
         let moment: f64 = mesh
@@ -360,7 +374,9 @@ fn solved_uniform_temperature_produces_restrained_hydrostatic_compression() {
                     .iter()
                     .enumerate()
                     .map(|(j, b)| {
-                        a.coordinates_m[0] * geometric.get(3 * i, 3 * j) * b.coordinates_m[0]
+                        a.coordinates_m.canonical_value()[0]
+                            * geometric.get(3 * i, 3 * j)
+                            * b.coordinates_m.canonical_value()[0]
                     })
                     .sum::<f64>()
             })
@@ -404,7 +420,7 @@ fn solved_uniform_temperature_produces_restrained_hydrostatic_compression() {
                 .nodes
                 .iter()
                 .zip(reactions.chunks_exact(3))
-                .map(|(node, reaction)| node.coordinates_m[axis] * reaction[axis])
+                .map(|(node, reaction)| node.coordinates_m.canonical_value()[axis] * reaction[axis])
                 .sum::<f64>();
             assert!(
                 (moment / (-pressure / 6.0) - 1.0).abs() < 1.0e-9,
@@ -423,7 +439,17 @@ fn solved_temperature_transfer_rejects_valid_other_mesh_and_missing_authored_lin
         // Same node IDs/count/order, but different physical geometry and a valid new digest.
         let mut other_mesh = mesh.clone();
         for node in &mut other_mesh.topology.nodes {
-            node.coordinates_m[2] *= 2.0;
+            {
+                let quantity_change = 2.0;
+                let quantity_index = 2;
+                let quantity_slot = &mut node.coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] *= quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
         }
         other_mesh.seal_canonical_digest().unwrap();
         other_mesh.validate_canonical().unwrap();

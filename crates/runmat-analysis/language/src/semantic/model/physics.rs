@@ -143,7 +143,7 @@ fn boundary(
                 body,
                 "coefficient",
                 &[FeaType::Quantity(
-                    PhysicalDimension::HEAT_TRANSFER_COEFFICIENT,
+                    PhysicalDimension::HEAT_TRANSFER_COEFFICIENT.into(),
                 )],
                 |diagnostics| {
                     required_quantity(
@@ -171,7 +171,7 @@ fn boundary(
                 "emissivity",
                 &[
                     FeaType::Real,
-                    FeaType::Quantity(PhysicalDimension::DIMENSIONLESS),
+                    FeaType::Quantity(PhysicalDimension::DIMENSIONLESS.into()),
                 ],
                 |diagnostics| required_scalar(declaration, body, "emissivity", diagnostics),
                 diagnostics,

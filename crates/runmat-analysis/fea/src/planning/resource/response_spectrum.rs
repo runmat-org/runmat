@@ -1,8 +1,6 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{
-    ModalCombination, ModalTruncationCorrection, SpectrumAbscissa, SpectrumResponse,
-};
+use runmat_analysis_core::{ModalCombination, ModalTruncationCorrection, SpectrumResponse};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -291,11 +289,10 @@ impl StructuralModalResponseSpectrumResourceProjection {
                 "response-spectrum request differs from its admitted topology",
             ));
         }
-        let point_count = match &request.spectrum().abscissa {
-            SpectrumAbscissa::FrequencyHertz(values) | SpectrumAbscissa::PeriodSeconds(values) => {
-                count(values.len(), "spectrum points")?
-            }
-        };
+        let point_count = count(
+            request.spectrum().abscissa.canonical_points().len(),
+            "spectrum points",
+        )?;
         let correlation_pairs = if matches!(
             request.spectrum().modal_combination,
             ModalCombination::CompleteQuadraticCombination | ModalCombination::TenPercent

@@ -13,7 +13,7 @@ fn lazy_query_matches_inventory_after_append_and_cancelled_synchronization() {
             .nodes
             .iter()
             .enumerate()
-            .filter(|(_, node)| query.contains_point(node.coordinates_m))
+            .filter(|(_, node)| query.contains_point(node.coordinates_m.canonical_value()))
             .map(|(index, _)| index as u32)
             .collect::<Vec<_>>()
     };
@@ -96,7 +96,7 @@ fn canonical_reordering_reuses_original_point_inventory_and_matches_exhaustive_q
         .nodes
         .iter()
         .enumerate()
-        .filter(|(_, node)| bounds.contains_point(node.coordinates_m))
+        .filter(|(_, node)| bounds.contains_point(node.coordinates_m.canonical_value()))
         .map(|(index, _)| index as u32)
         .collect::<Vec<_>>();
     assert_eq!(
@@ -149,7 +149,12 @@ fn cancelled_rebase_preserves_topology_and_index_and_changed_coordinates_rebuild
     );
     let mut translated = canonical;
     for node in &mut translated.nodes {
-        node.coordinates_m = node.coordinates_m.map(|value| value + 10.0);
+        node.coordinates_m =
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                node.coordinates_m
+                    .canonical_value()
+                    .map(|value| value + 10.0),
+            );
     }
     topology
         .adopt_canonical_with_spatial_index(translated, &mut || Ok::<_, ()>(()))
@@ -230,7 +235,7 @@ fn canonical_handoff_completes_a_retained_append_prefix_before_reordering() {
         .nodes
         .iter()
         .enumerate()
-        .filter(|(_, node)| bounds.contains_point(node.coordinates_m))
+        .filter(|(_, node)| bounds.contains_point(node.coordinates_m.canonical_value()))
         .map(|(i, _)| i as u32)
         .collect::<Vec<_>>();
     assert_eq!(
@@ -297,7 +302,7 @@ fn cancelled_prefix_handoff_preserves_original_topology_and_resumable_query() {
             .nodes
             .iter()
             .enumerate()
-            .filter(|(_, node)| bounds.contains_point(node.coordinates_m))
+            .filter(|(_, node)| bounds.contains_point(node.coordinates_m.canonical_value()))
             .map(|(index, _)| index as u32)
             .collect::<Vec<_>>();
         assert_eq!(

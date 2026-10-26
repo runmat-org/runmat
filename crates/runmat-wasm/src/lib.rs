@@ -49,3 +49,6 @@ pub use api::streams::{
     set_log_filter, subscribe_runtime_log, subscribe_stdout, subscribe_trace_events,
     unsubscribe_runtime_log, unsubscribe_stdout, unsubscribe_trace_events,
 };
+
+#[cfg(not(feature = "graphics-replay"))]
+pub use api::fea_execution::execute_prepared_fea_study;

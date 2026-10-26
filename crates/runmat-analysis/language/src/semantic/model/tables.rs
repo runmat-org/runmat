@@ -169,7 +169,7 @@ fn samples(
 }
 
 fn typed(value: &CheckedExpression, dimension: PhysicalDimension) -> Option<f64> {
-    (value.value_type == crate::FeaType::Quantity(dimension))
+    value.value_type.is_quantity(dimension.into())
         .then(|| scalar(value))
         .flatten()
 }

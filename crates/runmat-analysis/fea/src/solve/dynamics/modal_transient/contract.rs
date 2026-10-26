@@ -4,13 +4,15 @@ use crate::execution::ModalTransientCoordinateState;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModalTransientInitialState {
-    pub displacement: Vec<f64>,
-    pub velocity: Vec<f64>,
+    pub displacement:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
+    pub velocity:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, Vec<f64>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModalTransientSample {
-    pub time_s: f64,
+    pub time_s: runmat_types::physical::Time,
     pub coordinates: ModalTransientCoordinateState,
     pub relative_residual: f64,
 }

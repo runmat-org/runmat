@@ -106,7 +106,7 @@ pub(super) fn face_pressure_offset(
     } else {
         match p.boundaries[i] {
             FaceBoundary::PressureOutlet { pressure, .. } => {
-                pressure - p.pressure_reference_pa[f.owner]
+                pressure - p.pressure_reference_pa.canonical_values()[f.owner]
             }
             _ => {
                 pressure[f.owner]
@@ -130,7 +130,7 @@ pub(super) fn symmetry_traction(
 ) -> Result<(f64, V), Error> {
     let f = &p.topology.faces[i];
     let (alpha, _, _) = face_geometry(p, f)?;
-    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
     let coefficient = 2.0 * face_viscosity(p, owner_gradient) * alpha;
     let traction = scale(normal, -coefficient * dot(owner_velocity, normal));
     if !coefficient.is_finite() || traction.iter().any(|x| !x.is_finite()) {

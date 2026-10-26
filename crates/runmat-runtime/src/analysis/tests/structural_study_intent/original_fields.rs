@@ -253,13 +253,12 @@ fn witness(order: ElementOrder) {
 
 fn mesh_output(order: ElementOrder) -> crate::meshing::MeshingExecutionOutput {
     let mut artifact = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
-    artifact.resolved_request = structural_study::resolve_intent_meshing_request(
-        UnitSystem::Meter,
-        Some(runmat_meshing_core::MeshingRequestSettings {
+    artifact.resolved_request = structural_study::resolve_intent_meshing_request(Some(
+        runmat_meshing_core::MeshingRequestSettings {
             element_order: order,
             ..Default::default()
-        }),
-    )
+        },
+    ))
     .unwrap()
     .unwrap();
     artifact.topology.boundary_faces[0]

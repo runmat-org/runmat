@@ -32,8 +32,8 @@ fn affine_patch_model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     else {
         panic!("expected isotropic linear elasticity")
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     model.signals.clear();
     model.excitations.clear();
     model.excitation_cases.clear();
@@ -45,7 +45,9 @@ fn affine_patch_model(mesh: &SolverMeshArtifact) -> AnalysisModel {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|node_id| {
-            let coordinates = mesh.topology.nodes[node_id as usize - 1].coordinates_m;
+            let coordinates = mesh.topology.nodes[node_id as usize - 1]
+                .coordinates_m
+                .canonical_value();
             AnalysisConstraint::Structural(StructuralConstraint {
                 constraint_id: format!("affine_boundary_node_{node_id}"),
                 frame: CoordinateFrame::Global,

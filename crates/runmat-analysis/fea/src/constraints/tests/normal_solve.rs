@@ -15,8 +15,11 @@ fn solve_face_normal_offset(angle: f64) {
     let (mut model, mut mesh) = model_and_mesh();
     let (sin, cos) = angle.sin_cos();
     for node in &mut mesh.topology.nodes {
-        let [x, y, z] = node.coordinates_m;
-        node.coordinates_m = [x, cos * y - sin * z, sin * y + cos * z];
+        let [x, y, z] = node.coordinates_m.canonical_value();
+        node.coordinates_m = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new([x, cos * y - sin * z, sin * y + cos * z]);
     }
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
@@ -61,7 +64,7 @@ fn solve_face_normal_offset(angle: f64) {
             constraint_id: "face_normal_offset".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::NormalDisplacement {
-                target: RegionTarget::boundary("face:1"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1")),
                 value: PrescribedValue::Constant(Displacement::new(-offset_m)),
             },
         }),

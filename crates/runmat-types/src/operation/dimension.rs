@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::QuantityDimension;
-
 /// SI base-dimension exponents carried by statically checked operations.
 ///
-/// Named [`QuantityDimension`] values remain useful in public signatures. This composable form is
+/// Shared quantity descriptors carry nominal and semantic metadata separately. This composable form is
 /// the authority for derived results such as a pressure integrated over an area or a resultant
 /// moment about a point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -91,34 +89,5 @@ impl PhysicalDimension {
             luminous_intensity: self.luminous_intensity.checked_mul(exponent)?,
             information: self.information.checked_mul(exponent)?,
         })
-    }
-}
-
-impl From<QuantityDimension> for PhysicalDimension {
-    fn from(value: QuantityDimension) -> Self {
-        match value {
-            QuantityDimension::Dimensionless => Self::DIMENSIONLESS,
-            QuantityDimension::Length => Self::LENGTH,
-            QuantityDimension::Area => Self::AREA,
-            QuantityDimension::Volume => Self::VOLUME,
-            QuantityDimension::Time => Self::TIME,
-            QuantityDimension::Frequency => Self::FREQUENCY,
-            QuantityDimension::Mass => Self::MASS,
-            QuantityDimension::Density => Self::DENSITY,
-            QuantityDimension::Temperature => Self::TEMPERATURE,
-            QuantityDimension::Velocity => Self::VELOCITY,
-            QuantityDimension::Acceleration => Self::ACCELERATION,
-            QuantityDimension::Force => Self::FORCE,
-            QuantityDimension::Moment => Self::MOMENT,
-            QuantityDimension::Pressure => Self::PRESSURE,
-            QuantityDimension::Energy => Self::ENERGY,
-            QuantityDimension::Power => Self::POWER,
-            QuantityDimension::HeatFlux => Self::HEAT_FLUX,
-            QuantityDimension::ThermalConductivity => Self::THERMAL_CONDUCTIVITY,
-            QuantityDimension::HeatTransferCoefficient => Self::HEAT_TRANSFER_COEFFICIENT,
-            QuantityDimension::ElectricPotential => Self::ELECTRIC_POTENTIAL,
-            QuantityDimension::ElectricCurrent => Self::ELECTRIC_CURRENT,
-            QuantityDimension::MagneticFluxDensity => Self::MAGNETIC_FLUX_DENSITY,
-        }
     }
 }

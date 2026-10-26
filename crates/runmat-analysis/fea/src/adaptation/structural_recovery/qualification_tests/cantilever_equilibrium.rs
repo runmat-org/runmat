@@ -136,7 +136,7 @@ fn original_cantilever_equilibrium_matches_separate_dense_factorization() {
             .iter()
             .zip(summary.physical_load.chunks_exact(3))
         {
-            let [x, y, z] = node.coordinates_m;
+            let [x, y, z] = node.coordinates_m.canonical_value();
             for axis in 0..3 {
                 resultant[axis] += f[axis];
             }

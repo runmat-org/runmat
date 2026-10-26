@@ -43,7 +43,7 @@ fn both_geometry_orders_match_exact_affine_barycentric_integrals() {
             // Fixture coordinates may not be the unit reference tetrahedron.
             let coordinates = stored
                 .corners
-                .map(|index| projection.nodes[index].coordinates_m);
+                .map(|index| projection.nodes[index].coordinates_m.canonical_value());
             let matrix = [
                 super::super::element::subtract(coordinates[1], coordinates[0]),
                 super::super::element::subtract(coordinates[2], coordinates[0]),
@@ -204,7 +204,7 @@ fn canonical_gradient_has_zero_curl_and_survives_node_storage_permutation() {
         .nodes
         .iter()
         .map(|node| {
-            let [x, y, z] = node.coordinates_m;
+            let [x, y, z] = node.coordinates_m.canonical_value();
             x * x + 3.0 * y - z
         })
         .collect();
@@ -332,7 +332,7 @@ fn shared_face_tangential_trace_is_single_valued_for_each_global_edge() {
             }
             let points: Vec<_> = common
                 .iter()
-                .map(|&node| projection.nodes[node].coordinates_m)
+                .map(|&node| projection.nodes[node].coordinates_m.canonical_value())
                 .collect();
             let centroid: [f64; 3] = std::array::from_fn(|axis| {
                 points.iter().map(|point| point[axis]).sum::<f64>() / 3.0
@@ -344,7 +344,7 @@ fn shared_face_tangential_trace_is_single_valued_for_each_global_edge() {
                 let coordinates: Vec<_> = element
                     .corners
                     .iter()
-                    .map(|&node| projection.nodes[node].coordinates_m)
+                    .map(|&node| projection.nodes[node].coordinates_m.canonical_value())
                     .collect();
                 let matrix = [
                     super::super::element::subtract(coordinates[1], coordinates[0]),

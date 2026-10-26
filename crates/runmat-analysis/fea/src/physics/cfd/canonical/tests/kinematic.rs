@@ -74,7 +74,7 @@ fn inlet_velocity_and_wall_motion_reproduce_the_constraint_driven_couette_flow()
             f.constraints.push(c);
             continue;
         };
-        let v = value.map(|x| x.meters_per_second);
+        let v = value.map(|x| x.canonical_value());
         let speed = norm(v);
         let id = format!("kinematic-{i}");
         if speed > 0.0 && is_top_wall(&f, target) {
@@ -105,10 +105,10 @@ fn inlet_velocity_and_wall_motion_reproduce_the_constraint_driven_couette_flow()
         .unwrap()
         .solve()
         .unwrap();
-    for (u, v) in actual.velocity_m_per_s.iter().zip(&expected.velocity_m_per_s) {
+    for (u, v) in actual.velocity_m_per_s.canonical_values().iter().zip(expected.velocity_m_per_s.canonical_values()) {
         assert!(norm(sub(*u, *v)) < 1e-12);
     }
-    for (p, q) in actual.pressure_pa.iter().zip(&expected.pressure_pa) {
+    for (p, q) in actual.pressure_pa.canonical_values().iter().zip(expected.pressure_pa.canonical_values()) {
         assert!((p - q).abs() < 1e-12);
     }
 }

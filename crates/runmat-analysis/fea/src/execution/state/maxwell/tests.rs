@@ -27,7 +27,7 @@ fn workload() -> MaxwellHarmonicWorkload {
             AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: id.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(id),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(id))),
                 },
             })
         })

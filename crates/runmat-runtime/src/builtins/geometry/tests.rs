@@ -212,9 +212,9 @@ fn geometry_load_units_option_sets_the_asset_unit() {
     let path = tmp.path().join("part.stl");
     std::fs::write(&path, TRIANGLE_STL).unwrap();
     for (unit, expected) in [
-        ("mm", runmat_geometry_core::UnitSystem::Millimeter),
-        ("Inches", runmat_geometry_core::UnitSystem::Inch),
-        ("metre", runmat_geometry_core::UnitSystem::Meter),
+        ("mm", runmat_geometry_core::LengthUnit::Millimeter),
+        ("Inches", runmat_geometry_core::LengthUnit::Inch),
+        ("metre", runmat_geometry_core::LengthUnit::Meter),
     ] {
         let value = load_with_options(
             &path,
@@ -222,11 +222,12 @@ fn geometry_load_units_option_sets_the_asset_unit() {
         )
         .unwrap_or_else(|error| panic!("{unit}: {error:?}"));
         let asset = geometry_asset_from_value_with_builtin(&value, GEOMETRY_LOAD_NAME).unwrap();
-        assert_eq!(asset.units, expected, "{unit}");
+        assert_eq!(asset.coordinate_units.map(|units| units.unit()), Some(expected), "{unit}");
     }
     let default = load_with_options(&path, Vec::new()).unwrap();
     let asset = geometry_asset_from_value_with_builtin(&default, GEOMETRY_LOAD_NAME).unwrap();
-    assert_eq!(asset.units, runmat_geometry_core::UnitSystem::Meter);
+    // STL declares no length unit; without `Units` the asset carries no declared unit.
+    assert_eq!(asset.coordinate_units.map(|units| units.unit()), None);
 }
 
 #[test]

@@ -15,7 +15,12 @@ fn refill_candidates_preserve_split_boundary_face() {
     let mut nodes = unit_tetrahedron_nodes();
     nodes.push(ConstrainedCavityNode {
         node_id: 4,
-        coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                1.0 / 3.0,
+                1.0 / 3.0,
+                0.0,
+            ]),
     });
 
     let refill =
@@ -61,7 +66,10 @@ fn single_tetrahedron_refill_ignores_non_boundary_nodes_in_coordinate_table() {
     let mut nodes = unit_tetrahedron_nodes();
     nodes.push(ConstrainedCavityNode {
         node_id: 99,
-        coordinates_m: [4.0, 4.0, 4.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                4.0, 4.0, 4.0,
+            ]),
     });
 
     let refill =
@@ -78,7 +86,10 @@ fn star_refill_candidates_preserve_cavity_boundary_and_volume() {
     let nodes = unit_tetrahedron_nodes();
     let interior = [ConstrainedCavityNode {
         node_id: 10,
-        coordinates_m: [0.25, 0.25, 0.25],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.25, 0.25, 0.25,
+            ]),
     }];
 
     let refill =

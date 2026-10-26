@@ -11,9 +11,9 @@ regions = geometry.listRegions(part);
 mesh(part);
 ```
 
-Inspection answers which exact format, units, assemblies, products, parameters, materials, topology aliases, names, tags, and persistent identities the file actually contains. Do this before authoring region selectors.
+Inspection answers which exact format, units, assemblies, products, parameters, materials, names, tags, and canonical persistent identities the file actually contains. Do this before authoring region selectors.
 
-## Import In `.fea`
+## Generated CAD Binding Module
 
 ```fea
 geometry bracket {
@@ -21,7 +21,7 @@ geometry bracket {
     units = mm
 
     region body : solid {
-        select id "solid_000001"
+        select name "body"
         expect exactly_one
     }
     region mount : face {
@@ -46,6 +46,42 @@ Tetrahedral solver meshing requires an admitted closed exact solid. A format bei
 
 Official native CLI and Desktop builds use the OCCT backend for STEP, IGES, and BREP. Metadata-only builds can inspect supported STEP exchange facts without claiming exact face/solid topology. Browser execution remains unavailable until its configured geometry, meshing, and solver host can satisfy the same contracts.
 
+## Engineering source and CAD selections
+
+Keep the geometry declaration, named regions, and physics in one study source:
+
+```fea
+geometry bracket {
+    file = "./bracket.step"
+    units = mm
+    region load_face : face { select name "load_face"; expect exactly_one }
+}
+```
+
+`select name "load_face"` resolves only against names authored inside the CAD file:
+STEP/IGES product, label and face names carried through XCAF. A name the file does
+not carry is a check error that lists the names the file does carry. There is no
+side file of saved selections; to name a face, name it in the CAD tool (or with a
+STEP labeling step such as `geometry/name-step-faces.cc`) and re-export.
+
+Every name resolves once, when the study is checked and materialized, to the canonical
+`persistent-entity:sha256:` identity of the matching entity. The solver sees only those
+canonical identities. Geometry without authored names (for example a native BREP)
+selects entities by that canonical identity directly, as returned by geometry
+inspection or by a geometry selection tool:
+
+```fea
+region support : face { select id "persistent-entity:sha256:8af3…"; expect exactly_one }
+```
+
+Source aliases such as `face_000001` are not identities and are rejected.
+Do not create `<study>.geometry.fea` files for machine bindings. Ordinary imports remain
+available for deliberate engineering reuse.
+
+Replacing a CAD file invalidates its recorded source digest. Reattach selections through
+the existing admitted revision map, or review unresolved selections. Never infer identity
+from a display label, face ordinal, or geometric proximity.
+
 ## Regions And Selectors
 
 A region declaration has three independent facts:
@@ -66,6 +102,10 @@ Implemented selectors include:
 | `select feature.<id>` | exact output of a feature |
 | `select boundary_introduced_by feature.<id>` | boundary introduced by one feature operation |
 | `select output.region.<id>` | region returned by generated geometry |
+
+CAD label entries, display face numbers, and unqualified topology names are metadata, not alternate identities. Inspection, picking, authored persistent selectors, and execution share the exact importer's `PersistentEntityId`; the string key is derived by that type alone. Copy the actual inspected key in place of the illustrative placeholder above.
+
+Re-importing an unchanged entity preserves its identity where the exact topology and occurrence remain unchanged. Editing a shape or re-exporting an assembly may change those facts. Reattachment uses an admitted `GeometryRevisionMap`, with explicit retain, replace, split, merge, and delete evidence. Region remapping is atomic: a deleted, split, unmapped, or absent target requires review; names, ordinal position, and proximity never choose a replacement. A fresh STEP file does not itself provide CAD feature history, so automatic correspondence after arbitrary edits is not assumed.
 
 Selectors are resolved at exact realization and then projected onto the solver mesh. Wrong topology, empty selection, cardinality mismatch, missing lineage, or changed source identity fails before assembly.
 

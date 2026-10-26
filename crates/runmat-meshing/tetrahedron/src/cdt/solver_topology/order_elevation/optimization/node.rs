@@ -30,8 +30,11 @@ impl NodeOptimizer<'_, '_, '_> {
             let left = &topology.nodes[geometry::node_slot(&topology.nodes, movable.edge[0])?];
             let right = &topology.nodes[geometry::node_slot(&topology.nodes, movable.edge[1])?];
             if squared_distance(
-                original.coordinates_m,
-                midpoint(left.coordinates_m, right.coordinates_m),
+                original.coordinates_m.canonical_value(),
+                midpoint(
+                    left.coordinates_m.canonical_value(),
+                    right.coordinates_m.canonical_value(),
+                ),
             ) == 0.0
             {
                 return Ok(false);
@@ -71,9 +74,12 @@ impl NodeOptimizer<'_, '_, '_> {
             .node(&topology.nodes[geometry::node_slot(&topology.nodes, movable.edge[0])?])?;
         let right = storage
             .node(&topology.nodes[geometry::node_slot(&topology.nodes, movable.edge[1])?])?;
-        let target = midpoint(left.coordinates_m, right.coordinates_m);
+        let target = midpoint(
+            left.coordinates_m.canonical_value(),
+            right.coordinates_m.canonical_value(),
+        );
         let initial = storage.node(&topology.nodes[node_index])?;
-        let initial_objective = squared_distance(initial.coordinates_m, target);
+        let initial_objective = squared_distance(initial.coordinates_m.canonical_value(), target);
         let initial_is_valid = movable
             .incident_elements
             .iter()
@@ -115,7 +121,10 @@ impl NodeOptimizer<'_, '_, '_> {
         });
 
         for candidate in candidates {
-            topology.nodes[node_index].coordinates_m = candidate.coordinates_m;
+            topology.nodes[node_index].coordinates_m =
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    candidate.coordinates_m.canonical_value(),
+                );
             topology.nodes[node_index].exact_parameters =
                 storage.parameters(&candidate.exact_parameters)?;
             match jacobian::validate_elements(
@@ -178,8 +187,11 @@ impl NodeOptimizer<'_, '_, '_> {
         }
         if request.movable.exact_edge_id.is_none() && request.movable.surface_uses.is_empty() {
             for (index, coordinates_m) in candidates::interior_coordinates(
-                request.initial.coordinates_m,
-                request.endpoints.each_ref().map(|node| node.coordinates_m),
+                request.initial.coordinates_m.canonical_value(),
+                request
+                    .endpoints
+                    .each_ref()
+                    .map(|node| node.coordinates_m.canonical_value()),
             )
             .enumerate()
             {
@@ -189,7 +201,10 @@ impl NodeOptimizer<'_, '_, '_> {
                     Candidate {
                         fraction: 2.0 + index as f64,
                         objective: squared_distance(coordinates_m, request.target),
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                         exact_parameters: Vec::new(),
                     },
                 )?;
@@ -218,15 +233,26 @@ impl NodeOptimizer<'_, '_, '_> {
                     &mut candidates,
                     Candidate {
                         fraction: 2.0 + index as f64,
-                        objective: squared_distance(point.coordinates_m, request.target),
-                        coordinates_m: point.coordinates_m,
+                        objective: squared_distance(
+                            point.coordinates_m.canonical_value(),
+                            request.target,
+                        ),
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(
+                            point.coordinates_m.canonical_value()
+                        ),
                         exact_parameters: point.exact_parameters,
                     },
                 )?;
             }
         }
         for candidate in candidates {
-            topology.nodes[request.node_index].coordinates_m = candidate.coordinates_m;
+            topology.nodes[request.node_index].coordinates_m =
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    candidate.coordinates_m.canonical_value(),
+                );
             topology.nodes[request.node_index].exact_parameters =
                 storage.parameters(&candidate.exact_parameters)?;
             let profile = jacobian::optimization_margin_profile_elements(
@@ -247,7 +273,10 @@ impl NodeOptimizer<'_, '_, '_> {
             topology.nodes[request.node_index] = storage.node(&request.initial)?;
         }
         if let Some((_, candidate)) = best_candidate {
-            topology.nodes[request.node_index].coordinates_m = candidate.coordinates_m;
+            topology.nodes[request.node_index].coordinates_m =
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    candidate.coordinates_m.canonical_value(),
+                );
             topology.nodes[request.node_index].exact_parameters = candidate.exact_parameters;
             return Ok(topology.nodes[request.node_index] != request.initial);
         }
@@ -277,11 +306,14 @@ impl NodeOptimizer<'_, '_, '_> {
             },
         )?
         .and_then(|point| {
-            let objective = squared_distance(point.coordinates_m, target);
+            let objective = squared_distance(point.coordinates_m.canonical_value(), target);
             objective.is_finite().then_some(Candidate {
                 fraction,
                 objective,
-                coordinates_m: point.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(point.coordinates_m.canonical_value()),
                 exact_parameters: point.exact_parameters,
             })
         }))

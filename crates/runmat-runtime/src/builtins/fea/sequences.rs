@@ -786,7 +786,11 @@ mod tests {
     async fn response_spectrum_domain_retains_typed_spectrum_id() {
         let spectrum = runmat_analysis_core::ResponseSpectrum {
             spectrum_id: runmat_analysis_core::ResponseSpectrumId("launch".into()),
-            abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(vec![10.0, 20.0]),
+            abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(
+                    vec![10.0, 20.0],
+                ),
+            ),
             ordinates: runmat_analysis_core::NumericalDataSource::authored(
                 vec![1.0, 2.0],
                 "sha256:launch",

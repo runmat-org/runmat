@@ -73,7 +73,8 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     let (document, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();
     let host = TestHost::default().with_geometry_inspection(
         "project/geometry/tetrahedron.step",
-        GeometryInspection {
+        GeometryInspection {preview_extent_m: None, 
+            unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
             capabilities: vec![
@@ -82,7 +83,6 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             ],
             exchange: None,
             resolved_units: None,
-            declared_units: None,
             authored_names: Default::default(),
         },
     );

@@ -1,3 +1,5 @@
+// Engineering physics belongs in the importing study.
+
 geometry heatsink {
     file = "./geometry/electronics-heatsink.step"
     units = mm

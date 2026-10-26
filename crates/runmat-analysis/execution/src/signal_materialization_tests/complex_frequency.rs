@@ -14,7 +14,7 @@ fn chunked_complex_frequency_materialization_matches_explicit_table() {
     generator.domain = GeneratorDomain::FrequencyHertz;
     generator.sampling = SignalSamplingPolicy::CanonicalPoints(vec![10.0, 17.0, 20.0]);
     let mut admitted = admitted();
-    admitted.sample_points = vec![10.0, 17.0, 20.0];
+    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::FrequencyHertz.axis_descriptor(None).unwrap(), vec![10.0, 17.0, 20.0]).unwrap();
     let expected = [(1.0, 0.4), (2.0, -0.3), (-1.0, 0.8)];
     let mut explicit = generated.clone();
     let PhysicalSignal::Force(value) = &mut explicit else {
@@ -24,6 +24,7 @@ fn chunked_complex_frequency_materialization_matches_explicit_table() {
         domain: TabulatedSignalDomain::FrequencyHertz,
         knots: admitted
             .sample_points
+            .canonical_values()
             .iter()
             .zip(expected)
             .map(|(f, (real, imaginary))| {
@@ -59,6 +60,7 @@ fn chunked_complex_frequency_materialization_matches_explicit_table() {
                     .map(|f| {
                         let index = admitted
                             .sample_points
+                            .canonical_values()
                             .iter()
                             .position(|point| *point == f)
                             .unwrap();
@@ -122,7 +124,7 @@ fn chunked_complex_frequency_materialization_matches_explicit_table() {
         )
         .is_err());
         let mut substituted = admitted.clone();
-        substituted.sample_points[1] = 18.0;
+        substituted.sample_points.try_replace(1, runmat_types::physical::Quantity::try_from_descriptor(substituted.sample_points.descriptor(), 18.0).unwrap()).unwrap();
         assert!(validate_signal_generator_chunks(&generated, &substituted, &chunks).is_err());
     }
 }

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use runmat_geometry_core::{ResolvedGeometryRegions, UnitSystem};
+use runmat_geometry_core::ResolvedGeometryRegions;
 
 use crate::{AnalysisModel, AnalysisModelId, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 
@@ -29,7 +29,8 @@ pub struct AnalysisModelRealizationInput<'a> {
     pub study: &'a RealizedStudy,
     pub geometry_id: &'a str,
     pub geometry_revision: u32,
-    pub units: UnitSystem,
+    pub units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::CanonicalCoordinates>,
     pub regions: &'a ResolvedGeometryRegions,
     pub materials: &'a BTreeMap<AuthoredMaterialRef, MaterialModel>,
 }

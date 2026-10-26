@@ -41,6 +41,7 @@ fn admitted(
     let generator_identity =
         GeneratorIdentity::new(digest("callable"), digest("captures"), digest(name)).unwrap();
     AdmittedNumericalGenerator {
+        schema_version: 2,
         invocation: AdmittedGeneratorInvocation {
             program_revision: ProgramRevision::new(
                 digest("graph"),
@@ -71,14 +72,23 @@ fn admitted(
         )
         .unwrap(),
         kind,
-        sample_points,
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            runmat_analysis_core::GeneratorDomain::FrequencyHertz
+                .axis_descriptor(None)
+                .unwrap(),
+            sample_points,
+        )
+        .unwrap(),
     }
 }
 
 fn response() -> ResponseSpectrum {
     ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("design".into()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(vec![5.0, 10.0, 20.0]),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![5.0, 10.0, 20.0])),
         ordinates: NumericalDataSource::Generator(invocation("loads.design_spectrum")),
         damping: SpectrumDamping::Ratio(0.05),
         response: SpectrumResponse::AbsoluteAcceleration,
@@ -107,7 +117,7 @@ fn response() -> ResponseSpectrum {
 fn random() -> RandomExcitationSpectrum {
     RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("base".into()),
-        frequencies_hz: vec![10.0, 20.0],
+        frequencies_hz: runmat_types::physical::Quantity::new(vec![10.0, 20.0]),
         channels: vec![
             RandomExcitationChannel {
                 channel_id: RandomExcitationChannelId("x".into()),
@@ -131,7 +141,8 @@ fn random() -> RandomExcitationSpectrum {
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: None,
+            max_absolute_density_error: (None)
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     }
@@ -263,11 +274,11 @@ fn random_spectrum_preserves_complex_matrix_order_and_rejects_nonhermitian_outpu
     .unwrap();
     let matrices = materialized.resolved_spectral_density().unwrap();
     assert_eq!(
-        matrices[0].value(2, 0, 1),
+        matrices[0].canonical_coefficient(2, 0, 1),
         ComplexSpectralDensity::new(0.0, 0.5)
     );
     assert_eq!(
-        matrices[0].value(2, 1, 0),
+        matrices[0].canonical_coefficient(2, 1, 0),
         ComplexSpectralDensity::new(0.0, -0.5)
     );
     let bytes = canonical_materialized_random_spectrum_bytes(&materialized).unwrap();
@@ -333,4 +344,43 @@ fn numerical_materialization_rejects_wrong_shape_and_substituted_chunk_identity(
         &substituted,
     )
     .is_err());
+}
+
+#[test]
+fn spectral_admission_rejects_axis_substitution_and_unversioned_receipts() {
+    let authored = response();
+    let admission = admitted(
+        "loads.design_spectrum",
+        NumericalGeneratorKind::ResponseSpectrum {
+            spectrum_id: authored.spectrum_id.clone(),
+        },
+        vec![5.0, 10.0, 20.0],
+    );
+    let check = |admitted: &AdmittedNumericalGenerator| {
+        plan_response_spectrum_generator_chunks(&authored, admitted, 8192, |_| {
+            panic!("no artifact arguments")
+        })
+    };
+    assert!(check(&admission).is_ok());
+    let mut changed = admission.clone();
+    changed.sample_points = runmat_types::physical::Quantity::try_from_descriptor(
+        runmat_analysis_core::GeneratorDomain::TimeSeconds
+            .axis_descriptor(None)
+            .unwrap(),
+        vec![5.0, 10.0, 20.0],
+    )
+    .unwrap();
+    assert!(check(&changed).is_err());
+    changed.sample_points = runmat_types::physical::Quantity::try_from_descriptor(
+        admission.sample_points.descriptor(),
+        vec![5.0, 11.0, 20.0],
+    )
+    .unwrap();
+    assert!(check(&changed).is_err());
+    let mut changed = admission.clone();
+    changed.schema_version = 1;
+    assert!(check(&changed).is_err());
+    let mut wire = serde_json::to_value(&admission).unwrap();
+    wire.as_object_mut().unwrap().remove("schema_version");
+    assert!(serde_json::from_value::<AdmittedNumericalGenerator>(wire).is_err());
 }

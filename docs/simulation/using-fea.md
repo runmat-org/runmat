@@ -6,31 +6,18 @@ This guide builds and runs a small structural study, then shows generated inputs
 
 Save the following as `bracket.fea` beside `geometry/two-box-assembly.step`:
 
+The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+
 ```fea
 geometry bracket {
     file = "./geometry/two-box-assembly.step"
     units = m
 
-    region left_body : solid {
-        select id "solid_000001"
-        expect exactly_one
-    }
-    region right_body : solid {
-        select id "solid_000002"
-        expect exactly_one
-    }
-    region left_support : face {
-        select id "face_000001"
-        expect exactly_one
-    }
-    region left_load_face : face {
-        select id "face_000002"
-        expect exactly_one
-    }
-    region right_support : face {
-        select id "face_000007"
-        expect exactly_one
-    }
+    region left_body : solid { select name "left_body"; expect exactly_one }
+    region right_body : solid { select name "right_body"; expect exactly_one }
+    region left_support : face { select name "left_support"; expect exactly_one }
+    region left_load_face : face { select name "left_load_face"; expect exactly_one }
+    region right_support : face { select name "right_support"; expect exactly_one }
 }
 
 mesh bracket on geometry.bracket {
@@ -117,7 +104,7 @@ regions = geometry.listRegions(part);
 mesh(part);
 ```
 
-Use inspection to choose source aliases, imported names/tags, persistent identities, or feature results. Do not infer a face id from file order. A region declaration records both the topology role and cardinality expected by the model.
+Use inspection to choose canonical occurrence-qualified persistent identities or feature results. Do not infer a face id from file order. A region declaration records both the topology role and cardinality expected by the model.
 
 ## Generated Time History From `.m`
 

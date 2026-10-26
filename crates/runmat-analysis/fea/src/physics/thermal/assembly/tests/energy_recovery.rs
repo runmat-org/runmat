@@ -7,8 +7,11 @@ fn transient_reaction_power_and_scale_share_the_same_nodal_transfers() {
         let mut assembly = energy_assembly(&model, order, 0.0);
         let previous = vec![293.15; assembly.projection.nodes.len()];
         for (node, projected) in assembly.projection.nodes.iter().enumerate() {
-            if projected.coordinates_m[0] == 0.0 {
-                assembly.prescribed_temperature_k[node] = Some(310.0);
+            if projected.coordinates_m.canonical_value()[0] == 0.0 {
+                assembly
+                    .prescribed_temperature_k
+                    .try_replace(node, runmat_types::physical::Quantity::new(Some(310.0)))
+                    .unwrap();
             }
         }
         for increment in [0.01, 0.1, 1.0, 10.0, 16.85] {
@@ -16,7 +19,7 @@ fn transient_reaction_power_and_scale_share_the_same_nodal_transfers() {
                 .projection
                 .nodes
                 .iter()
-                .map(|node| 293.15 + increment * (1.0 + node.coordinates_m[0]))
+                .map(|node| 293.15 + increment * (1.0 + node.coordinates_m.canonical_value()[0]))
                 .collect::<Vec<_>>();
             let balance = assembly
                 .energy_balance(
@@ -74,9 +77,9 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
                 0.0,
             )
             .unwrap();
-        assert_eq!(energy.residual_w, 0.0);
+        assert_eq!(energy.residual_w.canonical_value(), 0.0);
         assert_eq!(energy.relative_residual, 0.0);
-        assert_eq!(energy.boundary_loss_w, 0.0);
+        assert_eq!(energy.boundary_loss_w.canonical_value(), 0.0);
         assert_eq!(
             assembly.recover_element_heat_flux(&uniform).unwrap(),
             vec![[0.0; 3]]
@@ -86,7 +89,7 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
             .projection
             .nodes
             .iter()
-            .map(|node| 315.0 + 20.0 * node.coordinates_m[0])
+            .map(|node| 315.0 + 20.0 * node.coordinates_m.canonical_value()[0])
             .collect::<Vec<_>>();
         let energy = assembly
             .energy_balance(
@@ -98,9 +101,9 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
                 0.0,
             )
             .unwrap();
-        assert_eq!(energy.boundary_loss_w, 0.0);
-        assert_eq!(energy.residual_w, 0.0);
-        let expected = -20.0 * assembly.element_conductivity_w_per_mk[0];
+        assert_eq!(energy.boundary_loss_w.canonical_value(), 0.0);
+        assert_eq!(energy.residual_w.canonical_value(), 0.0);
+        let expected = -20.0 * assembly.element_conductivity_w_per_mk.canonical_values()[0];
         let actual = assembly.recover_element_heat_flux(&nonuniform).unwrap()[0][0];
         assert!((actual - expected).abs() <= expected.abs() * 1.0e-12);
     }
@@ -119,11 +122,17 @@ fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pair
             .projection
             .nodes
             .iter()
-            .map(|node| 300.0 + 20.0 * node.coordinates_m[0])
+            .map(|node| 300.0 + 20.0 * node.coordinates_m.canonical_value()[0])
             .collect::<Vec<_>>();
         for (node, projected) in assembly.projection.nodes.iter().enumerate() {
-            if projected.coordinates_m[0] == 0.0 {
-                assembly.prescribed_temperature_k[node] = Some(temperature[node]);
+            if projected.coordinates_m.canonical_value()[0] == 0.0 {
+                assembly
+                    .prescribed_temperature_k
+                    .try_replace(
+                        node,
+                        runmat_types::physical::Quantity::new(Some(temperature[node])),
+                    )
+                    .unwrap();
             }
         }
         let energy = assembly
@@ -147,15 +156,19 @@ fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pair
         };
         let expected = derivative_magnitude
             * 20.0
-            * assembly.element_conductivity_w_per_mk[0]
+            * assembly.element_conductivity_w_per_mk.canonical_values()[0]
             * assembly.projection.elements[0].signed_volume_m3;
         assert!(
-            (energy.prescribed_boundary_power_w - expected).abs() <= expected * 1.0e-12,
+            (energy.prescribed_boundary_power_w.canonical_value() - expected).abs()
+                <= expected * 1.0e-12,
             "{order:?}: {energy:?}"
         );
-        assert_eq!(energy.boundary_loss_w, 0.0);
+        assert_eq!(energy.boundary_loss_w.canonical_value(), 0.0);
         for (node, &value) in temperature.iter().enumerate() {
-            assembly.prescribed_temperature_k[node] = Some(value);
+            assembly
+                .prescribed_temperature_k
+                .try_replace(node, runmat_types::physical::Quantity::new(Some(value)))
+                .unwrap();
         }
         let all_prescribed = assembly
             .energy_balance(
@@ -172,7 +185,8 @@ fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pair
         // not disappear from the physical through-flow normalization. The
         // integrated linear-field nodal gradients give L1 = 2 * expected.
         assert!(
-            (all_prescribed.scale.prescribed_w - 2.0 * expected).abs() <= 2.0 * expected * 1.0e-12,
+            (all_prescribed.scale.prescribed_w.canonical_value() - 2.0 * expected).abs()
+                <= 2.0 * expected * 1.0e-12,
             "{order:?}: {all_prescribed:?}"
         );
         assert!(
@@ -193,7 +207,7 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
             let selector = face.provenance[0].analysis_selection_id().unwrap();
             model.boundaries = vec![AnalysisBoundary {
                 boundary_id: "physical_robin".into(),
-                target: RegionTarget::boundary(selector),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                 operator: BoundaryOperator::ThermalConvection {
                     ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient)),
                     coefficient: HeatTransferCoefficient::new(18.0),
@@ -211,8 +225,8 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
                     0.0,
                 )
                 .unwrap();
-            assert_eq!(energy.applied_power_w, 0.0);
-            assert_eq!(energy.boundary_loss_w, 0.0);
+            assert_eq!(energy.applied_power_w.canonical_value(), 0.0);
+            assert_eq!(energy.boundary_loss_w.canonical_value(), 0.0);
             assert_eq!(energy.relative_residual, 0.0);
             for difference in [-20.0, 20.0] {
                 let temperature = vec![ambient + difference; equilibrium.len()];
@@ -226,9 +240,12 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
                         0.0,
                     )
                     .unwrap();
-                let expected = 18.0 * difference * face.area_m2;
-                assert!((energy.boundary_loss_w - expected).abs() <= expected.abs() * 1.0e-12);
-                assert_eq!(energy.applied_power_w, 0.0);
+                let expected = 18.0 * difference * face.area_m2.canonical_value();
+                assert!(
+                    (energy.boundary_loss_w.canonical_value() - expected).abs()
+                        <= expected.abs() * 1.0e-12
+                );
+                assert_eq!(energy.applied_power_w.canonical_value(), 0.0);
                 assert_eq!(energy.relative_residual, 1.0);
             }
             for density in [1.0e-30, 1.0e-15, 1.0e-3] {
@@ -243,9 +260,12 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
                         0.0,
                     )
                     .unwrap();
-                assert!(energy.applied_power_w > 0.0);
-                assert_eq!(energy.boundary_loss_w, 0.0);
-                assert_eq!(energy.residual_w, -energy.applied_power_w);
+                assert!(energy.applied_power_w.canonical_value() > 0.0);
+                assert_eq!(energy.boundary_loss_w.canonical_value(), 0.0);
+                assert_eq!(
+                    energy.residual_w.canonical_value(),
+                    -energy.applied_power_w.canonical_value()
+                );
                 // Tet10 uniform source has four corner weights -V/20 and six edge
                 // weights V/5: its nodal L1 scale is 7V/5, versus V for Tet4.
                 let expected = if order == ElementOrder::Tet10 {
@@ -268,7 +288,7 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let face = &projection.boundary_faces[0];
     let selector = face.provenance[0].analysis_selection_id().unwrap();
-    let target = RegionTarget::boundary(selector);
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)));
     model.boundaries = vec![
         AnalysisBoundary {
             boundary_id: "ambient".into(),
@@ -299,8 +319,8 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
                 0.0,
             )
             .unwrap();
-        let expected = 1.0e-30 * face.area_m2;
-        assert!((energy.applied_power_w - expected).abs() <= expected * 1.0e-12);
+        let expected = 1.0e-30 * face.area_m2.canonical_value();
+        assert!((energy.applied_power_w.canonical_value() - expected).abs() <= expected * 1.0e-12);
         // Quadratic triangular corner integrals vanish analytically; quadrature can
         // leave roundoff-scale signed corner weights in the nodal absolute sum.
         assert!((energy.relative_residual - 1.0).abs() < 1.0e-12);
@@ -314,11 +334,19 @@ fn opposing_prescribed_heat_flows_keep_their_physical_scale_after_cancellation()
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mut assembly = energy_assembly(&model, order, 0.0);
         for (node, projected) in assembly.projection.nodes.iter().enumerate() {
-            assembly.prescribed_temperature_k[node] = match projected.coordinates_m {
-                [0.0, 0.0, 0.0] => Some(300.0),
-                [1.0, 0.0, 0.0] => Some(400.0),
-                _ => None,
-            };
+            assembly
+                .prescribed_temperature_k
+                .try_replace(
+                    node,
+                    runmat_types::physical::Quantity::new(
+                        match projected.coordinates_m.canonical_value() {
+                            [0.0, 0.0, 0.0] => Some(300.0),
+                            [1.0, 0.0, 0.0] => Some(400.0),
+                            _ => None,
+                        },
+                    ),
+                )
+                .unwrap();
         }
         let reference = assembly
             .steady_reference_temperatures(&model, ExcitationSamplePoint::Static, 293.15)
@@ -336,7 +364,8 @@ fn opposing_prescribed_heat_flows_keep_their_physical_scale_after_cancellation()
         assert!(solved.converged);
         let mut temperature = solved.solution;
         for (node, value) in temperature.iter_mut().enumerate() {
-            *value = assembly.prescribed_temperature_k[node].unwrap_or(*value + reference[node]);
+            *value = assembly.prescribed_temperature_k.canonical_values()[node]
+                .unwrap_or(*value + reference[node]);
         }
         let balance = assembly
             .energy_balance(
@@ -349,16 +378,17 @@ fn opposing_prescribed_heat_flows_keep_their_physical_scale_after_cancellation()
             )
             .unwrap();
         balance.validate().unwrap();
-        assert!(balance.scale.prescribed_w > 0.0);
-        assert_eq!(balance.applied_power_w, 0.0);
-        assert_eq!(balance.boundary_loss_w, 0.0);
-        assert_eq!(balance.storage_rate_w, 0.0);
+        assert!(balance.scale.prescribed_w.canonical_value() > 0.0);
+        assert_eq!(balance.applied_power_w.canonical_value(), 0.0);
+        assert_eq!(balance.boundary_loss_w.canonical_value(), 0.0);
+        assert_eq!(balance.storage_rate_w.canonical_value(), 0.0);
         assert!(
             balance.relative_residual < 1.0e-10,
             "{order:?}: {balance:?}"
         );
         let free = assembly
             .prescribed_temperature_k
+            .canonical_values()
             .iter()
             .position(Option::is_none)
             .unwrap();
@@ -394,7 +424,7 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
             if robin_anchor {
                 model.boundaries.push(AnalysisBoundary {
                     boundary_id: "increment_robin".into(),
-                    target: RegionTarget::boundary(selector),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                     operator: BoundaryOperator::ThermalConvection {
                         ambient_temperature: PrescribedValue::Constant(Temperature::new(
                             equilibrium_k,
@@ -408,7 +438,7 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
                     .push(AnalysisConstraint::Thermal(ThermalConstraint {
                         constraint_id: "increment_fixed".into(),
                         kind: ThermalConstraintKind::Prescribed {
-                            target: RegionTarget::boundary(selector),
+                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                             value: PrescribedValue::Constant(Temperature::new(equilibrium_k)),
                         },
                     }));

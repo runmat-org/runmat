@@ -108,7 +108,7 @@ impl RunMatSession {
                     .and_then(|value| value.to_str()),
                 Some("fea" | "m")
             ) {
-                return Err("working editor overlays must be FEA or MATLAB source".into());
+                return Err("working editor overlays must be FEA or MATLAB sources".into());
             }
             if !seen.insert(overlay.path.clone()) {
                 return Err("duplicate working editor overlay".into());

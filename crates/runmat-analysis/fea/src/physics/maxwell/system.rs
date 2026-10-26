@@ -7,6 +7,7 @@
 //!       = -i omega (J_vol + sum_k U_k (sigma g_k + j_k), w)            for every free edge w
 //!   (sigma g_k, E) + U_k (sigma g_k, g_k) = I_k                         for every current drive
 //! The current row is scaled by -i omega so the augmented block is near complex-symmetric.
+use runmat_types::physical::Quantity;
 use super::{
     complex::{dot_conjugate, vector_norm_squared},
     continuity::ChargeContinuity,
@@ -88,12 +89,12 @@ impl<'a> MaxwellDiscretization<'a> {
         let mut generator = Vec::new();
         let mut closure = Vec::new();
         let mut unknown_voltage = BTreeMap::new();
-        let omega = input.angular_frequency_rad_per_s;
+        let omega = input.angular_frequency_rad_per_s.canonical_value();
         for (k, drive) in input.drives.iter().enumerate() {
             let g = lookup(&drive.unit_generator_field)?;
             for &e in g.keys() {
                 let law = &volumes[e];
-                if omega * law.permittivity_f_per_m > 1e-3 * law.conductivity_s_per_m {
+                if omega * law.permittivity_f_per_m.canonical_value() > 1e-3 * law.conductivity_s_per_m.canonical_value() {
                     return Err(MaxwellError::Unsupported(format!(
                         "driven conductor {} is not a good conductor at this frequency (omega eps / sigma > 1e-3)",
                         drive.drive_id
@@ -127,7 +128,7 @@ impl<'a> MaxwellDiscretization<'a> {
 
     /// Unit impressed current density of drive k in element e (A/m^2 per V).
     fn unit_current(&self, k: usize, e: usize) -> [f64; 3] {
-        let sigma = self.volumes[e].conductivity_s_per_m;
+        let sigma = self.volumes[e].conductivity_s_per_m.canonical_value();
         let g = self.generator[k].get(&e).copied().unwrap_or([0.0; 3]);
         let j = self.closure[k].get(&e).copied().unwrap_or([0.0; 3]);
         std::array::from_fn(|axis| sigma * g[axis] + j[axis])
@@ -135,7 +136,7 @@ impl<'a> MaxwellDiscretization<'a> {
 
     /// Assemble the augmented complex system.
     pub fn assemble(&self) -> Result<(Vec<ComplexEntry>, Vec<(f64, f64)>), MaxwellError> {
-        let omega = self.input.angular_frequency_rad_per_s;
+        let omega = self.input.angular_frequency_rad_per_s.canonical_value();
         let mut entries = Vec::with_capacity(self.projection.elements.len() * 36);
         let mut rhs = vec![ComplexPhasor::ZERO; self.dimension()];
         let push = |entries: &mut Vec<ComplexEntry>, row, column, value: ComplexPhasor| {
@@ -166,9 +167,9 @@ impl<'a> MaxwellDiscretization<'a> {
                             row,
                             column,
                             ComplexPhasor::new(
-                                moments.curl_curl[i][j] / law.permeability_h_per_m
-                                    - omega * omega * law.permittivity_f_per_m * moments.mass[i][j],
-                                omega * law.conductivity_s_per_m * moments.mass[i][j],
+                                moments.curl_curl[i][j] / law.permeability_h_per_m.canonical_value()
+                                    - omega * omega * law.permittivity_f_per_m.canonical_value() * moments.mass[i][j],
+                                omega * law.conductivity_s_per_m.canonical_value() * moments.mass[i][j],
                             ),
                         );
                     }
@@ -199,7 +200,7 @@ impl<'a> MaxwellDiscretization<'a> {
                 let Some(g) = self.generator[k].get(&e) else {
                     continue;
                 };
-                let sigma = law.conductivity_s_per_m;
+                let sigma = law.conductivity_s_per_m.canonical_value();
                 for (i, edge) in indices.iter().enumerate() {
                     if let Some(&column) = self.rows.get(edge) {
                         let c: f64 = (0..3)
@@ -227,8 +228,8 @@ impl<'a> MaxwellDiscretization<'a> {
                             let weight = point.volume_weight_m3 * point.values[i][axis] * omega;
                             // -i omega J: real = +omega Im J, imaginary = -omega Re J.
                             rhs[row] += ComplexPhasor::new(
-                                weight * source.current_density_a_per_m2[axis].imaginary,
-                                -weight * source.current_density_a_per_m2[axis].real,
+                                weight * source.current_density_a_per_m2.canonical_value()[axis].imaginary,
+                                -weight * source.current_density_a_per_m2.canonical_value()[axis].real,
                             );
                         }
                     }
@@ -270,7 +271,7 @@ impl<'a> MaxwellDiscretization<'a> {
         edges: &[ComplexPhasor],
         voltages: &[ComplexPhasor],
     ) -> Result<MaxwellEvaluation, MaxwellError> {
-        let omega = self.input.angular_frequency_rad_per_s;
+        let omega = self.input.angular_frequency_rad_per_s.canonical_value();
         let mut samples = Vec::with_capacity(self.input.sampling.integration_samples().len());
         let mut continuity = ChargeContinuity::new(&self.projection, &self.grounded_nodes);
         let mut electric_energy = 0.0;
@@ -302,7 +303,9 @@ impl<'a> MaxwellDiscretization<'a> {
                     let position = e * 15 + ordinal;
                     let authority = &self.input.sampling.integration_samples()[position];
                     let volume_source =
-                        self.input.source_current[position].current_density_a_per_m2;
+                        self.input.source_current[position]
+                            .current_density_a_per_m2
+                            .canonical_value();
                     let edge_field: ComplexVector3 = std::array::from_fn(|axis| {
                         (0..6).fold(ComplexPhasor::ZERO, |sum, i| {
                             sum + edges[indices[i]] * point.values[i][axis]
@@ -316,19 +319,19 @@ impl<'a> MaxwellDiscretization<'a> {
                     let electric: ComplexVector3 =
                         std::array::from_fn(|axis| edge_field[axis] + generator[axis]);
                     let flux = curl.map(|value| value.times_i() / omega);
-                    let magnetic = flux.map(|value| value / law.permeability_h_per_m);
+                    let magnetic = flux.map(|value| value / law.permeability_h_per_m.canonical_value());
                     // The generator field's displacement current is neglected (driven
                     // conductors satisfy omega eps / sigma <= 1e-3).
-                    let displacement = edge_field.map(|value| value * law.permittivity_f_per_m);
-                    let conduction = electric.map(|value| value * law.conductivity_s_per_m);
+                    let displacement = edge_field.map(|value| value * law.permittivity_f_per_m.canonical_value());
+                    let conduction = electric.map(|value| value * law.conductivity_s_per_m.canonical_value());
                     let weight = point.volume_weight_m3;
                     electric_energy +=
-                        0.25 * weight * law.permittivity_f_per_m * vector_norm_squared(edge_field);
+                        0.25 * weight * law.permittivity_f_per_m.canonical_value() * vector_norm_squared(edge_field);
                     magnetic_energy +=
-                        0.25 * weight * law.permeability_h_per_m * vector_norm_squared(magnetic);
-                    ohmic += 0.5 * weight * law.conductivity_s_per_m * vector_norm_squared(electric);
+                        0.25 * weight * law.permeability_h_per_m.canonical_value() * vector_norm_squared(magnetic);
+                    ohmic += 0.5 * weight * law.conductivity_s_per_m.canonical_value() * vector_norm_squared(electric);
                     let closure_source: ComplexVector3 = std::array::from_fn(|axis| {
-                        impressed_drive[axis] - generator[axis] * law.conductivity_s_per_m
+                        impressed_drive[axis] - generator[axis] * law.conductivity_s_per_m.canonical_value()
                     });
                     let free_source: ComplexVector3 =
                         std::array::from_fn(|axis| volume_source[axis] + closure_source[axis]);
@@ -338,7 +341,7 @@ impl<'a> MaxwellDiscretization<'a> {
                     continuity.accumulate(
                         &self.projection.elements[e].node_indices[..4],
                         &point,
-                        edge_field.map(|value| value * law.conductivity_s_per_m),
+                        edge_field.map(|value| value * law.conductivity_s_per_m.canonical_value()),
                         displacement,
                         impressed,
                         omega,
@@ -356,11 +359,11 @@ impl<'a> MaxwellDiscretization<'a> {
                         ordinal,
                         position_m: point.position_m,
                         volume_weight_m3: weight,
-                        electric_field_v_per_m: electric,
-                        flux_density_t: flux,
-                        magnetic_field_a_per_m: magnetic,
-                        electric_displacement_c_per_m2: displacement,
-                        conduction_current_density_a_per_m2: conduction,
+                        electric_field_v_per_m: Quantity::new(electric),
+                        flux_density_t: Quantity::new(flux),
+                        magnetic_field_a_per_m: Quantity::new(magnetic),
+                        electric_displacement_c_per_m2: Quantity::new(displacement),
+                        conduction_current_density_a_per_m2: Quantity::new(conduction),
                     });
                     ordinal += 1;
                 })
@@ -511,14 +514,14 @@ pub(super) fn solve(
             .iter()
             .map(|edge| edge.node_identities)
             .collect(),
-        edge_circulations_v: edges,
+        edge_circulations_v: Quantity::new(edges),
         samples: evaluation.samples,
         drives: evaluation.drives,
-        electric_energy_j: evaluation.electric_energy_j,
-        magnetic_energy_j: evaluation.magnetic_energy_j,
-        source_power_va: evaluation.source_power_va,
-        ohmic_power_w: evaluation.ohmic_power_w,
-        reactive_power_var: evaluation.reactive_power_var,
+        electric_energy_j: Quantity::new(evaluation.electric_energy_j),
+        magnetic_energy_j: Quantity::new(evaluation.magnetic_energy_j),
+        source_power_va: Quantity::new(evaluation.source_power_va),
+        ohmic_power_w: Quantity::new(evaluation.ohmic_power_w),
+        reactive_power_var: Quantity::new(evaluation.reactive_power_var),
         relative_physical_residual: physical,
         relative_complex_power_error: evaluation.relative_complex_power_error,
         relative_charge_continuity_residual: evaluation.relative_charge_continuity_residual,
@@ -544,11 +547,11 @@ fn accept(evaluation: &MaxwellEvaluation, tolerance: f64) -> Result<(), MaxwellE
         || charge > tolerance * 16.0
         || evaluation.samples.iter().any(|s| {
             [
-                s.electric_field_v_per_m,
-                s.flux_density_t,
-                s.magnetic_field_a_per_m,
-                s.electric_displacement_c_per_m2,
-                s.conduction_current_density_a_per_m2,
+                s.electric_field_v_per_m.canonical_value(),
+                s.flux_density_t.canonical_value(),
+                s.magnetic_field_a_per_m.canonical_value(),
+                s.electric_displacement_c_per_m2.canonical_value(),
+                s.conduction_current_density_a_per_m2.canonical_value(),
             ]
             .into_iter()
             .flatten()
@@ -571,7 +574,7 @@ pub(crate) fn validate_retained_consistency(
 ) -> Result<(), MaxwellError> {
     let plan = MaxwellSystemPlan::derive(mesh, &input.grounded_faces)?;
     let system = MaxwellDiscretization::new(mesh, input, &plan)?;
-    let edges = &response.edge_circulations_v;
+    let edges = response.edge_circulations_v.canonical_values();
     if edges.len() != system.edge_count()
         || !response
             .edge_node_identities
@@ -604,7 +607,7 @@ pub(crate) fn validate_retained_consistency(
         || evaluation.relative_charge_continuity_residual
             != response.relative_charge_continuity_residual
         || evaluation.relative_complex_power_error != response.relative_complex_power_error
-        || evaluation.ohmic_power_w != response.ohmic_power_w
+        || evaluation.ohmic_power_w != response.ohmic_power_w.canonical_value()
     {
         return Err(invalid(
             "retained Maxwell response differs from re-evaluation of its original equations",

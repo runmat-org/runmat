@@ -11,7 +11,7 @@ pub(super) fn assert_unit_tetrahedron(topology: &SolverMeshTopology, request: &M
     let nodes = topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     assert_eq!(nodes.len(), topology.nodes.len());
     for point in nodes.values() {
@@ -64,7 +64,7 @@ pub(super) fn assert_boundary_conservation(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.identity, node.coordinates_m))
+        .map(|node| (node.identity, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut expected = BTreeMap::new();
     for triangle in &surface.triangles {

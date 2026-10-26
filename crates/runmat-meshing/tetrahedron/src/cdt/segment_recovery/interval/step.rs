@@ -100,7 +100,10 @@ where
     if depth >= work.options.maximum_split_depth {
         let witness = witness.map(|witness| {
             let witness_node = topology.nodes()[witness.vertex as usize];
-            (witness_node.identity, witness_node.coordinates_m)
+            (
+                witness_node.identity,
+                witness_node.coordinates_m.canonical_value(),
+            )
         });
         return Err(diagnostic::split_limit_failure(
             topology, context, left, right, witness,
@@ -154,7 +157,10 @@ where
         work.inserted_node(context.constraint_index)?;
         let node = DelaunayVolumeNode {
             identity: derived_identity,
-            coordinates_m: coordinates,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates),
             construction,
         };
         if recovery.protected_faces.is_empty() {

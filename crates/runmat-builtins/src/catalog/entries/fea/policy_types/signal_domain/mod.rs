@@ -4,6 +4,7 @@ use crate::*;
 
 mod frequency;
 mod study_parameter;
+mod study_parameter_with_units;
 mod time;
 #[cfg(test)]
 mod tests;
@@ -26,4 +27,5 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &time::FEA_SIGNAL_DOMAIN_TIME_CATALOG_ENTRY,
     &frequency::FEA_SIGNAL_DOMAIN_FREQUENCY_CATALOG_ENTRY,
     &study_parameter::FEA_SIGNAL_DOMAIN_STUDY_PARAMETER_CATALOG_ENTRY,
+    &study_parameter_with_units::FEA_SIGNAL_DOMAIN_STUDY_PARAMETER_WITH_UNITS_CATALOG_ENTRY,
 ];

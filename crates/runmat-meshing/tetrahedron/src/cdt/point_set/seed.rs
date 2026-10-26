@@ -6,11 +6,11 @@ pub(super) fn initial_tetrahedron(
     nodes: &[DelaunayVolumeNode],
     work: &mut HullWork<'_>,
 ) -> Result<[usize; 4], DelaunayPointSetError> {
-    let first = nodes[0].coordinates_m;
-    let second = nodes[1].coordinates_m;
+    let first = nodes[0].coordinates_m.canonical_value();
+    let second = nodes[1].coordinates_m.canonical_value();
     let mut third = None;
     for (index, node) in nodes.iter().enumerate().skip(2) {
-        let point = node.coordinates_m;
+        let point = node.coordinates_m.canonical_value();
         let projections = [
             [
                 [first[0], first[1]],
@@ -47,8 +47,8 @@ pub(super) fn initial_tetrahedron(
         if work.orient3d([
             first,
             second,
-            nodes[third].coordinates_m,
-            nodes[index].coordinates_m,
+            nodes[third].coordinates_m.canonical_value(),
+            nodes[index].coordinates_m.canonical_value(),
         ])? != PredicateSign::Zero
         {
             return Ok([0, 1, third, index]);

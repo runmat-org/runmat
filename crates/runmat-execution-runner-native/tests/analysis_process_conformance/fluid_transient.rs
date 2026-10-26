@@ -142,19 +142,19 @@ pub(super) async fn run() {
         let time = 0.3 * ((ordinal + 1) as f64 / 3.);
         assert!(result
             .velocity_m_per_s
-            .iter()
+            .canonical_values().iter()
             .all(|u| (u[0] - (0.001 + 0.01 * time)).abs() < 1e-8
                 && u[1].abs() < 1e-8
                 && u[2].abs() < 1e-8));
-        assert!(result.pressure_reference_pa.iter().all(|p| *p == 1e12));
-        for (cell, fluctuation) in topology.cells.iter().zip(&result.pressure_fluctuation_pa) {
+        assert!(result.pressure_reference_pa.canonical_values().iter().all(|p| *p == 1e12));
+        for (cell, fluctuation) in topology.cells.iter().zip(result.pressure_fluctuation_pa.canonical_values()) {
             assert!((fluctuation + 0.01 * (cell.centroid_m[0] - 1.)).abs() < 2e-7);
         }
         // Reported absolute pressure cannot reproduce the original low-order bits.
         assert!(result
             .pressure_pa
-            .iter()
-            .zip(&result.pressure_fluctuation_pa)
+            .canonical_values().iter()
+            .zip(result.pressure_fluctuation_pa.canonical_values())
             .any(|(absolute, fluctuation)| absolute - 1e12 != *fluctuation));
     }
     let wall = attempts

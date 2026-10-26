@@ -17,15 +17,15 @@ const CURRENT: f64 = 34.641016151377546; // J^2 rho0 / k = 400 on the unit cube
 fn coupled_model() -> AnalysisModel {
     let mut model = model(StaticElectricalEquation::SteadyConduction);
     let law = model.materials[0].electrical.as_mut().unwrap();
-    law.conductivity_s_per_m = SIGMA;
-    law.resistive_heating_coefficient = ALPHA;
-    law.reference_temperature_k = T0;
+    law.conductivity_s_per_m = runmat_types::physical::Quantity::new(SIGMA);
+    law.resistive_heating_coefficient = runmat_types::physical::Quantity::new(ALPHA);
+    law.reference_temperature_k = runmat_types::physical::Quantity::new(T0);
     model.materials[0].thermal = Some(MaterialThermalModel {
-        reference_temperature_k: T0,
-        modulus_temp_coeff_per_k: 0.0,
-        conductivity_w_per_mk: K,
-        specific_heat_j_per_kgk: 1.0,
-        expansion_coefficient_per_k: 0.0,
+        reference_temperature_k: runmat_types::physical::Quantity::new(T0),
+        modulus_temp_coeff_per_k: runmat_types::physical::Quantity::new(0.0),
+        conductivity_w_per_mk: runmat_types::physical::Quantity::new(K),
+        specific_heat_j_per_kgk: runmat_types::physical::Quantity::new(1.0),
+        expansion_coefficient_per_k: runmat_types::physical::Quantity::new(0.0),
     });
     model.thermal = Some(ThermalDomain {
         reference_temperature: Temperature::new(T0),
@@ -39,7 +39,7 @@ fn coupled_model() -> AnalysisModel {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: format!("{face}_temperature"),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                     value: PrescribedValue::Constant(Temperature::new(T0)),
                 },
             }));
@@ -47,7 +47,7 @@ fn coupled_model() -> AnalysisModel {
     crate::physics::electrical::tests::prescribe(
         &mut model,
         "ground".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         0.0,
     );
     model.signals.push(PhysicalSignal::ElectricCurrent(Signal {
@@ -68,7 +68,7 @@ fn coupled_model() -> AnalysisModel {
     }));
     model.excitations.push(ExcitationAction::ElectricCurrent(AnalysisExcitation {
         excitation_id: ExcitationId("supply".into()),
-        target: ExcitationTarget::Region(RegionTarget::boundary("slab_left")),
+        target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
         frame: CoordinateFrame::Global,
         direction: None,
         distribution: ExcitationDistribution::PreserveResultant,
@@ -134,7 +134,7 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
         let nodal = completion.thermal.temperature_snapshots[0].as_host_f64().unwrap();
         let mut worst = 0.0_f64;
         for (node, temperature) in mesh.topology.nodes.iter().zip(nodal) {
-            let exact = T0 + exact_rise(node.coordinates_m[0]);
+            let exact = T0 + exact_rise(node.coordinates_m.canonical_value()[0]);
             worst = worst.max((temperature - exact).abs());
         }
         let peak = exact_rise(0.5);

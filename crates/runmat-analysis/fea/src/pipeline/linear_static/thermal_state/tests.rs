@@ -23,7 +23,7 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         .thermal
         .as_mut()
         .unwrap()
-        .expansion_coefficient_per_k = 1.0e-5;
+        .expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(1.0e-5);
     let producer = ProcedureStep::thermal_steady("heat");
     let mut consumer = ProcedureStep::coupled(
         "expand",
@@ -62,7 +62,7 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         .find(|face| {
             face.node_indices
                 .iter()
-                .all(|&node| mesh.topology.nodes[node].coordinates_m[0] == 0.0)
+                .all(|&node| mesh.topology.nodes[node].coordinates_m.canonical_value()[0] == 0.0)
         })
         .unwrap();
     let target = RegionTarget::boundary(face.provenance[0].analysis_selection_id().unwrap());
@@ -115,21 +115,26 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
             .unwrap()
     };
     let mechanical = model.materials[0].require_mechanical().unwrap();
-    let nu = mechanical.poisson_ratio;
+    let nu = mechanical.poisson_ratio.canonical_value();
     let eigenstrain = 1.0e-4;
     let expected_extension = eigenstrain * (1.0 + nu) / (1.0 - nu);
     let displacement = field(crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     for (node, value) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
-        assert!((value[0] - expected_extension * node.coordinates_m[0]).abs() < 1.0e-12);
+        assert!(
+            (value[0] - expected_extension * node.coordinates_m.canonical_value()[0]).abs()
+                < 1.0e-12
+        );
         assert!(value[1].abs() < 1.0e-12 && value[2].abs() < 1.0e-12);
     }
-    let expected_transverse_stress = -mechanical.youngs_modulus_pa * eigenstrain / (1.0 - nu);
+    let expected_transverse_stress =
+        -mechanical.youngs_modulus_pa.canonical_value() * eigenstrain / (1.0 - nu);
     let stress = field(crate::FEA_FIELD_STRUCTURAL_STRESS);
     assert!(stress[0].abs() < 1.0e-4);
     for value in &stress[1..3] {
         assert!((value / expected_transverse_stress - 1.0).abs() < 1.0e-10);
     }
-    let expected_energy = mechanical.youngs_modulus_pa * eigenstrain.powi(2) / (1.0 - nu) / 6.0;
+    let expected_energy =
+        mechanical.youngs_modulus_pa.canonical_value() * eigenstrain.powi(2) / (1.0 - nu) / 6.0;
     assert!(
         (field(crate::FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] / expected_energy - 1.0).abs()
             < 1.0e-10
@@ -189,7 +194,15 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         .thermal
         .as_mut()
         .unwrap()
-        .expansion_coefficient_per_k *= 2.0;
+        .expansion_coefficient_per_k = runmat_types::physical::Quantity::new(
+        model.materials[0]
+            .thermal
+            .as_mut()
+            .unwrap()
+            .expansion_coefficient_per_k
+            .canonical_value()
+            * (2.0),
+    );
     let doubled =
         run_linear_static_from_thermal_state(&model, ComputeBackend::Cpu, options.clone(), &source)
             .unwrap();

@@ -19,8 +19,10 @@ use super::{
 pub struct CanonicalThermalStatePayload {
     pub temperature: AnalysisField,
     pub ordered_node_ids: Vec<u64>,
-    pub reference_temperature_k: f64,
-    pub sample_time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub sample_time_s: runmat_types::physical::Time,
     pub maximum_relative_linear_residual: f64,
     /// Mesh nodes of finite-conductance thermal interfaces; `temperature` holds the first
     /// side's temperature there and `interface_temperature` the second side's.
@@ -79,9 +81,9 @@ impl CanonicalThermalStatePayload {
                 .iter()
                 .all(|node| unique_nodes.insert(*node))
             || values.iter().any(|value| *value <= 0.0)
-            || !self.reference_temperature_k.is_finite()
-            || self.reference_temperature_k <= 0.0
-            || !self.sample_time_s.is_finite()
+            || !self.reference_temperature_k.canonical_value().is_finite()
+            || self.reference_temperature_k.canonical_value() <= 0.0
+            || !self.sample_time_s.canonical_value().is_finite()
             || !self.maximum_relative_linear_residual.is_finite()
             || self.maximum_relative_linear_residual < 0.0
         {
@@ -150,8 +152,8 @@ impl CanonicalSemanticState {
         if model
             .thermal
             .as_ref()
-            .map(|domain| domain.reference_temperature.kelvin)
-            != Some(result.reference_temperature_k)
+            .map(|domain| domain.reference_temperature.canonical_value())
+            != Some(result.reference_temperature_k.canonical_value())
         {
             return Err(AnalysisExecutionError::Invalid(
                 "thermal result reference differs from authored study".into(),
@@ -198,8 +200,10 @@ impl CanonicalSemanticState {
         let payload = CanonicalThermalStatePayload {
             temperature: result.temperature_snapshots[terminal_index].clone(),
             ordered_node_ids: result.ordered_node_ids.clone(),
-            reference_temperature_k: result.reference_temperature_k,
-            sample_time_s: result.time_points_s[terminal_index],
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                result.reference_temperature_k.canonical_value(),
+            ),
+            sample_time_s: runmat_types::physical::Time::new(result.time_points_s[terminal_index]),
             maximum_relative_linear_residual: result
                 .residual_norms
                 .iter()
@@ -307,7 +311,10 @@ mod tests {
         assert_eq!(state.topology_digest, result.topology_digest);
         let payload = state.payload.thermal().unwrap();
         assert_eq!(payload.temperature, result.temperature_snapshots[3]);
-        assert_eq!(payload.sample_time_s, result.time_points_s[3]);
+        assert_eq!(
+            payload.sample_time_s.canonical_value(),
+            result.time_points_s[3]
+        );
         assert_eq!(payload.ordered_node_ids.len(), mesh.topology.nodes.len());
         let decoded =
             CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap())
@@ -411,7 +418,9 @@ mod tests {
         partial.energy_balances.clear();
         assert!(CanonicalSemanticState::from_thermal_result(&model, &mesh, &partial).is_err());
         let mut wrong_reference = result.clone();
-        wrong_reference.reference_temperature_k += 1.0;
+        wrong_reference.reference_temperature_k = runmat_types::physical::Quantity::new(
+            wrong_reference.reference_temperature_k.canonical_value() + (1.0),
+        );
         assert!(
             CanonicalSemanticState::from_thermal_result(&model, &mesh, &wrong_reference).is_err()
         );
@@ -458,7 +467,7 @@ mod tests {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: "steady_temperature".into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(face_id),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_id))),
                     value: PrescribedValue::Constant(Temperature::new(315.0)),
                 },
             }));
@@ -473,7 +482,15 @@ mod tests {
         )
         .unwrap();
         let state = CanonicalSemanticState::from_thermal_result(&model, &mesh, &result).unwrap();
-        assert_eq!(state.payload.thermal().unwrap().sample_time_s, 0.0);
+        assert_eq!(
+            state
+                .payload
+                .thermal()
+                .unwrap()
+                .sample_time_s
+                .canonical_value(),
+            0.0
+        );
         assert_eq!(result.residual_norms.len(), 1);
         assert_eq!(state.payload.thermal().unwrap().temperature.shape, vec![4]);
     }
@@ -542,7 +559,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            bound.temperature.nodal_temperature_k,
+            bound.temperature.nodal_temperature_k.as_slice(),
             source
                 .payload
                 .thermal()
@@ -552,8 +569,11 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(bound.transition.source_state, source.identity);
-        assert_eq!(bound.reference_temperature_k, 293.15);
-        assert_eq!(bound.source_time_s, *result.time_points_s.last().unwrap());
+        assert_eq!(bound.reference_temperature_k.canonical_value(), 293.15);
+        assert_eq!(
+            bound.source_time_s.canonical_value(),
+            *result.time_points_s.last().unwrap()
+        );
 
         let mut wrong_reference = model.clone();
         wrong_reference

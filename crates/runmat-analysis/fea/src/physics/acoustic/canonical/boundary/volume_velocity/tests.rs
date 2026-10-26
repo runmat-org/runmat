@@ -20,10 +20,14 @@ fn assembly(quadratic: bool) -> AcousticAssembly {
         slab_mesh(2)
     };
     let mut model = crate::physics::acoustic::canonical::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let properties = compile_solid_property_map(&model, &mesh).unwrap();
-    AcousticAssembly::assemble(AnalysisProjection::derive(&mesh).unwrap(), &properties, 1.0)
-        .unwrap()
+    AcousticAssembly::assemble(
+        AnalysisProjection::derive(&mesh).unwrap(),
+        &properties,
+        runmat_types::physical::AngularFrequency::new(1.0),
+    )
+    .unwrap()
 }
 
 fn load(flow: ComplexScalar) -> RealizedExcitation {
@@ -36,7 +40,7 @@ fn load(flow: ComplexScalar) -> RealizedExcitation {
             value: 1.0,
             approach: SignalSampleApproach::At,
         },
-        target: RealizedExcitationTarget::Region(RegionTarget::boundary("slab_left")),
+        target: RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
         kind: RealizedExcitationKind::VolumeVelocity(flow),
         policy: RealizedExcitationPolicy {
             frame: CoordinateFrame::BoundaryNormalTangent,
@@ -52,8 +56,11 @@ fn load(flow: ComplexScalar) -> RealizedExcitation {
 }
 
 fn triangle_area(assembly: &AcousticAssembly, face: &ProjectedBoundaryFace) -> f64 {
-    let corners: [[f64; 3]; 3] =
-        std::array::from_fn(|i| assembly.projection.nodes[face.node_indices[i]].coordinates_m);
+    let corners: [[f64; 3]; 3] = std::array::from_fn(|i| {
+        assembly.projection.nodes[face.node_indices[i]]
+            .coordinates_m
+            .canonical_value()
+    });
     let a: [f64; 3] = std::array::from_fn(|i| corners[1][i] - corners[0][i]);
     let b: [f64; 3] = std::array::from_fn(|i| corners[2][i] - corners[0][i]);
     let cross = [
@@ -69,9 +76,9 @@ fn total_flow_normalizes_once_over_union_with_exact_tri3_tri6_moments() {
     for quadratic in [false, true] {
         for both_sides in [false, true] {
             let mut a = assembly(quadratic);
-            let mut faces = a.faces(&RegionTarget::boundary("slab_left")).unwrap();
+            let mut faces = a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))).unwrap();
             if both_sides {
-                faces.extend(a.faces(&RegionTarget::boundary("slab_right")).unwrap());
+                faces.extend(a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))).unwrap());
             }
             let area = faces
                 .iter()
@@ -93,9 +100,17 @@ fn total_flow_normalizes_once_over_union_with_exact_tri3_tri6_moments() {
                 imaginary: -0.2,
             };
             a.add_volume_velocity(&load(flow), flow, faces).unwrap();
-            for (source, weight) in a.source.iter().zip(expected) {
-                assert!((source.real - a.omega * flow.imaginary * weight).abs() < 1e-13);
-                assert!((source.imaginary + a.omega * flow.real * weight).abs() < 1e-13);
+            for (source, weight) in a.source.canonical_values().iter().zip(expected) {
+                assert!(
+                    (source.real - a.derivative_rate.canonical_value() * flow.imaginary * weight)
+                        .abs()
+                        < 1e-13
+                );
+                assert!(
+                    (source.imaginary + a.derivative_rate.canonical_value() * flow.real * weight)
+                        .abs()
+                        < 1e-13
+                );
             }
             assert_eq!(a.source_evidence.len(), 1);
             assert!(a.source_evidence[0].accepted);
@@ -113,7 +128,7 @@ fn total_flow_rejects_empty_duplicate_and_invalid_ownership_or_distribution() {
     let flow = ComplexScalar::real(1.0);
     let a = assembly(false);
     let face = a
-        .faces(&RegionTarget::boundary("slab_left"))
+        .faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")))
         .unwrap()
         .remove(0);
     let mut invalid_patches = vec![vec![], vec![face.clone(), face.clone()]];

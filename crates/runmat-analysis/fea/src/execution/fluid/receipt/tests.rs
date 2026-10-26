@@ -38,11 +38,13 @@ fn actual_nonzero_solve_cold_receipt_preserves_original_authority_and_schema_bou
     assert!(result
         .original()
         .velocity_m_per_s
+        .canonical_values()
         .iter()
         .any(|u| u[0] > 0.9));
     assert!(result
         .original()
         .face_volume_flux_m3_per_s
+        .canonical_values()
         .iter()
         .any(|q| q.abs() > 0.0));
     let original_bytes = result.canonical_bytes().unwrap();
@@ -83,7 +85,11 @@ fn actual_nonzero_solve_cold_receipt_preserves_original_authority_and_schema_bou
     assert_eq!(receipt.receipt().reservation, result.reservation());
     assert_eq!(
         receipt.receipt().faces,
-        result.original().face_volume_flux_m3_per_s.len() as u64
+        result
+            .original()
+            .face_volume_flux_m3_per_s
+            .canonical_values()
+            .len() as u64
     );
     assert!(FluidNumericalReceiptArtifact::from_canonical_bytes_for(
         &bytes,
@@ -101,7 +107,12 @@ fn self_consistent_receipt_substitutions_never_gain_original_source_authority() 
     let result = w.execute(&m).unwrap();
     let receipt = FluidNumericalReceiptArtifact::new(&w, &result, &m).unwrap();
     let mut substituted = receipt.clone();
-    substituted.receipt.global_boundary_flux_m3_per_s += 1.0;
+    substituted.receipt.global_boundary_flux_m3_per_s = substituted
+        .receipt
+        .global_boundary_flux_m3_per_s
+        .clone()
+        .try_map_canonical_storage(|value| value + (1.0))
+        .unwrap();
     substituted.identity = receipt_identity(
         substituted.source_workload,
         substituted.source_result,
@@ -124,7 +135,17 @@ fn self_consistent_receipt_substitutions_never_gain_original_source_authority() 
     changed.policy.maximum_outer_iterations += 1;
     assert!(receipt.validate_against(&changed, &result, &m).is_err());
     let mut changed_mesh = m.clone();
-    changed_mesh.topology.nodes[0].coordinates_m[0] += 0.01;
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 0;
+        let quantity_slot = &mut changed_mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     changed_mesh.seal_canonical_digest().unwrap();
     assert!(receipt
         .validate_against(&w, &result, &changed_mesh)

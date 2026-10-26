@@ -232,7 +232,7 @@ pub fn validate_exact_face_geometry_in_parameterization(
             maximum_physical_aspect_ratio,
         )
         || !same_measure(
-            geometry.maximum_chordal_deviation_m,
+            geometry.maximum_chordal_deviation_m.canonical_value(),
             maximum_chordal_deviation_m,
         )
         || !same_angle(

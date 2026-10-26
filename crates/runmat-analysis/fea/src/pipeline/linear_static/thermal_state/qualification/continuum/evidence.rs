@@ -44,11 +44,13 @@ pub(super) fn measure(
     );
     let balance = heat.energy_balances[0];
     // Unit volume, no storage/convection: q W enters and q W leaves through end reactions.
-    assert!((balance.applied_power_w / GENERATION - 1.0).abs() < 1.0e-10,
+    assert!((balance.applied_power_w.canonical_value() / GENERATION - 1.0).abs() < 1.0e-10,
         "uniform q={GENERATION} W/m³ on unit volume must apply {GENERATION} W; actual balance {balance:?}");
-    assert!((balance.prescribed_boundary_power_w / GENERATION - 1.0).abs() < 1.0e-8);
-    assert!(balance.storage_rate_w.abs() < GENERATION * 1.0e-12);
-    assert!(balance.boundary_loss_w.abs() < GENERATION * 1.0e-12);
+    assert!(
+        (balance.prescribed_boundary_power_w.canonical_value() / GENERATION - 1.0).abs() < 1.0e-8
+    );
+    assert!(balance.storage_rate_w.canonical_value().abs() < GENERATION * 1.0e-12);
+    assert!(balance.boundary_loss_w.canonical_value().abs() < GENERATION * 1.0e-12);
     assert!(balance.relative_residual < 1.0e-8);
 
     let mut temperature_error = 0.0;
@@ -64,7 +66,7 @@ pub(super) fn measure(
         let coordinates = element
             .node_indices
             .iter()
-            .map(|&node| projection.nodes[node].coordinates_m)
+            .map(|&node| projection.nodes[node].coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         // Positive five-point tensor rule integrates the squared cubic error exactly on
         // these affine tetrahedra. It cannot hide interior error behind nodal coincidence.
@@ -96,7 +98,7 @@ pub(super) fn measure(
         // E[x²]=(sum(x_i²)+(sum(x_i))²)/20, E[x]=sum(x_i)/4.
         let x = element.node_indices[..4]
             .iter()
-            .map(|&node| projection.nodes[node].coordinates_m[0])
+            .map(|&node| projection.nodes[node].coordinates_m.canonical_value()[0])
             .collect::<Vec<_>>();
         let sum = x.iter().sum::<f64>();
         let mean_x = sum / 4.0;
@@ -140,7 +142,7 @@ pub(super) fn measure(
             .nodes
             .iter()
             .zip(reactions.chunks_exact(3))
-            .map(|(node, reaction)| node.coordinates_m[axis] * reaction[axis])
+            .map(|(node, reaction)| node.coordinates_m.canonical_value()[axis] * reaction[axis])
             .sum::<f64>();
         let expected = if axis == 0 {
             0.0

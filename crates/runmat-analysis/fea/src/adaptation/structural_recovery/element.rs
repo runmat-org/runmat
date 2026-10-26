@@ -24,7 +24,7 @@ pub(super) fn estimate(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut region_side_nodal_stress =
         BTreeMap::<(u64, &PersistentEntityId), ([f64; STRESS_COMPONENT_COUNT], f64)>::new();

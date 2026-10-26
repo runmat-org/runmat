@@ -81,7 +81,7 @@ pub(super) fn profile(
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
     result.validate_publication_request(request)?;
     let recovery_request = result.native_field_request_from_result()?;
-    let sample = RecoveredFieldSample::FrequencyHertz(result.frequency().hertz);
+    let sample = RecoveredFieldSample::FrequencyHertz(result.frequency().canonical_value());
     let fields = vec![
         FieldProjection {
             definition: native_acoustic_field_definition(

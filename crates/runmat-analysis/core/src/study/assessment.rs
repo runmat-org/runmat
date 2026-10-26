@@ -12,12 +12,9 @@ pub enum AssessmentStatus {
     Indeterminate,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AssessmentQuantity {
-    pub value_si: f64,
-    pub dimension: PhysicalDimension,
-}
+/// Stable API alias of the shared checked quantity representation. SI dimensions,
+/// nominal angle powers and known semantic roles travel together.
+pub type AssessmentQuantity = runmat_types::physical::DimensionedScalar;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
@@ -137,7 +134,7 @@ pub fn validate_assessments(
         if assessment.assessment_id.trim().is_empty() || !ids.insert(&assessment.assessment_id) {
             return Err("assessment ids must be nonempty and unique".into());
         }
-        let dimension = assessment_output_dimension(outputs.get(&assessment.output_id))
+        let dimension = assessment_output_descriptor(outputs.get(&assessment.output_id))
             .ok_or_else(|| {
                 format!(
                     "assessment `{}` requires a declared real scalar output",
@@ -152,7 +149,7 @@ pub fn validate_assessments(
             if function.module_path.trim().is_empty()
                 || function.symbol.trim().is_empty()
                 || function.source_digest == [0; 32]
-                || parameters.iter().any(|p| !p.value_si.is_finite())
+                || parameters.iter().any(|p| !p.canonical_value().is_finite())
             {
                 return Err(format!(
                     "assessment `{}` has an invalid function revision or parameters",
@@ -162,7 +159,9 @@ pub fn validate_assessments(
         }
         let (minimum, maximum) = assessment.rule.bounds();
         for bound in [minimum, maximum].into_iter().flatten() {
-            if !bound.value_si.is_finite() || bound.dimension != dimension {
+            if !bound.canonical_value().is_finite()
+                || !bound.descriptor().is_compatible_with(dimension)
+            {
                 return Err(format!(
                     "assessment `{}` has an invalid or dimensionally incompatible bound",
                     assessment.assessment_id
@@ -171,7 +170,7 @@ pub fn validate_assessments(
         }
         if minimum
             .zip(maximum)
-            .is_some_and(|(a, b)| a.value_si > b.value_si)
+            .is_some_and(|(a, b)| a.canonical_value() > b.canonical_value())
         {
             return Err("assessment minimum exceeds maximum".into());
         }
@@ -182,6 +181,12 @@ pub fn validate_assessments(
 pub fn assessment_output_dimension(
     output: Option<&AuthoredOutputType>,
 ) -> Option<PhysicalDimension> {
+    Some(assessment_output_descriptor(output)?.dimension())
+}
+
+pub fn assessment_output_descriptor(
+    output: Option<&AuthoredOutputType>,
+) -> Option<runmat_types::physical::DynamicDimension> {
     let value = match output? {
         AuthoredOutputType::SpatialExtremum { value }
         | AuthoredOutputType::SeriesExtremum { value }
@@ -192,9 +197,9 @@ pub fn assessment_output_dimension(
         _ => return None,
     };
     Some(match value {
-        AuthoredOutputValue::Physical(quantity) => quantity.physical_dimension(),
+        AuthoredOutputValue::Physical(quantity) => quantity.quantity_descriptor()?,
         AuthoredOutputValue::Derived(dimension) => dimension,
-        AuthoredOutputValue::Dimensionless => PhysicalDimension::DIMENSIONLESS,
+        AuthoredOutputValue::Dimensionless => PhysicalDimension::DIMENSIONLESS.into(),
     })
 }
 
@@ -219,7 +224,7 @@ fn evaluate_with_outcome(
         output_id: assessment.output_id.clone(),
         status: AssessmentStatus::Indeterminate,
         measured: measurement
-            .filter(|value| value.quantity.value_si.is_finite())
+            .filter(|value| value.quantity.canonical_value().is_finite())
             .map(|value| value.quantity),
         issue: None,
     };
@@ -230,25 +235,24 @@ fn evaluate_with_outcome(
     let (minimum, maximum) = assessment.rule.bounds();
     if minimum
         .zip(maximum)
-        .is_some_and(|(a, b)| a.value_si > b.value_si)
+        .is_some_and(|(a, b)| a.canonical_value() > b.canonical_value())
     {
         result.issue = Some(AssessmentIssue::InvalidDefinition);
         return result;
     }
     let issue = if !measurement.complete {
         Some(AssessmentIssue::IncompleteOutput)
-    } else if !measurement.quantity.value_si.is_finite()
+    } else if !measurement.quantity.canonical_value().is_finite()
         || [minimum, maximum]
             .into_iter()
             .flatten()
-            .any(|b| !b.value_si.is_finite())
+            .any(|b| !b.canonical_value().is_finite())
     {
         Some(AssessmentIssue::NonfiniteValue)
-    } else if [minimum, maximum]
-        .into_iter()
-        .flatten()
-        .any(|b| b.dimension != measurement.quantity.dimension)
-    {
+    } else if [minimum, maximum].into_iter().flatten().any(|b| {
+        !b.descriptor()
+            .is_compatible_with(measurement.quantity.descriptor())
+    }) {
         Some(AssessmentIssue::DimensionMismatch)
     } else if !measurement.numerically_acceptable {
         Some(AssessmentIssue::NumericalEvidenceUnavailable)
@@ -296,16 +300,16 @@ fn evaluate_with_outcome(
             }
         },
     };
-    let low = measurement.quantity.value_si - error;
-    let high = measurement.quantity.value_si + error;
+    let low = measurement.quantity.canonical_value() - error;
+    let high = measurement.quantity.canonical_value() + error;
     if !low.is_finite() || !high.is_finite() {
         result.issue = Some(AssessmentIssue::ComparisonUncertain);
         return result;
     }
-    let passed =
-        minimum.is_none_or(|b| low >= b.value_si) && maximum.is_none_or(|b| high <= b.value_si);
-    let failed =
-        minimum.is_some_and(|b| high < b.value_si) || maximum.is_some_and(|b| low > b.value_si);
+    let passed = minimum.is_none_or(|b| low >= b.canonical_value())
+        && maximum.is_none_or(|b| high <= b.canonical_value());
+    let failed = minimum.is_some_and(|b| high < b.canonical_value())
+        || maximum.is_some_and(|b| low > b.canonical_value());
     result.status = if passed {
         AssessmentStatus::Passed
     } else if failed {
@@ -341,20 +345,22 @@ mod tests {
             assessment_id: "displacement_limit".into(),
             output_id: "peak".into(),
             rule: AssessmentRule::Maximum {
-                bound: AssessmentQuantity {
-                    value_si: 0.001,
-                    dimension: PhysicalDimension::LENGTH,
-                },
+                bound: AssessmentQuantity::try_from_descriptor(
+                    (PhysicalDimension::LENGTH).into(),
+                    0.001,
+                )
+                .expect("checked finite assessment quantity"),
             },
             evidence,
         }
     }
     fn measure(value_si: f64) -> AssessmentMeasurement {
         AssessmentMeasurement {
-            quantity: AssessmentQuantity {
+            quantity: AssessmentQuantity::try_from_descriptor(
+                (PhysicalDimension::LENGTH).into(),
                 value_si,
-                dimension: PhysicalDimension::LENGTH,
-            },
+            )
+            .expect("checked finite assessment quantity"),
             complete: true,
             numerically_acceptable: true,
             absolute_error_bound: None,
@@ -500,31 +506,27 @@ mod tests {
         let mut definition = assessment(AssessmentEvidenceRequirement::AuthoredSamples);
         validate_assessments(&[definition.clone()], &outputs).unwrap();
         definition.rule = AssessmentRule::Maximum {
-            bound: AssessmentQuantity {
-                value_si: 1.0,
-                dimension: PhysicalDimension::DIMENSIONLESS,
-            },
+            bound: AssessmentQuantity::try_from_descriptor(
+                (PhysicalDimension::DIMENSIONLESS).into(),
+                1.0,
+            )
+            .expect("checked finite assessment quantity"),
         };
         assert!(validate_assessments(&[definition], &outputs).is_err());
     }
 
     #[test]
     fn invalid_values_and_overflow_remain_serializable_indeterminate_results() {
-        let definition = assessment(AssessmentEvidenceRequirement::AuthoredSamples);
-        let result = evaluate_assessment(&definition, Some(measure(f64::NAN)));
-        assert_eq!(result.issue, Some(AssessmentIssue::NonfiniteValue));
-        assert!(result.measured.is_none());
-        let mut invalid = definition.clone();
-        invalid.rule = AssessmentRule::Maximum {
-            bound: AssessmentQuantity {
-                value_si: f64::INFINITY,
-                dimension: PhysicalDimension::LENGTH,
-            },
-        };
-        assert_eq!(
-            evaluate_assessment(&invalid, Some(measure(0.0))).status,
-            AssessmentStatus::Indeterminate
+        assert!(
+            AssessmentQuantity::try_from_dimension(PhysicalDimension::LENGTH, None, f64::NAN)
+                .is_err()
         );
+        assert!(AssessmentQuantity::try_from_dimension(
+            PhysicalDimension::LENGTH,
+            None,
+            f64::INFINITY
+        )
+        .is_err());
         let mut overflow = measure(f64::MAX);
         overflow.absolute_error_bound = Some(f64::MAX);
         assert_eq!(

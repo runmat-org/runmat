@@ -282,7 +282,7 @@ fn mixed_structural_fixture() -> (
     CanonicalStructuralConstraintPlan,
 ) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0]
         .provenance
         .push(PersistentEntityId::new(
@@ -344,7 +344,7 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
     let foundation = runmat_analysis_core::AnalysisConnector {
         connector_id: "foundation_a".into(),
         kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-            target: runmat_analysis_core::RegionTarget::boundary("selected_foundation_face"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("selected_foundation_face")),
             modulus: runmat_analysis_core::FoundationModulus::new(1.0),
         },
     };
@@ -387,7 +387,7 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
 
     let mut unmapped = model;
     unmapped.connectors[0].kind = runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-        target: runmat_analysis_core::RegionTarget::boundary("missing_face"),
+        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("missing_face")),
         modulus: runmat_analysis_core::FoundationModulus::new(1.0),
     };
     assert!(matches!(
@@ -632,7 +632,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         .push(runmat_analysis_core::AnalysisConnector {
             connector_id: "preflight_foundation".into(),
             kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-                target: runmat_analysis_core::RegionTarget::boundary("root"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 modulus: runmat_analysis_core::FoundationModulus::new(1.0),
             },
         });

@@ -5,9 +5,9 @@ use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 
 fn material() -> SolidMaterial {
     SolidMaterial {
-        youngs_modulus_pa: 100.0,
-        poisson_ratio: 0.2,
-        density_kg_per_m3: 3.0,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(0.2),
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(3.0),
     }
 }
 
@@ -76,7 +76,7 @@ fn affine_mass_preserves_all_quadratic_kinetic_cross_moments_at_scale_and_transl
             for left in basis {
                 for right in basis {
                     let exponent = std::array::from_fn::<_, 4, _>(|i| left[i] + right[i]);
-                    let exact = material().density_kg_per_m3
+                    let exact = material().density_kg_per_m3.canonical_value()
                         * determinant
                         * exponent.into_iter().map(factorial).product::<f64>()
                         / factorial(3 + exponent.into_iter().sum::<u32>());
@@ -129,7 +129,7 @@ fn curved_geometry_keeps_its_original_rule_and_richer_independent_integral() {
         let mut reference = [[0.0; 10]; 10];
         for (point, weight) in tensor_tetrahedron_rule(&GAUSS_LEGENDRE_EIGHT_UNIT) {
             let shape = shape_values(point);
-            let measure = material().density_kg_per_m3
+            let measure = material().density_kg_per_m3.canonical_value()
                 * weight
                 * jacobian_determinant(geometry.nodes_m, point).unwrap();
             for i in 0..10 {
@@ -154,7 +154,8 @@ fn curved_geometry_keeps_its_original_rule_and_richer_independent_integral() {
 fn reciprocal_density_and_geometry_scales_preserve_physical_rigid_translation_mass() {
     for (length_exponent, density_exponent) in [(-350, 900), (300, -900)] {
         let mut material = material();
-        material.density_kg_per_m3 = 2.0_f64.powi(density_exponent);
+        material.density_kg_per_m3 =
+            runmat_types::physical::MassDensity::new(2.0_f64.powi(density_exponent));
         let geometry = geometry(2.0_f64.powi(length_exponent), 0.0);
         let matrix = consistent_mass_matrix(material, geometry).unwrap();
         // Exact volume for the independently constructed skew tetrahedron is 4*s^3.

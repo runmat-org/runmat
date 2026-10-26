@@ -144,7 +144,7 @@ fn validate_entry(
     let sampled = runmat_analysis_fea::results::observation::authored_observations_sample(
         step,
         runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
-            completed.workload.frequency.hertz,
+            completed.workload.frequency.canonical_value(),
         ),
     )
     .map_err(|e| e.to_string())?;
@@ -156,7 +156,7 @@ fn validate_entry(
                 .validate_authored_step(step)
                 .map_err(|e| e.to_string())?;
             let sample = runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
-                completed.workload.frequency.hertz,
+                completed.workload.frequency.canonical_value(),
             );
             if completed.observation_results.len() != step.observations.len()
                 || completed

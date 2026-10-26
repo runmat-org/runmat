@@ -50,16 +50,29 @@ pub(crate) struct ThermalOperatorAssembly {
     pub conductivity: RealSparseMatrix,
     pub capacity: RealSparseMatrix,
     /// Applied generation/flux only; excludes the algebraic Robin ambient forcing.
-    pub applied_source: Vec<f64>,
+    pub applied_source:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Power, Vec<f64>>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
-    pub prescribed_temperature_k: Vec<Option<f64>>,
+    pub prescribed_temperature_k: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::Temperature,
+        Vec<Option<f64>>,
+    >,
     /// Tie, periodic and affine-jump relations: each secondary node follows its primaries.
     pub relations: Vec<ScalarNodeRelation>,
     /// Projection nodes: the mesh nodes, then one side-owned node per conductance-interface node.
     pub dofs: InterfaceDofs,
-    pub positive_robin_weight: Vec<f64>,
-    pub element_conductivity_w_per_mk: Vec<f64>,
-    pub element_volumetric_capacity_j_per_m3k: Vec<f64>,
+    pub positive_robin_weight: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ThermalConductance,
+        Vec<f64>,
+    >,
+    pub element_conductivity_w_per_mk: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ThermalConductivity,
+        Vec<f64>,
+    >,
+    pub element_volumetric_capacity_j_per_m3k: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::VolumetricHeatCapacity,
+        Vec<f64>,
+    >,
 }
 
 impl ThermalOperatorAssembly {
@@ -70,7 +83,10 @@ impl ThermalOperatorAssembly {
         time_step_s: f64,
         previous_temperature_k: &[f64],
         reference_temperature_k: &[f64],
-    ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+    ) -> Result<
+        crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>,
+        ThermalAssemblyError,
+    > {
         self.reject_radiation_in_linear_route(model)?;
         if !time_step_s.is_finite()
             || time_step_s <= 0.0
@@ -105,13 +121,19 @@ impl ThermalOperatorAssembly {
         for (source, stored_energy) in rhs.iter_mut().zip(capacity_temperature) {
             *source += inverse_time_step * stored_energy;
         }
-        for (node, value) in self.prescribed_temperature_k.iter().enumerate() {
+        for (node, value) in self
+            .prescribed_temperature_k
+            .canonical_values()
+            .iter()
+            .enumerate()
+        {
             if let Some(value) = value {
                 rhs[node] = value - reference_temperature_k[node];
             }
         }
         let constrained = self
             .prescribed_temperature_k
+            .canonical_values()
             .iter()
             .map(Option::is_some)
             .collect::<Vec<_>>();
@@ -126,6 +148,17 @@ impl ThermalOperatorAssembly {
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
         AssembledRealSystem::try_new(operators, constrained, rhs)
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
+            .and_then(|numerical| {
+                crate::algebra::PhysicalScalarSystem::try_new(
+                    numerical,
+                    runmat_types::physical::DynamicDimension::quantity_type(
+                        runmat_types::physical::QuantityKind::Power,
+                    )
+                    .with_semantic_kind(Some(runmat_types::physical::QuantityKind::Power))
+                    .expect("thermal equation"),
+                )
+                .map_err(|error| ThermalAssemblyError::SparseOperator(error.into()))
+            })
     }
 }
 
@@ -176,12 +209,13 @@ pub(crate) fn assemble(
             .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
         let mass_density_kg_per_m3 = material
             .require_mass_density()
-            .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
-        element_conductivity_w_per_mk.push(thermal.conductivity_w_per_mk);
-        element_specific_heat_j_per_kgk.push(thermal.specific_heat_j_per_kgk);
+            .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?
+            .canonical_value();
+        element_conductivity_w_per_mk.push(thermal.conductivity_w_per_mk.canonical_value());
+        element_specific_heat_j_per_kgk.push(thermal.specific_heat_j_per_kgk.canonical_value());
         element_density_kg_per_m3.push(mass_density_kg_per_m3);
         element_volumetric_capacity_j_per_m3k
-            .push(mass_density_kg_per_m3 * thermal.specific_heat_j_per_kgk);
+            .push(mass_density_kg_per_m3 * thermal.specific_heat_j_per_kgk.canonical_value());
     }
     // Element conduction/capacity kernels run on the admitted CPU pool and scatter onto the
     // planned support in canonical element order (thread-count independent values).
@@ -542,7 +576,7 @@ pub(crate) fn assemble(
                         operator_id: boundary.boundary_id.clone(),
                     });
                 }
-                let heat_transfer = coefficient.watts_per_square_meter_kelvin;
+                let heat_transfer = coefficient.canonical_value();
                 for face in faces {
                     projection
                         .visit_boundary_quadrature(face, |point| {
@@ -597,14 +631,21 @@ pub(crate) fn assemble(
         capacity: capacity
             .finish()
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?,
-        applied_source,
+        applied_source:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Power, _>::new(
+                applied_source,
+            ),
         source_evidence,
-        prescribed_temperature_k,
+        prescribed_temperature_k: runmat_types::physical::Quantity::new(prescribed_temperature_k),
         relations,
         dofs,
-        positive_robin_weight,
-        element_conductivity_w_per_mk,
-        element_volumetric_capacity_j_per_m3k,
+        positive_robin_weight: runmat_types::physical::Quantity::new(positive_robin_weight),
+        element_conductivity_w_per_mk: runmat_types::physical::Quantity::new(
+            element_conductivity_w_per_mk,
+        ),
+        element_volumetric_capacity_j_per_m3k: runmat_types::physical::Quantity::new(
+            element_volumetric_capacity_j_per_m3k,
+        ),
     })
 }
 

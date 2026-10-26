@@ -288,6 +288,11 @@ fn dense_f64(values: Vec<f64>, shape: Vec<u64>) -> ValuePayload {
 fn literal(expression: &GeometryScalarExpression) -> AnalysisBridgeResult<f64> {
     match expression {
         GeometryScalarExpression::Literal { value } if value.is_finite() => Ok(*value),
+        // Explicit numerical-language boundary: the resolved request retains its
+        // typed declarations/identity while MATLAB receives canonical numbers.
+        GeometryScalarExpression::Canonical { value } if value.canonical_value().is_finite() => {
+            Ok(value.canonical_value())
+        }
         _ => Err(AnalysisBridgeError::Invalid(
             "geometry generator argument was not fully resolved".into(),
         )),

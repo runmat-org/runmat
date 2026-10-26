@@ -8,13 +8,13 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         0.0,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         2.0,
     );
     let properties = crate::properties::compile_property_map(&model, None).unwrap();
@@ -95,13 +95,13 @@ fn floating_and_integral_terminal_intent_is_not_replaced_by_insulation() {
     use runmat_analysis_core::{ElectricCurrent, ElectricalConstraint, PrescribedValue};
     for kind in [
         ElectricalConstraintKind::FloatingConductor {
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         },
         ElectricalConstraintKind::Equipotential {
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         },
         ElectricalConstraintKind::IntegralCurrent {
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             value: PrescribedValue::Constant(ElectricCurrent::new(1.0)),
         },
     ] {

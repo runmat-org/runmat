@@ -92,7 +92,7 @@ pub fn build_surface_solver_topology(
                         .tolerance_m
                         .max(edge.tolerance_m)
                         .max(request.tolerance.absolute_floor_m);
-                    if distance(vertex.point_m, node.point_m) <= tolerance {
+                    if distance(vertex.point_m.canonical_value(), node.point_m) <= tolerance.canonical_value() {
                         provenance.push(vertex.id.clone());
                     }
                 }
@@ -112,7 +112,7 @@ pub fn build_surface_solver_topology(
         nodes.push(SolverMeshNode {
             node_id,
             stable_identity: node.node_id,
-            coordinates_m: node.point_m,
+            coordinates_m: runmat_types::physical::Position::new(node.point_m),
             provenance,
             exact_parameters: parameters,
         });

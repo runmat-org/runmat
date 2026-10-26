@@ -157,13 +157,15 @@ fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for
         mixed_target_workspace_profile, resolve_mixed_structural_target,
     };
     let mesh = crate::constraints::compilation_tests::mesh(ElementOrder::Tet4);
-    let model = crate::fixtures::mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+    let model = crate::fixtures::mixed_solid_beam_model(
+        mesh.topology.nodes[0].coordinates_m.canonical_value(),
+    );
     let structural = model.structural.as_ref().unwrap();
     let topology = CanonicalStructuralNodeSpace::derive(&mesh, structural).unwrap();
     for target in [
         RegionTarget::point("node:1"),
         RegionTarget::point("node:102"),
-        RegionTarget::boundary("root"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
     ] {
         let profile = mixed_target_workspace_profile(&target, &mesh, structural).unwrap();
         let selected =

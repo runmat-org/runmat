@@ -44,9 +44,9 @@ pub(in crate::execution) fn native_electrical_fields(
             ..
         } => (
             "electrical.electric_displacement",
-            displacement_c_per_m2.as_slice(),
+            displacement_c_per_m2.canonical_values().as_slice(),
             "electrical.electric_energy_density",
-            energy_density_j_per_m3.as_slice(),
+            energy_density_j_per_m3.canonical_values().as_slice(),
         ),
         ElectricalConstitutiveResponse::SteadyConduction {
             current_density_a_per_m2,
@@ -54,20 +54,22 @@ pub(in crate::execution) fn native_electrical_fields(
             ..
         } => (
             "electrical.current_density",
-            current_density_a_per_m2.as_slice(),
+            current_density_a_per_m2.canonical_values().as_slice(),
             "electrical.joule_power_density",
-            joule_density_w_per_m3.as_slice(),
+            joule_density_w_per_m3.canonical_values().as_slice(),
         ),
     };
     [
         NativeElectricalField {
             field_id: "electrical.potential",
-            values: NativeElectricalValues::Scalar(&r.potential_v),
+            values: NativeElectricalValues::Scalar(r.potential_v.canonical_values()),
             shape: vec![nodes],
         },
         NativeElectricalField {
             field_id: "electrical.electric_field",
-            values: NativeElectricalValues::Vector(&r.element_electric_field_v_per_m),
+            values: NativeElectricalValues::Vector(
+                r.element_electric_field_v_per_m.canonical_values(),
+            ),
             shape: vec![elements, 3],
         },
         NativeElectricalField {

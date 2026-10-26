@@ -120,10 +120,8 @@ study response {{
     assert_eq!(study.inputs.len(), 1);
     assert!(matches!(
         study.inputs[0].default,
-        Some(runmat_analysis_core::AuthoredInputValue::Quantity {
-            dimension: runmat_types::QuantityDimension::Force,
-            value_si: 1000.0,
-        })
+        Some(runmat_analysis_core::AuthoredInputValue::Quantity(value))
+            if value.dimension() == runmat_types::PhysicalDimension::FORCE && value.canonical_value() == 1000.0
     ));
     assert!(matches!(
         &study.model.arguments[0].value,

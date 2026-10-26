@@ -133,7 +133,12 @@ pub(in crate::assembly) fn assemble_solver_solid_operators_capturing(
         .nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| (node.node_id, (node.coordinates_m, index * 3)))
+        .map(|(index, node)| {
+            (
+                node.node_id,
+                (node.coordinates_m.canonical_value(), index * 3),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     assemble_solid_operators(
         &artifact.topology.volume_elements,
@@ -301,7 +306,7 @@ fn write_element<const D: usize>(
             MechanicalDampingModel::Rayleigh {
                 mass_coefficient,
                 stiffness_coefficient,
-            } => (mass_coefficient.per_second, stiffness_coefficient.seconds),
+            } => (mass_coefficient.canonical_value(), stiffness_coefficient.canonical_value()),
         };
         let target = out.matrix(DAMPING);
         for row in 0..D {
@@ -354,8 +359,12 @@ pub(super) fn resolve_element_material(
 fn solid_material(material: StructuralElementMaterial) -> SolidMaterial {
     SolidMaterial {
         youngs_modulus_pa: material.youngs_modulus_pa,
-        poisson_ratio: material.poisson_ratio,
-        density_kg_per_m3: material.density_kg_per_m3,
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(
+            material.poisson_ratio.canonical_value(),
+        ),
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(
+            material.density_kg_per_m3.canonical_value(),
+        ),
     }
 }
 

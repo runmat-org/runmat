@@ -119,10 +119,10 @@ pub(super) async fn run() {
         .unwrap();
         let completed = executed.completed;
         let producer = executed.source;
-        assert!((completed.result.manifest.energy_balances[0].applied_power_w - 12.0).abs() < 1e-8);
+        assert!((completed.result.manifest.energy_balances[0].applied_power_w - runmat_types::physical::Quantity::new(12.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
         assert!(
-            (completed.result.manifest.energy_balances[0].prescribed_boundary_power_w - 12.0).abs()
-                < 1e-8
+            (completed.result.manifest.energy_balances[0].prescribed_boundary_power_w - runmat_types::physical::Quantity::new(12.0)).abs()
+                < runmat_types::physical::Quantity::new(1e-8)
         );
         assert!(!completed.states.is_empty());
         assert!(!completed.observations.samples.is_empty());
@@ -198,7 +198,7 @@ pub(super) async fn run() {
             }
             assert_eq!(values.len(), projection.nodes.len());
             assert!(projection.nodes.iter().zip(values).all(|(node, value)| {
-                let x = node.coordinates_m[0];
+                let x = node.coordinates_m.canonical_value()[0];
                 (value - (300.0 + 6.0 * x * (1.0 - x))).abs() < 1e-8
             }));
         }

@@ -248,7 +248,7 @@ pub fn build_prepared_acoustic_field_recovery_resource_plan(
             "acoustic recovery partition inventory exceeds output policy",
         ));
     }
-    let sample = RecoveredFieldSample::FrequencyHertz(workload.frequency.hertz);
+    let sample = RecoveredFieldSample::FrequencyHertz(workload.frequency.canonical_value());
     let (partitions, _) = acoustic_field_recovery_shape(request, sample)?;
     let mut profiler = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
     for bytes in partitions {

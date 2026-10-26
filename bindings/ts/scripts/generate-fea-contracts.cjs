@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const {splitTopLevel} = require("./fea-semantic-typegen/syntax.cjs");
 
 const bindingsRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(bindingsRoot, "../..");
@@ -72,6 +73,8 @@ const analysisConstants = [
   ["ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT", "FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT"],
 ];
 const analysisEnumTypes = [
+  ["AnalysisExecutionMode", "FeaExecutionMode"],
+  ["AnalysisExecutionReadiness", "FeaExecutionReadiness"],
   ["AnalysisDocumentKind", "FeaDocumentKind"],
   ["AnalysisFieldKind", "FeaFieldKind"],
   ["AnalysisFieldStorage", "FeaFieldStorage"],
@@ -85,6 +88,9 @@ const progressEnumTypes = [
   ["FeaProgressStatus", "FeaProgressStatus"],
 ];
 const analysisStructTypes = [
+  ["AnalysisExecutionDuration", "FeaExecutionDuration", { renameAll: "camelCase" }],
+  ["AnalysisExecutionCandidate", "FeaExecutionCandidate", { renameAll: "camelCase" }],
+  ["AnalysisExecutionChoices", "FeaExecutionChoices", { renameAll: "camelCase" }],
   ["AnalysisRuntimeCapabilities", "FeaCapabilities", { renameAll: "camelCase" }],
   ["AnalysisDocumentRunResult", "FeaRunResult", { renameAll: "camelCase" }],
   ["AnalysisFieldBinding", "FeaFieldBinding", { renameAll: "camelCase" }],
@@ -145,6 +151,8 @@ function snakeToPascal(value) {
 
 function rustTypeToTs(type) {
   const trimmed = type.trim();
+  const array = trimmed.match(/^\[([\s\S]+);\s*(\d+)\]$/);
+  if (array) return { type: `[${Array.from({length:Number(array[2])},()=>rustTypeToTs(array[1]).type).join(", ")}]`, nullable:false };
   const optionMatch = trimmed.match(/^Option<(.+)>$/);
   if (optionMatch) {
     return { type: `${rustTypeToTs(optionMatch[1]).type} | null`, nullable: true };
@@ -173,11 +181,13 @@ function rustTypeToTs(type) {
     case "bool":
       return { type: "boolean", nullable: false };
     case "usize":
+    case "u8":
+    case "u16":
     case "u64":
     case "u32":
     case "f64":
       return { type: "number", nullable: false };
-    case "UnitSystem":
+    case "LengthUnit":
       return { type: "FeaGeometryUnits", nullable: false };
     case "ComputeBackend":
       return { type: "FeaComputeBackend", nullable: false };
@@ -362,6 +372,8 @@ function readStructFields(source, name, options = {}) {
   }
   let rename = null;
   let skipIfNone = false;
+  let canonicalScalar = false;
+  let canonicalStorage = false;
   const renameAll = options.renameAll ?? null;
 
   for (const line of lines) {
@@ -381,6 +393,8 @@ function readStructFields(source, name, options = {}) {
       skipIfNone = true;
       continue;
     }
+    if (['#[serde(with = "runmat_types::physical::canonical_scalar")]', '#[serde(with = "runmat_types::physical::canonical_scalar::optional")]'].includes(line)) { canonicalScalar = true; continue; }
+    if (line === '#[serde(with = "runmat_types::physical::canonical_storage")]') { canonicalStorage = true; continue; }
     if (line.startsWith("#[")) {
       continue;
     }
@@ -391,7 +405,10 @@ function readStructFields(source, name, options = {}) {
     }
     const rustName = fieldMatch[1];
     const rustType = fieldMatch[2];
-    const tsType = rustTypeToTs(rustType);
+    const storageMatch = canonicalStorage ? rustType.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*Quantity<([\s\S]+)>$/) : null;
+    if (canonicalStorage && !storageMatch) throw new Error(`Canonical storage requires shared quantity shape: ${rustType}`);
+    const storageType = storageMatch ? splitTopLevel(storageMatch[1])[1] : null;
+    const tsType = canonicalStorage ? rustTypeToTs(storageType) : canonicalScalar ? (/^Option\s*</.test(rustType) ? { type: "number | null", nullable: true } : { type: "number", nullable: false }) : rustTypeToTs(rustType);
     const defaultName = renameAll === "camelCase" ? snakeToCamel(rustName) : rustName;
     fields.push({
       name: rename ?? defaultName,
@@ -400,6 +417,8 @@ function readStructFields(source, name, options = {}) {
     });
     rename = null;
     skipIfNone = false;
+    canonicalScalar = false;
+    canonicalStorage = false;
   }
 
   return fields;
@@ -481,7 +500,7 @@ function main() {
     `export type { FeaSourceCheckResult } from "./fea-semantic-contracts.js";`,
   ];
   const authoringEnums = [
-    formatTypeUnion("FeaGeometryUnits", readEnumValues(geometryUnitsSource, "UnitSystem")),
+    `export type FeaGeometryUnits = import("./fea-semantic-contracts.js").LengthUnit;`,
     formatTypeUnion("FeaComputeBackend", readEnumValues(feaContractsSource, "ComputeBackend")),
     formatTypeUnion("FeaElementOrder", readEnumValues(meshingRequestSource, "ElementOrder")),
     formatTypeUnion("FeaAnalysisProcedure", readEnumValues(coreIdentitySource, "AnalysisProcedure")),

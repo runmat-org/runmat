@@ -49,7 +49,7 @@ fn realize_thermo_mechanical_context(
     if !prescribed_profile_step {
         return Ok(None);
     }
-    let reference_temperature_k = domain.reference_temperature.kelvin;
+    let reference_temperature_k = domain.reference_temperature.canonical_value();
     if !reference_temperature_k.is_finite() || reference_temperature_k <= 0.0 {
         return Err("thermo-mechanical reference temperature must be finite and positive".into());
     }
@@ -66,8 +66,11 @@ fn realize_thermo_mechanical_context(
         return Err("thermo-mechanical analysis requires at least one thermal material".into());
     }
     if thermal_materials.iter().any(|thermal| {
-        !thermal.expansion_coefficient_per_k.is_finite()
-            || thermal.expansion_coefficient_per_k < 0.0
+        !thermal
+            .expansion_coefficient_per_k
+            .canonical_value()
+            .is_finite()
+            || thermal.expansion_coefficient_per_k.canonical_value() < 0.0
     }) {
         return Err(
             "thermo-mechanical expansion coefficients must be finite and non-negative".into(),
@@ -75,7 +78,7 @@ fn realize_thermo_mechanical_context(
     }
     let thermal_expansion_coefficient = thermal_materials
         .iter()
-        .map(|thermal| thermal.expansion_coefficient_per_k)
+        .map(|thermal| thermal.expansion_coefficient_per_k.canonical_value())
         .sum::<f64>()
         / thermal_materials.len() as f64;
     let mut whole_model_delta = None;
@@ -130,9 +133,13 @@ fn realize_thermo_mechanical_context(
         }
     }
     Ok(Some(FeaThermoMechanicalContext {
-        reference_temperature_k,
-        applied_temperature_delta_k: whole_model_delta.unwrap_or(0.0),
-        thermal_expansion_coefficient,
+        reference_temperature_k: runmat_types::physical::Temperature::new(reference_temperature_k),
+        applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(
+            whole_model_delta.unwrap_or(0.0),
+        ),
+        thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(
+            thermal_expansion_coefficient,
+        ),
         region_temperature_deltas: region_deltas
             .into_iter()
             .map(
@@ -152,8 +159,8 @@ fn realize_electro_thermal_context(
     let Some(domain) = model.electro_thermal.as_ref() else {
         return Ok(None);
     };
-    if !domain.reference_temperature.kelvin.is_finite()
-        || domain.reference_temperature.kelvin <= 0.0
+    if !domain.reference_temperature.canonical_value().is_finite()
+        || domain.reference_temperature.canonical_value() <= 0.0
     {
         return Err("electro-thermal reference temperature must be finite and positive".into());
     }
@@ -163,10 +170,13 @@ fn realize_electro_thermal_context(
         .filter_map(|material| material.electrical.as_ref())
         .collect::<Vec<_>>();
     if electrical_materials.iter().any(|material| {
-        !material.conductivity_s_per_m.is_finite()
-            || material.conductivity_s_per_m <= 0.0
-            || !material.resistive_heating_coefficient.is_finite()
-            || material.resistive_heating_coefficient < 0.0
+        !material.conductivity_s_per_m.canonical_value().is_finite()
+            || material.conductivity_s_per_m.canonical_value() <= 0.0
+            || !material
+                .resistive_heating_coefficient
+                .canonical_value()
+                .is_finite()
+            || material.resistive_heating_coefficient.canonical_value() < 0.0
     }) {
         return Err(
             "electro-thermal material conductivity must be finite and positive and resistive heating must be finite and non-negative"
@@ -181,12 +191,17 @@ fn realize_electro_thermal_context(
             (
                 electrical_materials
                     .iter()
-                    .map(|material| material.conductivity_s_per_m.max(1.0e-12))
+                    .map(|material| material.conductivity_s_per_m.canonical_value().max(1.0e-12))
                     .sum::<f64>()
                     / count,
                 electrical_materials
                     .iter()
-                    .map(|material| material.resistive_heating_coefficient.max(0.0))
+                    .map(|material| {
+                        material
+                            .resistive_heating_coefficient
+                            .canonical_value()
+                            .max(0.0)
+                    })
                     .sum::<f64>()
                     / count,
             )
@@ -202,10 +217,14 @@ fn realize_electro_thermal_context(
         }
     }
     Ok(Some(FeaElectroThermalContext {
-        reference_temperature_k: domain.reference_temperature.kelvin,
+        reference_temperature_k: runmat_types::physical::Temperature::new(
+            domain.reference_temperature.canonical_value(),
+        ),
         applied_voltage_v: applied_voltage_v.unwrap_or(0.0),
         base_electrical_conductivity_s_per_m,
-        resistive_heating_coefficient,
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+            resistive_heating_coefficient,
+        ),
     }))
 }
 
@@ -255,7 +274,13 @@ mod tests {
             .expect("fixture excitations should realize");
         let (thermo, electro) =
             realize_coupling_contexts(&model, &realized).expect("coupling context should realize");
-        assert_eq!(thermo.unwrap().applied_temperature_delta_k, 0.0);
+        assert_eq!(
+            thermo
+                .unwrap()
+                .applied_temperature_delta_k
+                .canonical_value(),
+            0.0
+        );
         assert!(electro.is_none());
     }
 
@@ -310,6 +335,14 @@ mod tests {
         let (thermo, _) =
             realize_coupling_contexts(&model, &realized).expect("coupling context should realize");
 
-        assert!((thermo.unwrap().applied_temperature_delta_k - 20.0).abs() < 1.0e-12);
+        assert!(
+            (thermo
+                .unwrap()
+                .applied_temperature_delta_k
+                .canonical_value()
+                - 20.0)
+                .abs()
+                < 1.0e-12
+        );
     }
 }

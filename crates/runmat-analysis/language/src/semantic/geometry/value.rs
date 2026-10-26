@@ -51,7 +51,11 @@ pub(super) fn parameters(
 pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpression> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => Some(source.parse::<f64>().ok()?.into()),
-        CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si().into()),
+        CheckedExpressionKind::CadParameterValue(source) => {
+            Some(GeometryScalarExpression::SourceMeasure {
+                value: source.measure.clone(),
+            })
+        }
         CheckedExpressionKind::Reference(path)
             if path.len() == 2 && path.first().is_some_and(|part| part == "input") =>
         {
@@ -87,26 +91,19 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
         }),
         CheckedExpressionKind::Quantity {
             value,
-            scale_bits,
-            offset_bits,
+            unit,
+            source_unit_symbol,
             ..
-        } => {
-            let scaled = GeometryScalarExpression::Binary {
-                operator: GeometryScalarOperator::Multiply,
-                left: Box::new(scalar(value)?),
-                right: Box::new(f64::from_bits(*scale_bits).into()),
-            };
-            let offset = f64::from_bits(*offset_bits);
-            Some(if offset == 0.0 {
-                scaled
+        } => Some(GeometryScalarExpression::Quantity {
+            value: Box::new(scalar(value)?),
+            unit: *unit,
+            source_unit_symbol: source_unit_symbol.clone(),
+            semantic_kind: if unit.offset() != 0.0 {
+                Some(runmat_types::physical::QuantityKind::Temperature)
             } else {
-                GeometryScalarExpression::Binary {
-                    operator: GeometryScalarOperator::Add,
-                    left: Box::new(scaled),
-                    right: Box::new(offset.into()),
-                }
-            })
-        }
+                None
+            },
+        }),
         _ => None,
     }
 }
@@ -120,34 +117,40 @@ pub(super) fn vector3(value: &CheckedExpression) -> Option<[GeometryScalarExpres
         } if lowering.as_str() == "fea.geometry.global" => argument_values(arguments).next()?,
         _ => value,
     };
+    if let CheckedExpressionKind::Reference(path) = &value.kind {
+        if let [namespace, name] = path.as_slice() {
+            if namespace == "input" {
+                return Some(std::array::from_fn(|component| {
+                    GeometryScalarExpression::ParameterComponent {
+                        name: name.clone(),
+                        component,
+                    }
+                }));
+            }
+        }
+    }
     if let CheckedExpressionKind::Quantity {
         value: components,
-        scale_bits,
-        offset_bits,
+        unit,
+        source_unit_symbol,
         ..
     } = &value.kind
     {
         let CheckedExpressionKind::List(values) = &components.kind else {
             return None;
         };
-        let scale = f64::from_bits(*scale_bits);
-        let offset = f64::from_bits(*offset_bits);
         let values = values
             .iter()
             .map(|component| {
-                let scaled = GeometryScalarExpression::Binary {
-                    operator: GeometryScalarOperator::Multiply,
-                    left: Box::new(scalar(component)?),
-                    right: Box::new(scale.into()),
-                };
-                Some(if offset == 0.0 {
-                    scaled
-                } else {
-                    GeometryScalarExpression::Binary {
-                        operator: GeometryScalarOperator::Add,
-                        left: Box::new(scaled),
-                        right: Box::new(offset.into()),
-                    }
+                Some(GeometryScalarExpression::Quantity {
+                    value: Box::new(scalar(component)?),
+                    unit: *unit,
+                    source_unit_symbol: source_unit_symbol.clone(),
+                    semantic_kind: if unit.offset() != 0.0 {
+                        Some(runmat_types::physical::QuantityKind::Temperature)
+                    } else {
+                        None
+                    },
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -172,6 +175,11 @@ pub(super) fn authoring_value(value: &CheckedExpression) -> Option<GeometryAutho
         CheckedExpressionKind::List(values) if values.len() == 3 => {
             Some(GeometryAuthoringValue::Vector(vector3(value)?))
         }
+        CheckedExpressionKind::Quantity {
+            value: components, ..
+        } if matches!(&components.kind, CheckedExpressionKind::List(values) if values.len() == 3) => {
+            Some(GeometryAuthoringValue::Vector(vector3(value)?))
+        }
         _ => scalar(value).map(GeometryAuthoringValue::Scalar),
     }
 }
@@ -189,12 +197,29 @@ fn parameter_type(value_type: &FeaType) -> Option<GeometryParameterType> {
     match value_type {
         FeaType::Boolean => Some(GeometryParameterType::Boolean),
         FeaType::Integer | FeaType::Real => Some(GeometryParameterType::Scalar),
-        FeaType::Quantity(PhysicalDimension::LENGTH) => Some(GeometryParameterType::Length),
-        FeaType::Quantity(PhysicalDimension::DIMENSIONLESS) => Some(GeometryParameterType::Angle),
+        FeaType::Quantity(spec) if spec.is_compatible_with(PhysicalDimension::LENGTH.into()) => {
+            Some(GeometryParameterType::Length)
+        }
+        FeaType::Quantity(spec)
+            if spec.is_compatible_with(
+                runmat_types::physical::DynamicDimension::quantity_type(
+                    runmat_types::physical::QuantityKind::Angle,
+                ),
+            ) =>
+        {
+            Some(GeometryParameterType::Angle)
+        }
         FeaType::String => Some(GeometryParameterType::Text),
         FeaType::Vector {
-            length: Some(3), ..
-        } => Some(GeometryParameterType::Vector3),
+            length: Some(3),
+            element,
+        } => match element.as_ref() {
+            FeaType::Quantity(descriptor) => {
+                Some(GeometryParameterType::QuantityVector3(*descriptor))
+            }
+            FeaType::Integer | FeaType::Real => Some(GeometryParameterType::Vector3),
+            _ => None,
+        },
         _ => None,
     }
 }

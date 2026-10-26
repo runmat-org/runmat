@@ -15,9 +15,10 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct StructuralLinearSystemView<'a> {
     pub dof_count: usize,
+    pub physical_layout: crate::assembly::physical_fields::StructuralSolveLayout<'a>,
     pub operator: &'a AssembledRealSystem,
     pub constraint_matrix: Option<&'a ResolvedConstraintMatrix>,
     pub affine_constraint_reduction: Option<&'a AffineConstraintReduction>,
@@ -31,6 +32,7 @@ impl<'a> From<&'a AssemblySummary> for StructuralLinearSystemView<'a> {
     fn from(summary: &'a AssemblySummary) -> Self {
         Self {
             dof_count: summary.dof_count,
+            physical_layout: summary.structural_solve_layout(),
             operator: &summary.operator,
             constraint_matrix: summary.constraint_matrix.as_ref(),
             affine_constraint_reduction: summary.affine_constraint_reduction.as_ref(),
@@ -148,6 +150,15 @@ fn solve_structural_system_with_preparation(
     initial_guess: Option<&[f64]>,
     reuse: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> LinearSolveResult {
+    if let Err(message) = summary.validate_physical_inputs(initial_guess) {
+        return super::rejected_system_result(
+            summary.operator,
+            backend_kind,
+            preconditioner_kind,
+            "FEA_INVALID_PHYSICAL_LAYOUT",
+            message,
+        );
+    }
     if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
         return match reuse {
             Some(reuse) => crate::solve::affine::solve_affine_constraint_system_reusing(
@@ -214,5 +225,26 @@ fn solve_structural_system_with_preparation(
             )
             .expect("reference sparse application is infallible for a prepared system")
         }
+    }
+}
+
+impl StructuralLinearSystemView<'_> {
+    fn validate_physical_inputs(&self, initial_guess: Option<&[f64]>) -> Result<(), String> {
+        use runmat_types::physical::{QuantityField, QuantityLayout};
+        self.physical_layout
+            .validate()
+            .map_err(|error| format!("invalid structural basis: {error:?}"))?;
+        if self.physical_layout.component_count() != self.dof_count
+            || self.operator.dof_count() != self.dof_count
+        {
+            return Err(
+                "operator dimensions do not match the retained structural coordinate basis".into(),
+            );
+        }
+        if let Some(values) = initial_guess {
+            QuantityField::try_new(self.physical_layout.clone(), values)
+                .map_err(|error| format!("invalid structural state: {error:?}"))?;
+        }
+        Ok(())
     }
 }

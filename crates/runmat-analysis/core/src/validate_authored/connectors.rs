@@ -28,7 +28,7 @@ pub(super) fn validate_connectors(
                                 .to_string(),
                     });
                 }
-                validate_connector_coefficient(connector, stiffness.newtons_per_meter)?;
+                validate_connector_coefficient(connector, stiffness.canonical_value())?;
             }
             ConnectorKind::AxialDashpot {
                 primary,
@@ -45,15 +45,15 @@ pub(super) fn validate_connectors(
                                 .to_string(),
                     });
                 }
-                validate_connector_coefficient(connector, damping.newton_seconds_per_meter)?;
+                validate_connector_coefficient(connector, damping.canonical_value())?;
             }
             ConnectorKind::IsotropicGroundSpring { target, stiffness } => {
                 validate_connector_target(connector, target, EntityDimension::Point)?;
-                validate_connector_coefficient(connector, stiffness.newtons_per_meter)?;
+                validate_connector_coefficient(connector, stiffness.canonical_value())?;
             }
             ConnectorKind::SurfaceNormalFoundation { target, modulus } => {
                 validate_connector_target(connector, target, EntityDimension::Face)?;
-                validate_connector_coefficient(connector, modulus.newtons_per_cubic_meter)?;
+                validate_connector_coefficient(connector, modulus.canonical_value())?;
             }
         }
     }

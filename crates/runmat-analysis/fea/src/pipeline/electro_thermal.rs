@@ -22,7 +22,7 @@ struct ConductanceEdge {
     from: usize,
     to: usize,
     conductance: f64,
-    length_m: f64,
+    length_m: runmat_types::physical::Length,
     direction: [f64; VECTOR_COMPONENT_COUNT],
 }
 
@@ -172,7 +172,7 @@ pub(crate) fn recover_electro_thermal_fields(
 
     let mut temperature_snapshots = Vec::with_capacity(progress_factors.len());
     let mut thermal_residual_snapshots = Vec::with_capacity(progress_factors.len());
-    let mut final_temperature = vec![summary.reference_temperature_k; node_count];
+    let mut final_temperature = vec![summary.reference_temperature_k.canonical_value(); node_count];
     for (index, progress_factor) in progress_factors.iter().copied().enumerate() {
         let current_factor = progress_factor.clamp(0.0, 1.0);
         let mean_temperature_rise = summary.joule_heating_scale.max(0.0) * current_factor;
@@ -184,7 +184,8 @@ pub(crate) fn recover_electro_thermal_fields(
                 } else {
                     0.0
                 };
-                summary.reference_temperature_k + mean_temperature_rise * source_scale
+                summary.reference_temperature_k.canonical_value()
+                    + mean_temperature_rise * source_scale
             })
             .collect::<Vec<_>>();
         final_temperature = temperature.clone();
@@ -263,7 +264,7 @@ fn edge_electric_field_values(solve: &ElectroThermalPotentialSolve) -> Vec<f64> 
     let mut values = Vec::with_capacity(solve.graph.edges.len() * VECTOR_COMPONENT_COUNT);
     for edge in &solve.graph.edges {
         let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
-        let magnitude = voltage_drop / edge.length_m.max(1.0e-12);
+        let magnitude = voltage_drop / edge.length_m.canonical_value().max(1.0e-12);
         values.extend(edge.direction.iter().map(|component| magnitude * component));
     }
     values
@@ -275,7 +276,7 @@ fn edge_current_density_values(solve: &ElectroThermalPotentialSolve, signed_span
     }
     let mut values = Vec::with_capacity(solve.edge_current.len() * VECTOR_COMPONENT_COUNT);
     for (edge, current) in solve.graph.edges.iter().zip(solve.edge_current.iter()) {
-        let magnitude = current.abs() * signed_span / edge.length_m.max(1.0e-12);
+        let magnitude = current.abs() * signed_span / edge.length_m.canonical_value().max(1.0e-12);
         values.extend(edge.direction.iter().map(|component| magnitude * component));
     }
     values
@@ -444,8 +445,8 @@ fn build_conductance_domain_graph(
             .map(|(edge, conductivity)| ConductanceEdge {
                 from: edge.from,
                 to: edge.to,
-                conductance: conductivity / edge.length_m,
-                length_m: edge.length_m,
+                conductance: conductivity / edge.length_m.canonical_value(),
+                length_m: runmat_types::physical::Length::new(edge.length_m.canonical_value()),
                 direction: edge.direction,
             })
             .collect::<Vec<_>>()
@@ -457,7 +458,7 @@ fn build_conductance_domain_graph(
                 from: index,
                 to: index + 1,
                 conductance,
-                length_m: 1.0,
+                length_m: runmat_types::physical::Length::new(1.0),
                 direction: [1.0, 0.0, 0.0],
             })
             .collect::<Vec<_>>()
@@ -500,7 +501,11 @@ fn build_conductance_domain_graph(
     let mean_edge_length_m = if edges.is_empty() {
         0.0
     } else {
-        edges.iter().map(|edge| edge.length_m).sum::<f64>() / edges.len() as f64
+        edges
+            .iter()
+            .map(|edge| edge.length_m.canonical_value())
+            .sum::<f64>()
+            / edges.len() as f64
     };
     ConductanceDomainGraph {
         edges,
@@ -875,7 +880,7 @@ fn electro_thermal_source_coupling_diagnostic(
     };
     let temperature_rise = final_temperature
         .iter()
-        .map(|value| (value - summary.reference_temperature_k).max(0.0))
+        .map(|value| (value - summary.reference_temperature_k.canonical_value()).max(0.0))
         .collect::<Vec<_>>();
     let temperature_span_k = final_temperature.iter().copied().fold(
         (f64::INFINITY, -f64::INFINITY),
@@ -999,10 +1004,10 @@ mod tests {
     fn summary() -> ElectroThermalAssemblySummary {
         ElectroThermalAssemblySummary {
             enabled: true,
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
             joule_heating_scale: 10.0,
             conductivity_spread_ratio: 1.08,
             region_scale_count: 2,
@@ -1096,7 +1101,7 @@ mod tests {
             &nodal_joule_heat,
             &temperature
                 .iter()
-                .map(|value| value - summary().reference_temperature_k)
+                .map(|value| value - summary().reference_temperature_k.canonical_value())
                 .collect::<Vec<_>>(),
         );
 

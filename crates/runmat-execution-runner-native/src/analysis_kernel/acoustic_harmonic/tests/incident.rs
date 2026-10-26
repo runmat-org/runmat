@@ -57,7 +57,7 @@ fn incident_task(order: ElementOrder, chunk: usize) -> PreparedAcousticHarmonicT
         .push(ExcitationAction::AcousticIncidentPressure(
             AnalysisExcitation {
                 excitation_id: ExcitationId("incident-inlet".into()),
-                target: ExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
                 frame: CoordinateFrame::BoundaryNormalTangent,
                 direction: None,
                 distribution: ExcitationDistribution::UniformKinematic,

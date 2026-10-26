@@ -138,7 +138,8 @@ pub(super) fn merge(
                         .ok()
                         .map(|index| topology.edges[index].tolerance_m)
                 })
-                .fold(options.coordinate_tolerance_m, f64::max);
+                .map(|tolerance| tolerance.canonical_value())
+                .fold(options.coordinate_tolerance_m.canonical_value(), f64::max);
             let discrepancy = distance(previous.point_m, next.point_m);
             if discrepancy > tolerance {
                 return Err(invalid(format!("shared face node {:?} disagrees by {discrepancy:e} m, exceeding admitted {tolerance:e} m",next.node_id)).with_face(&faces[face_index].source_face_id));

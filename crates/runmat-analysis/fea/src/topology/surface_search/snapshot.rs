@@ -157,7 +157,8 @@ impl AnalysisProjection {
                 .nodes
                 .get(face.node_indices[local])
                 .ok_or(BoundarySearchError::InvalidGeometry)?
-                .coordinates_m;
+                .coordinates_m
+                .canonical_value();
         }
         let normal = cross(
             subtract(reference[1], reference[0]),

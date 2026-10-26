@@ -36,7 +36,7 @@ pub(super) fn encroaching_point(
         topology.nodes()[left_index as usize],
         topology.nodes()[right_index as usize],
     ];
-    let endpoints = endpoint_nodes.map(|node| node.coordinates_m);
+    let endpoints = endpoint_nodes.map(|node| node.coordinates_m.canonical_value());
     let region = DiametralRegion::new(endpoints);
     let mut best = None::<(f64, StableDigest, u32, PredicateSign)>;
     let bounds = region.as_ref().map(|region| region.bounds);
@@ -80,11 +80,17 @@ pub(super) fn encroaching_point(
             let node = nodes[vertex as usize];
             let relation = diametral_sphere_position_constructed(
                 endpoint_nodes.map(|node| {
-                    crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
-                        .predicate_point()
+                    crate::cdt::DelaunayVolumeNode::explicit(
+                        node.identity,
+                        node.coordinates_m.canonical_value(),
+                    )
+                    .predicate_point()
                 }),
-                crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
-                    .predicate_point(),
+                crate::cdt::DelaunayVolumeNode::explicit(
+                    node.identity,
+                    node.coordinates_m.canonical_value(),
+                )
+                .predicate_point(),
             )
             .map_err(|failure| {
                 invalid_topology(
@@ -95,7 +101,7 @@ pub(super) fn encroaching_point(
             Ok(
                 matches!(relation, PredicateSign::Negative | PredicateSign::Zero).then(|| {
                     (
-                        circumradius_rank(endpoints, node.coordinates_m),
+                        circumradius_rank(endpoints, node.coordinates_m.canonical_value()),
                         node.identity,
                         vertex,
                         relation,
@@ -131,10 +137,12 @@ pub(super) fn split_parameter(
 ) -> Result<DyadicNode, DelaunaySegmentRecoveryError> {
     let left_coordinates = find_node(topology, left.identity)
         .ok_or_else(|| invalid_topology(context.constraint_index, "left split node is missing"))?
-        .coordinates_m;
+        .coordinates_m
+        .canonical_value();
     let right_coordinates = find_node(topology, right.identity)
         .ok_or_else(|| invalid_topology(context.constraint_index, "right split node is missing"))?
-        .coordinates_m;
+        .coordinates_m
+        .canonical_value();
     let witness_node = topology
         .nodes()
         .get(witness as usize)
@@ -150,7 +158,7 @@ pub(super) fn split_parameter(
     }
     let preferred = placement::preferred(
         [left_coordinates, right_coordinates],
-        witness_node.coordinates_m,
+        witness_node.coordinates_m.canonical_value(),
         context,
         [left.parameter()?, right.parameter()?],
         acute_lineage,
@@ -277,8 +285,8 @@ mod tests {
             constraint_index: 0,
             first_identity: topology.nodes[0].identity,
             last_identity: topology.nodes[1].identity,
-            first_coordinates: topology.nodes[0].coordinates_m,
-            last_coordinates: topology.nodes[1].coordinates_m,
+            first_coordinates: topology.nodes[0].coordinates_m.canonical_value(),
+            last_coordinates: topology.nodes[1].coordinates_m.canonical_value(),
         };
         let mut work = RecoveryWork::new(Default::default(), &NeverCancelled);
         let witness = encroaching_point(

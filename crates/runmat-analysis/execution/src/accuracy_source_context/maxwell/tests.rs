@@ -168,13 +168,13 @@ fn workload() -> MaxwellHarmonicWorkload {
     let mut step = ProcedureStep::electromagnetic_harmonic("field");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![1e8]);
     model.sequence = AnalysisSequence::from_steps("maxwell-source", vec![step]);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 3.0,
-        relative_permittivity: 4.0,
-        relative_permeability: 1.0,
-        resistive_heating_coefficient: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(4.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
         conductivity_frequency_response: Vec::new(),
     });
     for face in 0..4 {
@@ -183,7 +183,7 @@ fn workload() -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: format!("pec:{face}"),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }

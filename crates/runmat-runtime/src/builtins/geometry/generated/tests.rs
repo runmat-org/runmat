@@ -80,12 +80,33 @@ fn identifier(result: crate::BuiltinResult<Value>) -> String {
         .to_string()
 }
 
+/// Canonical values of an admitted expression list; the translation column of a
+/// transform is a typed length, every other coefficient a dimensionless literal.
 fn literals(values: &[GeometryScalarExpression]) -> Vec<f64> {
     values
         .iter()
-        .map(|value| match value {
-            GeometryScalarExpression::Literal { value } => *value,
-            other => panic!("expected literal, got {other:?}"),
+        .enumerate()
+        .map(|(index, value)| match value {
+            GeometryScalarExpression::Literal { value } => {
+                assert!(
+                    !matches!(index, 3 | 7 | 11),
+                    "translation coefficient {index} must be a typed length"
+                );
+                *value
+            }
+            GeometryScalarExpression::Canonical { value } => {
+                assert!(
+                    matches!(index, 3 | 7 | 11),
+                    "coefficient {index} is dimensionless and must stay a literal"
+                );
+                assert_eq!(
+                    value.semantic_kind(),
+                    Some(runmat_types::physical::QuantityKind::Length),
+                    "coefficient {index} is not a length"
+                );
+                value.canonical_value()
+            }
+            other => panic!("expected a canonical coefficient, got {other:?}"),
         })
         .collect()
 }
@@ -390,6 +411,47 @@ fn errors_report_the_calling_builtin_identifier() {
         ))),
         "RunMat:geometry:withRegion:InvalidInput"
     );
+}
+
+#[test]
+fn cylinder_types_lengths_and_positions_and_keeps_the_axis_dimensionless() {
+    let cylinder = block_on(geometry_cylinder_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(0.01),
+            num(0.02),
+            vector([0.0, 0.0, 1.0]),
+            vector([0.1, 0.2, 0.3]),
+        ]),
+    ))
+    .unwrap();
+    let GeometryFeatureOperation::Cylinder {
+        radius_m,
+        height_m,
+        axis,
+        origin_m,
+    } = last_operation(&cylinder)
+    else {
+        panic!("expected cylinder");
+    };
+    let length = |expression: &GeometryScalarExpression| match expression {
+        GeometryScalarExpression::Canonical { value } => {
+            assert_eq!(
+                value.semantic_kind(),
+                Some(runmat_types::physical::QuantityKind::Length)
+            );
+            value.canonical_value()
+        }
+        other => panic!("expected a typed length, got {other:?}"),
+    };
+    assert_eq!(length(&radius_m), 0.01);
+    assert_eq!(length(&height_m), 0.02);
+    assert_eq!(origin_m.iter().map(length).collect::<Vec<_>>(), vec![0.1, 0.2, 0.3]);
+    for (component, expected) in axis.iter().zip([0.0, 0.0, 1.0]) {
+        assert!(
+            matches!(component, GeometryScalarExpression::Literal { value } if *value == expected),
+            "axis component must stay a dimensionless literal, got {component:?}"
+        );
+    }
 }
 
 #[test]

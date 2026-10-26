@@ -251,6 +251,7 @@ pub(super) fn assemble_explicit_structural_system(
         structural_solid_total_mass_kg: 0.0,
         structural_solid_recovery: Vec::new(),
         structural_dof_layout,
+        structural_reduced_basis: None,
         structural_beam_recovery,
         structural_shell_recovery,
         structural_formulations,

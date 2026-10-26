@@ -228,7 +228,6 @@ pub(super) fn resolve_provider_selection<P: GeometryFeatureProvider>(
         }
         runmat_geometry_core::GeometryRegionSelector::Name(_)
         | runmat_geometry_core::GeometryRegionSelector::Tag(_)
-        | runmat_geometry_core::GeometryRegionSelector::SourceAlias(_)
         | runmat_geometry_core::GeometryRegionSelector::GeneratedOutput(_) => {
             return Err(GeometryFeatureError::InvalidPlan(format!(
                 "feature `{feature_id}` uses an edge selector unavailable during feature execution"

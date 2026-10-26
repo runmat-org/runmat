@@ -26,7 +26,7 @@ pub(super) fn refined(levels: usize) -> (ExactBRepTopology, ExactSurfaceMesh, De
     for _ in 0..levels {
         let points = nodes
             .iter()
-            .map(|node| (node.identity, node.coordinates_m))
+            .map(|node| (node.identity, node.coordinates_m.canonical_value()))
             .collect::<BTreeMap<_, _>>();
         let mut midpoint_ids = BTreeMap::new();
         let mut next_cells = Vec::with_capacity(cells.len() * 8);
@@ -139,7 +139,7 @@ pub(super) fn refined(levels: usize) -> (ExactBRepTopology, ExactSurfaceMesh, De
     }
     let points = nodes
         .iter()
-        .map(|node| (node.identity, node.coordinates_m))
+        .map(|node| (node.identity, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut uses = BTreeMap::<_, BTreeMap<_, ExactFaceMeshNodeUse>>::new();
     for triangle in &surface.triangles {

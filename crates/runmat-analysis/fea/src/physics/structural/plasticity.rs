@@ -36,7 +36,7 @@ impl std::error::Error for PlasticityError {}
 
 #[derive(Debug, Clone, Copy)]
 struct LinearHardening {
-    yield_stress_pa: f64,
+    yield_stress_pa: runmat_types::physical::YieldStress,
     modulus_pa: f64,
 }
 
@@ -52,8 +52,8 @@ impl IsotropicConstitutiveModel {
         let elasticity = material
             .require_mechanical()
             .map_err(|_| PlasticityError::MissingIsotropicElasticity)?;
-        let youngs = elasticity.youngs_modulus_pa;
-        let poisson = elasticity.poisson_ratio;
+        let youngs = elasticity.youngs_modulus_pa.canonical_value();
+        let poisson = elasticity.poisson_ratio.canonical_value();
         if !youngs.is_finite()
             || youngs <= 0.0
             || !poisson.is_finite()
@@ -77,17 +77,19 @@ impl IsotropicConstitutiveModel {
                 yield_stress_pa,
                 isotropic_hardening_modulus_pa,
             }) => {
-                if !yield_stress_pa.is_finite()
-                    || *yield_stress_pa <= 0.0
-                    || !isotropic_hardening_modulus_pa.is_finite()
-                    || *isotropic_hardening_modulus_pa < 0.0
-                    || !(3.0 * shear_modulus_pa + isotropic_hardening_modulus_pa).is_finite()
+                let yield_stress = yield_stress_pa.canonical_value();
+                let hardening_modulus = isotropic_hardening_modulus_pa.canonical_value();
+                if !yield_stress.is_finite()
+                    || yield_stress <= 0.0
+                    || !hardening_modulus.is_finite()
+                    || hardening_modulus < 0.0
+                    || !(3.0 * shear_modulus_pa + hardening_modulus).is_finite()
                 {
                     return Err(PlasticityError::InvalidPlasticLaw);
                 }
                 Some(LinearHardening {
                     yield_stress_pa: *yield_stress_pa,
-                    modulus_pa: *isotropic_hardening_modulus_pa,
+                    modulus_pa: hardening_modulus,
                 })
             }
         };
@@ -125,7 +127,7 @@ impl IsotropicConstitutiveModel {
     ) -> Result<f64, PlasticityError> {
         self.validate_committed(committed)?;
         let value = self.plastic.map_or(0.0, |law| {
-            law.yield_stress_pa * committed.equivalent_plastic_strain
+            law.yield_stress_pa.canonical_value() * committed.equivalent_plastic_strain
         });
         if !value.is_finite() {
             return Err(PlasticityError::NonFiniteResponse);
@@ -153,8 +155,8 @@ impl IsotropicConstitutiveModel {
             return Ok(0.0);
         };
         let trial = return_map::trial_stress(self, total_engineering_strain, committed)?;
-        let yield_stress =
-            law.yield_stress_pa + law.modulus_pa * committed.equivalent_plastic_strain;
+        let yield_stress = law.yield_stress_pa.canonical_value()
+            + law.modulus_pa * committed.equivalent_plastic_strain;
         // Cancellation in total - plastic must be scaled by both operands, not just their
         // small difference. Engineering shear has half its engineering magnitude in tensor space.
         let tensor_norm = |strain: &[f64; 6]| {

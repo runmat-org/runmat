@@ -409,14 +409,10 @@ fn fixture() -> (
     model.random_excitations = vec![excitation];
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let volume_region = PersistentEntityId::new(
-        PersistentEntityKind::Region,
-        model.material_assignments[0]
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        vec!["root".into()],
-    );
+    let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     for (face_index, region) in [(0, "root"), (1, "tip"), (3, "dynamic_force")] {
@@ -489,7 +485,9 @@ fn fixture() -> (
 fn random_excitation() -> RandomExcitationSpectrum {
     RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("broadband-base".into()),
-        frequencies_hz: vec![1.0e-3, 100.0, 1_000.0, 10_000.0],
+        frequencies_hz: runmat_types::physical::Quantity::new(vec![
+            1.0e-3, 100.0, 1_000.0, 10_000.0,
+        ]),
         channels: vec![RandomExcitationChannel {
             channel_id: RandomExcitationChannelId("base-x".into()),
             quantity: RandomExcitationQuantity::BaseAcceleration,
@@ -499,14 +497,20 @@ fn random_excitation() -> RandomExcitationSpectrum {
             },
         }],
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
-            vec![CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+            vec![
+                CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([
+                    2.5e-4
+                ]));
+                4
+            ],
             "sha256:native-broadband-base",
         ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     }

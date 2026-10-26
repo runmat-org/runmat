@@ -39,7 +39,7 @@ fn anchored_uniaxial_summary(
         .into_iter()
         .enumerate()
         {
-            if node.coordinates_m[axis] == 0.0 {
+            if node.coordinates_m.canonical_value()[axis] == 0.0 {
                 rows.push(
                     summary
                         .structural_dof_layout
@@ -48,7 +48,7 @@ fn anchored_uniaxial_summary(
                 );
             }
         }
-        let x = node.coordinates_m;
+        let x = node.coordinates_m.canonical_value();
         if (x.iter().sum::<f64>() - 1.0).abs() < 1e-14 {
             let weight = match mesh.topology.volume_elements[0].order {
                 ElementOrder::Tet4 => 1.0 / 6.0,
@@ -133,8 +133,15 @@ fn physical_newton_matches_independent_uniaxial_plastic_bar_and_cold_restart_bot
                 .point_identities
                 .iter()
                 .any(|point| point.element_identity == element.element_identity));
-            assert!((element.elastic_energy_j - 0.5 * 5.6 * 5.6 / 1200.0 / 6.0).abs() < 2e-10);
-            assert!((element.hardening_energy_j - 0.5 * 30.0 * alpha * alpha / 6.0).abs() < 2e-10);
+            assert!(
+                (element.elastic_energy_j.canonical_value() - 0.5 * 5.6 * 5.6 / 1200.0 / 6.0).abs()
+                    < 2e-10
+            );
+            assert!(
+                (element.hardening_energy_j.canonical_value() - 0.5 * 30.0 * alpha * alpha / 6.0)
+                    .abs()
+                    < 2e-10
+            );
         }
         let strain = [
             5.6 / 1200.0 + alpha,
@@ -153,7 +160,8 @@ fn physical_newton_matches_independent_uniaxial_plastic_bar_and_cold_restart_bot
                 let actual = final_state.displacement
                     [summary.structural_dof_layout.index(index, kind).unwrap()];
                 assert!(
-                    (actual - strain[axis] * node.coordinates_m[axis]).abs() < 2e-10,
+                    (actual - strain[axis] * node.coordinates_m.canonical_value()[axis]).abs()
+                        < 2e-10,
                     "order={order:?}, node={index}, axis={axis}, actual={actual}"
                 );
             }

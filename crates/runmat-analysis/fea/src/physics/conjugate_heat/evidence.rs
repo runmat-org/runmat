@@ -204,7 +204,7 @@ pub(super) fn evaluate(
         let mut transferred = 0.0;
         for &(face, a, b) in &plan.faces {
             let f = &p.boundary_faces[face];
-            area += f.area_m2;
+            area += f.area_m2.canonical_value();
             let da = f
                 .node_indices
                 .iter()

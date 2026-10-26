@@ -7,11 +7,11 @@ fn reduced_cfd_rejects_every_signed_vector_constraint() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     for kind in [
         FluidConstraintKind::PrescribedVelocity {
-            target: RegionTarget::authored("inlet"),
+            target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("inlet")),
             value: PrescribedValue::Constant([-2.0, 3.0, -4.0].map(Velocity::new)),
         },
         FluidConstraintKind::MovingWall {
-            target: RegionTarget::authored("wall"),
+            target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("wall")),
             velocity: PrescribedValue::Constant([0.0, -2.0, 0.0].map(Velocity::new)),
         },
     ] {
@@ -55,7 +55,7 @@ fn reduced_cfd_does_not_alias_a_gauge_to_an_outlet_or_ignore_exact_outlet_author
     model.constraints = vec![AnalysisConstraint::Fluid(FluidConstraint {
         constraint_id: "datum".into(),
         kind: FluidConstraintKind::PressureReference {
-            target: RegionTarget::authored("datum"),
+            target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("datum")),
             value: PrescribedValue::Constant(Pressure::new(0.0)),
         },
     })];
@@ -65,7 +65,7 @@ fn reduced_cfd_does_not_alias_a_gauge_to_an_outlet_or_ignore_exact_outlet_author
     model.constraints.clear();
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::authored("outlet"),
+        target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("outlet")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(0.0)),
         },

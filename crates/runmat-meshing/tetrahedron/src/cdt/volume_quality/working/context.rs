@@ -121,7 +121,8 @@ impl<'a> PreparedLocalQuality<'a> {
             .conservative_minimum_length_m()
             .map_err(metric_error)?;
         let quality = self.evaluate_metric(topology, index, context.incident_entity_ids, metric)?;
-        let mut geometry = nodes.map(|node| node.coordinates_m.map(ordered_float_key));
+        let mut geometry =
+            nodes.map(|node| node.coordinates_m.canonical_value().map(ordered_float_key));
         geometry.sort_unstable();
         let grading = self.metric.is_none().then_some(super::grading::Dependency {
             slot: index,

@@ -355,19 +355,19 @@ impl AuthoredConstraintKind {
             Self::ThermalTemperature {
                 value: PrescribedValue::Constant(value),
                 ..
-            } => value.kelvin.is_finite() && value.kelvin >= 0.0,
+            } => value.canonical_value().is_finite() && value.canonical_value() >= 0.0,
             Self::ElectricalPotential {
                 value: PrescribedValue::Constant(value),
                 ..
-            } => value.volts.is_finite(),
+            } => value.canonical_value().is_finite(),
             Self::ElectricalIntegralCurrent {
                 value: PrescribedValue::Constant(value),
                 ..
-            } => value.amperes.is_finite(),
+            } => value.canonical_value().is_finite(),
             Self::MagneticVectorPotential {
                 value: PrescribedValue::Constant(value),
                 ..
-            } => value.webers_per_meter.is_finite(),
+            } => value.canonical_value().is_finite(),
             Self::AcousticPressure {
                 value: PrescribedValue::Constant(value),
                 ..
@@ -375,7 +375,7 @@ impl AuthoredConstraintKind {
             | Self::FluidPressureReference {
                 value: PrescribedValue::Constant(value),
                 ..
-            } => value.pascals.is_finite(),
+            } => value.canonical_value().is_finite(),
             Self::FluidVelocity {
                 value: PrescribedValue::Constant(value),
                 ..
@@ -387,11 +387,11 @@ impl AuthoredConstraintKind {
             Self::StructuralNormalDisplacement {
                 value: PrescribedValue::Constant(value),
                 ..
-            } => value.meters.is_finite(),
+            } => value.canonical_value().is_finite(),
             Self::ThermalAffineJump(AuthoredThermalJump {
                 temperature_jump: PrescribedValue::Constant(value),
                 ..
-            }) => value.kelvin.is_finite(),
+            }) => value.canonical_value().is_finite(),
             _ => true,
         };
         if finite {

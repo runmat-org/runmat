@@ -152,7 +152,8 @@ pub struct ExactEdge {
     pub start_vertex_id: Option<PersistentEntityId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_vertex_id: Option<PersistentEntityId>,
-    pub tolerance_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub tolerance_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Length, f64>,
     pub is_closed: bool,
     pub is_periodic: bool,
     pub is_degenerate: bool,
@@ -162,8 +163,10 @@ pub struct ExactEdge {
 #[serde(deny_unknown_fields)]
 pub struct ExactVertex {
     pub id: PersistentEntityId,
-    pub point_m: [f64; 3],
-    pub tolerance_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub point_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub tolerance_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Length, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -105,7 +105,7 @@ fn original_cantilever_stiffness_matches_closed_form_barycentric_moments() {
                 assert_eq!(mesh.topology.nodes[i].node_id, element.node_ids[local]);
                 i
             });
-            let nodes = indices.map(|i| mesh.topology.nodes[i].coordinates_m);
+            let nodes = indices.map(|i| mesh.topology.nodes[i].coordinates_m.canonical_value());
             let (gradients, volume) = affine_gradients(nodes);
             for (i, a) in gradients.iter().enumerate() {
                 for (j, b) in gradients.iter().enumerate() {

@@ -12,6 +12,7 @@ pub(in crate::cdt::volume_sliver) fn target(
         topology
             .node(topology.node_index(id).expect("source corner"))
             .coordinates_m
+            .canonical_value()
     });
     let slot = source
         .node_identities

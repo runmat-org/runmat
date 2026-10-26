@@ -14,8 +14,8 @@ fn periodic_graph_workspace_is_admitted_without_raising_the_authored_ceiling() {
                 constraint_id: "paired".into(),
                 kind: AcousticConstraintKind::Periodic(PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary("slab_left"),
-                        secondary: RegionTarget::boundary("slab_right"),
+                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),

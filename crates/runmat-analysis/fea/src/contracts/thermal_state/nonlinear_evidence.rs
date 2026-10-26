@@ -7,19 +7,21 @@ pub const THERMAL_MAXIMUM_BACKTRACKING_TRIALS: usize = 24;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalNonlinearSampleEvidence {
-    pub time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub time_s: runmat_types::physical::Time,
     pub iteration_count: usize,
     pub backtracking_count: usize,
     pub relative_equilibrium_residual: f64,
     pub relative_increment: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     /// Actual free-coordinate physical power scale; not an absolute-Kelvin floor.
-    pub power_scale_w: f64,
+    pub power_scale_w: runmat_types::physical::Power,
 }
 
 impl ThermalNonlinearSampleEvidence {
     pub fn satisfies(&self, target: f64) -> bool {
-        self.time_s.is_finite()
-            && self.time_s.to_bits() != (-0.0_f64).to_bits()
+        self.time_s.canonical_value().is_finite()
+            && self.time_s.canonical_value().to_bits() != (-0.0_f64).to_bits()
             && self.iteration_count > 0
             && self.iteration_count <= THERMAL_MAXIMUM_NEWTON_CORRECTIONS
             && self.backtracking_count <= self.iteration_count * THERMAL_MAXIMUM_BACKTRACKING_TRIALS
@@ -28,9 +30,10 @@ impl ThermalNonlinearSampleEvidence {
             && [self.relative_equilibrium_residual, self.relative_increment]
                 .iter()
                 .all(|value| value.is_finite() && *value >= 0.0 && *value <= target)
-            && self.power_scale_w.is_finite()
-            && self.power_scale_w >= 0.0
-            && (self.power_scale_w > 0.0 || self.relative_equilibrium_residual == 0.0)
+            && self.power_scale_w.canonical_value().is_finite()
+            && self.power_scale_w.canonical_value() >= 0.0
+            && (self.power_scale_w.canonical_value() > 0.0
+                || self.relative_equilibrium_residual == 0.0)
     }
 }
 
@@ -41,12 +44,12 @@ mod tests {
     #[test]
     fn final_equilibrium_and_increment_are_both_mandatory() {
         let accepted = ThermalNonlinearSampleEvidence {
-            time_s: 0.0,
+            time_s: runmat_types::physical::Time::new(0.0),
             iteration_count: 3,
             backtracking_count: 2,
             relative_equilibrium_residual: 1e-10,
             relative_increment: 1e-10,
-            power_scale_w: 2.0,
+            power_scale_w: runmat_types::physical::Power::new(2.0),
         };
         assert!(accepted.satisfies(1e-8));
         for invalid in [
@@ -59,11 +62,11 @@ mod tests {
                 ..accepted
             },
             ThermalNonlinearSampleEvidence {
-                power_scale_w: 0.0,
+                power_scale_w: runmat_types::physical::Power::new(0.0),
                 ..accepted
             },
             ThermalNonlinearSampleEvidence {
-                power_scale_w: f64::NAN,
+                power_scale_w: runmat_types::physical::Power::new(f64::NAN),
                 ..accepted
             },
             ThermalNonlinearSampleEvidence {
@@ -79,7 +82,7 @@ mod tests {
                 ..accepted
             },
             ThermalNonlinearSampleEvidence {
-                time_s: -0.0,
+                time_s: runmat_types::physical::Time::new(-0.0),
                 ..accepted
             },
         ] {

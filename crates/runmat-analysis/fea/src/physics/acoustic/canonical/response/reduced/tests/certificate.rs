@@ -16,7 +16,7 @@ fn original_canonical_lossless_discrete_pole_fails_closed_despite_zero_rhs() {
     let pole = AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
         &properties,
-        80.0_f64.sqrt(),
+        runmat_types::physical::Quantity::new(80.0_f64.sqrt()),
     )
     .unwrap();
     let error = super::super::PreparedReduced::new(&pole, AcousticHarmonicPolicy::default())
@@ -30,7 +30,7 @@ fn original_canonical_lossless_discrete_pole_fails_closed_despite_zero_rhs() {
     let off = AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
         &properties,
-        0.9 * 80.0_f64.sqrt(),
+        runmat_types::physical::Quantity::new(0.9 * 80.0_f64.sqrt()),
     )
     .unwrap();
     let prepared =
@@ -39,6 +39,9 @@ fn original_canonical_lossless_discrete_pole_fails_closed_despite_zero_rhs() {
     assert!(prepared.certificate.contraction_bound < prepared.certificate.limit);
     assert_eq!(
         prepared.certificate.operator_identity,
-        prepared.operator.numerical_identity().unwrap()
+        prepared
+            .operator
+            .with_canonical_storage(|operator| operator.numerical_identity())
+            .unwrap()
     );
 }

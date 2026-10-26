@@ -52,7 +52,7 @@ pub(super) fn derive(
                 samples[j] = Sample::SymmetryFace(incidence.face_index);
                 displacements[j] = sub(f.centroid_m, cell.centroid_m);
             } else {
-                displacements[j] = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+                displacements[j] = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
             }
         }
         let metric = GradientMetric::derive(&displacements)?;
@@ -84,7 +84,7 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[V]) -> Result<Ve
                 }
                 Sample::SymmetryFace(i) => {
                     let f = &p.topology.faces[i];
-                    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+                    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
                     scale(normal, -dot(values[c], normal))
                 }
                 Sample::ZeroNormalDerivative => [0.0; 3],
@@ -140,7 +140,7 @@ pub(super) fn linear_terms(
                     }
                     Sample::SymmetryFace(i) => {
                         let f = &t.faces[i];
-                        let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+                        let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
                         for k in 0..3 {
                             for j in 0..3 {
                                 add_term(c, k, j, weight, -normal[k] * normal[j]);

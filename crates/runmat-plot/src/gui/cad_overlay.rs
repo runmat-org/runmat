@@ -61,7 +61,6 @@ pub(crate) struct CadOverlayRenderInput<'a> {
     pub xray_enabled: bool,
     pub owner_visible: &'a dyn Fn(&str) -> bool,
     pub font_scale: f32,
-    pub annotations: &'a [GeometryScreenAnnotation],
 }
 
 impl CadOverlayState {
@@ -87,7 +86,6 @@ impl CadOverlayState {
             xray_enabled,
             owner_visible,
             font_scale,
-            annotations,
         } = input;
         let scale = font_scale.clamp(0.9, 1.0);
         let theme = CadOverlayTheme::from_context(ctx);
@@ -106,7 +104,6 @@ impl CadOverlayState {
             &mut actions,
         );
         self.render_view_menu(ctx, plot_rect, scale, &theme, &mut actions);
-        self.render_annotations(ctx, plot_rect, annotations, scale, &theme);
 
         let panel_top = plot_rect.min.y + strip_height(scale) + 12.0 * scale;
         if self.show_details {
@@ -128,6 +125,22 @@ impl CadOverlayState {
         actions
     }
 
+    pub(crate) fn render_annotation_labels(
+        &self,
+        ctx: &egui::Context,
+        plot_rect: egui::Rect,
+        annotations: &[GeometryScreenAnnotation],
+        font_scale: f32,
+    ) {
+        self.render_annotations(
+            ctx,
+            plot_rect,
+            annotations,
+            font_scale.clamp(0.9, 1.0),
+            &CadOverlayTheme::from_context(ctx),
+        );
+    }
+
     fn render_annotations(
         &self,
         ctx: &egui::Context,
@@ -143,29 +156,96 @@ impl CadOverlayState {
             egui::Order::Foreground,
             egui::Id::new("runmat_fea_geometry_annotations"),
         ));
+        let vector_keepouts: Vec<_> = annotations
+            .iter()
+            .filter_map(|annotation| {
+                annotation.vector_extent.map(|extent| {
+                    egui::Rect::from_two_pos(
+                        plot_rect.min + egui::vec2(extent[0][0], extent[0][1]),
+                        plot_rect.min + egui::vec2(extent[1][0], extent[1][1]),
+                    )
+                    .expand(10.0 * scale)
+                })
+            })
+            .collect();
         let mut occupied = Vec::<egui::Rect>::new();
+        // Presentation order prioritizes selected names, selected conditions and
+        // loads before repeated supports. Keep dense assemblies bounded.
+        let label_budget =
+            ((plot_rect.width() * plot_rect.height() / 32_000.0) as usize).clamp(6, 24);
         for annotation in annotations {
+            if annotation.label.is_empty() {
+                continue;
+            }
+            if occupied.len() >= label_budget {
+                break;
+            }
             let anchor = plot_rect.min + egui::vec2(annotation.position[0], annotation.position[1]);
             if !plot_rect.contains(anchor) {
                 continue;
             }
             let nearest = nearest_annotation_distance(annotation, annotations);
             let detail = annotation_detail(nearest, annotations.len());
+            // Preserve physical values even in crowded views; support symbols
+            // may collapse, but a force/flux must not lose its magnitude.
+            let detail = if matches!(detail, AnnotationDetail::Symbol)
+                && !matches!(
+                    annotation.kind,
+                    GeometrySceneAnnotationKind::FixedSupport
+                        | GeometrySceneAnnotationKind::SymmetrySupport
+                ) {
+                AnnotationDetail::Compact
+            } else {
+                detail
+            };
             let label = annotation_label(annotation, detail);
             let font = egui::FontId::proportional(match detail {
-                AnnotationDetail::Full => 11.0 * scale,
-                AnnotationDetail::Compact => 10.0 * scale,
+                AnnotationDetail::Full => 9.5 * scale,
+                AnnotationDetail::Compact => 9.5 * scale,
                 AnnotationDetail::Symbol => 12.0 * scale,
             });
             let galley = painter.layout_no_wrap(label, font.clone(), theme.primary_text);
-            let padding = egui::vec2(6.0 * scale, 3.0 * scale);
-            let rect = egui::Rect::from_min_size(
-                anchor + egui::vec2(7.0 * scale, -galley.size().y * 0.5 - padding.y),
-                galley.size() + 2.0 * padding,
-            );
-            if occupied.iter().any(|used| used.intersects(rect)) {
-                continue;
+            let padding = egui::vec2(4.0 * scale, 2.0 * scale);
+            let size = galley.size() + 2.0 * padding;
+            let mut positions: Vec<_> = [0.0, -1.0, 1.0, -2.0, 2.0, -3.0, 3.0]
+                .into_iter()
+                .map(|row| {
+                    anchor + egui::vec2(7.0 * scale, -size.y * 0.5 + row * (size.y + 4.0 * scale))
+                })
+                .collect();
+            if let Some(extent) = annotation.vector_extent {
+                let bounds = egui::Rect::from_two_pos(
+                    plot_rect.min + egui::vec2(extent[0][0], extent[0][1]),
+                    plot_rect.min + egui::vec2(extent[1][0], extent[1][1]),
+                )
+                .expand(12.0 * scale);
+                positions.extend([
+                    egui::pos2(anchor.x + 7.0 * scale, bounds.top() - size.y),
+                    egui::pos2(anchor.x + 7.0 * scale, bounds.bottom()),
+                    egui::pos2(bounds.right(), anchor.y - size.y * 0.5),
+                    egui::pos2(bounds.left() - size.x, anchor.y - size.y * 0.5),
+                ]);
             }
+            positions.sort_by(|a, b| a.distance_sq(anchor).total_cmp(&b.distance_sq(anchor)));
+            let rect = positions.into_iter().find_map(|position| {
+                let candidate = egui::Rect::from_min_size(position, size);
+                let rect = candidate.translate(egui::vec2(
+                    (plot_rect.right() - candidate.right())
+                        .min(0.0)
+                        .max(plot_rect.left() - candidate.left()),
+                    (plot_rect.bottom() - candidate.bottom())
+                        .min(0.0)
+                        .max(plot_rect.top() - candidate.top()),
+                ));
+                (!occupied
+                    .iter()
+                    .chain(vector_keepouts.iter())
+                    .any(|used| used.intersects(rect)))
+                .then_some(rect)
+            });
+            let Some(rect) = rect else {
+                continue;
+            };
             occupied.push(rect);
             let color = annotation_color(annotation.color);
             painter.rect_filled(rect, 3.0 * scale, theme.strip_bg.gamma_multiply(0.94));
@@ -175,7 +255,13 @@ impl CadOverlayState {
                 egui::Stroke::new(1.0, color),
                 egui::StrokeKind::Inside,
             );
-            painter.circle_filled(anchor, 3.0 * scale, color);
+            painter.line_segment(
+                [anchor, egui::pos2(rect.left(), rect.center().y)],
+                egui::Stroke::new(1.0, color),
+            );
+            if annotation.vector_extent.is_none() {
+                painter.circle_filled(anchor, 2.0 * scale, color);
+            }
             painter.galley(rect.min + padding, galley, theme.primary_text);
         }
     }
@@ -848,6 +934,9 @@ fn annotation_detail(nearest_distance: f32, count: usize) -> AnnotationDetail {
 }
 
 fn annotation_label(annotation: &GeometryScreenAnnotation, detail: AnnotationDetail) -> String {
+    if annotation.kind == GeometrySceneAnnotationKind::Label {
+        return annotation.label.clone();
+    }
     match detail {
         AnnotationDetail::Full => annotation.label.clone(),
         AnnotationDetail::Compact => annotation
@@ -857,6 +946,7 @@ fn annotation_label(annotation: &GeometryScreenAnnotation, detail: AnnotationDet
             .unwrap_or_else(|| annotation.label.clone()),
         AnnotationDetail::Symbol if annotation.label.contains("</>") => "</>".to_string(),
         AnnotationDetail::Symbol => match annotation.kind {
+            GeometrySceneAnnotationKind::Label => annotation.label.clone(),
             GeometrySceneAnnotationKind::Force | GeometrySceneAnnotationKind::BodyForce => {
                 "→".to_string()
             }
@@ -1255,6 +1345,7 @@ mod tests {
             color: [1.0, 0.0, 0.0, 1.0],
             kind: GeometrySceneAnnotationKind::Force,
             label: "Force · </> impactPulse".to_string(),
+            vector_extent: None,
         };
         assert_eq!(
             annotation_label(&function, AnnotationDetail::Full),

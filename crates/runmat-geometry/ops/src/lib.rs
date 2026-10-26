@@ -25,7 +25,7 @@ pub use triangulation::{
 mod tests {
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry,
-        SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+        SourceGeometryKind, SurfaceMesh, TessellationProfile,
     };
 
     use crate::{compute_axis_aligned_bounds, compute_stats, evaluate_quality};
@@ -34,6 +34,7 @@ mod tests {
         GeometryAsset {
             geometry_id: "geo".to_string(),
             source: GeometrySource {
+                unit_evidence: Default::default(),
                 path: "/x.stl".to_string(),
                 sha256: "hash".to_string(),
                 importer_version: "stl/v1".to_string(),
@@ -46,7 +47,7 @@ mod tests {
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
-            units: UnitSystem::Meter,
+            coordinate_units: None,
             revision: 1,
             meshes: vec![MeshDescriptor {
                 mesh_id: "mesh".to_string(),
@@ -83,7 +84,7 @@ mod tests {
     #[test]
     fn quality_reports_units_warning_when_unspecified() {
         let mut asset = sample();
-        asset.units = UnitSystem::Unspecified;
+        asset.source.unit_evidence = Default::default();
         let report = evaluate_quality(&asset);
         assert!(report
             .warnings

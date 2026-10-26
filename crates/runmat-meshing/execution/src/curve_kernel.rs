@@ -161,11 +161,14 @@ pub(super) fn curve_options(host: &crate::MeshingHostWorkload) -> SharedCurveDis
     let numerical_error_m = request
         .tolerance
         .absolute_floor_m
-        .max(request.tolerance.requested_deviation_m * 1.0e-6)
+        .canonical_value()
+        .max(request.tolerance.requested_deviation_m.canonical_value() * 1.0e-6)
         .max(f64::EPSILON);
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: curve.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                curve.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_tangent_change_rad: curve.maximum_tangent_change_degrees * PI / 180.0,
             minimum_metric_edge_length: curve.minimum_metric_edge_length,
             maximum_metric_edge_length: curve
@@ -177,9 +180,9 @@ pub(super) fn curve_options(host: &crate::MeshingHostWorkload) -> SharedCurveDis
             .limits
             .maximum_recursion_depth
             .min(u32::from(u16::MAX)) as u16,
-        geometry_absolute_error_m: numerical_error_m,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(numerical_error_m),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: numerical_error_m,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(numerical_error_m),
     }
 }
 

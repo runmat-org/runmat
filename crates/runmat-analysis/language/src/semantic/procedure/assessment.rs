@@ -75,13 +75,18 @@ pub(super) fn lower_assessments(
         let bound = |value: &&CheckedExpression| {
             let dimension = match value.value_type {
                 FeaType::Quantity(dimension) => dimension,
-                FeaType::Real | FeaType::Integer => runmat_types::PhysicalDimension::DIMENSIONLESS,
+                FeaType::Real | FeaType::Integer => {
+                    runmat_types::PhysicalDimension::DIMENSIONLESS.into()
+                }
                 _ => return None,
             };
-            Some(AssessmentQuantity {
-                value_si: values::canonical_scalar(value)?,
-                dimension,
-            })
+            Some(
+                AssessmentQuantity::try_from_descriptor(
+                    (dimension).into(),
+                    values::canonical_scalar(value)?,
+                )
+                .ok()?,
+            )
         };
         let minimum = fields.get("minimum").and_then(bound);
         let maximum = fields.get("maximum").and_then(bound);
@@ -169,16 +174,20 @@ fn lower_function_rule(
             values
                 .iter()
                 .map(|value| {
-                    Some(AssessmentQuantity {
-                        value_si: values::canonical_scalar(value)?,
-                        dimension: match value.value_type {
-                            FeaType::Quantity(dimension) => dimension,
-                            FeaType::Real | FeaType::Integer => {
-                                runmat_types::PhysicalDimension::DIMENSIONLESS
-                            }
-                            _ => return None,
-                        },
-                    })
+                    Some(
+                        AssessmentQuantity::try_from_descriptor(
+                            (match value.value_type {
+                                FeaType::Quantity(dimension) => dimension,
+                                FeaType::Real | FeaType::Integer => {
+                                    runmat_types::PhysicalDimension::DIMENSIONLESS.into()
+                                }
+                                _ => return None,
+                            })
+                            .into(),
+                            values::canonical_scalar(value)?,
+                        )
+                        .ok()?,
+                    )
                 })
                 .collect::<Option<Vec<_>>>()?
         }

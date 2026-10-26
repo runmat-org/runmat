@@ -13,8 +13,8 @@ pub mod identity;
 mod mixed_structural;
 mod moment_projection;
 pub(crate) mod nonlinear_solid;
+pub mod physical_fields;
 mod reduced_material_summary;
-mod reduced_rhs;
 mod solid_matrix;
 mod solid_properties;
 pub(crate) mod solid_recovery;
@@ -73,7 +73,6 @@ use self::{
 use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
 use moment_projection::project_moment;
 use reduced_material_summary::structural_material_summary;
-use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::algebra::{
     AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
@@ -136,6 +135,9 @@ pub struct AssemblySummary {
     pub structural_solid_recovery: Vec<SolidRecoveryElementSummary>,
     #[serde(default)]
     pub structural_dof_layout: StructuralDofLayout,
+    /// Actual basis when the current operator has already been reduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural_reduced_basis: Option<physical_fields::StructuralReducedBasis>,
     #[serde(default)]
     pub structural_beam_recovery: Vec<BeamRecoveryElementSummary>,
     #[serde(default)]
@@ -603,10 +605,13 @@ impl fmt::Display for SolverMeshRegionMappingError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StructuralMaterialSummary {
-    pub youngs_modulus_pa: f64,
-    pub poisson_ratio: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub poisson_ratio: runmat_types::physical::PoissonRatio,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub density_kg_per_m3: f64,
+    pub density_kg_per_m3: runmat_types::physical::MassDensity,
     pub lame_lambda_pa: f64,
     pub shear_modulus_pa: f64,
 }
@@ -617,7 +622,8 @@ pub struct BeamRecoveryElementSummary {
     pub region_id: String,
     pub node_i_index: usize,
     pub node_j_index: usize,
-    pub length_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub length_m: runmat_types::physical::Length,
     pub section: BeamSection,
     pub material: BeamMaterial,
     pub transform_global_to_local: BeamTransform12,
@@ -755,37 +761,36 @@ pub(super) fn assemble_linear_system_impl(
         material
             .require_mechanical()
             .ok()
-            .map(|mechanical| mechanical.youngs_modulus_pa)
+            .map(|mechanical| mechanical.youngs_modulus_pa.canonical_value())
     }))
     .unwrap_or(1.0e9);
     let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
         material
             .require_mechanical()
             .ok()
-            .map(|mechanical| mechanical.poisson_ratio)
+            .map(|mechanical| mechanical.poisson_ratio.canonical_value())
     }))
     .unwrap_or(0.3);
     let avg_reference_temperature_k = mean(model.materials.iter().filter_map(|material| {
         material
             .thermal
             .as_ref()
-            .map(|thermal| thermal.reference_temperature_k)
+            .map(|thermal| thermal.reference_temperature_k.canonical_value())
     }))
     .unwrap_or(293.15);
     let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
-    let avg_density_kg_per_m3 = mean(
-        model
-            .materials
-            .iter()
-            .filter_map(|material| material.mass_density_kg_per_m3),
-    )
+    let avg_density_kg_per_m3 = mean(model.materials.iter().filter_map(|material| {
+        material
+            .mass_density_kg_per_m3
+            .map(|quantity| quantity.canonical_value())
+    }))
     .unwrap_or(7850.0);
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
         / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
     let structural_material = StructuralMaterialSummary {
-        youngs_modulus_pa: avg_youngs_modulus,
-        poisson_ratio: avg_poisson_ratio,
-        density_kg_per_m3: avg_density_kg_per_m3,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(avg_youngs_modulus),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(avg_poisson_ratio),
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(avg_density_kg_per_m3),
         lame_lambda_pa,
         shear_modulus_pa,
     };
@@ -807,8 +812,6 @@ pub(super) fn assemble_linear_system_impl(
         && structural_requirement == Some(StructuralFormulationRequirement::SyntheticOperator)
     {
         apply_synthetic_structural_rhs(excitations, &mut rhs);
-    } else if structural_requirement.is_none() {
-        apply_reduced_multiphysics_rhs(excitations, &mut rhs);
     }
 
     let structural_dof_layout = StructuralDofLayout::reduced_translational_rows(mesh_dof_count)
@@ -912,22 +915,26 @@ pub(super) fn assemble_linear_system_impl(
             })
             .transpose()
             .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
-        let thermal_strain_scale = (context.thermal_expansion_coefficient
-            * context.applied_temperature_delta_k.abs())
+        let thermal_strain_scale = (context.thermal_expansion_coefficient.canonical_value()
+            * context.applied_temperature_delta_k.canonical_value().abs())
         .clamp(0.0, 0.05);
-        let thermal_load_scale = (context.applied_temperature_delta_k / 50.0).clamp(-2.0, 2.0);
+        let thermal_load_scale =
+            (context.applied_temperature_delta_k.canonical_value() / 50.0).clamp(-2.0, 2.0);
         let constitutive_temperature_factor = if model.materials.is_empty() {
-            (-(2.5e-4) * context.applied_temperature_delta_k).clamp(-0.25, 0.25)
+            (-(2.5e-4) * context.applied_temperature_delta_k.canonical_value()).clamp(-0.25, 0.25)
         } else {
             let response = mean(model.materials.iter().filter_map(|material| {
                 material.thermal.as_ref().map(|thermal| {
-                    let adjusted_delta = context.applied_temperature_delta_k
-                        + (context.reference_temperature_k - thermal.reference_temperature_k)
-                        + (avg_reference_temperature_k - thermal.reference_temperature_k) * 0.1;
-                    thermal.modulus_temp_coeff_per_k * adjusted_delta
+                    let adjusted_delta = context.applied_temperature_delta_k.canonical_value()
+                        + (context.reference_temperature_k.canonical_value()
+                            - thermal.reference_temperature_k.canonical_value())
+                        + (avg_reference_temperature_k
+                            - thermal.reference_temperature_k.canonical_value())
+                            * 0.1;
+                    thermal.modulus_temp_coeff_per_k.canonical_value() * adjusted_delta
                 })
             }))
-            .unwrap_or(-(2.5e-4) * context.applied_temperature_delta_k);
+            .unwrap_or(-(2.5e-4) * context.applied_temperature_delta_k.canonical_value());
             response.clamp(-0.25, 0.25)
         };
         let constitutive_poisson_coupling =
@@ -943,8 +950,8 @@ pub(super) fn assemble_linear_system_impl(
             model,
             dof_count,
             constitutive_temperature_factor,
-            context.reference_temperature_k,
-            context.applied_temperature_delta_k,
+            context.reference_temperature_k.canonical_value(),
+            context.applied_temperature_delta_k.canonical_value(),
             &mut dof_adjustments,
         );
         let spatial_field = apply_thermo_spatial_field(context, dof_count, &mut dof_adjustments);
@@ -986,9 +993,15 @@ pub(super) fn assemble_linear_system_impl(
             };
         thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
             enabled: true,
-            reference_temperature_k: context.reference_temperature_k,
-            applied_temperature_delta_k: context.applied_temperature_delta_k,
-            thermal_expansion_coefficient: context.thermal_expansion_coefficient,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                context.reference_temperature_k.canonical_value(),
+            ),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(
+                context.applied_temperature_delta_k.canonical_value(),
+            ),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(
+                context.thermal_expansion_coefficient.canonical_value(),
+            ),
             thermal_strain_scale,
             thermal_load_scale,
             constitutive_temperature_factor,
@@ -1026,7 +1039,10 @@ pub(super) fn assemble_linear_system_impl(
         let conductivity_spread_ratio = (max_scale / min_scale).clamp(1.0, 8.0);
         let joule_heating_scale = (context.applied_voltage_v.powi(2)
             * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
-            * context.resistive_heating_coefficient.max(0.0)
+            * context
+                .resistive_heating_coefficient
+                .canonical_value()
+                .max(0.0)
             / 1.0e6)
             .clamp(0.0, 10.0);
 
@@ -1039,10 +1055,14 @@ pub(super) fn assemble_linear_system_impl(
 
         electro_thermal = Some(ElectroThermalAssemblySummary {
             enabled: true,
-            reference_temperature_k: context.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                context.reference_temperature_k.canonical_value(),
+            ),
             applied_voltage_v: context.applied_voltage_v,
             base_electrical_conductivity_s_per_m: context.base_electrical_conductivity_s_per_m,
-            resistive_heating_coefficient: context.resistive_heating_coefficient,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                context.resistive_heating_coefficient.canonical_value(),
+            ),
             joule_heating_scale,
             conductivity_spread_ratio,
             region_scale_count: 0,
@@ -1139,7 +1159,7 @@ pub(super) fn assemble_linear_system_impl(
         let coordinates_m = topology
             .nodes
             .iter()
-            .map(|node| node.coordinates_m)
+            .map(|node| node.coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         let node_identities = topology
             .nodes
@@ -1162,7 +1182,7 @@ pub(super) fn assemble_linear_system_impl(
             ConnectorAssemblyContext {
                 topology_identity: topology.identity,
                 layout: &structural_dof_layout,
-                coordinates_m: &coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(&coordinates_m),
                 node_identities: &node_identities,
             },
             local_execution,
@@ -1274,6 +1294,7 @@ pub(super) fn assemble_linear_system_impl(
         structural_solid_total_mass_kg,
         structural_solid_recovery,
         structural_dof_layout: structural_dof_layout.clone(),
+        structural_reduced_basis: None,
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
         structural_formulations: structural_requirement.map_or_else(Vec::new, |requirement| {
@@ -1461,10 +1482,13 @@ fn electro_thermal_fingerprint(
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
-        context.reference_temperature_k.to_bits(),
+        context.reference_temperature_k.canonical_value().to_bits(),
         context.applied_voltage_v.to_bits(),
         context.base_electrical_conductivity_s_per_m.to_bits(),
-        context.resistive_heating_coefficient.to_bits(),
+        context
+            .resistive_heating_coefficient
+            .canonical_value()
+            .to_bits(),
         joule_heating_scale.to_bits(),
         conductivity_spread_ratio.to_bits(),
         dof_count as u64,
@@ -1629,9 +1653,15 @@ fn thermo_mechanical_fingerprint(
     let mut hash = 1469598103934665603_u64;
     for value in [
         inputs.dof_count as u64,
-        context.reference_temperature_k.to_bits(),
-        context.applied_temperature_delta_k.to_bits(),
-        context.thermal_expansion_coefficient.to_bits(),
+        context.reference_temperature_k.canonical_value().to_bits(),
+        context
+            .applied_temperature_delta_k
+            .canonical_value()
+            .to_bits(),
+        context
+            .thermal_expansion_coefficient
+            .canonical_value()
+            .to_bits(),
         inputs.constitutive_temperature_factor.to_bits(),
         inputs.constitutive_poisson_coupling.to_bits(),
         inputs.effective_modulus_scale.to_bits(),
@@ -1668,7 +1698,8 @@ fn apply_thermo_spatial_field(
     for (idx, region_delta) in context.region_temperature_deltas.iter().enumerate() {
         min_delta = min_delta.min(region_delta.temperature_delta_k);
         max_delta = max_delta.max(region_delta.temperature_delta_k);
-        let normalized = ((region_delta.temperature_delta_k - context.applied_temperature_delta_k)
+        let normalized = ((region_delta.temperature_delta_k
+            - context.applied_temperature_delta_k.canonical_value())
             / 240.0)
             .clamp(-0.45, 0.45);
         let start =
@@ -1738,16 +1769,17 @@ fn apply_thermo_material_heterogeneity(
                 .map(|material| {
                     let modulus = material
                         .require_mechanical()
-                        .map(|mechanical| mechanical.youngs_modulus_pa)
+                        .map(|mechanical| mechanical.youngs_modulus_pa.canonical_value())
                         .unwrap_or(1.0e9)
                         .max(1.0);
                     let temperature_response = material
                         .thermal
                         .as_ref()
                         .map(|thermal| {
-                            thermal.modulus_temp_coeff_per_k
+                            thermal.modulus_temp_coeff_per_k.canonical_value()
                                 * (applied_temperature_delta_k
-                                    + (reference_temperature_k - thermal.reference_temperature_k))
+                                    + (reference_temperature_k
+                                        - thermal.reference_temperature_k.canonical_value()))
                         })
                         .unwrap_or(constitutive_temperature_factor)
                         .clamp(-0.4, 0.2);
@@ -1823,13 +1855,34 @@ mod tests {
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
     };
 
+    #[test]
+    fn production_assembly_rejects_synthetic_joule_heating_rhs() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let result = assemble_linear_system_impl(
+            &model,
+            &static_excitations(&model),
+            None,
+            None,
+            Some(FeaElectroThermalContext {
+                reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                applied_voltage_v: 12.0,
+                base_electrical_conductivity_s_per_m: 1.0,
+                resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+            }),
+            AssemblyExecution::serial_physical(),
+        );
+        assert!(
+            matches!(result, Err(LinearAssemblyError::CouplingRealization(message)) if message.contains("legacy synthetic Joule-heating RHS"))
+        );
+    }
+
     fn fixed_constraint(region_id: &str) -> runmat_analysis_core::AnalysisConstraint {
         runmat_analysis_core::AnalysisConstraint::Structural(
             runmat_analysis_core::StructuralConstraint {
                 constraint_id: "fixed_root".to_string(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                    target: runmat_analysis_core::RegionTarget::authored(region_id),
+                    target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id))),
                 },
             },
         )
@@ -1897,7 +1950,7 @@ mod tests {
         };
         assert_eq!(*node_indices, [0, 1, 2, 3]);
         assert_eq!(
-            *coordinates_m,
+            coordinates_m.canonical_value(),
             [
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -1905,7 +1958,11 @@ mod tests {
                 [0.0, 0.0, 1.0],
             ]
         );
-        let expected_mass_kg = model.materials[0].require_mass_density().unwrap() / 6.0;
+        let expected_mass_kg = model.materials[0]
+            .require_mass_density()
+            .unwrap()
+            .canonical_value()
+            / 6.0;
         assert!(
             (summary.structural_solid_total_mass_kg - expected_mass_kg).abs()
                 <= expected_mass_kg * 1.0e-12
@@ -1956,12 +2013,18 @@ mod tests {
             nodes: vec![
                 runmat_analysis_core::StructuralNode {
                     node_id: 1,
-                    coordinates_m: [0.0, 0.0, 0.0],
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([0.0, 0.0, 0.0]),
                     solid_attachment: None,
                 },
                 runmat_analysis_core::StructuralNode {
                     node_id: 2,
-                    coordinates_m: [1.0, 0.0, 0.0],
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([1.0, 0.0, 0.0]),
                     solid_attachment: None,
                 },
             ],
@@ -1978,20 +2041,41 @@ mod tests {
             }],
             beam_sections: vec![runmat_analysis_core::BeamSectionModel {
                 section_id: "rect".to_string(),
-                area_m2: 1.0e-4,
-                iy_m4: 1.0e-9,
-                iz_m4: 1.0e-9,
-                torsion_j_m4: 1.0e-9,
-                outer_fiber_y_m: 0.01,
-                outer_fiber_z_m: 0.01,
-                torsion_outer_radius_m: 0.01,
+                area_m2:
+                    runmat_types::physical::Quantity::<runmat_types::physical::kind::Area, _>::new(
+                        1.0e-4,
+                    ),
+                iy_m4: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::SecondMomentOfArea,
+                    _,
+                >::new(1.0e-9),
+                iz_m4: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::SecondMomentOfArea,
+                    _,
+                >::new(1.0e-9),
+                torsion_j_m4: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::SecondMomentOfArea,
+                    _,
+                >::new(1.0e-9),
+                outer_fiber_y_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.01),
+                outer_fiber_z_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.01),
+                torsion_outer_radius_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.01),
             }],
             shell_sections: Vec::new(),
         });
         model
             .material_assignments
             .push(runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("span"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span")),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2026,7 +2110,7 @@ mod tests {
     #[test]
     fn solver_mesh_and_beam_share_attached_translation_rows() {
         let mut mesh = tetrahedron4_mesh();
-        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
         mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
             PersistentEntityKind::Vertex,
             "beam_root".into(),
@@ -2217,7 +2301,7 @@ mod tests {
     #[test]
     fn whole_model_body_force_spans_solid_and_explicit_formulations_once() {
         let mut mesh = tetrahedron4_mesh();
-        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
         mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
             PersistentEntityKind::Vertex,
             "beam_root".into(),
@@ -2266,7 +2350,7 @@ mod tests {
     #[test]
     fn mixed_affine_rows_anchor_rigid_modes_without_connector_support() {
         let mut mesh = tetrahedron4_mesh();
-        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
         mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
             PersistentEntityKind::Vertex,
             "beam_root".into(),
@@ -2336,14 +2420,17 @@ mod tests {
         soft_model.constraints.clear();
         let mut hard = soft_model.materials[0].clone();
         hard.material_id = "mat_hard".to_string();
-        hard.require_mechanical_mut().unwrap().youngs_modulus_pa = 200.0e9;
-        hard.require_mechanical_mut().unwrap().poisson_ratio = 0.3;
+        hard.require_mechanical_mut().unwrap().youngs_modulus_pa =
+            runmat_types::physical::YoungsModulus::new(200.0e9);
+        hard.require_mechanical_mut().unwrap().poisson_ratio =
+            runmat_types::physical::PoissonRatio::new(0.3);
         let mut soft = hard.clone();
         soft.material_id = "mat_soft".to_string();
-        soft.require_mechanical_mut().unwrap().youngs_modulus_pa = 20.0e9;
+        soft.require_mechanical_mut().unwrap().youngs_modulus_pa =
+            runmat_types::physical::YoungsModulus::new(20.0e9);
         soft_model.materials = vec![hard.clone(), soft.clone()];
         soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
+            target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("soft_region")),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_soft".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2353,7 +2440,7 @@ mod tests {
 
         let mut hard_model = soft_model.clone();
         hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
+            target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("soft_region")),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_hard".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2377,14 +2464,22 @@ mod tests {
         assert_eq!(
             soft_summary.structural_solid_recovery[0]
                 .material
-                .youngs_modulus_pa,
-            soft.require_mechanical().unwrap().youngs_modulus_pa
+                .youngs_modulus_pa
+                .canonical_value(),
+            soft.require_mechanical()
+                .unwrap()
+                .youngs_modulus_pa
+                .canonical_value()
         );
         assert_eq!(
             hard_summary.structural_solid_recovery[0]
                 .material
-                .youngs_modulus_pa,
-            hard.require_mechanical().unwrap().youngs_modulus_pa
+                .youngs_modulus_pa
+                .canonical_value(),
+            hard.require_mechanical()
+                .unwrap()
+                .youngs_modulus_pa
+                .canonical_value()
         );
     }
 
@@ -2396,12 +2491,13 @@ mod tests {
         model.materials[0]
             .require_mechanical_mut()
             .unwrap()
-            .youngs_modulus_pa = 0.5;
+            .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(0.5);
         model.materials[0]
             .require_mechanical_mut()
             .unwrap()
-            .poisson_ratio = -0.25;
-        model.materials[0].mass_density_kg_per_m3 = Some(0.125);
+            .poisson_ratio = runmat_types::physical::PoissonRatio::new(-0.25);
+        model.materials[0].mass_density_kg_per_m3 =
+            (Some(0.125)).map(runmat_types::physical::MassDensity::new);
 
         let mesh = tetrahedron4_mesh();
         let expected_property_identity =
@@ -2412,12 +2508,30 @@ mod tests {
             .expect("valid low-valued auxetic material should assemble without coercion");
         let recovered_material = summary.structural_solid_recovery[0].material;
 
-        assert_eq!(recovered_material.youngs_modulus_pa, 0.5);
-        assert_eq!(recovered_material.poisson_ratio, -0.25);
-        assert_eq!(recovered_material.density_kg_per_m3, 0.125);
-        assert_eq!(summary.structural_material.youngs_modulus_pa, 0.5);
-        assert_eq!(summary.structural_material.poisson_ratio, -0.25);
-        assert_eq!(summary.structural_material.density_kg_per_m3, 0.125);
+        assert_eq!(recovered_material.youngs_modulus_pa.canonical_value(), 0.5);
+        assert_eq!(recovered_material.poisson_ratio.canonical_value(), -0.25);
+        assert_eq!(
+            recovered_material.density_kg_per_m3.canonical_value(),
+            0.125
+        );
+        assert_eq!(
+            summary
+                .structural_material
+                .youngs_modulus_pa
+                .canonical_value(),
+            0.5
+        );
+        assert_eq!(
+            summary.structural_material.poisson_ratio.canonical_value(),
+            -0.25
+        );
+        assert_eq!(
+            summary
+                .structural_material
+                .density_kg_per_m3
+                .canonical_value(),
+            0.125
+        );
         assert_eq!(
             summary.structural_property_map_identity,
             Some(expected_property_identity)
@@ -2524,12 +2638,12 @@ mod tests {
             vec![
                 FixtureExcitation {
                     id: "tip_force".into(),
-                    region_id: "beam_span".into(),
+                    region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                     kind: FixtureExcitationKind::Force([3.0, -5.0, 7.0]),
                 },
                 FixtureExcitation {
                     id: "tip_moment".into(),
-                    region_id: "beam_span".into(),
+                    region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                     kind: FixtureExcitationKind::Moment([2.0, 4.0, -6.0]),
                 },
             ],
@@ -2773,8 +2887,9 @@ mod tests {
         model.materials[0]
             .require_mechanical_mut()
             .unwrap()
-            .youngs_modulus_pa = 100.0e9;
-        model.materials[0].mass_density_kg_per_m3 = Some(1_000.0);
+            .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0e9);
+        model.materials[0].mass_density_kg_per_m3 =
+            (Some(1_000.0)).map(runmat_types::physical::MassDensity::new);
         model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
             mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.1),
             stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(1.0e-5),
@@ -2784,8 +2899,9 @@ mod tests {
         second_material
             .require_mechanical_mut()
             .unwrap()
-            .youngs_modulus_pa = 200.0e9;
-        second_material.mass_density_kg_per_m3 = Some(2_000.0);
+            .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(200.0e9);
+        second_material.mass_density_kg_per_m3 =
+            (Some(2_000.0)).map(runmat_types::physical::MassDensity::new);
         second_material.damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
             mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
             stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(2.0e-5),
@@ -2793,13 +2909,13 @@ mod tests {
         model.materials.push(second_material);
         model.material_assignments = vec![
             runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("span_first"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span_first")),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
             },
             runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("span_second"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span_second")),
                 expected_material_id: "mat_second".into(),
                 assigned_material_id: "mat_second".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2809,7 +2925,10 @@ mod tests {
         structural.elements[0].region_id = "span_first".into();
         structural.nodes.push(runmat_analysis_core::StructuralNode {
             node_id: 3,
-            coordinates_m: [2.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([2.0, 0.0, 0.0]),
             solid_attachment: None,
         });
         let mut second_element = structural.elements[0].clone();
@@ -2832,13 +2951,15 @@ mod tests {
         assert_eq!(
             summary.structural_beam_recovery[0]
                 .material
-                .youngs_modulus_pa,
+                .youngs_modulus_pa
+                .canonical_value(),
             100.0e9
         );
         assert_eq!(
             summary.structural_beam_recovery[1]
                 .material
-                .youngs_modulus_pa,
+                .youngs_modulus_pa
+                .canonical_value(),
             200.0e9
         );
 
@@ -2881,7 +3002,7 @@ mod tests {
             LinearAssemblyError::Structural(
                 StructuralAssemblyError::InvalidMaterialCoverage(message)
             ) if message.contains("beam_1")
-                && message.contains("beam_span")
+                && message.contains(&runmat_meshing_core::fixtures::fixture_edge("beam_span"))
                 && message.contains("found 0")
         ));
     }
@@ -3135,7 +3256,8 @@ mod tests {
                 force[axis] += nodal[axis];
             }
             let arm = std::array::from_fn::<_, 3, _>(|axis| {
-                projection.nodes[node_index].coordinates_m[axis] - face.centroid_m[axis]
+                projection.nodes[node_index].coordinates_m.canonical_value()[axis]
+                    - face.centroid_m[axis]
             });
             let nodal_moment = [
                 arm[1] * nodal[2] - arm[2] * nodal[1],
@@ -3218,8 +3340,14 @@ mod tests {
             panic!("traction projection must report a vector resultant")
         };
         for (axis, component) in traction.into_iter().enumerate() {
-            assert_close(requested_resultant.real[axis], component * face.area_m2);
-            assert_close(projected_resultant.real[axis], component * face.area_m2);
+            assert_close(
+                requested_resultant.real[axis],
+                component * face.area_m2.canonical_value(),
+            );
+            assert_close(
+                projected_resultant.real[axis],
+                component * face.area_m2.canonical_value(),
+            );
         }
         assert_eq!(evidence.resolved_node_count, 6);
         assert!(evidence.accepted);
@@ -3334,7 +3462,7 @@ mod tests {
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::DistributingCoupling(
                     runmat_analysis_core::ReferencePointCoupling {
-                        target: runmat_analysis_core::RegionTarget::boundary("tip"),
+                        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
                         reference_point: runmat_analysis_core::ReferencePoint {
                             reference_point_id: "tip".into(),
                             position: runmat_analysis_core::Position::new([0.0, 0.0, 0.0]),
@@ -3424,7 +3552,10 @@ mod tests {
             .structural
             .as_mut()
             .expect("fixture has structural topology");
-        structural.nodes[1].coordinates_m = structural.nodes[0].coordinates_m;
+        structural.nodes[1].coordinates_m =
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                structural.nodes[0].coordinates_m.canonical_value(),
+            );
 
         let shell_base = fixture_model(FixtureId::StructuralShellPlateMomentReference);
         let mut shell_unknown_node = shell_base.clone();
@@ -3456,8 +3587,14 @@ mod tests {
             .structural
             .as_mut()
             .expect("fixture has structural topology");
-        structural.nodes[1].coordinates_m = structural.nodes[0].coordinates_m;
-        structural.nodes[2].coordinates_m = structural.nodes[0].coordinates_m;
+        structural.nodes[1].coordinates_m =
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                structural.nodes[0].coordinates_m.canonical_value(),
+            );
+        structural.nodes[2].coordinates_m =
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                structural.nodes[0].coordinates_m.canonical_value(),
+            );
 
         let element_id = base
             .structural
@@ -3587,15 +3724,15 @@ mod tests {
         let mut zero = model.materials[0].clone();
         zero.material_id = "carbon_epoxy_0".into();
         zero.name = "Carbon/epoxy 0 degree lamina".into();
-        zero.mass_density_kg_per_m3 = Some(1_600.0);
+        zero.mass_density_kg_per_m3 = (Some(1_600.0)).map(runmat_types::physical::MassDensity::new);
         zero.elasticity = Some(MaterialElasticityModel::OrthotropicLamina(
             MaterialOrthotropicLaminaModel {
-                longitudinal_modulus_pa: 135.0e9,
-                transverse_modulus_pa: 10.0e9,
-                major_poisson_ratio: 0.3,
-                in_plane_shear_modulus_pa: 5.0e9,
-                transverse_shear_modulus_13_pa: 5.0e9,
-                transverse_shear_modulus_23_pa: 3.8e9,
+                longitudinal_modulus_pa: runmat_types::physical::YoungsModulus::new(135.0e9),
+                transverse_modulus_pa: runmat_types::physical::YoungsModulus::new(10.0e9),
+                major_poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
+                in_plane_shear_modulus_pa: runmat_types::physical::ShearModulus::new(5.0e9),
+                transverse_shear_modulus_13_pa: runmat_types::physical::ShearModulus::new(5.0e9),
+                transverse_shear_modulus_23_pa: runmat_types::physical::ShearModulus::new(3.8e9),
             },
         ));
         zero.damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
@@ -3628,8 +3765,11 @@ mod tests {
             .map(|(ply_id, material_id, angle_rad)| LaminatePlyModel {
                 ply_id: ply_id.into(),
                 material_id: material_id.into(),
-                thickness_m: ply_thickness,
-                angle_rad,
+                thickness_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(ply_thickness),
+                angle_rad: runmat_types::physical::Angle::new(angle_rad),
             })
             .collect(),
             shear_correction: None,
@@ -3694,7 +3834,7 @@ mod tests {
                 &mut model,
                 vec![FixtureExcitation {
                     id: "shell_surface_load".into(),
-                    region_id: "shell_panel".into(),
+                    region_id: runmat_meshing_core::fixtures::fixture_face("shell_panel"),
                     kind,
                 }],
             );
@@ -3737,13 +3877,13 @@ mod tests {
         let cases = [
             (
                 FixtureId::StructuralBeamCantileverEndMomentReference,
-                "beam_span",
+                runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                 [100.0, 0.0, 0.0],
                 [0.02, 0.0, 0.0],
             ),
             (
                 FixtureId::StructuralShellPlateMomentReference,
-                "shell_panel",
+                runmat_meshing_core::fixtures::fixture_face("shell_panel"),
                 [0.0, 0.0, -1_000.0],
                 [0.0, 0.0, -1.0],
             ),
@@ -3794,7 +3934,7 @@ mod tests {
             &mut shell,
             vec![FixtureExcitation {
                 id: "normal_traction".into(),
-                region_id: "shell_panel".into(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("shell_panel"),
                 kind: FixtureExcitationKind::Traction([2.0, 0.0, 0.0]),
             }],
         );
@@ -4061,7 +4201,7 @@ mod tests {
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
                     runmat_analysis_core::PrescribedStructuralDofs {
-                        target: runmat_analysis_core::RegionTarget::authored("root"),
+                        target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
                         translations: vec![runmat_analysis_core::TranslationDofValue {
                             dof: runmat_analysis_core::StructuralTranslationDof::Ux,
                             value: runmat_analysis_core::PrescribedValue::Signal(
@@ -4228,7 +4368,7 @@ mod tests {
         model
             .material_assignments
             .push(runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span_2"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span_2")),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -4237,12 +4377,18 @@ mod tests {
         structural.nodes.extend([
             runmat_analysis_core::StructuralNode {
                 node_id: 3,
-                coordinates_m: [0.0, 2.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 2.0, 0.0]),
                 solid_attachment: None,
             },
             runmat_analysis_core::StructuralNode {
                 node_id: 4,
-                coordinates_m: [1.0, 2.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([1.0, 2.0, 0.0]),
                 solid_attachment: None,
             },
         ]);

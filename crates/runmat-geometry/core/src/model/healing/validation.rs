@@ -60,7 +60,9 @@ impl GeometryHealingReport {
             validate_operation(
                 operation,
                 &self.policy,
-                self.tolerance.maximum_healing_displacement_m,
+                self.tolerance
+                    .maximum_healing_displacement_m
+                    .canonical_value(),
                 &revision_index,
             )?;
         }

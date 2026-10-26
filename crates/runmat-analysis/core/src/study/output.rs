@@ -78,7 +78,11 @@ impl ObservationSpec {
     /// Physical meaning of the projected result, distinct from its recovered source quantity.
     pub fn result_quantity(&self) -> ObservationResultQuantity {
         if self.complex_representation == ComplexRepresentation::PhaseRadians {
-            return ObservationResultQuantity::Dimensionless;
+            return ObservationResultQuantity::Derived(
+                runmat_types::physical::DynamicDimension::quantity_type(
+                    runmat_types::physical::QuantityKind::ComplexPhase,
+                ),
+            );
         }
         if self.complex_representation == ComplexRepresentation::SoundPressureLevel {
             return ObservationResultQuantity::Physical(ObservationQuantity::SoundPressureLevel);
@@ -88,8 +92,8 @@ impl ObservationSpec {
         } else {
             self.quantity
         };
-        match self.result_dimension() {
-            Some(dimension) if dimension != quantity.physical_dimension() => {
+        match self.result_descriptor() {
+            Some(dimension) if Some(dimension) != quantity.quantity_descriptor() => {
                 ObservationResultQuantity::Derived(dimension)
             }
             _ => ObservationResultQuantity::Physical(quantity),
@@ -122,20 +126,26 @@ impl ObservationSpec {
 
     /// SI base dimension after representation and spatial reduction.
     pub fn result_dimension(&self) -> Option<PhysicalDimension> {
+        Some(self.result_descriptor()?.dimension())
+    }
+
+    pub fn result_descriptor(&self) -> Option<runmat_types::physical::DynamicDimension> {
         if matches!(
             self.complex_representation,
             ComplexRepresentation::PhaseRadians | ComplexRepresentation::SoundPressureLevel
         ) {
-            return Some(PhysicalDimension::DIMENSIONLESS);
+            return Some(runmat_types::physical::DynamicDimension::quantity_type(
+                runmat_types::physical::QuantityKind::ComplexPhase,
+            ));
         }
-        let source = self.quantity.physical_dimension();
+        let source = self.quantity.quantity_descriptor()?;
         let spatial = self
             .reduction
             .as_ref()
             .map_or(SpatialReduction::None, |reduction| reduction.spatial);
         let measure = self.target.measure_dimension();
         let spatial_dimension = match spatial {
-            SpatialReduction::Integral | SpatialReduction::NormalFlux => source.multiply(measure?),
+            SpatialReduction::Integral | SpatialReduction::NormalFlux => source.multiply(measure?.into()),
             SpatialReduction::Resultant => {
                 if matches!(
                     self.quantity,
@@ -143,16 +153,16 @@ impl ObservationSpec {
                 ) {
                     Some(source)
                 } else {
-                    source.multiply(measure?)
+                    source.multiply(measure?.into())
                 }
             }
             SpatialReduction::Moment { .. } => {
                 let resultant = if self.quantity == ObservationQuantity::ReactionForce {
                     source
                 } else {
-                    source.multiply(measure?)?
+                    source.multiply(measure?.into())?
                 };
-                resultant.multiply(PhysicalDimension::LENGTH)
+                resultant.multiply(PhysicalDimension::LENGTH.into())
             }
             SpatialReduction::None
             | SpatialReduction::Average
@@ -186,7 +196,7 @@ impl ObservationTarget {
 #[serde(rename_all = "snake_case", tag = "kind", content = "quantity")]
 pub enum ObservationResultQuantity {
     Physical(ObservationQuantity),
-    Derived(PhysicalDimension),
+    Derived(runmat_types::physical::DynamicDimension),
     Dimensionless,
 }
 

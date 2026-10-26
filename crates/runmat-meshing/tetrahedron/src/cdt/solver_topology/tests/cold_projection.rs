@@ -131,6 +131,11 @@ fn cold_projection_admits_both_orders_and_transfers_only_original_retained_stora
         drop(wire);
         let projection = admitted
             .into_projection(runmat_meshing_core::GeometryRevisionRef {
+                source_unit_evidence:
+                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                        runmat_geometry_core::LengthUnit::Meter,
+                        "canonical solver fixture",
+                    ),
                 source_digest: runmat_meshing_core::StableDigest::from_bytes([17; 32]),
                 geometry_revision: 1,
                 persistent_mapping_version: 1,

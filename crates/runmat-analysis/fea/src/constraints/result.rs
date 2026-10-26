@@ -245,7 +245,12 @@ impl CanonicalStructuralConstraintResult {
                 (
                     node.stable_identity,
                     ConstraintNodeState {
-                        coordinates_m: node.coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(
+                            node.coordinates_m.canonical_value()
+                        ),
                         dof_indices: [
                             Some(index * 3),
                             Some(index * 3 + 1),
@@ -389,7 +394,7 @@ impl CanonicalStructuralConstraintResult {
                             group.resultant_force_newtons[component] += generalized_reaction;
                             add_cross_product(
                                 &mut group.resultant_moment_about_global_origin_newton_meters,
-                                node.coordinates_m,
+                                node.coordinates_m.canonical_value(),
                                 component_vector(component, generalized_reaction),
                             );
                         }
@@ -598,7 +603,7 @@ impl CanonicalStructuralConstraintResult {
                 .topology
                 .nodes
                 .iter()
-                .map(|node| (node.stable_identity, node.coordinates_m))
+                .map(|node| (node.stable_identity, node.coordinates_m.canonical_value()))
                 .collect::<BTreeMap<_, _>>(),
             CanonicalStructuralTopologyIdentity::Explicit { .. }
             | CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
@@ -628,7 +633,7 @@ impl CanonicalStructuralConstraintResult {
                 topology
                     .nodes
                     .into_iter()
-                    .map(|node| (node.identity, node.coordinates_m))
+                    .map(|node| (node.identity, node.coordinates_m.canonical_value()))
                     .collect()
             }
         };

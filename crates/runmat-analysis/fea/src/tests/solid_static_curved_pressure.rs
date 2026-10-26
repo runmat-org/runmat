@@ -37,8 +37,18 @@ fn curved_tet10_pressure_preserves_analytic_resultant_moment_and_nodal_loads() {
         .iter_mut()
         .find(|node| node.node_id == bent_node_id)
         .unwrap();
-    assert_eq!(bent_node.coordinates_m, [0.5, 0.0, 0.5]);
-    bent_node.coordinates_m[1] = -delta;
+    assert_eq!(bent_node.coordinates_m.canonical_value(), [0.5, 0.0, 0.5]);
+    {
+        let quantity_change = -delta;
+        let quantity_index = 1;
+        let quantity_slot = &mut bent_node.coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     mesh.validate_canonical().unwrap();
@@ -88,7 +98,7 @@ fn curved_tet10_pressure_preserves_analytic_resultant_moment_and_nodal_loads() {
         for axis in 0..3 {
             nodal_force[axis] += force[axis];
         }
-        let [x, y, z] = node.coordinates_m;
+        let [x, y, z] = node.coordinates_m.canonical_value();
         nodal_moment[0] += y * force[2] - z * force[1];
         nodal_moment[1] += z * force[0] - x * force[2];
         nodal_moment[2] += x * force[1] - y * force[0];
@@ -130,7 +140,7 @@ fn curved_tet10_pressure_preserves_analytic_resultant_moment_and_nodal_loads() {
         for axis in 0..3 {
             reaction_force[axis] += force[axis];
         }
-        let [x, y, z] = node.coordinates_m;
+        let [x, y, z] = node.coordinates_m.canonical_value();
         reaction_moment[0] += y * force[2] - z * force[1];
         reaction_moment[1] += z * force[0] - x * force[2];
         reaction_moment[2] += x * force[1] - y * force[0];

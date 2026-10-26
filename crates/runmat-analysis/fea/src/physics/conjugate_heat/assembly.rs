@@ -152,7 +152,7 @@ fn supg_tau(
         return Ok(0.0);
     }
     let corners: [[f64; 3]; 4] =
-        std::array::from_fn(|i| projection.nodes[e.node_indices[i]].coordinates_m);
+        std::array::from_fn(|i| projection.nodes[e.node_indices[i]].coordinates_m.canonical_value());
     let gradients = barycentric_gradients(corners)?;
     let projected = gradients.iter().map(|g| dot(u, *g).abs()).sum::<f64>();
     if projected <= 0.0 || !projected.is_finite() {
@@ -243,9 +243,10 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
             .material
             .require_mass_density()
             .map_err(|e| Error::InvalidDetail(e.to_string()))?;
-        let capacity = density * thermal.specific_heat_j_per_kgk;
-        if !thermal.conductivity_w_per_mk.is_finite()
-            || thermal.conductivity_w_per_mk <= 0.0
+        let capacity = density.canonical_value() * thermal.specific_heat_j_per_kgk.canonical_value();
+        let conductivity = thermal.conductivity_w_per_mk.canonical_value();
+        if !conductivity.is_finite()
+            || conductivity <= 0.0
             || !capacity.is_finite()
             || capacity <= 0.0
         {
@@ -254,7 +255,7 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
             ));
         }
         elements.push(ElementCoefficients {
-            conductivity_w_per_mk: thermal.conductivity_w_per_mk,
+            conductivity_w_per_mk: conductivity,
             volumetric_capacity_j_per_m3k: capacity,
         });
     }
@@ -344,7 +345,7 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
                 if ambient.imaginary != 0.0 {
                     return Err(Error::Unsupported("complex ambient temperature"));
                 }
-                let h = coefficient.watts_per_square_meter_kelvin;
+                let h = coefficient.canonical_value();
                 if !h.is_finite() || h < 0.0 {
                     return Err(Error::Invalid("convection coefficient"));
                 }

@@ -33,14 +33,14 @@ const LOCAL_TRANSIENT_BLOCK_INTERVALS: u64 = 256;
 
 #[derive(Clone, Debug)]
 pub(super) struct TransientInitialSample {
-    pub(super) time_s: f64,
+    pub(super) time_s: runmat_types::physical::Time,
     pub(super) state: SecondOrderState,
     pub(super) summary: AssemblySummary,
     pub(super) projected_residual_norm: f64,
     pub(super) reaction: Vec<f64>,
-    pub(super) strain_energy_j: f64,
-    pub(super) kinetic_energy_j: f64,
-    pub(super) energy_balance_residual_j: f64,
+    pub(super) strain_energy_j: runmat_types::physical::Energy,
+    pub(super) kinetic_energy_j: runmat_types::physical::Energy,
+    pub(super) energy_balance_residual_j: runmat_types::physical::Energy,
     pub(super) relative_energy_balance_error: f64,
     pub(super) dynamic_balance: StructuralDynamicBalanceSnapshot,
 }
@@ -48,18 +48,18 @@ pub(super) struct TransientInitialSample {
 #[derive(Clone, Debug)]
 pub(super) struct TransientAcceptedSample {
     pub(super) schedule_ordinal: u64,
-    pub(super) time_s: f64,
-    pub(super) accepted_time_step_s: f64,
+    pub(super) time_s: runmat_types::physical::Time,
+    pub(super) accepted_time_step_s: runmat_types::physical::Time,
     pub(super) state: SecondOrderState,
     pub(super) summary: AssemblySummary,
     pub(super) projected_residual_norm: f64,
     pub(super) reaction: Vec<f64>,
-    pub(super) strain_energy_j: f64,
-    pub(super) kinetic_energy_j: f64,
-    pub(super) applied_load_work_j: f64,
-    pub(super) support_work_j: f64,
-    pub(super) damping_dissipation_j: f64,
-    pub(super) energy_balance_residual_j: f64,
+    pub(super) strain_energy_j: runmat_types::physical::Energy,
+    pub(super) kinetic_energy_j: runmat_types::physical::Energy,
+    pub(super) applied_load_work_j: runmat_types::physical::Energy,
+    pub(super) support_work_j: runmat_types::physical::Energy,
+    pub(super) damping_dissipation_j: runmat_types::physical::Energy,
+    pub(super) energy_balance_residual_j: runmat_types::physical::Energy,
     pub(super) relative_energy_balance_error: f64,
     pub(super) dynamic_balance: StructuralDynamicBalanceSnapshot,
     pub(super) integration_interval: Option<TransientIntegrationInterval>,
@@ -126,7 +126,7 @@ pub(super) fn initialize<E, M: std::fmt::Display>(
             },
         )
         .map_err(|error| TransientSolveError::InitialAcceleration { detail: error })?;
-    let initial_time_s = schedule.points[0].time_s;
+    let initial_time_s = schedule.points[0].time_s.canonical_value();
     require_numerical_residual(
         initial.projected_relative_residual,
         initial_time_s,
@@ -153,14 +153,16 @@ pub(super) fn initialize<E, M: std::fmt::Display>(
             }
         })?;
     let sample = TransientInitialSample {
-        time_s: initial_time_s,
+        time_s: runmat_types::physical::Time::new(initial_time_s),
         state: physical_state.clone(),
         summary: physical_summary.clone(),
         projected_residual_norm: projected_relative_residual,
         reaction: history.reaction_snapshots()[0].clone(),
-        strain_energy_j: history.strain_energy_j()[0],
-        kinetic_energy_j: history.kinetic_energy_j()[0],
-        energy_balance_residual_j: history.energy_balance_residual_j()[0],
+        strain_energy_j: runmat_types::physical::Energy::new(history.strain_energy_j()[0]),
+        kinetic_energy_j: runmat_types::physical::Energy::new(history.kinetic_energy_j()[0]),
+        energy_balance_residual_j: runmat_types::physical::Energy::new(
+            history.energy_balance_residual_j()[0],
+        ),
         relative_energy_balance_error: history.relative_energy_balance_error()[0],
         dynamic_balance: history.balances()[0].clone(),
     };
@@ -380,8 +382,8 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             );
             return Err(TransientSolveError::Cancelled);
         }
-        let current_time_s = schedule.points[ordinal - 1].time_s;
-        let next_time_s = schedule_point.time_s;
+        let current_time_s = schedule.points[ordinal - 1].time_s.canonical_value();
+        let next_time_s = schedule_point.time_s.canonical_value();
         let approach = match schedule_point.arrival {
             StructuralTransientScheduleArrival::LeftLimit => SignalSampleApproach::LeftLimit,
             StructuralTransientScheduleArrival::Continuous => SignalSampleApproach::At,
@@ -412,7 +414,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
                 time_step_s,
             )
             .map_err(|source| TransientSolveError::Step {
-                time_s: next_time_s,
+                time_s: runmat_types::physical::Time::new(next_time_s),
                 detail: source,
             })?;
         require_numerical_residual(
@@ -442,13 +444,13 @@ pub(super) fn advance<E, M: std::fmt::Display>(
         let interval =
             (interval_retention == TransientIntervalRetention::RetainForMotion).then(|| {
                 TransientIntegrationInterval {
-                    start_time_s: current_time_s,
+                    start_time_s: runmat_types::physical::Time::new(current_time_s),
                     start_approach: state.continuation_approach,
                     start_summary: previous_physical_summary,
                     start_displacement: previous_physical_state.displacement().to_vec(),
                     start_velocity: previous_physical_state.velocity().to_vec(),
                     start_acceleration: previous_physical_state.acceleration().to_vec(),
-                    end_time_s: next_time_s,
+                    end_time_s: runmat_types::physical::Time::new(next_time_s),
                     end_approach: approach,
                     end_summary: physical_step_summary.clone(),
                     end_displacement: physical_step_state.displacement().to_vec(),
@@ -473,7 +475,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             let point_state = strategy
                 .refresh_acceleration(&point_summary, &state.numerical_continuation_state)
                 .map_err(|error| TransientSolveError::AccelerationRefresh {
-                    time_s: next_time_s,
+                    time_s: runmat_types::physical::Time::new(next_time_s),
                     detail: error,
                 })?;
             require_numerical_residual(
@@ -504,7 +506,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             let right_limit_state = strategy
                 .refresh_acceleration(&right_limit_summary, &state.numerical_continuation_state)
                 .map_err(|error| TransientSolveError::AccelerationRefresh {
-                    time_s: next_time_s,
+                    time_s: runmat_types::physical::Time::new(next_time_s),
                     detail: error,
                 })?;
             require_numerical_residual(
@@ -533,18 +535,30 @@ pub(super) fn advance<E, M: std::fmt::Display>(
         samples.push(TransientAcceptedSample {
             schedule_ordinal: u64::try_from(ordinal)
                 .map_err(|_| TransientSolveError::ScheduleOrdinalLimit)?,
-            time_s: next_time_s,
-            accepted_time_step_s: time_step_s,
+            time_s: runmat_types::physical::Time::new(next_time_s),
+            accepted_time_step_s: runmat_types::physical::Time::new(time_step_s),
             state: public_state,
             summary: public_summary,
             projected_residual_norm,
             reaction: history.reaction_snapshots()[history_index].clone(),
-            strain_energy_j: history.strain_energy_j()[history_index],
-            kinetic_energy_j: history.kinetic_energy_j()[history_index],
-            applied_load_work_j: history.external_work_j()[history_index],
-            support_work_j: history.support_work_j()[history_index],
-            damping_dissipation_j: history.damping_dissipation_j()[history_index],
-            energy_balance_residual_j: history.energy_balance_residual_j()[history_index],
+            strain_energy_j: runmat_types::physical::Energy::new(
+                history.strain_energy_j()[history_index],
+            ),
+            kinetic_energy_j: runmat_types::physical::Energy::new(
+                history.kinetic_energy_j()[history_index],
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                history.external_work_j()[history_index],
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                history.support_work_j()[history_index],
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                history.damping_dissipation_j()[history_index],
+            ),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(
+                history.energy_balance_residual_j()[history_index],
+            ),
             relative_energy_balance_error: history.relative_energy_balance_error()[history_index],
             dynamic_balance: history.balances()[history_index].clone(),
             integration_interval: interval,
@@ -566,7 +580,7 @@ fn require_numerical_residual<E>(
 ) -> Result<(), TransientSolveError<E>> {
     if !residual_norm.is_finite() || residual_norm > target {
         return Err(TransientSolveError::ResidualTargetExceeded {
-            time_s,
+            time_s: runmat_types::physical::Time::new(time_s),
             residual_norm,
             target,
         });

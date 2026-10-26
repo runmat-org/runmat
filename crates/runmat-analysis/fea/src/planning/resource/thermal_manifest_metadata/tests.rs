@@ -55,7 +55,7 @@ fn complete_manifest_profile_bounds_real_steady_and_transient_headers() {
                 .push(AnalysisConstraint::Thermal(ThermalConstraint {
                     constraint_id: "thermal_anchor".into(),
                     kind: ThermalConstraintKind::Prescribed {
-                        target: RegionTarget::boundary(boundary),
+                        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                         value: PrescribedValue::Constant(Temperature::new(293.15)),
                     },
                 }));

@@ -39,7 +39,12 @@ fn indexed_location_reuse_matches_original_pairwise_scan_across_scales_and_round
             let expected = topology
                 .nodes
                 .iter()
-                .find(|node| coordinates_share_representable_location(node.coordinates_m, query))
+                .find(|node| {
+                    coordinates_share_representable_location(
+                        node.coordinates_m.canonical_value(),
+                        query,
+                    )
+                })
                 .map(|node| node.identity);
             assert_eq!(
                 find_representable_node(&topology, query, 0, &mut work).unwrap(),

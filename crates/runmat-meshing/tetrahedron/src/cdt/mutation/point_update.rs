@@ -69,8 +69,8 @@ impl TopologyMutation {
                 .node_indices
                 .get(&replacement.identity)
                 .is_some_and(|existing| *existing != index)
-            || (replacement.coordinates_m != old.coordinates_m
-                && self.contains_position(replacement.coordinates_m))
+            || (replacement.coordinates_m.canonical_value() != old.coordinates_m.canonical_value()
+                && self.contains_position(replacement.coordinates_m.canonical_value()))
         {
             return Err(error("relocation node identity or position collides"));
         }
@@ -147,13 +147,18 @@ impl TopologyMutation {
         }
         self.node_indices.remove(&old.identity);
         self.positions
-            .remove(&old.coordinates_m.map(coordinate_bits));
+            .remove(&old.coordinates_m.canonical_value().map(coordinate_bits));
         self.nodes[index as usize] = replacement;
         self.node_indices.insert(replacement.identity, index);
-        self.positions
-            .insert(replacement.coordinates_m.map(coordinate_bits));
+        self.positions.insert(
+            replacement
+                .coordinates_m
+                .canonical_value()
+                .map(coordinate_bits),
+        );
         self.coordinate_scale_m = replacement
             .coordinates_m
+            .canonical_value()
             .into_iter()
             .map(f64::abs)
             .fold(self.coordinate_scale_m, f64::max);

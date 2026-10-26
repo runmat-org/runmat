@@ -70,7 +70,7 @@ fn spectrum(
 ) -> RandomExcitationSpectrum {
     RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("broadband-base".into()),
-        frequencies_hz,
+        frequencies_hz: runmat_types::physical::Quantity::new(frequencies_hz),
         channels,
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
             matrices,
@@ -80,7 +80,8 @@ fn spectrum(
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     }
@@ -106,8 +107,8 @@ fn physical_random_response_matches_independent_dense_reference_and_round_trips(
         vec![lower, upper],
         vec![channel("x", [1.0, 0.0, 0.0])],
         vec![
-            CrossPowerSpectralDensity::diagonal(&[density]),
-            CrossPowerSpectralDensity::diagonal(&[density]),
+            CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([density])),
+            CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([density])),
         ],
     );
     let result = solve_modal_random_response(&summary, &basis, &excitation, policy()).unwrap();
@@ -198,7 +199,15 @@ fn physical_random_response_matches_independent_dense_reference_and_round_trips(
         result
     );
     let mut substituted = excitation.clone();
-    substituted.spectral_density.values_mut().unwrap()[0].values[0].real *= 2.0;
+    let matrix = &mut substituted.spectral_density.values_mut().unwrap()[0];
+    matrix.values = matrix
+        .values
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[0].real *= 2.0;
+            values
+        })
+        .unwrap();
     assert!(result
         .validate_for(&summary, &basis, &substituted)
         .unwrap_err()
@@ -215,12 +224,12 @@ fn full_cross_spectrum_can_cancel_identical_base_motion_channels() {
     let (summary, basis) = physical_basis();
     let frequency = basis.modes()[0].frequency_hz();
     let matrix = CrossPowerSpectralDensity {
-        values: vec![
+        values: runmat_types::physical::Quantity::new(vec![
             ComplexSpectralDensity::new(1.0, 0.0),
             ComplexSpectralDensity::new(-1.0, 0.0),
             ComplexSpectralDensity::new(-1.0, 0.0),
             ComplexSpectralDensity::new(1.0, 0.0),
-        ],
+        ]),
     };
     let excitation = spectrum(
         vec![frequency * 0.5, frequency * 2.0],
@@ -262,8 +271,8 @@ fn insufficient_directional_mass_is_rejected() {
         vec![frequency * 0.5, frequency * 2.0],
         vec![channel("missing-direction", direction)],
         vec![
-            CrossPowerSpectralDensity::diagonal(&[1.0]),
-            CrossPowerSpectralDensity::diagonal(&[1.0]),
+            CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([1.0])),
+            CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([1.0])),
         ],
     );
     let mut demanding = policy();

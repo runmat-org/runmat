@@ -1,3 +1,4 @@
+use super::quantity_layout::{pressure_operator, PressureOperator};
 use super::AcousticHarmonicError;
 use crate::{
     algebra::{
@@ -16,22 +17,30 @@ use crate::{
 pub(super) struct AcousticAssembly {
     pub projection: AnalysisProjection,
     /// Volume stiffness plus the reactive boundary stiffness of spherical radiation.
-    pub stiffness: RealSparseMatrix,
+    pub stiffness: PressureOperator,
     /// Volume stiffness only; boundary resampling rebuilds `stiffness` from it.
-    pub volume_stiffness: RealSparseMatrix,
-    pub mass: RealSparseMatrix,
+    pub volume_stiffness: PressureOperator,
+    pub mass: PressureOperator,
     /// Total admittance B of the harmonic operator K − ω²M + iωB: the volume loss of
     /// damped regions plus the boundary admittance.
-    pub impedance: RealSparseMatrix,
+    pub impedance: PressureOperator,
     /// Volume loss alone; boundary resampling rebuilds `impedance` from it.
-    pub volume_admittance: RealSparseMatrix,
+    pub volume_admittance: PressureOperator,
     /// Whether any region carries material loss (a complex bulk modulus).
     pub lossy: bool,
-    pub omega: f64,
-    pub density: Vec<f64>,
-    pub compressibility: Vec<f64>,
-    pub source: Vec<ProjectionScalar>,
-    pub prescribed: Vec<Option<ProjectionScalar>>,
+    pub derivative_rate: runmat_types::physical::TimeDerivativeRate,
+    pub density:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::MassDensity, Vec<f64>>,
+    pub compressibility:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Compressibility, Vec<f64>>,
+    pub source: runmat_types::physical::Quantity<
+        runmat_types::physical::DynamicDimension,
+        Vec<ProjectionScalar>,
+    >,
+    pub prescribed: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::Pressure,
+        Vec<Option<ProjectionScalar>>,
+    >,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
     pub incident_faces: Vec<(crate::topology::ProjectedBoundaryFace, f64)>,
     pub reduction: Option<crate::constraints::AffineConstraintReduction>,
@@ -41,8 +50,10 @@ impl AcousticAssembly {
     pub(super) fn assemble(
         projection: AnalysisProjection,
         properties: &CompiledPropertyMap,
-        omega: f64,
+        omega: runmat_types::physical::AngularFrequency,
     ) -> Result<Self, AcousticHarmonicError> {
+        let derivative_rate = omega.phasor_derivative_rate();
+        let omega = omega.canonical_value();
         let size = projection.nodes.len();
         let mut density = Vec::with_capacity(projection.elements.len());
         let mut compressibility = Vec::with_capacity(projection.elements.len());
@@ -60,14 +71,15 @@ impl AcousticAssembly {
                 .map_err(|e| AcousticHarmonicError::Material(e.to_string()))?;
             let rho = material
                 .require_mass_density()
-                .map_err(|e| AcousticHarmonicError::Material(e.to_string()))?;
-            let c = acoustic.speed_of_sound_m_per_s;
+                .map_err(|e| AcousticHarmonicError::Material(e.to_string()))?
+                .canonical_value();
+            let c = acoustic.speed_of_sound_m_per_s.canonical_value();
             if !rho.is_finite() || rho <= 0.0 || !c.is_finite() || c <= 0.0 {
                 return Err(AcousticHarmonicError::Material(
                     "density and sound speed must be positive finite".into(),
                 ));
             }
-            let zeta = acoustic.damping_ratio;
+            let zeta = acoustic.damping_ratio.canonical_value();
             if !zeta.is_finite() || !(0.0..1.0).contains(&zeta) {
                 return Err(AcousticHarmonicError::Material(
                     "acoustic damping ratio must be finite in [0, 1)".into(),
@@ -161,26 +173,21 @@ impl AcousticAssembly {
             OperatorRole::Damping,
             "volume_loss",
         )?)?;
-        let stiffness = finish(stiffness)?;
+        let volume_admittance = pressure_operator(volume_admittance, 1)?;
+        let stiffness = pressure_operator(finish(stiffness)?, 2)?;
         Ok(Self {
             projection,
             volume_stiffness: stiffness.clone(),
             stiffness,
-            mass: finish(mass)?,
+            mass: pressure_operator(finish(mass)?, 0)?,
             impedance: volume_admittance.clone(),
             volume_admittance,
             lossy: loss.iter().any(|eta| *eta > 0.0),
-            omega,
-            density,
-            compressibility,
-            source: vec![
-                ProjectionScalar {
-                    real: 0.0,
-                    imaginary: 0.0
-                };
-                size
-            ],
-            prescribed: vec![None; size],
+            derivative_rate,
+            density: runmat_types::physical::Quantity::new(density),
+            compressibility: runmat_types::physical::Quantity::new(compressibility),
+            source: zero_source(size),
+            prescribed: runmat_types::physical::Quantity::new(vec![None; size]),
             source_evidence: Vec::new(),
             incident_faces: Vec::new(),
             reduction: None,
@@ -190,34 +197,51 @@ impl AcousticAssembly {
     /// Reset sources and prescribed values before resampling boundaries at another time.
     /// Operators and projection are retained; the boundary admittance is rebuilt.
     pub(super) fn with_cleared_sources(mut self) -> Self {
-        self.source.iter_mut().for_each(|value| {
-            *value = ProjectionScalar {
-                real: 0.0,
-                imaginary: 0.0,
-            }
-        });
-        self.prescribed.iter_mut().for_each(|value| *value = None);
+        let size = self.projection.nodes.len();
+        self.source = zero_source(size);
+        self.prescribed = runmat_types::physical::Quantity::new(vec![None; size]);
         self.source_evidence.clear();
         self.incident_faces.clear();
         self
     }
 
     pub(super) fn apply(&self, real: &[f64], imaginary: &[f64]) -> (Vec<f64>, Vec<f64>) {
-        let kr = spmv(&self.stiffness, real).expect("validated pressure shape");
-        let ki = spmv(&self.stiffness, imaginary).expect("validated pressure shape");
-        let mr = spmv(&self.mass, real).expect("validated pressure shape");
-        let mi = spmv(&self.mass, imaginary).expect("validated pressure shape");
-        let br = spmv(&self.impedance, real).expect("validated pressure shape");
-        let bi = spmv(&self.impedance, imaginary).expect("validated pressure shape");
+        let product = |operator: &PressureOperator, values: &[f64]| {
+            operator
+                .with_canonical_storage(|matrix| spmv(matrix, values))
+                .expect("validated pressure shape")
+        };
+        let (kr, ki) = (product(&self.stiffness, real), product(&self.stiffness, imaginary));
+        let (mr, mi) = (product(&self.mass, real), product(&self.mass, imaginary));
+        let (br, bi) = (product(&self.impedance, real), product(&self.impedance, imaginary));
+        let omega = self.derivative_rate.canonical_value();
         (
             (0..real.len())
-                .map(|i| kr[i] - self.omega * self.omega * mr[i] - self.omega * bi[i])
+                .map(|i| kr[i] - omega * omega * mr[i] - omega * bi[i])
                 .collect(),
             (0..real.len())
-                .map(|i| ki[i] - self.omega * self.omega * mi[i] + self.omega * br[i])
+                .map(|i| ki[i] - omega * omega * mi[i] + omega * br[i])
                 .collect(),
         )
     }
+}
+
+/// Zero weak source in the acoustic equation's (second time order) units.
+fn zero_source(
+    size: usize,
+) -> runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<ProjectionScalar>>
+{
+    runmat_types::physical::Quantity::try_from_descriptor(
+        super::quantity_layout::equation_descriptor(2),
+        vec![
+            ProjectionScalar {
+                real: 0.0,
+                imaginary: 0.0
+            };
+            size
+        ],
+    )
+    .expect("finite zero acoustic weak source")
 }
 
 pub(super) fn assembler(size: usize, role: OperatorRole, id: &str) -> RealSparseAssembler {

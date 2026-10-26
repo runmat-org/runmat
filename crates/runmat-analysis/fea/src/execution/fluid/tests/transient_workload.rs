@@ -130,11 +130,15 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
         crate::topology::FiniteVolumeTopology::derive(&projection, w.geometry_policy).unwrap();
     for (i, r) in result.retained_results() {
         let time = 0.3 * ((i + 1) as f64 / 3.);
-        for u in &r.velocity_m_per_s {
+        for u in r.velocity_m_per_s.canonical_values() {
             assert!((u[0] - (0.001 + 0.01 * time)).abs() < 1e-8);
             assert!(u[1].abs() < 1e-8 && u[2].abs() < 1e-8);
         }
-        for (cell, p) in topology.cells.iter().zip(&r.pressure_fluctuation_pa) {
+        for (cell, p) in topology
+            .cells
+            .iter()
+            .zip(r.pressure_fluctuation_pa.canonical_values())
+        {
             assert!((p + 0.01 * (cell.centroid_m[0] - 1.)).abs() < 2e-7);
         }
     }
@@ -235,7 +239,13 @@ fn nonuniform_original_nodal_field_integrates_exact_cell_and_face_initial_data_w
         m.topology
             .nodes
             .iter()
-            .flat_map(|n| [-omega * n.coordinates_m[1], omega * n.coordinates_m[0], 0.])
+            .flat_map(|n| {
+                [
+                    -omega * n.coordinates_m.canonical_value()[1],
+                    omega * n.coordinates_m.canonical_value()[0],
+                    0.,
+                ]
+            })
             .collect(),
     );
     w.model
@@ -248,11 +258,19 @@ fn nonuniform_original_nodal_field_integrates_exact_cell_and_face_initial_data_w
     let original = p.initial_state().original_fields();
     let projection = crate::topology::AnalysisProjection::derive(&m).unwrap();
     let t = crate::topology::FiniteVolumeTopology::derive(&projection, w.geometry_policy).unwrap();
-    for (c, u) in t.cells.iter().zip(original.velocity_m_per_s) {
+    for (c, u) in t
+        .cells
+        .iter()
+        .zip(original.velocity_m_per_s.canonical_values().iter())
+    {
         assert!((u[0] + omega * c.centroid_m[1]).abs() < 1e-16);
         assert!((u[1] - omega * c.centroid_m[0]).abs() < 1e-16);
     }
-    for (f, q) in t.faces.iter().zip(original.face_volume_flux_m3_per_s) {
+    for (f, q) in t
+        .faces
+        .iter()
+        .zip(original.face_volume_flux_m3_per_s.canonical_values().iter())
+    {
         let v = [-omega * f.centroid_m[1], omega * f.centroid_m[0], 0.];
         let expected = (0..3)
             .map(|k| v[k] * f.owner_area_vector_m2[k])
@@ -265,7 +283,7 @@ fn nonuniform_original_nodal_field_integrates_exact_cell_and_face_initial_data_w
         m.topology
             .nodes
             .iter()
-            .flat_map(|n| n.coordinates_m)
+            .flat_map(|n| n.coordinates_m.canonical_value())
             .collect(),
     );
     divergent.model.initial_conditions[0] =

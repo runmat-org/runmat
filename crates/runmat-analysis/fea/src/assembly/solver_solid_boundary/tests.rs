@@ -20,13 +20,28 @@ fn mesh(quadratic: bool, scale: f64) -> SolverMeshArtifact {
     // Two unequal strips of widths .2 and .8. The piecewise affine map preserves straight
     // Tri6/Tet10 midsides, but equal-node loading is not the consistent surface measure.
     for node in &mut mesh.topology.nodes {
-        let y = node.coordinates_m[1];
-        node.coordinates_m[1] = if y <= 0.5 {
-            0.4 * y
-        } else {
-            0.2 + 1.6 * (y - 0.5)
+        let y = node.coordinates_m.canonical_value()[1];
+        {
+            let quantity_change = if y <= 0.5 {
+                0.4 * y
+            } else {
+                0.2 + 1.6 * (y - 0.5)
+            };
+            let quantity_index = 1;
+            let quantity_slot = &mut node.coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
         };
-        node.coordinates_m = node.coordinates_m.map(|coordinate| scale * coordinate);
+        node.coordinates_m =
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                node.coordinates_m
+                    .canonical_value()
+                    .map(|coordinate| scale * coordinate),
+            );
     }
     mesh.seal_canonical_digest().unwrap();
     mesh.validate_canonical().unwrap();
@@ -40,7 +55,7 @@ fn force() -> RealizedExcitation {
         signal_id: SignalId("complex-force".into()),
         quantity: PhysicalQuantityKind::Force,
         sample: ProjectionSample::Static,
-        target: RealizedExcitationTarget::Region(RegionTarget::boundary("slab_right")),
+        target: RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
         kind: RealizedExcitationKind::Force(ComplexVector3 {
             real: [5.0, -7.0, 11.0],
             imaginary: [-3.0, 2.0, 4.0],
@@ -84,9 +99,12 @@ fn independent_weights(mesh: &SolverMeshArtifact) -> Vec<f64> {
     let projection = AnalysisProjection::derive(mesh).unwrap();
     let mut weights = vec![0.0; projection.nodes.len()];
     let mut area = 0.0;
-    for face in projection.boundary_faces_matching("slab_right") {
-        let [a, b, c] =
-            [0, 1, 2].map(|corner| projection.nodes[face.node_indices[corner]].coordinates_m);
+    for face in projection.boundary_faces_matching(&runmat_meshing_core::fixtures::fixture_face("slab_right")) {
+        let [a, b, c] = [0, 1, 2].map(|corner| {
+            projection.nodes[face.node_indices[corner]]
+                .coordinates_m
+                .canonical_value()
+        });
         let ab = std::array::from_fn(|axis| b[axis] - a[axis]);
         let ac = std::array::from_fn(|axis| c[axis] - a[axis]);
         let vector = cross(ab, ac);
@@ -170,10 +188,10 @@ fn face_resultant_uses_consistent_nonuniform_tri3_and_tri6_surface_measure() {
                     .zip(rhs.chunks_exact(3))
                 {
                     let force = [nodal[0], nodal[1], nodal[2]];
-                    let nodal_moment = cross(node.coordinates_m, force);
+                    let nodal_moment = cross(node.coordinates_m.canonical_value(), force);
                     for axis in 0..3 {
                         assert!((force[axis] - weight * expected[axis]).abs() < 1e-11,
-                            "quadratic={quadratic},scale={scale},node={:?}, weight={weight}, force={force:?}", node.coordinates_m);
+                            "quadratic={quadratic},scale={scale},node={:?}, weight={weight}, force={force:?}", node.coordinates_m.canonical_value());
                         resultant[axis] += force[axis];
                         moment[axis] += nodal_moment[axis];
                     }

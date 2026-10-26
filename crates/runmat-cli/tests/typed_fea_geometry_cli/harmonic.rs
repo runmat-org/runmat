@@ -40,9 +40,9 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
         .execute(
             "unit-box",
             &ResolvedGeometryFeatureOperation::Box {
-                width_m: 1.0,
-                depth_m: 1.0,
-                height_m: 1.0,
+                width_m: runmat_types::physical::Length::new(1.0),
+                depth_m: runmat_types::physical::Length::new(1.0),
+                height_m: runmat_types::physical::Length::new(1.0),
             },
             &GeometryFeatureProviderSelection::None,
             &[],
@@ -74,6 +74,8 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
     } else {
         source
     };
+    let source = source.replace("FIRST_FACE_ID", &imported.source_face_ids[&0].analysis_selection_id().unwrap())
+        .replace("SECOND_FACE_ID", &imported.source_face_ids[&1].analysis_selection_id().unwrap());
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     let output = runmat(
         &project,
@@ -151,11 +153,11 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
                         .find(|node| node.node_id == *id)
                         .unwrap();
                     assert!(
-                        (node.coordinates_m[0] - x).abs() < 1e-12,
+                        (node.coordinates_m.canonical_value()[0] - x).abs() < 1e-12,
                         "source ordinal {ordinal}: {:?}",
-                        node.coordinates_m
+                        node.coordinates_m.canonical_value()
                     );
-                    node.coordinates_m
+                    node.coordinates_m.canonical_value()
                 })
                 .collect::<Vec<_>>();
             let a = points[0];
@@ -202,7 +204,7 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
                         .iter()
                         .find(|node| node.node_id == *id)
                         .unwrap();
-                    (node.coordinates_m[0] - x).abs() < 1e-12
+                    (node.coordinates_m.canonical_value()[0] - x).abs() < 1e-12
                 })
             })
             .collect::<Vec<_>>();
@@ -216,9 +218,9 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
                     .find(|node| node.node_id == *id)
                     .unwrap();
                 assert!(
-                    (node.coordinates_m[0] - x).abs() < 1e-12,
+                    (node.coordinates_m.canonical_value()[0] - x).abs() < 1e-12,
                     "end plane x={x}: {:?}",
-                    node.coordinates_m
+                    node.coordinates_m.canonical_value()
                 );
             }
         }
@@ -330,7 +332,7 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
         let mut squared_error = 0.0;
         let mut squared_reference = 0.0;
         for (node, u) in mesh.topology.nodes.iter().zip(values.chunks_exact(6)) {
-            let reference = amplitude * (k * node.coordinates_m[0]).sin();
+            let reference = amplitude * (k * node.coordinates_m.canonical_value()[0]).sin();
             squared_error += (u[0] - reference).powi(2)
                 + (u[1] - 0.4 * reference).powi(2)
                 + u[2..].iter().map(|v| v * v).sum::<f64>();
@@ -383,11 +385,11 @@ geometry part {
         expect exactly_one
     }
     region support : face {
-        select id "face_000001"
+        select id "FIRST_FACE_ID"
         expect exactly_one
     }
     region loaded_face : face {
-        select id "face_000002"
+        select id "SECOND_FACE_ID"
         expect exactly_one
     }
 }

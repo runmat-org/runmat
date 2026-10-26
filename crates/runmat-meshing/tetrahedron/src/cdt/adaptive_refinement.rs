@@ -299,7 +299,12 @@ fn adaptive_node(
     let coordinates_m = std::array::from_fn(|axis| {
         vertices
             .iter()
-            .map(|vertex| topology.nodes[*vertex as usize].coordinates_m[axis] * 0.25)
+            .map(|vertex| {
+                topology.nodes[*vertex as usize]
+                    .coordinates_m
+                    .canonical_value()[axis]
+                    * 0.25
+            })
             .sum()
     });
     // Indicator magnitude is solver evidence, not geometric identity. The same marked cell must

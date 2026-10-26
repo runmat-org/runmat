@@ -174,8 +174,8 @@ fn realize_structural_topology(
         for (segment_index, [from, to]) in segments.into_iter().enumerate() {
             let from_id = structural_node(mesh, from, &mut topology.nodes, &mut node_ids)?;
             let to_id = structural_node(mesh, to, &mut topology.nodes, &mut node_ids)?;
-            let from_coordinates = mesh_node(mesh, from)?.coordinates_m;
-            let to_coordinates = mesh_node(mesh, to)?.coordinates_m;
+            let from_coordinates = mesh_node(mesh, from)?.coordinates_m.canonical_value();
+            let to_coordinates = mesh_node(mesh, to)?.coordinates_m.canonical_value();
             let midpoint = midpoint(from_coordinates, to_coordinates);
             let segment_label = format!("{entity_label} segment {segment_index}");
             let segment_axis = subtract(to_coordinates, from_coordinates);
@@ -292,9 +292,15 @@ fn realize_structural_topology(
                 structural_node(mesh, triangle[2], &mut topology.nodes, &mut node_ids)?,
             ];
             let points = [
-                mesh_node(mesh, triangle[0])?.coordinates_m,
-                mesh_node(mesh, triangle[1])?.coordinates_m,
-                mesh_node(mesh, triangle[2])?.coordinates_m,
+                mesh_node(mesh, triangle[0])?
+                    .coordinates_m
+                    .canonical_value(),
+                mesh_node(mesh, triangle[1])?
+                    .coordinates_m
+                    .canonical_value(),
+                mesh_node(mesh, triangle[2])?
+                    .coordinates_m
+                    .canonical_value(),
             ];
             let centroid = centroid(points);
             let first_edge = subtract(points[1], points[0]);
@@ -329,7 +335,9 @@ fn realize_structural_topology(
                 topology.shell_sections.push(ShellSectionModel::Homogeneous(
                     HomogeneousShellSectionModel {
                         section_id: display_id(&id),
-                        thickness_m: value.thickness_m,
+                        thickness_m: runmat_types::physical::Length::new(
+                            value.thickness_m.canonical_value(),
+                        ),
                         reference_surface: value.reference_surface,
                         shear_correction: value.shear_correction,
                     },
@@ -492,16 +500,19 @@ fn beam_section(
 ) -> BeamSectionModel {
     let (area, iy, iz, torsion, outer_y, outer_z, radius) = match value {
         AuthoredSectionDefinition::GeneralBeam(value) => (
-            value.area_m2,
-            value.iy_m4,
-            value.iz_m4,
-            value.torsion_j_m4,
-            value.outer_fiber_y_m,
-            value.outer_fiber_z_m,
-            value.torsion_outer_radius_m,
+            value.area_m2.canonical_value(),
+            value.iy_m4.canonical_value(),
+            value.iz_m4.canonical_value(),
+            value.torsion_j_m4.canonical_value(),
+            value.outer_fiber_y_m.canonical_value(),
+            value.outer_fiber_z_m.canonical_value(),
+            value.torsion_outer_radius_m.canonical_value(),
         ),
         AuthoredSectionDefinition::RectangularBeam(value) => {
-            let (w, h) = (value.width_m, value.height_m);
+            let (w, h) = (
+                value.width_m.canonical_value(),
+                value.height_m.canonical_value(),
+            );
             let (a, b) = if w >= h { (w, h) } else { (h, w) };
             let torsion =
                 a * b.powi(3) * (1.0 / 3.0 - 0.21 * b / a * (1.0 - b.powi(4) / (12.0 * a.powi(4))));
@@ -516,7 +527,7 @@ fn beam_section(
             )
         }
         AuthoredSectionDefinition::CircularBeam(value) => {
-            let r = value.radius_m;
+            let r = value.radius_m.canonical_value();
             (
                 std::f64::consts::PI * r * r,
                 std::f64::consts::PI * r.powi(4) / 4.0,
@@ -528,29 +539,31 @@ fn beam_section(
             )
         }
         AuthoredSectionDefinition::TubularBeam(value) => {
-            let r4 = value.outer_radius_m.powi(4) - value.inner_radius_m.powi(4);
+            let r4 = value.outer_radius_m.canonical_value().powi(4)
+                - value.inner_radius_m.canonical_value().powi(4);
             (
                 std::f64::consts::PI
-                    * (value.outer_radius_m.powi(2) - value.inner_radius_m.powi(2)),
+                    * (value.outer_radius_m.canonical_value().powi(2)
+                        - value.inner_radius_m.canonical_value().powi(2)),
                 std::f64::consts::PI * r4 / 4.0,
                 std::f64::consts::PI * r4 / 4.0,
                 std::f64::consts::PI * r4 / 2.0,
-                value.outer_radius_m,
-                value.outer_radius_m,
-                value.outer_radius_m,
+                value.outer_radius_m.canonical_value(),
+                value.outer_radius_m.canonical_value(),
+                value.outer_radius_m.canonical_value(),
             )
         }
         AuthoredSectionDefinition::HomogeneousShell(_) => unreachable!(),
     };
     BeamSectionModel {
         section_id: display_id(id),
-        area_m2: area,
-        iy_m4: iy,
-        iz_m4: iz,
-        torsion_j_m4: torsion,
-        outer_fiber_y_m: outer_y,
-        outer_fiber_z_m: outer_z,
-        torsion_outer_radius_m: radius,
+        area_m2: runmat_types::physical::Area::new(area),
+        iy_m4: runmat_types::physical::SecondMomentOfArea::new(iy),
+        iz_m4: runmat_types::physical::SecondMomentOfArea::new(iz),
+        torsion_j_m4: runmat_types::physical::SecondMomentOfArea::new(torsion),
+        outer_fiber_y_m: runmat_types::physical::Length::new(outer_y),
+        outer_fiber_z_m: runmat_types::physical::Length::new(outer_z),
+        torsion_outer_radius_m: runmat_types::physical::Length::new(radius),
     }
 }
 
@@ -571,7 +584,7 @@ fn laminate_section(
             Ok(LaminatePlyModel {
                 ply_id: ply.ply_id.clone(),
                 material_id: material.qualified_id(),
-                thickness_m: ply.thickness_m,
+                thickness_m: runmat_types::physical::Length::new(ply.thickness_m.canonical_value()),
                 angle_rad: ply.angle_rad,
             })
         })

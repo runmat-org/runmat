@@ -56,7 +56,10 @@ pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
             node_points.insert(next_node_id, coordinates_m);
             inserted_nodes.push(ConstrainedCavityNode {
                 node_id: next_node_id,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             });
             diagnostic.capped_face_count += cap_tetrahedra.len();
             *diagnostic
@@ -91,7 +94,10 @@ pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
                 node_points.insert(next_node_id, coordinates_m);
                 inserted_nodes.push(ConstrainedCavityNode {
                     node_id: next_node_id,
-                    coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(coordinates_m),
                 });
                 candidate_tetrahedra.push(cap_tetrahedron);
                 capped_count += 1;

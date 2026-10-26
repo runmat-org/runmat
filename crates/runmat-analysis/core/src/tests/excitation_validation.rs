@@ -265,7 +265,7 @@ fn invalid_response_spectrum_is_rejected() {
     let mut model = valid_model();
     model.response_spectra = vec![ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("launch_srs".to_string()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(vec![10.0, 100.0]),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![10.0, 100.0])),
         ordinates: NumericalDataSource::authored(vec![5.0, 20.0], "sha256:spectrum"),
         damping: SpectrumDamping::Ratio(1.2),
         response: SpectrumResponse::AbsoluteAcceleration,

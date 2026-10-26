@@ -91,7 +91,7 @@ study response {
         &model.initial_conditions[0].kind,
         runmat_analysis_core::AuthoredInitialConditionKind::Velocity(
             runmat_analysis_core::InitialValue::UniformVector3(values)
-        ) if values.iter().all(|value| value.meters_per_second == 0.0)
+        ) if values.iter().all(|value| value.canonical_value() == 0.0)
     ));
     assert!(matches!(
         &model.initial_conditions[1].kind,

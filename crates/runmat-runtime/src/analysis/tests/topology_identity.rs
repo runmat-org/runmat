@@ -33,7 +33,7 @@ fn render_topology_preserves_repeated_occurrence_selection_identities() {
         .find(|region| region.region_id == second_id)
         .unwrap();
     assert_ne!(first_region.triangle_ranges, second_region.triangle_ranges);
-    assert!(regions
+    assert!(!regions
         .iter()
         .any(|region| region.region_id == "shared-face"));
 }

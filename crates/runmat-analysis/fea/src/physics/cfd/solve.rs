@@ -26,22 +26,25 @@ pub(super) fn solve_velocity_pressure(
 ) -> CfdVelocityPressureSolution {
     let node_count: usize = topology.node_count.max(2);
     let profile_scale = cfd_profile_scale(profile_scales, step_index);
-    let nominal_inlet_velocity = boundary_summary.nominal_inlet_velocity_m_per_s;
+    let nominal_inlet_velocity = boundary_summary
+        .nominal_inlet_velocity_m_per_s
+        .canonical_value();
     let inlet_velocity = nominal_inlet_velocity * profile_scale;
     let reynolds = cfd_reynolds_number_for_velocity(domain, nominal_inlet_velocity).max(1.0);
-    let hydraulic_diameter_m = topology.hydraulic_diameter_m;
+    let hydraulic_diameter_m = topology.hydraulic_diameter_m.canonical_value();
     let friction_factor = if reynolds <= 2300.0 {
         64.0 / reynolds
     } else {
         0.3164 / reynolds.powf(0.25)
     };
     let friction_gradient_pa_per_m = 0.5
-        * domain.density.kilograms_per_cubic_meter
+        * domain.density.canonical_value()
         * inlet_velocity
         * inlet_velocity.abs()
         * friction_factor
         / hydraulic_diameter_m;
-    let pressure_drop_pa = (friction_gradient_pa_per_m * topology.domain_length_m).max(0.0);
+    let pressure_drop_pa =
+        (friction_gradient_pa_per_m * topology.domain_length_m.canonical_value()).max(0.0);
     let denom = node_count.saturating_sub(1).max(1) as f64;
     let mut axial_velocity = vec![inlet_velocity; node_count];
     let mut pressure = (0..node_count)
@@ -73,10 +76,10 @@ pub(super) fn solve_velocity_pressure(
                 axial_velocity[node] = axial_velocity[node - 1];
                 continue;
             }
-            let gradient = (pressure[node + 1] - pressure[node - 1]) / (2.0 * topology.dx_m);
+            let gradient =
+                (pressure[node + 1] - pressure[node - 1]) / (2.0 * topology.dx_m.canonical_value());
             let pressure_driven_speed = ((-2.0 * gradient * hydraulic_diameter_m)
-                / (domain.density.kilograms_per_cubic_meter.max(1.0e-12)
-                    * friction_factor.max(1.0e-12)))
+                / (domain.density.canonical_value().max(1.0e-12) * friction_factor.max(1.0e-12)))
             .max(0.0)
             .sqrt();
             axial_velocity[node] = 0.50 * axial_velocity[node] + 0.50 * pressure_driven_speed;
@@ -118,10 +121,10 @@ pub(super) fn solve_velocity_pressure(
     }
     pressure = target_pressure;
     for node in 1..node_count.saturating_sub(1) {
-        let gradient = (pressure[node + 1] - pressure[node - 1]) / (2.0 * topology.dx_m);
+        let gradient =
+            (pressure[node + 1] - pressure[node - 1]) / (2.0 * topology.dx_m.canonical_value());
         axial_velocity[node] = ((-2.0 * gradient * hydraulic_diameter_m)
-            / (domain.density.kilograms_per_cubic_meter.max(1.0e-12)
-                * friction_factor.max(1.0e-12)))
+            / (domain.density.canonical_value().max(1.0e-12) * friction_factor.max(1.0e-12)))
         .max(0.0)
         .sqrt();
     }
@@ -133,13 +136,16 @@ pub(super) fn solve_velocity_pressure(
         let xi = node as f64 / denom;
         let recirculation = (2.0 * std::f64::consts::PI * xi).sin()
             * axial
-            * domain.turbulence_intensity.ratio.clamp(0.0, 1.0)
+            * domain
+                .turbulence_intensity
+                .canonical_value()
+                .clamp(0.0, 1.0)
             * 0.02;
         velocity.extend_from_slice(&[axial, recirculation, 0.0]);
     }
 
     for value in &mut pressure {
-        *value += boundary_summary.outlet_pressure_pa;
+        *value += boundary_summary.outlet_pressure_pa.canonical_value();
     }
     CfdVelocityPressureSolution { velocity, pressure }
 }
@@ -157,19 +163,19 @@ pub fn residual_norms(
         .sum::<f64>()
         / node_count as f64;
     let reynolds = cfd_reynolds_number_for_velocity(domain, mean_axial_velocity).max(1.0);
-    let hydraulic_diameter_m = topology.hydraulic_diameter_m.max(1.0e-12);
+    let hydraulic_diameter_m = topology.hydraulic_diameter_m.canonical_value().max(1.0e-12);
     let friction_factor = if reynolds <= 2300.0 {
         64.0 / reynolds
     } else {
         0.3164 / reynolds.powf(0.25)
     };
     let friction_gradient_pa_per_m = 0.5
-        * domain.density.kilograms_per_cubic_meter.max(1.0e-12)
+        * domain.density.canonical_value().max(1.0e-12)
         * mean_axial_velocity
         * mean_axial_velocity.abs()
         * friction_factor
         / hydraulic_diameter_m;
-    let dx = topology.dx_m.max(1.0e-12);
+    let dx = topology.dx_m.canonical_value().max(1.0e-12);
     let mut momentum_base = 0.0_f64;
     let mut continuity_base = 0.0_f64;
     for node in 0..node_count {

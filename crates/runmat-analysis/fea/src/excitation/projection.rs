@@ -20,7 +20,7 @@ impl ProjectionCoordinates<'_> {
             Self::Canonical(projection) => projection
                 .nodes
                 .get(node_index)
-                .map(|node| node.coordinates_m),
+                .map(|node| node.coordinates_m.canonical_value()),
             Self::Explicit(coordinates) => coordinates.get(node_index).copied(),
         }
     }

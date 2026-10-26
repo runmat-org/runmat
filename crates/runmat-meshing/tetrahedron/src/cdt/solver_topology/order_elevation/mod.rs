@@ -56,7 +56,7 @@ pub(super) fn elevate(
         .nodes
         .iter()
         .filter(|node| !node.exact_parameters.is_empty())
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<std::collections::BTreeMap<_, _>>();
     let mut invalid_elements = with_folded_faces(&topology, jacobian::invalid_element_indices(
         &topology,
@@ -224,7 +224,7 @@ pub(super) fn elevate(
     let remaining_after_curving = invalid_elements.len();
     let mut straightened = 0_u64;
     let mut straightened_elements = std::collections::BTreeSet::new();
-    let maximum_deviation_m = input.request.quality.surface.maximum_chordal_deviation_m;
+    let maximum_deviation_m = input.request.quality.surface.maximum_chordal_deviation_m.canonical_value();
     while !invalid_elements.is_empty() {
         straightened_elements.extend(invalid_elements.iter().copied());
         let mut changed = relax_element_edges(
@@ -347,14 +347,14 @@ fn relax_element_edges(
                 continue;
             }
             let chord: [f64; 3] = std::array::from_fn(|axis| {
-                0.5 * (topology.nodes[left].coordinates_m[axis]
-                    + topology.nodes[right].coordinates_m[axis])
+                0.5 * (topology.nodes[left].coordinates_m.canonical_value()[axis]
+                    + topology.nodes[right].coordinates_m.canonical_value()[axis])
             });
             let target = if on_geometry {
                 let curved = exact_midsides
                     .get(&topology.nodes[middle].node_id)
                     .copied()
-                    .unwrap_or(topology.nodes[middle].coordinates_m);
+                    .unwrap_or(topology.nodes[middle].coordinates_m.canonical_value());
                 let sagitta = (0..3)
                     .map(|axis| (curved[axis] - chord[axis]).powi(2))
                     .sum::<f64>()
@@ -370,8 +370,8 @@ fn relax_element_edges(
             } else {
                 chord
             };
-            if topology.nodes[middle].coordinates_m != target {
-                topology.nodes[middle].coordinates_m = target;
+            if topology.nodes[middle].coordinates_m.canonical_value() != target {
+                topology.nodes[middle].coordinates_m = runmat_types::physical::Quantity::new(target);
                 moved += 1;
             }
         }
@@ -391,7 +391,7 @@ fn describe_element(
     let corners = ids[..4]
         .iter()
         .filter_map(|id| node(*id))
-        .map(|node| (node.coordinates_m, !node.exact_parameters.is_empty()))
+        .map(|node| (node.coordinates_m.canonical_value(), !node.exact_parameters.is_empty()))
         .collect::<Vec<_>>();
     if corners.len() != 4 {
         return format!("element {element} has absent corners");
@@ -494,7 +494,7 @@ fn folded_boundary_face_elements(
         topology
             .nodes
             .binary_search_by_key(&id, |node| node.node_id)
-            .map(|index| topology.nodes[index].coordinates_m)
+            .map(|index| topology.nodes[index].coordinates_m.canonical_value())
             .map_err(|_| {
                 error::failure(
                     DelaunaySolverTopologyErrorKind::InvalidMesh,
@@ -566,7 +566,7 @@ mod relaxation_tests {
             let corners = TETRAHEDRON_MIDSIDE_EDGE_CORNERS[local_edge];
             let point = |corner: usize| {
                 let id = topology.volume_elements[0].node_ids[corners[corner]];
-                topology.nodes.iter().find(|node| node.node_id == id).unwrap().coordinates_m
+                topology.nodes.iter().find(|node| node.node_id == id).unwrap().coordinates_m.canonical_value()
             };
             std::array::from_fn(|axis| 0.5 * (point(0)[axis] + point(1)[axis]))
         };
@@ -575,27 +575,29 @@ mod relaxation_tests {
         let interior_chord = chord(&topology, 1);
         // A boundary midside 0.3 m off its chord, and an interior midside moved off its chord.
         let curved = [boundary_chord[0], boundary_chord[1] - 0.3, boundary_chord[2]];
-        topology.nodes[boundary].coordinates_m = curved;
+        topology.nodes[boundary].coordinates_m = runmat_types::physical::Quantity::new(curved);
         topology.nodes[interior].exact_parameters.clear();
-        topology.nodes[interior].coordinates_m[2] += 0.2;
+        let mut moved = topology.nodes[interior].coordinates_m.canonical_value();
+        moved[2] += 0.2;
+        topology.nodes[interior].coordinates_m = runmat_types::physical::Quantity::new(moved);
         let exact = std::collections::BTreeMap::from([(topology.nodes[boundary].node_id, curved)]);
         let relax = |topology: &mut SolverMeshTopology, class, deviation| {
             relax_element_edges(topology, &[0], &exact, deviation, class, &runmat_meshing_core::NeverCancelled)
                 .unwrap()
         };
         assert_eq!(relax(&mut topology, MidsideClass::Interior, 0.1), 1);
-        assert_eq!(topology.nodes[interior].coordinates_m, interior_chord);
-        assert_eq!(topology.nodes[boundary].coordinates_m, curved);
+        assert_eq!(topology.nodes[interior].coordinates_m.canonical_value(), interior_chord);
+        assert_eq!(topology.nodes[boundary].coordinates_m.canonical_value(), curved);
         // The sagitta (0.3 m) exceeds the deviation (0.1 m): the node moves 0.1 m toward the chord.
         assert!(relax(&mut topology, MidsideClass::Boundary, 0.1) >= 1);
         let offset = (0..3)
-            .map(|axis| (topology.nodes[boundary].coordinates_m[axis] - curved[axis]).powi(2))
+            .map(|axis| (topology.nodes[boundary].coordinates_m.canonical_value()[axis] - curved[axis]).powi(2))
             .sum::<f64>()
             .sqrt();
         assert!((offset - 0.1).abs() < 1.0e-12, "{offset}");
-        assert_eq!(topology.nodes[interior].coordinates_m, interior_chord);
+        assert_eq!(topology.nodes[interior].coordinates_m.canonical_value(), interior_chord);
         // Within the deviation the edge goes fully straight.
         relax(&mut topology, MidsideClass::Boundary, 0.5);
-        assert_eq!(topology.nodes[boundary].coordinates_m, boundary_chord);
+        assert_eq!(topology.nodes[boundary].coordinates_m.canonical_value(), boundary_chord);
     }
 }

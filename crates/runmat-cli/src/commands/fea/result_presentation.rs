@@ -61,11 +61,11 @@ pub(super) struct ThermalEnergyBalanceSummary {
 impl From<&runmat_analysis_fea::contracts::ThermalEnergyBalance> for ThermalEnergyBalanceSummary {
     fn from(balance: &runmat_analysis_fea::contracts::ThermalEnergyBalance) -> Self {
         Self {
-            applied_power_w: balance.applied_power_w,
-            boundary_loss_w: balance.boundary_loss_w,
-            storage_rate_w: balance.storage_rate_w,
-            prescribed_boundary_power_w: balance.prescribed_boundary_power_w,
-            residual_w: balance.residual_w,
+            applied_power_w: balance.applied_power_w.canonical_value(),
+            boundary_loss_w: balance.boundary_loss_w.canonical_value(),
+            storage_rate_w: balance.storage_rate_w.canonical_value(),
+            prescribed_boundary_power_w: balance.prescribed_boundary_power_w.canonical_value(),
+            residual_w: balance.residual_w.canonical_value(),
             relative_residual: balance.relative_residual,
         }
     }

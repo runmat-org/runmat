@@ -35,6 +35,11 @@ pub(super) fn stage_identity() -> MeshingStageIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageKind::SurfaceMesh,
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: digest(1),
             geometry_revision: 3,
             persistent_mapping_version: 2,

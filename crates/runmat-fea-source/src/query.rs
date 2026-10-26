@@ -106,7 +106,7 @@ pub enum FeaQueryError {
     NotFound,
     #[error("requested definitions exceed the 64 KiB response budget; narrow the query")]
     ResponseLimit,
-    #[error("this source object has no standalone checked declaration; query its owner instead")]
+    #[error("this declaration has no resolved definition; inspect source diagnostics or query its owner")]
     DefinitionUnavailable,
     #[error("geometry selection must contain 1 to 256 distinct bounded region identities and request navigation only")]
     InvalidRegionSelection,
@@ -198,7 +198,13 @@ impl FeaSourceCheckResult {
             FeaQueryDetail::Navigation => Vec::new(),
             FeaQueryDetail::Definition => entries
                 .iter()
-                .map(|entry| self.definition(&entry.identity))
+                .map(|entry| self.definition(&entry.identity).map_err(|error| {
+                    if error == FeaQueryError::NotFound {
+                        // The source index already proves the declaration exists.
+                        // Failed semantic lowering must not masquerade as a name mismatch.
+                        FeaQueryError::DefinitionUnavailable
+                    } else { error }
+                }))
                 .collect::<Result<Vec<_>, _>>()?,
         };
         let page = FeaBrowsePage {

@@ -46,14 +46,18 @@ pub(super) fn corners(
             .nodes
             .get(element.node_indices[local])
             .ok_or(Error::Invalid("node index"))?;
-        if node.coordinates_m.iter().any(|v| !v.is_finite())
+        if node
+            .coordinates_m
+            .canonical_value()
+            .iter()
+            .any(|v| !v.is_finite())
             || node.stable_identity == StableDigest::ZERO
         {
             return Err(Error::Invalid(
                 "nonfinite coordinate or absent node identity",
             ));
         }
-        coordinates[local] = node.coordinates_m;
+        coordinates[local] = node.coordinates_m.canonical_value();
         identities[local] = node.stable_identity;
         if identities[..local].contains(&node.stable_identity) {
             return Err(Error::Invalid("repeated corner identity"));
@@ -77,8 +81,13 @@ pub(super) fn corners(
             let midpoint = std::array::from_fn(|axis| {
                 coordinates[a][axis] + (coordinates[b][axis] - coordinates[a][axis]) * 0.5
             });
-            if length(subtract(node.coordinates_m, midpoint)) > RELATIVE_TOLERANCE * scale
-                || node.coordinates_m.iter().any(|v| !v.is_finite())
+            if length(subtract(node.coordinates_m.canonical_value(), midpoint))
+                > RELATIVE_TOLERANCE * scale
+                || node
+                    .coordinates_m
+                    .canonical_value()
+                    .iter()
+                    .any(|v| !v.is_finite())
             {
                 return Err(Error::CurvedTet10(element.element_id));
             }
@@ -159,7 +168,7 @@ pub(super) fn validate_boundary_nodes(
             source
                 .nodes
                 .get(i)
-                .map(|n| n.coordinates_m)
+                .map(|n| n.coordinates_m.canonical_value())
                 .ok_or(Error::Invalid("boundary index"))
         })
         .collect::<Result<Vec<_>, _>>()?;

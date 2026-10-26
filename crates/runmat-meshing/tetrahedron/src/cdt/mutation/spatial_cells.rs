@@ -181,7 +181,8 @@ impl TopologyMutation {
         for node in &self.nodes {
             checkpoint()?;
             if !next.node_indices.get(&node.identity).is_some_and(|index| {
-                next.nodes[*index as usize].coordinates_m == node.coordinates_m
+                next.nodes[*index as usize].coordinates_m.canonical_value()
+                    == node.coordinates_m.canonical_value()
                     && next.nodes[*index as usize].construction == node.construction
             }) {
                 return Ok(());

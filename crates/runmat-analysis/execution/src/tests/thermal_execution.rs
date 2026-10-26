@@ -230,7 +230,7 @@ fn presolve_transport_bounds_postsolve_closure_and_preserves_numerical_result() 
                     .push(AnalysisConstraint::Thermal(ThermalConstraint {
                         constraint_id: "temperature".into(),
                         kind: ThermalConstraintKind::Prescribed {
-                            target: RegionTarget::boundary(face),
+                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                             value: PrescribedValue::Constant(Temperature::new(315.0)),
                         },
                     }));

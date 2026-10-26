@@ -183,7 +183,7 @@ impl Serialize for SolverMeshTopology {
             nodes: Nodes {
                 node_ids: Each(|| nodes.iter().map(|node| node.node_id)),
                 stable_identities: Each(|| nodes.iter().map(|node| words(&node.stable_identity))),
-                coordinates_m: Each(|| nodes.iter().map(|node| node.coordinates_m)),
+                coordinates_m: Each(|| nodes.iter().map(|node| node.coordinates_m.canonical_value())),
                 provenance: Each(|| nodes.iter().map(|node| t.all(&node.provenance))),
                 exact_parameters: Each(|| {
                     nodes.iter().map(|node| {
@@ -399,7 +399,8 @@ impl TopologyWire {
                     Ok(SolverMeshNode {
                         node_id,
                         stable_identity: digest(&identity),
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::try_new(coordinates_m)
+                            .map_err(|_| "solver topology node coordinates are not finite".to_string())?,
                         provenance: resolve(provenance)?,
                         exact_parameters: exact
                             .into_iter()

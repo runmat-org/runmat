@@ -11,7 +11,7 @@ pub(crate) fn authored_model(current: f64) -> AnalysisModel {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: boundary.into(),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(boundary),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                 },
             }));
     }
@@ -20,7 +20,7 @@ pub(crate) fn authored_model(current: f64) -> AnalysisModel {
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "gauge".into(),
             kind: MagneticConstraintKind::CoulombGauge {
-                target: RegionTarget::volume("slab"),
+                target: RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("slab")),
             },
         }));
     input

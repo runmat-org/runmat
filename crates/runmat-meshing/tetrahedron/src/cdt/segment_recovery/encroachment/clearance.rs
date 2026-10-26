@@ -70,7 +70,7 @@ fn admits_radius(
     };
     runmat_meshing_core::quality::predicate::compare_radial_distances_constructed(
         explicit(origin_identity, origin),
-        explicit(witness.identity, witness.coordinates_m),
+        explicit(witness.identity, witness.coordinates_m.canonical_value()),
         explicit(super::super::steiner_identity(context, split), point),
     )
     .map(|sign| sign != PredicateSign::Negative)
@@ -97,9 +97,11 @@ fn admits(
             split.parameter()?,
         ),
     );
-    let original =
-        endpoints.map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m));
-    let witness = DelaunayVolumeNode::explicit(witness.identity, witness.coordinates_m);
+    let original = endpoints.map(|node| {
+        DelaunayVolumeNode::explicit(node.identity, node.coordinates_m.canonical_value())
+    });
+    let witness =
+        DelaunayVolumeNode::explicit(witness.identity, witness.coordinates_m.canonical_value());
     for child in [[original[0], candidate], [candidate, original[1]]] {
         work.search_encroachment_step(context.constraint_index)?;
         let relation = diametral_sphere_position_constructed(

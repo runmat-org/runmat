@@ -21,7 +21,6 @@ use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaBucklingRunResult,
     FeaProgressHandler, FeaRunResult, ModalSolveOptions,
 };
-use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::operations::{
@@ -176,7 +175,7 @@ pub struct PreparedStructuralLinearRun {
     context: OperationContext,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructuralStudyStepNumericalResult {
     pub step_id: ProcedureStepId,
     pub solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
@@ -184,7 +183,7 @@ pub struct StructuralStudyStepNumericalResult {
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructuralStudySequenceNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     /// The effective memory ceiling the local placement admitted, min(authored, machine);
@@ -332,8 +331,9 @@ pub use contracts::{
     analysis_procedure_ids, AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData,
     AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
     AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
-    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionCapability,
-    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionDuration, AnalysisExecutionCandidate, AnalysisExecutionCapability,
+    AnalysisExecutionChoices, AnalysisExecutionMode,
+    AnalysisExecutionPlan, AnalysisExecutionReadiness, AnalysisExecutionStep, AnalysisFieldBinding,
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
@@ -481,7 +481,7 @@ pub fn analysis_validate_study_op(
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
     let mut issue_codes = validate_study_issue_codes(spec);
     let model_validation_detail =
-        validate_model_against_geometry(&spec.model, spec.geometry.units, &CoordinateFrame::Global)
+        validate_model_against_geometry(&spec.model, &CoordinateFrame::Global)
             .err()
             .map(|error| error.to_string());
     issue_codes.sort();
@@ -1593,12 +1593,7 @@ fn prepare_study_semantics(
             })
             .collect::<Vec<_>>(),
     );
-    analysis_validate(
-        &model,
-        spec.geometry.units,
-        &CoordinateFrame::Global,
-        context.clone(),
-    )?;
+    analysis_validate(&model, &CoordinateFrame::Global, context.clone())?;
     Ok(PreparedStudySequence {
         spec: spec.clone(),
         context,
@@ -1897,11 +1892,10 @@ pub fn analysis_run_study_sweep_op(
 
 pub fn analysis_validate(
     model: &AnalysisModel,
-    geometry_units: UnitSystem,
     geometry_frame: &CoordinateFrame,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisValidateResult>, OperationErrorEnvelope> {
-    validate_model_against_geometry(model, geometry_units, geometry_frame)
+    validate_model_against_geometry(model, geometry_frame)
         .map_err(|err| map_validate_error(err, model, &context))?;
 
     Ok(OperationEnvelope::new(
@@ -2530,9 +2524,9 @@ fn validate_thermal_run_model(
     if let Some((material, thermal)) = model.materials.iter().find_map(|material| {
         let thermal = material.thermal.as_ref()?;
         (!thermal.conductivity_w_per_mk.is_finite()
-            || thermal.conductivity_w_per_mk <= 0.0
+            || thermal.conductivity_w_per_mk <= runmat_types::physical::Quantity::new(0.0)
             || !thermal.specific_heat_j_per_kgk.is_finite()
-            || thermal.specific_heat_j_per_kgk <= 0.0)
+            || thermal.specific_heat_j_per_kgk <= runmat_types::physical::Quantity::new(0.0))
             .then_some((material, thermal))
     }) {
         return Err(operation_error(
@@ -2551,11 +2545,11 @@ fn validate_thermal_run_model(
                 ("material_id".to_string(), material.material_id.clone()),
                 (
                     "conductivity_w_per_mk".to_string(),
-                    thermal.conductivity_w_per_mk.to_string(),
+                    thermal.conductivity_w_per_mk.canonical_value().to_string(),
                 ),
                 (
                     "specific_heat_j_per_kgk".to_string(),
-                    thermal.specific_heat_j_per_kgk.to_string(),
+                    thermal.specific_heat_j_per_kgk.canonical_value().to_string(),
                 ),
             ]),
         ));
@@ -2581,7 +2575,7 @@ fn validate_thermal_run_model(
         };
         (!value
             .study_constant(&model.signals)
-            .is_some_and(|temperature| temperature.is_finite() && temperature.kelvin > 0.0))
+            .is_some_and(|temperature| temperature.is_finite() && temperature.canonical_value() > 0.0))
         .then_some(constraint.constraint_id.as_str())
     });
     let invalid_boundary = model.boundaries.iter().find_map(|boundary| {
@@ -2595,9 +2589,9 @@ fn validate_thermal_run_model(
             } => {
                 !ambient_temperature
                     .study_constant(&model.signals)
-                    .is_some_and(|temperature| temperature.is_finite() && temperature.kelvin > 0.0)
+                    .is_some_and(|temperature| temperature.is_finite() && temperature.canonical_value() > 0.0)
                     || !coefficient.is_finite()
-                    || coefficient.watts_per_square_meter_kelvin < 0.0
+                    || coefficient.canonical_value() < 0.0
             }
             _ => false,
         };
@@ -3821,3 +3815,8 @@ fn diagnostic_metric_bool(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+
+mod document_run_result;
+pub use document_run_result::{
+    analysis_document_study_result, project_study_field_bindings, project_study_result_views,
+};

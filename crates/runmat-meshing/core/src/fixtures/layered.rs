@@ -32,11 +32,11 @@ pub fn layered_box_mesh(
                 nodes.push(SolverMeshNode {
                     node_id: index as u64 + 1,
                     stable_identity: node_digest(index),
-                    coordinates_m: [
+                    coordinates_m: runmat_types::physical::Quantity::new([
                         size_m[0] * x as f64 / cells[0] as f64,
                         size_m[1] * y as f64 / cells[1] as f64,
                         size_m[2] * z as f64 / cells[2] as f64,
-                    ],
+                    ]),
                     provenance: Vec::new(),
                     exact_parameters: Vec::new(),
                 });
@@ -126,7 +126,7 @@ pub fn layered_box_mesh(
     let mut boundary_faces = Vec::new();
     let mut interfaces = BTreeMap::<String, (PersistentEntityId, String, String, Vec<u64>)>::new();
     for (face, face_owners) in &owners {
-        let coordinates = face.map(|id| nodes[id as usize - 1].coordinates_m);
+        let coordinates = face.map(|id| nodes[id as usize - 1].coordinates_m.canonical_value());
         let (role, source, adjacent) = match face_owners.as_slice() {
             [owner] => {
                 let axis = (0..3)

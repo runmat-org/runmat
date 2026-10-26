@@ -19,7 +19,7 @@ fn fixture(
         slab_mesh(cells)
     };
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.signals.push(PhysicalSignal::Pressure(complex_signal(
         Pressure::new(amplitude[0]),
@@ -30,7 +30,7 @@ fn fixture(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "anchor".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
@@ -41,8 +41,8 @@ fn fixture(
             kind: AcousticConstraintKind::PhaseShiftedPeriodic(PhaseShiftedPeriodicConstraint {
                 periodic: PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary("slab_left"),
-                        secondary: RegionTarget::boundary("slab_right"),
+                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),
@@ -91,8 +91,8 @@ fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine(
                 pressures.push(pressure);
                 velocities.push(velocity);
                 assert!(result.relative_residual < 1e-10);
-                assert!(result.mean_impedance_loss_w.abs() < 1e-12);
-                assert!(result.mean_input_power_w.abs() < 1e-8);
+                assert!(result.mean_impedance_loss_w.canonical_value().abs() < 1e-12);
+                assert!(result.mean_input_power_w.canonical_value().abs() < 1e-8);
                 if cells == if quadratic { 4 } else { 8 } {
                     assert!(
                         pressure < 0.004,
@@ -138,7 +138,7 @@ fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
         let mut overlap = model.clone();
         overlap.boundaries.push(AnalysisBoundary {
             boundary_id: "overlap".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticRadiation,
         });
         assert!(solve(&overlap, &mesh).is_err());
@@ -148,7 +148,7 @@ fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: "wrong_secondary_pressure".into(),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary("slab_right"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                     value: PrescribedValue::Signal(SignalId("drive".into())),
                 },
             }));
@@ -172,8 +172,14 @@ fn unphased_periodic_anchored_trace_matches_independent_cosine_solution() {
         let k = std::f64::consts::TAU * 0.2 / 2.0;
         let mut error = 0.0;
         let mut norm = 0.0;
-        for (node, pressure) in result.projection.nodes.iter().zip(&result.pressure_pa) {
-            let ratio = (k * (node.coordinates_m[0] - 0.5)).cos() / (0.5 * k).cos();
+        for (node, pressure) in result
+            .projection
+            .nodes
+            .iter()
+            .zip(result.pressure_pa.canonical_values())
+        {
+            let ratio =
+                (k * (node.coordinates_m.canonical_value()[0] - 0.5)).cos() / (0.5 * k).cos();
             let reference = amplitude.map(|value| value * ratio);
             error += (pressure.real - reference[0]).powi(2)
                 + (pressure.imaginary - reference[1]).powi(2);

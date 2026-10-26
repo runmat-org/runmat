@@ -47,7 +47,10 @@ pub(super) fn compile(
         .iter()
         .map(|point| MaxwellCurrentSample {
             sample_identity: point.identity,
-            current_density_a_per_m2: [ComplexPhasor::ZERO; 3],
+            current_density_a_per_m2: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ElectricCurrentDensity,
+                _,
+            >::new([ComplexPhasor::ZERO; 3]),
         })
         .collect();
     let loads =
@@ -95,10 +98,14 @@ pub(super) fn compile(
             };
             if selected {
                 matched = true;
-                for (component, current) in sample.current_density_a_per_m2.iter_mut().enumerate() {
-                    *current +=
-                        ComplexPhasor::new(value.real[component], value.imaginary[component]);
-                }
+                sample.current_density_a_per_m2 = sample.current_density_a_per_m2
+                    .try_map_canonical_storage(|mut components| {
+                        for (axis, current) in components.iter_mut().enumerate() {
+                            *current += ComplexPhasor::new(value.real[axis], value.imaginary[axis]);
+                        }
+                        components
+                    })
+                    .map_err(invalid)?;
             }
         }
         if !matched {

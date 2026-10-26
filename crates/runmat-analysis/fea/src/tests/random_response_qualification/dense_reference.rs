@@ -70,8 +70,8 @@ pub(super) fn integrate_dense_response(
 ) -> Vec<f64> {
     assert_eq!(panel_count % 2, 0, "composite Simpson panels must be even");
     let system = DenseReferenceSystem::new(summary, basis, excitation, damping_ratio);
-    let lower = excitation.frequencies_hz[0];
-    let upper = *excitation.frequencies_hz.last().unwrap();
+    let lower = excitation.frequencies_hz.canonical_values()[0];
+    let upper = *excitation.frequencies_hz.canonical_values().last().unwrap();
     let step = (upper - lower) / panel_count as f64;
     let mut integral = vec![0.0; summary.dof_count];
     for panel in 0..=panel_count {
@@ -156,7 +156,7 @@ impl DenseReferenceSystem {
             .collect();
         let spectral_density = excitation.resolved_spectral_density().unwrap()[0]
             .values
-            .iter()
+            .canonical_values().iter()
             .map(|value| Complex::new(value.real, value.imaginary))
             .collect();
         Self {

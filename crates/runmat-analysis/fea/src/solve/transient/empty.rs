@@ -25,8 +25,8 @@ pub(super) struct EmptyTransientAdvanceState {
 #[derive(Clone, Debug)]
 pub(super) struct EmptyTransientAcceptedSample {
     pub(super) schedule_ordinal: u64,
-    pub(super) time_s: f64,
-    pub(super) accepted_time_step_s: f64,
+    pub(super) time_s: runmat_types::physical::Time,
+    pub(super) accepted_time_step_s: runmat_types::physical::Time,
     pub(super) public_summary: AssemblySummary,
     pub(super) integration_interval: TransientIntegrationInterval,
 }
@@ -66,14 +66,14 @@ pub(super) fn solve<E>(
         let block = advance(summary, &schedule, state, terminal, assembly_at)?;
         for sample in block.samples {
             debug_assert_eq!(sample.schedule_ordinal as usize, result.time_points_s.len());
-            result.time_points_s.push(sample.time_s);
+            result.time_points_s.push(sample.time_s.canonical_value());
             result.displacement_snapshots.push(Vec::new());
             result.velocity_snapshots.push(Vec::new());
             result.acceleration_snapshots.push(Vec::new());
             result.residual_norms.push(0.0);
             result
                 .accepted_time_steps_s
-                .push(sample.accepted_time_step_s);
+                .push(sample.accepted_time_step_s.canonical_value());
             result.assembly_snapshots.push(sample.public_summary);
             result
                 .integration_intervals
@@ -113,8 +113,8 @@ pub(super) fn advance<E>(
         if is_cancelled() {
             return Err(TransientSolveError::Cancelled);
         }
-        let current_time_s = schedule.points[ordinal - 1].time_s;
-        let next_time_s = schedule_point.time_s;
+        let current_time_s = schedule.points[ordinal - 1].time_s.canonical_value();
+        let next_time_s = schedule_point.time_s.canonical_value();
         let approach = match schedule_point.arrival {
             StructuralTransientScheduleArrival::LeftLimit => SignalSampleApproach::LeftLimit,
             StructuralTransientScheduleArrival::Continuous => SignalSampleApproach::At,
@@ -156,8 +156,8 @@ pub(super) fn advance<E>(
             u64::try_from(ordinal).map_err(|_| TransientSolveError::ScheduleOrdinalLimit)?;
         samples.push(EmptyTransientAcceptedSample {
             schedule_ordinal: state.schedule_ordinal,
-            time_s: next_time_s,
-            accepted_time_step_s: time_step_s,
+            time_s: runmat_types::physical::Time::new(next_time_s),
+            accepted_time_step_s: runmat_types::physical::Time::new(time_step_s),
             public_summary,
             integration_interval,
         });
@@ -174,7 +174,7 @@ fn initial_result(
     schedule: crate::execution::StructuralTransientSchedule,
 ) -> TransientSolveResult {
     TransientSolveResult {
-        time_points_s: vec![schedule.points[0].time_s],
+        time_points_s: vec![schedule.points[0].time_s.canonical_value()],
         schedule,
         converged_steps: 0,
         total_steps: 0,
@@ -204,10 +204,10 @@ fn initial_result(
         kinetic_energy_snapshots: vec![0.0],
         reaction_snapshots: vec![Vec::new()],
         integration_intervals: Vec::new(),
-        external_work_j: vec![0.0],
-        support_work_j: vec![0.0],
-        damping_dissipation_j: vec![0.0],
-        energy_balance_residual_j: vec![0.0],
+        external_work_j: runmat_types::physical::Quantity::new(vec![0.0]),
+        support_work_j: runmat_types::physical::Quantity::new(vec![0.0]),
+        damping_dissipation_j: runmat_types::physical::Quantity::new(vec![0.0]),
+        energy_balance_residual_j: runmat_types::physical::Quantity::new(vec![0.0]),
         relative_energy_balance_error: vec![0.0],
         dynamic_balance_snapshots: vec![empty_balance()],
     }
@@ -220,10 +220,22 @@ fn complete_histories(result: &mut TransientSolveResult, options: &TransientSolv
     result.reaction_snapshots.resize(snapshot_count, Vec::new());
     result.strain_energy_snapshots.resize(snapshot_count, 0.0);
     result.kinetic_energy_snapshots.resize(snapshot_count, 0.0);
-    result.external_work_j.resize(snapshot_count, 0.0);
-    result.support_work_j.resize(snapshot_count, 0.0);
-    result.damping_dissipation_j.resize(snapshot_count, 0.0);
-    result.energy_balance_residual_j.resize(snapshot_count, 0.0);
+    result
+        .external_work_j
+        .try_resize(snapshot_count, runmat_types::physical::Energy::new(0.0))
+        .expect("finite zero energy");
+    result
+        .support_work_j
+        .try_resize(snapshot_count, runmat_types::physical::Energy::new(0.0))
+        .expect("finite zero energy");
+    result
+        .damping_dissipation_j
+        .try_resize(snapshot_count, runmat_types::physical::Energy::new(0.0))
+        .expect("finite zero energy");
+    result
+        .energy_balance_residual_j
+        .try_resize(snapshot_count, runmat_types::physical::Energy::new(0.0))
+        .expect("finite zero energy");
     result
         .relative_energy_balance_error
         .resize(snapshot_count, 0.0);

@@ -78,65 +78,79 @@ fn lower_material(
     );
     let isotropic = values::block(&declaration.statements, "elastic").and_then(|statements| {
         Some(MaterialMechanicalModel {
-            youngs_modulus_pa: values::required_quantity(
-                declaration,
-                statements,
-                "youngs_modulus",
-                PhysicalDimension::PRESSURE,
-                diagnostics,
-            )?,
-            poisson_ratio: values::required_ratio(
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "youngs_modulus",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+            ),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(values::required_ratio(
                 declaration,
                 statements,
                 "poisson_ratio",
                 diagnostics,
-            )?,
+            )?),
         })
     });
     let orthotropic =
         values::block(&declaration.statements, "orthotropic_lamina").and_then(|statements| {
             Some(MaterialOrthotropicLaminaModel {
-                longitudinal_modulus_pa: values::required_quantity(
-                    declaration,
-                    statements,
-                    "longitudinal_modulus",
-                    PhysicalDimension::PRESSURE,
-                    diagnostics,
-                )?,
-                transverse_modulus_pa: values::required_quantity(
-                    declaration,
-                    statements,
-                    "transverse_modulus",
-                    PhysicalDimension::PRESSURE,
-                    diagnostics,
-                )?,
-                major_poisson_ratio: values::required_ratio(
-                    declaration,
-                    statements,
-                    "major_poisson_ratio",
-                    diagnostics,
-                )?,
-                in_plane_shear_modulus_pa: values::required_quantity(
-                    declaration,
-                    statements,
-                    "in_plane_shear_modulus",
-                    PhysicalDimension::PRESSURE,
-                    diagnostics,
-                )?,
-                transverse_shear_modulus_13_pa: values::required_quantity(
-                    declaration,
-                    statements,
-                    "transverse_shear_modulus_13",
-                    PhysicalDimension::PRESSURE,
-                    diagnostics,
-                )?,
-                transverse_shear_modulus_23_pa: values::required_quantity(
-                    declaration,
-                    statements,
-                    "transverse_shear_modulus_23",
-                    PhysicalDimension::PRESSURE,
-                    diagnostics,
-                )?,
+                longitudinal_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                    values::required_quantity(
+                        declaration,
+                        statements,
+                        "longitudinal_modulus",
+                        PhysicalDimension::PRESSURE,
+                        diagnostics,
+                    )?,
+                ),
+                transverse_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                    values::required_quantity(
+                        declaration,
+                        statements,
+                        "transverse_modulus",
+                        PhysicalDimension::PRESSURE,
+                        diagnostics,
+                    )?,
+                ),
+                major_poisson_ratio: runmat_types::physical::PoissonRatio::new(
+                    values::required_ratio(
+                        declaration,
+                        statements,
+                        "major_poisson_ratio",
+                        diagnostics,
+                    )?,
+                ),
+                in_plane_shear_modulus_pa: runmat_types::physical::ShearModulus::new(
+                    values::required_quantity(
+                        declaration,
+                        statements,
+                        "in_plane_shear_modulus",
+                        PhysicalDimension::PRESSURE,
+                        diagnostics,
+                    )?,
+                ),
+                transverse_shear_modulus_13_pa: runmat_types::physical::ShearModulus::new(
+                    values::required_quantity(
+                        declaration,
+                        statements,
+                        "transverse_shear_modulus_13",
+                        PhysicalDimension::PRESSURE,
+                        diagnostics,
+                    )?,
+                ),
+                transverse_shear_modulus_23_pa: runmat_types::physical::ShearModulus::new(
+                    values::required_quantity(
+                        declaration,
+                        statements,
+                        "transverse_shear_modulus_23",
+                        PhysicalDimension::PRESSURE,
+                        diagnostics,
+                    )?,
+                ),
             })
         });
     let elasticity = match (isotropic, orthotropic) {
@@ -175,95 +189,117 @@ fn lower_material(
         });
     let thermal = values::block(&declaration.statements, "thermal").and_then(|statements| {
         Some(MaterialThermalModel {
-            reference_temperature_k: values::required_quantity(
-                declaration,
-                statements,
-                "reference_temperature",
-                PhysicalDimension::TEMPERATURE,
-                diagnostics,
-            )?,
-            modulus_temp_coeff_per_k: values::required_quantity(
-                declaration,
-                statements,
-                "modulus_temperature_coefficient",
-                inverse_temperature(),
-                diagnostics,
-            )?,
-            conductivity_w_per_mk: values::required_quantity(
-                declaration,
-                statements,
-                "conductivity",
-                PhysicalDimension::THERMAL_CONDUCTIVITY,
-                diagnostics,
-            )?,
-            specific_heat_j_per_kgk: values::required_quantity(
-                declaration,
-                statements,
-                "specific_heat",
-                PhysicalDimension::SPECIFIC_HEAT,
-                diagnostics,
-            )?,
-            expansion_coefficient_per_k: values::required_quantity(
-                declaration,
-                statements,
-                "expansion_coefficient",
-                inverse_temperature(),
-                diagnostics,
-            )?,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "reference_temperature",
+                    PhysicalDimension::TEMPERATURE,
+                    diagnostics,
+                )?,
+            ),
+            modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "modulus_temperature_coefficient",
+                    inverse_temperature(),
+                    diagnostics,
+                )?,
+            ),
+            conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "conductivity",
+                    PhysicalDimension::THERMAL_CONDUCTIVITY,
+                    diagnostics,
+                )?,
+            ),
+            specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "specific_heat",
+                    PhysicalDimension::SPECIFIC_HEAT,
+                    diagnostics,
+                )?,
+            ),
+            expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "expansion_coefficient",
+                    inverse_temperature(),
+                    diagnostics,
+                )?,
+            ),
         })
     });
     let acoustic = values::block(&declaration.statements, "acoustic").and_then(|statements| {
         Some(MaterialAcousticModel {
-            speed_of_sound_m_per_s: values::required_quantity(
-                declaration,
-                statements,
-                "speed_of_sound",
-                PhysicalDimension::VELOCITY,
-                diagnostics,
-            )?,
-            damping_ratio: values::required_ratio(
+            speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "speed_of_sound",
+                    PhysicalDimension::VELOCITY,
+                    diagnostics,
+                )?,
+            ),
+            damping_ratio: runmat_types::physical::DampingRatio::new(values::required_ratio(
                 declaration,
                 statements,
                 "damping_ratio",
                 diagnostics,
-            )?,
+            )?),
         })
     });
     let electrical = values::block(&declaration.statements, "electrical").and_then(|statements| {
         Some(MaterialElectricalModel {
-            reference_temperature_k: values::required_quantity(
-                declaration,
-                statements,
-                "reference_temperature",
-                PhysicalDimension::TEMPERATURE,
-                diagnostics,
-            )?,
-            conductivity_s_per_m: values::required_quantity(
-                declaration,
-                statements,
-                "conductivity",
-                PhysicalDimension::ELECTRICAL_CONDUCTIVITY,
-                diagnostics,
-            )?,
-            resistive_heating_coefficient: values::required_quantity(
-                declaration,
-                statements,
-                "resistive_heating_coefficient",
-                inverse_temperature(),
-                diagnostics,
-            )?,
-            relative_permittivity: values::required_ratio(
-                declaration,
-                statements,
-                "relative_permittivity",
-                diagnostics,
-            )?,
-            relative_permeability: values::required_ratio(
-                declaration,
-                statements,
-                "relative_permeability",
-                diagnostics,
-            )?,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "reference_temperature",
+                    PhysicalDimension::TEMPERATURE,
+                    diagnostics,
+                )?,
+            ),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "conductivity",
+                    PhysicalDimension::ELECTRICAL_CONDUCTIVITY,
+                    diagnostics,
+                )?,
+            ),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "resistive_heating_coefficient",
+                    inverse_temperature(),
+                    diagnostics,
+                )?,
+            ),
+            relative_permittivity: runmat_types::physical::RelativePermittivity::new(
+                values::required_ratio(
+                    declaration,
+                    statements,
+                    "relative_permittivity",
+                    diagnostics,
+                )?,
+            ),
+            relative_permeability: runmat_types::physical::RelativePermeability::new(
+                values::required_ratio(
+                    declaration,
+                    statements,
+                    "relative_permeability",
+                    diagnostics,
+                )?,
+            ),
             conductivity_frequency_response: Vec::new(),
         })
     });
@@ -275,27 +311,30 @@ fn lower_material(
             diagnostics,
         )?;
         Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: values::required_quantity(
+            yield_stress_pa: runmat_types::physical::YieldStress::new(values::required_quantity(
                 declaration,
                 statements,
                 "yield_stress",
                 PhysicalDimension::PRESSURE,
                 diagnostics,
-            )?,
-            isotropic_hardening_modulus_pa: values::required_quantity(
-                declaration,
-                statements,
-                "isotropic_hardening_modulus",
-                PhysicalDimension::PRESSURE,
-                diagnostics,
-            )?,
+            )?),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(
+                values::required_quantity(
+                    declaration,
+                    statements,
+                    "isotropic_hardening_modulus",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+            ),
         })
     });
     MaterialModel {
         material_id: declaration.key.name.clone(),
         name,
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3,
+        mass_density_kg_per_m3: (mass_density_kg_per_m3)
+            .map(runmat_types::physical::MassDensity::new),
         elasticity,
         damping,
         thermal,

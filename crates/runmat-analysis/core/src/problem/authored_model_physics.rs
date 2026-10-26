@@ -12,7 +12,6 @@ use super::{
     },
 };
 use runmat_geometry_core::GeometryRegionRole;
-use runmat_types::QuantityDimension;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A boundary coefficient that is either authored as a constant or computed from
@@ -69,13 +68,13 @@ impl AuthoredBoundaryKind {
             Self::ThermalConvection { coefficient, .. } => coefficient.validate_inputs(
                 inputs,
                 &[AuthoredInputType::Quantity(
-                    QuantityDimension::HeatTransferCoefficient,
+                    runmat_types::PhysicalDimension::HEAT_TRANSFER_COEFFICIENT.into(),
                 )],
             ),
             Self::ThermalRadiation { emissivity, .. } => emissivity.validate_inputs(
                 inputs,
                 &[
-                    AuthoredInputType::Quantity(QuantityDimension::Dimensionless),
+                    AuthoredInputType::Quantity(runmat_types::PhysicalDimension::DIMENSIONLESS.into()),
                     AuthoredInputType::Real,
                 ],
             ),
@@ -213,10 +212,10 @@ impl AuthoredBoundary {
                 coefficient,
             } => {
                 coefficient.constant().is_none_or(|coefficient| {
-                    coefficient.is_finite() && coefficient.watts_per_square_meter_kelvin >= 0.0
+                    coefficient.is_finite() && coefficient.canonical_value() >= 0.0
                 }) && match ambient_temperature {
                     PrescribedValue::Constant(temperature) => {
-                        temperature.is_finite() && temperature.kelvin >= 0.0
+                        temperature.is_finite() && temperature.canonical_value() >= 0.0
                     }
                     PrescribedValue::Signal(_) => true,
                 }
@@ -226,16 +225,16 @@ impl AuthoredBoundary {
                 emissivity,
             } => {
                 emissivity.constant().is_none_or(|emissivity| {
-                    emissivity.is_finite() && (0.0..=1.0).contains(&emissivity.fraction)
+                    emissivity.is_finite() && (0.0..=1.0).contains(&emissivity.canonical_value())
                 }) && match ambient_temperature {
                         PrescribedValue::Constant(value) => {
-                            value.is_finite() && value.kelvin >= 0.0
+                            value.is_finite() && value.canonical_value() >= 0.0
                         }
                         PrescribedValue::Signal(_) => true,
                     }
             }
             AuthoredBoundaryKind::AcousticImpedance { impedance } => {
-                impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
+                impedance.is_finite() && impedance.canonical_value() > 0.0
             }
             AuthoredBoundaryKind::AcousticImpedanceLaw { law } => law.is_valid(),
             _ => true,
@@ -256,7 +255,7 @@ impl AuthoredConnector {
                 stiffness,
             } => {
                 require_distinct_vertices(primary, secondary)?;
-                finite_nonnegative(stiffness.newtons_per_meter)?;
+                finite_nonnegative(stiffness.canonical_value())?;
             }
             AuthoredConnectorKind::AxialDashpot {
                 primary,
@@ -264,15 +263,15 @@ impl AuthoredConnector {
                 damping,
             } => {
                 require_distinct_vertices(primary, secondary)?;
-                finite_nonnegative(damping.newton_seconds_per_meter)?;
+                finite_nonnegative(damping.canonical_value())?;
             }
             AuthoredConnectorKind::IsotropicGroundSpring { target, stiffness } => {
                 require_role(target, &[GeometryRegionRole::Vertex])?;
-                finite_nonnegative(stiffness.newtons_per_meter)?;
+                finite_nonnegative(stiffness.canonical_value())?;
             }
             AuthoredConnectorKind::SurfaceNormalFoundation { target, modulus } => {
                 require_role(target, &[GeometryRegionRole::Face])?;
-                finite_nonnegative(modulus.newtons_per_cubic_meter)?;
+                finite_nonnegative(modulus.canonical_value())?;
             }
         }
         Ok(())
@@ -335,13 +334,13 @@ impl AuthoredInterface {
         }
         match self.kind {
             AuthoredInterfaceKind::ContactCoulomb { coefficient } => {
-                finite_positive(coefficient.ratio)?
+                finite_positive(coefficient.canonical_value())?
             }
             AuthoredInterfaceKind::ConjugateHeatTransferConductance { coefficient } => {
-                finite_positive(coefficient.watts_per_square_meter_kelvin)?
+                finite_positive(coefficient.canonical_value())?
             }
             AuthoredInterfaceKind::ConjugateHeatTransferResistance { resistance } => {
-                finite_positive(resistance.square_meter_kelvin_per_watt)?
+                finite_positive(resistance.canonical_value())?
             }
             _ => {}
         }

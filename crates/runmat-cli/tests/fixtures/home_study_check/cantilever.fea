@@ -1,9 +1,9 @@
 geometry beam {
     file = "./geometry/cantilever.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
-    region fixed : face { select id "face_000001"; expect exactly_one }
-    region tip : face { select id "face_000002"; expect exactly_one }
+    region body : solid { select name "Beam"; expect exactly_one }
+    region fixed : face { select name "Fixed end"; expect exactly_one }
+    region tip : face { select name "Loaded end"; expect exactly_one }
 }
 
 mesh beam on geometry.beam {

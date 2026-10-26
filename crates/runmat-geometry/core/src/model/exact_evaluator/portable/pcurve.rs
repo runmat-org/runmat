@@ -1,8 +1,8 @@
 use super::super::definition_validation::pcurve_domain;
 use super::super::{
     ExactPcurveDefinition, ExactPcurveEvaluator, ExactPcurveImplementation,
-    GeometryEvaluationControl, GeometryEvaluationError, ParameterRange, PcurveDerivatives,
-    PcurveEvaluatorId,
+    GeometryEvaluationControl, GeometryEvaluationError, ParameterRange,
+    PcurveDerivativeCoefficients, PcurveDerivatives, PcurveEvaluatorId,
 };
 use super::curve::trigonometric_curve;
 use super::spline::rational_derivatives;
@@ -23,7 +23,7 @@ impl ExactPcurveEvaluator for PortableExactEvaluator<'_> {
         id: &PcurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 2], GeometryEvaluationError> {
+    ) -> Result<[crate::GeometryParameterCoordinate; 2], GeometryEvaluationError> {
         Ok(ExactPcurveEvaluator::derivatives(self, id, parameter, control)?.point_uv)
     }
 
@@ -37,7 +37,27 @@ impl ExactPcurveEvaluator for PortableExactEvaluator<'_> {
         let ExactPcurveImplementation::Portable { definition } = &record.implementation else {
             return Err(kernel_owned("pcurve"));
         };
-        evaluate_pcurve(definition, parameter, control)
+        let evaluator: std::sync::Arc<str> = std::sync::Arc::from(id.as_str());
+        let denominator = match definition {
+            ExactPcurveDefinition::Circle { .. } => super::super::GeometryParameterFrame::radians(),
+            _ => super::super::GeometryParameterFrame::native(
+                evaluator.clone(),
+                super::super::GeometryParameterAxis::Pcurve,
+            ),
+        };
+        evaluate_pcurve(definition, parameter, control)?.into_parameter_frames(
+            [
+                super::super::GeometryParameterFrame::native(
+                    evaluator.clone(),
+                    super::super::GeometryParameterAxis::SurfaceU,
+                ),
+                super::super::GeometryParameterFrame::native(
+                    evaluator,
+                    super::super::GeometryParameterAxis::SurfaceV,
+                ),
+            ],
+            denominator,
+        )
     }
 }
 
@@ -45,7 +65,7 @@ pub(super) fn evaluate_pcurve(
     definition: &ExactPcurveDefinition,
     parameter: f64,
     control: &dyn GeometryEvaluationControl,
-) -> Result<PcurveDerivatives, GeometryEvaluationError> {
+) -> Result<PcurveDerivativeCoefficients, GeometryEvaluationError> {
     require_parameter(parameter, definition_range(definition))?;
     control.checkpoint()?;
     control.consume_iterations(1)?;
@@ -54,7 +74,7 @@ pub(super) fn evaluate_pcurve(
             origin_uv,
             direction_uv_per_parameter,
             ..
-        } => PcurveDerivatives {
+        } => PcurveDerivativeCoefficients {
             point_uv: add_scaled(
                 origin_uv,
                 direction_uv_per_parameter,
@@ -75,7 +95,7 @@ pub(super) fn evaluate_pcurve(
             let value = trigonometric_curve(
                 center_uv, x_axis_uv, y_axis_uv, *radius_uv, *radius_uv, parameter,
             );
-            PcurveDerivatives {
+            PcurveDerivativeCoefficients {
                 point_uv: value.0,
                 first_uv: value.1,
                 second_uv: value.2,
@@ -90,7 +110,7 @@ pub(super) fn evaluate_pcurve(
                 parameter,
                 control,
             )?;
-            PcurveDerivatives {
+            PcurveDerivativeCoefficients {
                 point_uv: value.point,
                 first_uv: value.first,
                 second_uv: value.second,

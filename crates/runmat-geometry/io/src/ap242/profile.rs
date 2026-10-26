@@ -360,9 +360,7 @@ fn capability_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_geometry_core::{
-        Ap242CapabilityDisposition, Ap242PersistentIdRole, Ap242PhysicalDimension,
-    };
+    use runmat_geometry_core::{Ap242CapabilityDisposition, Ap242PersistentIdRole, QuantityKind};
 
     const AP242: &str = include_str!("../../tests/fixtures/ap242_exchange_metadata.step");
 
@@ -403,17 +401,17 @@ END-ISO-10303-21;"#;
             inventory.parameters[0].parameter_id,
             "parameter-wall-thickness"
         );
-        assert_eq!(
-            inventory.parameters[0].value.dimension,
-            Ap242PhysicalDimension::Length
-        );
-        assert!((inventory.parameters[0].value.value_si - 0.008).abs() < 1e-12);
+        assert_eq!(inventory.parameters[0].value.kind(), QuantityKind::Length);
+        assert!((inventory.parameters[0].value.canonical_value() - 0.008).abs() < 1e-12);
         assert_eq!(inventory.engineering_properties.len(), 1);
         assert_eq!(
-            inventory.engineering_properties[0].value.dimension,
-            Ap242PhysicalDimension::MassDensity
+            inventory.engineering_properties[0].value.kind(),
+            QuantityKind::MassDensity
         );
-        assert_eq!(inventory.engineering_properties[0].value.value_si, 7850.0);
+        assert_eq!(
+            inventory.engineering_properties[0].value.canonical_value(),
+            7850.0
+        );
         assert_eq!(inventory.materials.len(), 1);
         assert_eq!(inventory.materials[0].property_ids, ["step_property_37"]);
         assert_eq!(
@@ -424,13 +422,13 @@ END-ISO-10303-21;"#;
         assert_eq!(
             inventory.engineering_properties[0].environment[0]
                 .value
-                .dimension,
-            Ap242PhysicalDimension::Temperature
+                .kind(),
+            QuantityKind::Temperature
         );
         assert_eq!(
             inventory.engineering_properties[0].environment[0]
                 .value
-                .value_si,
+                .canonical_value(),
             293.15
         );
         assert_eq!(

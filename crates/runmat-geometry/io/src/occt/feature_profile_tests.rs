@@ -72,13 +72,17 @@ fn exact_profile_sweeps_are_qualified_with_complete_lineage() {
         "extrusion",
         ResolvedGeometryFeatureOperation::Extrude {
             profile: GeometryFeatureRef("profile".into()),
-            distance_m: 0.5,
+            distance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.5),
             direction: [0.0, 0.0, 1.0],
         },
         &[("profile", &profile)],
     );
     assert_eq!(extrusion.topology.solids.len(), 1);
-    assert_close(volume(&extrusion), properties.surface_area_m2 * 0.5, 1.0e-9);
+    assert_close(
+        volume(&extrusion),
+        properties.surface_area_m2.canonical_value() * 0.5,
+        1.0e-9,
+    );
     extrusion.build_closure().unwrap();
 
     let revolution = execute(
@@ -87,17 +91,18 @@ fn exact_profile_sweeps_are_qualified_with_complete_lineage() {
         ResolvedGeometryFeatureOperation::Revolve {
             profile: GeometryFeatureRef("profile".into()),
             axis: [0.0, 1.0, 0.0],
-            origin_m: [
-                properties.centroid_m[0] - 2.0,
-                properties.centroid_m[1],
-                properties.centroid_m[2],
-            ],
-            angle_rad: 2.0 * std::f64::consts::PI,
+            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
+                properties.centroid_m.canonical_value()[0] - 2.0,
+                properties.centroid_m.canonical_value()[1],
+                properties.centroid_m.canonical_value()[2],
+            ]),
+            angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(2.0 * std::f64::consts::PI),
         },
         &[("profile", &profile)],
     );
     assert_eq!(revolution.topology.solids.len(), 1);
-    let pappus_volume = properties.surface_area_m2 * 2.0 * std::f64::consts::PI * 2.0;
+    let pappus_volume =
+        properties.surface_area_m2.canonical_value() * 2.0 * std::f64::consts::PI * 2.0;
     assert_close(volume(&revolution), pappus_volume, 5.0e-7);
     revolution.build_closure().unwrap();
 }
@@ -109,9 +114,9 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
         &provider,
         "stock",
         ResolvedGeometryFeatureOperation::Box {
-            width_m: 1.0,
-            depth_m: 1.0,
-            height_m: 1.0,
+            width_m: runmat_types::physical::Length::new(1.0),
+            depth_m: runmat_types::physical::Length::new(1.0),
+            height_m: runmat_types::physical::Length::new(1.0),
         },
         &[],
     );
@@ -120,10 +125,10 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
         "hole",
         ResolvedGeometryFeatureOperation::Hole {
             target: GeometryFeatureRef("stock".into()),
-            radius_m: 0.1,
-            depth_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(0.1),
+            depth_m: runmat_types::physical::Length::new(1.0),
             axis: [0.0, 0.0, 1.0],
-            origin_m: [0.5, 0.5, 0.0],
+            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.5, 0.5, 0.0]),
         },
         &[("stock", &stock)],
     );
@@ -135,10 +140,10 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
         "outside_hole",
         &ResolvedGeometryFeatureOperation::Hole {
             target: GeometryFeatureRef("stock".into()),
-            radius_m: 0.1,
-            depth_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(0.1),
+            depth_m: runmat_types::physical::Length::new(1.0),
             axis: [0.0, 0.0, 1.0],
-            origin_m: [2.0, 2.0, 0.0],
+            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([2.0, 2.0, 0.0]),
         },
         &GeometryFeatureProviderSelection::None,
         &[("stock", &stock)],
@@ -153,7 +158,7 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
         .iter()
         .find_map(|record| match &record.implementation {
             ExactMassPropertiesImplementation::KernelValidated { properties, .. } => {
-                Some(properties.surface_area_m2)
+                Some(properties.surface_area_m2.canonical_value())
             }
             ExactMassPropertiesImplementation::Kernel { .. } => None,
         })
@@ -175,7 +180,7 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
         ResolvedGeometryFeatureOperation::Pocket {
             target: GeometryFeatureRef("stock".into()),
             profile: GeometryFeatureRef("profile".into()),
-            depth_m: 0.35,
+            depth_m: runmat_types::physical::Length::new(0.35),
             direction: [0.0, 0.0, 1.0],
         },
         &[("stock", &stock), ("profile", &offset_profile)],
@@ -194,7 +199,7 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
             ResolvedGeometryFeatureOperation::Fillet {
                 target: GeometryFeatureRef("stock".into()),
                 edges: edge_selection(),
-                radius_m: 0.1,
+                radius_m: runmat_types::physical::Length::new(0.1),
             },
         ),
         (
@@ -202,7 +207,7 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
             ResolvedGeometryFeatureOperation::Chamfer {
                 target: GeometryFeatureRef("stock".into()),
                 edges: edge_selection(),
-                distance_m: 0.1,
+                distance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.1),
             },
         ),
     ] {
@@ -274,7 +279,7 @@ fn volume(geometry: &ImportedExactCad) -> f64 {
         .iter()
         .map(|record| match &record.implementation {
             ExactMassPropertiesImplementation::KernelValidated { properties, .. } => {
-                properties.volume_m3
+                properties.volume_m3.canonical_value()
             }
             ExactMassPropertiesImplementation::Kernel { .. } => 0.0,
         })

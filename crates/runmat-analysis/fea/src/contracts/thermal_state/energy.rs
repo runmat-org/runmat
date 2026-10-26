@@ -7,14 +7,18 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalPowerScale {
-    pub storage_w: f64,
-    pub boundary_w: f64,
-    pub applied_w: f64,
-    pub prescribed_w: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub storage_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub boundary_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub applied_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub prescribed_w: runmat_types::physical::Power,
 }
 
 impl ThermalPowerScale {
-    pub fn maximum(self) -> f64 {
+    pub fn maximum(self) -> runmat_types::physical::Power {
         self.storage_w
             .max(self.boundary_w)
             .max(self.applied_w)
@@ -25,12 +29,17 @@ impl ThermalPowerScale {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalEnergyBalance {
-    pub storage_rate_w: f64,
-    pub boundary_loss_w: f64,
-    pub applied_power_w: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub storage_rate_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub boundary_loss_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub applied_power_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     /// Signed correction from prescribed-temperature reactions in the residual equation.
-    pub prescribed_boundary_power_w: f64,
-    pub residual_w: f64,
+    pub prescribed_boundary_power_w: runmat_types::physical::Power,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub residual_w: runmat_types::physical::Power,
     pub scale: ThermalPowerScale,
     /// Absolute residual divided by the largest retained physical transfer sum.
     /// Exactly zero power has zero residual; there is no dimensional tolerance floor.
@@ -47,10 +56,10 @@ pub enum ThermalEnergyBalanceError {
 
 impl ThermalEnergyBalance {
     pub fn from_powers(
-        storage_rate_w: f64,
-        boundary_loss_w: f64,
-        applied_power_w: f64,
-        prescribed_boundary_power_w: f64,
+        storage_rate_w: runmat_types::physical::Power,
+        boundary_loss_w: runmat_types::physical::Power,
+        applied_power_w: runmat_types::physical::Power,
+        prescribed_boundary_power_w: runmat_types::physical::Power,
     ) -> Self {
         Self::from_power_transfers(
             storage_rate_w,
@@ -67,10 +76,10 @@ impl ThermalEnergyBalance {
     }
 
     pub fn from_power_transfers(
-        storage_rate_w: f64,
-        boundary_loss_w: f64,
-        applied_power_w: f64,
-        prescribed_boundary_power_w: f64,
+        storage_rate_w: runmat_types::physical::Power,
+        boundary_loss_w: runmat_types::physical::Power,
+        applied_power_w: runmat_types::physical::Power,
+        prescribed_boundary_power_w: runmat_types::physical::Power,
         scale: ThermalPowerScale,
     ) -> Self {
         let residual_w =
@@ -83,15 +92,15 @@ impl ThermalEnergyBalance {
             prescribed_boundary_power_w,
             residual_w,
             scale,
-            relative_residual: if normalization == 0.0 {
+            relative_residual: if normalization.canonical_value() == 0.0 {
                 0.0
             } else {
-                residual_w.abs() / normalization
+                residual_w.abs().ratio_to(normalization).canonical_value()
             },
         }
     }
 
-    /// Validate the recorded arithmetic, not conservation against independent physics data.
+    /// Validate retained signed-power arithmetic, without a dimensional floor.
     pub fn validate(&self) -> Result<(), ThermalEnergyBalanceError> {
         if [
             self.storage_rate_w,
@@ -99,7 +108,6 @@ impl ThermalEnergyBalance {
             self.applied_power_w,
             self.prescribed_boundary_power_w,
             self.residual_w,
-            self.relative_residual,
             self.scale.storage_w,
             self.scale.boundary_w,
             self.scale.applied_w,
@@ -107,6 +115,7 @@ impl ThermalEnergyBalance {
         ]
         .iter()
         .any(|value| !value.is_finite())
+            || !self.relative_residual.is_finite()
         {
             return Err(ThermalEnergyBalanceError::NonFinite);
         }

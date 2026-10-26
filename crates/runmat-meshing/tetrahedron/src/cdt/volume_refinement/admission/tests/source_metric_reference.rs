@@ -11,10 +11,16 @@ pub(super) fn legacy_source_metric_floor(
 ) -> bool {
     insertion.boundary.iter().all(|face| {
         let points = [
-            topology.nodes()[face[0] as usize].coordinates_m,
-            topology.nodes()[face[1] as usize].coordinates_m,
-            topology.nodes()[face[2] as usize].coordinates_m,
-            candidate.node.coordinates_m,
+            topology.nodes()[face[0] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes()[face[1] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes()[face[2] as usize]
+                .coordinates_m
+                .canonical_value(),
+            candidate.node.coordinates_m.canonical_value(),
         ];
         let Some(geometry) = evaluate_tetrahedron_geometry(points, candidate.resolved_metric)
         else {

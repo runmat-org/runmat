@@ -235,9 +235,9 @@ mod tests {
 
     fn steel() -> SolidMaterial {
         SolidMaterial {
-            youngs_modulus_pa: 200.0e9,
-            poisson_ratio: 0.3,
-            density_kg_per_m3: 7_850.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(7_850.0),
         }
     }
 
@@ -377,7 +377,7 @@ mod tests {
         let warp = 0.1;
         geometry.nodes_m[4][0] += warp;
         let mass = consistent_mass_matrix(steel(), geometry).unwrap();
-        let density = steel().density_kg_per_m3;
+        let density = steel().density_kg_per_m3.canonical_value();
         // For this warp det(J)=1+4δ(L0-L1). Exact simplex moments give
         // ∫N0² dV = 1/420 + δ/315 and ∫N4² dV = 4/315.
         assert!((mass[0][0] - density * (1.0 / 420.0 + warp / 315.0)).abs() < 1.0e-10);

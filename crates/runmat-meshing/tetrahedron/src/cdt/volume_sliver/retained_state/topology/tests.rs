@@ -51,7 +51,17 @@ fn compact_seed_restores_exact_topology_and_order_with_unrelated_cells() {
             DelaunayVolumeSliverErrorKind::InvalidTopology
         );
         let mut foreign = candidate;
-        foreign.nodes[0].coordinates_m[0] += 0.01;
+        {
+            let quantity_change = 0.01;
+            let quantity_index = 0;
+            let quantity_slot = &mut foreign.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert_eq!(
             TopologyPatch::between(&base, &foreign).err().unwrap().kind,
             DelaunayVolumeSliverErrorKind::InvalidTopology

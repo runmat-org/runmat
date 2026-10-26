@@ -9,7 +9,7 @@ fn legacy_topology(structural: &StructuralModel) -> serde_json::Value {
     json!({
         "nodes": structural.nodes.iter().map(|node| json!({
             "node_id": node.node_id,
-            "coordinates_m": node.coordinates_m.map(f64::to_bits),
+            "coordinates_m": node.coordinates_m.canonical_value().map(f64::to_bits),
             "solid_attachment": node.solid_attachment.clone(),
         })).collect::<Vec<_>>(),
         "elements": structural.elements.iter().map(|element| json!({
@@ -27,7 +27,17 @@ fn borrowed_topology_and_element_contracts_preserve_canonical_bytes() {
         FixtureId::StructuralShellPlateMomentReference,
     ] {
         let mut structural = fixture_model(fixture).structural.unwrap();
-        structural.nodes[0].coordinates_m[0] = -0.0;
+        {
+            let quantity_change = -0.0;
+            let quantity_index = 0;
+            let quantity_slot = &mut structural.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment::SolverNode {
             stable_identity: [7; 32],
         });
@@ -86,12 +96,17 @@ fn borrowed_topology_and_element_contracts_preserve_canonical_bytes() {
         let expected = encode_contract(
             PREFIX,
             "explicit-structural-node",
-            &(digest, node.node_id, node.coordinates_m.map(f64::to_bits)),
+            &(
+                digest,
+                node.node_id,
+                node.coordinates_m.canonical_value().map(f64::to_bits),
+            ),
             LIMITS,
         )
         .unwrap();
         assert_eq!(
-            explicit_node_identity(digest, node.node_id, node.coordinates_m).unwrap(),
+            explicit_node_identity(digest, node.node_id, node.coordinates_m.canonical_value())
+                .unwrap(),
             stable_hash(expected)
         );
         let first = digest;
@@ -112,7 +127,17 @@ fn borrowed_validation_preserves_duplicate_nonfinite_and_missing_node_errors() {
         Err(ExplicitStructuralTopologyError::DuplicateNode { .. })
     ));
     let mut nonfinite = structural.clone();
-    nonfinite.nodes[0].coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut nonfinite.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         explicit_topology_digest(&nonfinite),
         Err(ExplicitStructuralTopologyError::NonFiniteNode { .. })
@@ -170,18 +195,48 @@ fn counted_validation_reports_first_authored_failure_before_later_duplicates() {
         .structural
         .unwrap();
     let mut duplicate = structural.nodes[0].clone();
-    duplicate.coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut duplicate.coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     structural.nodes.push(duplicate);
     assert!(matches!(
         explicit_topology_digest(&structural),
         Err(ExplicitStructuralTopologyError::DuplicateNode { .. })
     ));
-    structural.nodes[0].coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut structural.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         explicit_topology_digest(&structural),
         Err(ExplicitStructuralTopologyError::NonFiniteNode { .. })
     ));
-    structural.nodes[0].coordinates_m[0] = 0.0;
+    {
+        let quantity_change = 0.0;
+        let quantity_index = 0;
+        let quantity_slot = &mut structural.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     structural.nodes.pop();
     structural.elements.push(structural.elements[0].clone());
     let StructuralElementKind::Beam(beam) = &mut structural.elements[0].kind else {

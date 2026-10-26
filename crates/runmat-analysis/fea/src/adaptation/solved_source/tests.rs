@@ -112,7 +112,7 @@ fn actual_h_refinement_resolves_interior_dofs_and_governs_original_evidence() {
             .unwrap()
             .chunks_exact(3),
     ) {
-        assert!((u[0] - 0.02 * node.coordinates_m[0]).abs() < 1e-14);
+        assert!((u[0] - 0.02 * node.coordinates_m.canonical_value()[0]).abs() < 1e-14);
         assert!(u[1].abs() < 1e-14 && u[2].abs() < 1e-14);
     }
     let id = ObservationId("tip_displacement".into());

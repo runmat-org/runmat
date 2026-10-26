@@ -55,7 +55,7 @@ pub(super) fn evaluate_tetrahedron_nodes(
         protected_facet_count,
         protected_edges,
     } = context;
-    let points = nodes.map(|node| node.coordinates_m);
+    let points = nodes.map(|node| node.coordinates_m.canonical_value());
     let identities = nodes.map(|node| node.identity);
     let geometry = evaluate_tetrahedron_geometry(points, metric.metric).ok_or_else(|| {
         error(

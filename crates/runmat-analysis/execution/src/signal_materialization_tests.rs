@@ -76,6 +76,7 @@ fn admitted() -> AdmittedSignalGenerator {
     )
     .unwrap();
     AdmittedSignalGenerator {
+        schema_version: 2,
         value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: revision,
         callable: BundleCallable {
@@ -98,7 +99,13 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("sampling"),
         )
         .unwrap(),
-        sample_points: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            runmat_analysis_core::GeneratorDomain::TimeSeconds
+                .axis_descriptor(None)
+                .unwrap(),
+            vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        )
+        .unwrap(),
         required_capabilities: BTreeSet::new(),
         provenance: GeneratorProvenance {
             project_revision: "project-revision".into(),
@@ -377,7 +384,7 @@ fn generated_nodal_vectors_preserve_each_node_component_and_sample() {
             SignalPrecision::Real64,
         );
         let mut admitted = admitted();
-        admitted.sample_points = vec![0.0, 1.0];
+        admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(), vec![0.0, 1.0]).unwrap();
         let chunks = plan_signal_generator_chunks(
             &authored,
             &admitted,
@@ -427,7 +434,7 @@ fn generated_nodal_vectors_preserve_each_node_component_and_sample() {
             for node in 0..nodes {
                 for component in 0..3 {
                     assert_eq!(
-                        values[3 * node + component].newtons,
+                        values[3 * node + component].canonical_value(),
                         (1000 * sample + 10 * node + component) as f64
                     );
                 }
@@ -444,7 +451,7 @@ fn matrix_output_is_reordered_from_column_major_to_sample_major() {
     };
     value.frame = Some(runmat_analysis_core::CoordinateFrame::Global);
     let mut admitted = admitted();
-    admitted.sample_points = vec![0.0, 1.0];
+    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(), vec![0.0, 1.0]).unwrap();
     let chunks = plan_signal_generator_chunks(
         &signal,
         &admitted,
@@ -720,7 +727,7 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
     assert!(matches!(
         &table.knots[2].value,
         runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(value)))
-            if value.newtons == 30.0
+            if value.canonical_value() == 30.0
     ));
     assert!(matches!(signal.provenance, SignalProvenance::Generated(_)));
 

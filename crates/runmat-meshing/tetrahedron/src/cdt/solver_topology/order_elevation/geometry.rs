@@ -143,7 +143,10 @@ pub(super) fn append_midpoint_nodes<'source, 'control>(
                 left.stable_identity,
                 right.stable_identity,
             ]),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             provenance,
             exact_parameters,
         });

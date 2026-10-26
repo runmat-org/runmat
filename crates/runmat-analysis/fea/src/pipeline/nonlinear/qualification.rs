@@ -83,7 +83,13 @@ fn check_public_manufactured_cube(quadratic: bool, increments: usize) {
             .topology
             .nodes
             .iter()
-            .flat_map(|node| [reference::displacement(node.coordinates_m[0]), 0.0, 0.0])
+            .flat_map(|node| {
+                [
+                    reference::displacement(node.coordinates_m.canonical_value()[0]),
+                    0.0,
+                    0.0,
+                ]
+            })
             .collect::<Vec<_>>();
         let u = result
             .displacement_snapshots
@@ -270,7 +276,7 @@ fn public_nonlinear_does_not_silently_omit_boundary_pressure() {
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "additional-pressure".into(),
-            target: runmat_analysis_core::RegionTarget::boundary("slab_right"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: runmat_analysis_core::BoundaryOperator::StructuralPressure {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Pressure::new(1.0),

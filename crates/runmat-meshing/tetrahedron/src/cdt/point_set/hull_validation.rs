@@ -70,12 +70,18 @@ pub(super) fn validate_convex_hull_closure(
         if (index as u64).is_multiple_of(options.insertion.topology.cancellation_check_interval) {
             work.check_cancellation()?;
         }
-        let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+        let points = face.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         let interior_sign = work.orient3d([
             points[0],
             points[1],
             points[2],
-            topology.nodes[*interior as usize].coordinates_m,
+            topology.nodes[*interior as usize]
+                .coordinates_m
+                .canonical_value(),
         ])?;
         if interior_sign == PredicateSign::Zero {
             return Err(error(
@@ -93,12 +99,12 @@ pub(super) fn validate_convex_hull_closure(
                 .into_iter()
                 .find(|vertex| !edge.contains(vertex))
                 .expect("a boundary face has a vertex off each of its edges");
-            let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m.canonical_value());
             let sign = work.orient3d([
                 points[0],
                 points[1],
                 points[2],
-                topology.nodes[apex as usize].coordinates_m,
+                topology.nodes[apex as usize].coordinates_m.canonical_value(),
             ])?;
             if sign != PredicateSign::Zero && sign != interior_signs[face_index] {
                 return Err(error(DelaunayPointSetErrorKind::InvalidTopology,

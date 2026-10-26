@@ -31,7 +31,7 @@ fn tie_planes(mesh: &SolverMeshArtifact, summary: &mut AssemblySummary) {
     let original_reduction = matrix.affine_reduction().unwrap();
     let mut planes = BTreeMap::<u64, Vec<usize>>::new();
     for (node, entry) in mesh.topology.nodes.iter().enumerate() {
-        let x = entry.coordinates_m[0];
+        let x = entry.coordinates_m.canonical_value()[0];
         assert!(x.is_finite() && (0.0..=1.0).contains(&x));
         let row = summary
             .structural_dof_layout

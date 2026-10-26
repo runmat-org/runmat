@@ -58,7 +58,7 @@ fn replace_with_force(model: &mut AnalysisModel, id: &str, region_id: &str, forc
     })];
     model.excitations = vec![ExcitationAction::Force(excitation(
         id,
-        ExcitationTarget::Region(RegionTarget::authored(region_id)),
+        ExcitationTarget::Region(RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(region_id))),
         signal_id,
         ExcitationDistribution::PreserveResultant,
     ))];
@@ -97,7 +97,7 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
     }));
     let mut inlet = excitation(
         &excitation_id.0,
-        ExcitationTarget::Region(RegionTarget::boundary("fluid_inlet")),
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_inlet"))),
         signal_id,
         ExcitationDistribution::TopologyField,
     );
@@ -127,9 +127,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
+use runmat_geometry_core::{EntityKind, GeometryAsset};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
+    CanonicalMeshingContract, ElementOrder, StableDigest,
 };
 use runmat_runtime::analysis::storage;
 use runmat_runtime::analysis::{
@@ -252,11 +252,8 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
     let volume_region = model.material_assignments[0]
         .selected_region_id()
         .map(|region_id| {
-            PersistentEntityId::new(
-                PersistentEntityKind::Region,
-                region_id.to_owned(),
-                vec!["root".to_owned()],
-            )
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(region_id)
+                .expect("contract volume target is a canonical fixture selector")
         })
         .unwrap_or_else(|| mesh.topology.regions[0].region_id.clone());
     mesh.topology.regions[0].region_id = volume_region.clone();
@@ -274,13 +271,10 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
         };
         Some(target.region_id.as_str())
     }) {
-        mesh.topology.boundary_faces[0]
-            .provenance
-            .push(PersistentEntityId::new(
-                PersistentEntityKind::Face,
-                boundary_region_id.to_string(),
-                vec!["root".to_owned()],
-            ));
+        mesh.topology.boundary_faces[0].provenance.push(
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(boundary_region_id)
+                .expect("contract thermal target is a canonical fixture face selector"),
+        );
         mesh.topology.boundary_faces[0].provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -348,8 +342,8 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     );
     for material in &mut model.materials {
         material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-            speed_of_sound_m_per_s: 343.0,
-            damping_ratio: 0.02,
+            speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+            damping_ratio: runmat_types::physical::DampingRatio::new(0.02),
         });
     }
     model.material_assignments = vec![MaterialAssignment {
@@ -361,7 +355,7 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     model.constraints.clear();
     model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
         boundary_id: "acoustic_rigid_wall".to_string(),
-        target: RegionTarget::boundary("root"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
         operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
     }];
     let id = "acoustic_pressure";
@@ -377,7 +371,7 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     })];
     model.excitations = vec![ExcitationAction::AcousticPressure(excitation(
         id,
-        ExcitationTarget::Region(RegionTarget::boundary("tip")),
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip"))),
         signal_id,
         ExcitationDistribution::PreserveResultant,
     ))];
@@ -406,7 +400,7 @@ fn contract_thermal_model(model_id: &str, procedure: AnalysisProcedure) -> Analy
         runmat_analysis_core::ThermalConstraint {
             constraint_id: "thermal_reference".to_string(),
             kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Temperature::new(293.15),
                 ),
@@ -468,10 +462,10 @@ fn material_conflict_contract_model() -> AnalysisModel {
     polymer
         .require_mechanical_mut()
         .expect("structural fixture material")
-        .youngs_modulus_pa = 3.0e9;
+        .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(3.0e9);
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Inferred,
@@ -568,7 +562,7 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
 fn analysis_validate_contract_is_v1_and_maps_codes() {
     let model = contract_linear_static_model();
     let context = OperationContext::new(Some("trace-contract-2".to_string()), None);
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
+    let envelope = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect("validate should succeed");
     assert_eq!(envelope.operation, "fea.validate");
     assert_eq!(envelope.op_version, "fea.validate/v1");
@@ -577,7 +571,6 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
     invalid.materials.clear();
     let err = analysis_validate(
         &invalid,
-        UnitSystem::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(None, None),
     )
@@ -985,26 +978,7 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
-    let mut unit_mismatch = contract_linear_static_model();
-    unit_mismatch.units = UnitSystem::Inch;
-    let unit_err = analysis_validate(
-        &unit_mismatch,
-        UnitSystem::Meter,
-        &CoordinateFrame::Global,
-        OperationContext::new(Some("trace-contract-2b".to_string()), None),
-    )
-    .expect_err("validate should fail for units");
-    assert_eq!(unit_err.error_code, "RM.FEA.VALIDATE.UNIT_MISMATCH");
-    assert_eq!(
-        unit_err.context.get("model_units").map(|s| s.as_str()),
-        Some("Inch")
-    );
-    assert_eq!(
-        unit_err.context.get("geometry_units").map(|s| s.as_str()),
-        Some("Meter")
-    );
-
+fn analysis_validate_maps_frame_mismatch_code() {
     let mut frame_mismatch = contract_linear_static_model();
     frame_mismatch.frame = CoordinateFrame::Cartesian(runmat_analysis_core::CartesianFrame {
         frame_id: "fixture_frame".to_string(),
@@ -1014,7 +988,6 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     });
     let frame_err = analysis_validate(
         &frame_mismatch,
-        UnitSystem::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(Some("trace-contract-2c".to_string()), None),
     )
@@ -1336,7 +1309,7 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
         runmat_analysis_core::FluidConstraint {
             constraint_id: "bc_cfd_inlet".into(),
             kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::authored("fluid_inlet"),
+                target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("fluid_inlet")),
                 value: runmat_analysis_core::PrescribedValue::Constant(velocity),
             },
         },

@@ -148,15 +148,13 @@ pub(super) fn create_study_object_from_args(
         model = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
             .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
     }
-    validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
-        |error| {
-            builtin_error(
-                STUDY_NAME,
-                &ERROR_INPUT,
-                format!("FEA model failed study validation: {error}"),
-            )
-        },
-    )?;
+    validate_model_against_geometry(&model, &CoordinateFrame::Global).map_err(|error| {
+        builtin_error(
+            STUDY_NAME,
+            &ERROR_INPUT,
+            format!("FEA model failed study validation: {error}"),
+        )
+    })?;
     let execution = match supplied_execution {
         Some(execution) => {
             execution
@@ -475,62 +473,57 @@ pub(super) fn create_material_object_from_args(
         )?)
     } else if fields.contains_key("youngs_modulus_pa") || fields.contains_key("poisson_ratio") {
         Some(MaterialMechanicalModel {
-            youngs_modulus_pa: remove_required_f64(
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(remove_required_f64(
                 &mut fields,
                 MATERIAL_NAME,
                 "youngs_modulus_pa",
-            )?,
-            poisson_ratio: remove_required_f64(&mut fields, MATERIAL_NAME, "poisson_ratio")?,
+            )?),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
+                "poisson_ratio",
+            )?),
         })
     } else {
         None
     };
-    let thermal = if let Some(value) = fields.remove("thermal") {
-        Some(json_deserialize(
-            MATERIAL_NAME,
-            value,
-            "thermal material model",
-        )?)
-    } else if [
-        "reference_temperature_k",
-        "modulus_temp_coeff_per_k",
-        "conductivity_w_per_mk",
-        "specific_heat_j_per_kgk",
-        "expansion_coefficient_per_k",
-    ]
-    .iter()
-    .any(|field| fields.contains_key(*field))
-    {
-        Some(MaterialThermalModel {
-            reference_temperature_k: remove_required_f64(
-                &mut fields,
+    let thermal =
+        if let Some(value) = fields.remove("thermal") {
+            Some(json_deserialize(
                 MATERIAL_NAME,
-                "reference_temperature_k",
-            )?,
-            modulus_temp_coeff_per_k: remove_required_f64(
-                &mut fields,
-                MATERIAL_NAME,
-                "modulus_temp_coeff_per_k",
-            )?,
-            conductivity_w_per_mk: remove_required_f64(
-                &mut fields,
-                MATERIAL_NAME,
-                "conductivity_w_per_mk",
-            )?,
-            specific_heat_j_per_kgk: remove_required_f64(
-                &mut fields,
-                MATERIAL_NAME,
-                "specific_heat_j_per_kgk",
-            )?,
-            expansion_coefficient_per_k: remove_required_f64(
-                &mut fields,
-                MATERIAL_NAME,
-                "expansion_coefficient_per_k",
-            )?,
-        })
-    } else {
-        None
-    };
+                value,
+                "thermal material model",
+            )?)
+        } else if [
+            "reference_temperature_k",
+            "modulus_temp_coeff_per_k",
+            "conductivity_w_per_mk",
+            "specific_heat_j_per_kgk",
+            "expansion_coefficient_per_k",
+        ]
+        .iter()
+        .any(|field| fields.contains_key(*field))
+        {
+            Some(MaterialThermalModel {
+                reference_temperature_k: runmat_types::physical::Temperature::new(
+                    remove_required_f64(&mut fields, MATERIAL_NAME, "reference_temperature_k")?,
+                ),
+                modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(
+                    remove_required_f64(&mut fields, MATERIAL_NAME, "modulus_temp_coeff_per_k")?,
+                ),
+                conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(
+                    remove_required_f64(&mut fields, MATERIAL_NAME, "conductivity_w_per_mk")?,
+                ),
+                specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(
+                    remove_required_f64(&mut fields, MATERIAL_NAME, "specific_heat_j_per_kgk")?,
+                ),
+                expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(
+                    remove_required_f64(&mut fields, MATERIAL_NAME, "expansion_coefficient_per_k")?,
+                ),
+            })
+        } else {
+            None
+        };
     let electrical = if let Some(value) = fields.remove("electrical") {
         Some(json_deserialize(
             MATERIAL_NAME,
@@ -577,12 +570,16 @@ pub(super) fn create_material_object_from_args(
     } else if fields.contains_key("speed_of_sound_m_per_s") || fields.contains_key("damping_ratio")
     {
         Some(MaterialAcousticModel {
-            speed_of_sound_m_per_s: remove_required_f64(
+            speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(remove_required_f64(
                 &mut fields,
                 MATERIAL_NAME,
                 "speed_of_sound_m_per_s",
-            )?,
-            damping_ratio: remove_required_f64(&mut fields, MATERIAL_NAME, "damping_ratio")?,
+            )?),
+            damping_ratio: runmat_types::physical::DampingRatio::new(remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
+                "damping_ratio",
+            )?),
         })
     } else {
         None
@@ -616,7 +613,8 @@ pub(super) fn create_material_object_from_args(
         material_id,
         name,
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3,
+        mass_density_kg_per_m3: (mass_density_kg_per_m3)
+            .map(runmat_types::physical::MassDensity::new),
         elasticity: mechanical.map(MaterialElasticityModel::IsotropicLinear),
         damping,
         thermal,
@@ -872,7 +870,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         model_id: AnalysisModelId(model_id.clone()),
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
-        units: geometry.units,
+        units: runmat_types::physical::CoordinateUnits::canonical(),
         frame: CoordinateFrame::Global,
         materials: Vec::new(),
         material_assignments: Vec::new(),

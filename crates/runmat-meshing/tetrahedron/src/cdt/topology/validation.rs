@@ -22,7 +22,11 @@ pub(in crate::cdt) fn validate_canonical_volume_topology(
     for (index, node) in topology.nodes.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || index > 0 && topology.nodes[index - 1].identity >= node.identity
         {
             return Err(error(

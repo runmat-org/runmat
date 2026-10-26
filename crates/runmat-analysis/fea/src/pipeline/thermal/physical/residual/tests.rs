@@ -106,14 +106,15 @@ fn public_small_power_fields_and_receipts_keep_original_relative_evidence() {
                 .thermal
                 .as_mut()
                 .unwrap()
-                .conductivity_w_per_mk = 2.0 * scale;
+                .conductivity_w_per_mk =
+                runmat_types::physical::ThermalConductivity::new(2.0 * scale);
             crate::physics::thermal::qualification::left_temperature(
                 &mut workload,
                 PrescribedValue::Constant(Temperature::new(400.0)),
             );
             workload.model.boundaries.push(AnalysisBoundary {
                 boundary_id: "scaled-incoming-power".into(),
-                target: RegionTarget::boundary("slab_right"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                 operator: BoundaryOperator::ThermalHeatFlux {
                     value: PrescribedValue::Constant(HeatFlux::new(0.37 * scale)),
                 },
@@ -127,7 +128,10 @@ fn public_small_power_fields_and_receipts_keep_original_relative_evidence() {
                 .zip(result.temperature_snapshots[0].as_host_f64().unwrap())
             {
                 // Independent 1D conduction reference; scaling k and q leaves T unchanged.
-                assert!((value - (400.0 + 0.185 * node.coordinates_m[0])).abs() < 1e-7);
+                assert!(
+                    (value - (400.0 + 0.185 * node.coordinates_m.canonical_value()[0])).abs()
+                        < 1e-7
+                );
             }
             let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
             let cold = ThermalNumericalReceiptArtifact::from_canonical_bytes(

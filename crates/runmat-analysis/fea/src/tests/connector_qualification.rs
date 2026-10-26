@@ -79,7 +79,7 @@ fn mixed_solid_beam_ground_spring_recovers_from_the_shared_tip_dof() {
     const SPRING_STIFFNESS_N_PER_M: f64 = 2_000.0;
 
     let mut mesh = single_tetrahedron_solver_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0]
         .provenance
         .push(PersistentEntityId::new(
@@ -139,7 +139,7 @@ fn solid_face_foundation_matches_an_independent_quadrature_sum() {
     model.connectors = vec![runmat_analysis_core::AnalysisConnector {
         connector_id: "tip_foundation".into(),
         kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-            target: runmat_analysis_core::RegionTarget::boundary("tip"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
             modulus: runmat_analysis_core::FoundationModulus::new(FOUNDATION_MODULUS_N_PER_M3),
         },
     }];

@@ -122,7 +122,7 @@ impl RandomResponsePlan {
         }
 
         let selected_mode_count = participation_by_mode_channel.len();
-        let mut breakpoints_hz = excitation.frequencies_hz.clone();
+        let mut breakpoints_hz = excitation.frequencies_hz.canonical_values().clone();
         let lower = breakpoints_hz[0];
         let upper = *breakpoints_hz.last().expect("validated random spectrum");
         breakpoints_hz.extend(
@@ -139,7 +139,7 @@ impl RandomResponsePlan {
             captured_mass_ratio_by_channel,
             participation_by_mode_channel,
             breakpoints_hz,
-            authored_interval_count: excitation.frequencies_hz.len() - 1,
+            authored_interval_count: excitation.frequencies_hz.canonical_values().len() - 1,
         })
     }
 

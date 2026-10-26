@@ -8,15 +8,22 @@ pub mod ap242;
 pub mod cad;
 pub mod exact;
 pub mod faceted;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub mod feature;
-pub mod iges_units;
 pub mod import;
 pub mod normalize;
 pub mod preview;
 pub mod report;
 pub mod sniff;
 
+mod selection_projection;
+pub use selection_projection::ExactSelectionProjection;
+
+mod source_units;
+pub use source_units::source_unit_evidence;
 mod occt;
 
 pub use exact::{
@@ -25,10 +32,13 @@ pub use exact::{
 };
 pub use faceted::{import_faceted_solid, FacetedSolidImportOptions, ImportedFacetedSolid};
 pub use import::{
-    import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
+    import_geometry, import_geometry_with_context, import_materialized_geometry_preview, GeometryImportBudgetPolicy,
     GeometryImportContext, GeometryImportOptions,
 };
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub use occt::evaluator::OcctExactEvaluator;
 pub use preview::{
     close_cad_preview_session, read_cad_preview_session_chunk, start_cad_preview_session,
@@ -37,23 +47,35 @@ pub use preview::{
 pub use report::{ImportDiagnostic, ImportDiagnosticSeverity, ImportReport, ImportResult};
 pub use sniff::{detect_geometry_format, GeometryFormat};
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub fn native_cad_backend_was_used() -> bool {
     occt::native_cad_backend_was_used()
 }
 
-#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+#[cfg(not(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+)))]
 pub fn native_cad_backend_was_used() -> bool {
     false
 }
 
 /// Exact CAD kernel ABI implemented by this native build, when present.
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub fn native_exact_kernel_abi() -> Option<String> {
     Some(occt::exact_kernel_abi())
 }
 
-#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+#[cfg(not(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+)))]
 pub fn native_exact_kernel_abi() -> Option<String> {
     None
 }
@@ -441,7 +463,10 @@ mod tests {
 
     #[test]
     #[cfg(not(any(
-        all(not(target_arch = "wasm32"), feature = "occt-native"),
+        all(
+            any(not(target_arch = "wasm32"), target_os = "emscripten"),
+            feature = "occt-native"
+        ),
         all(target_arch = "wasm32", feature = "occt-wasm-host")
     )))]
     fn iges_import_without_occt_reports_backend_unavailable() {
@@ -456,7 +481,10 @@ mod tests {
 
     #[test]
     #[cfg(not(any(
-        all(not(target_arch = "wasm32"), feature = "occt-native"),
+        all(
+            any(not(target_arch = "wasm32"), target_os = "emscripten"),
+            feature = "occt-native"
+        ),
         all(target_arch = "wasm32", feature = "occt-wasm-host")
     )))]
     fn brep_import_without_occt_reports_backend_unavailable() {

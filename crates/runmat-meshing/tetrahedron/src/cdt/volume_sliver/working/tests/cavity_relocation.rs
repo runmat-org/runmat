@@ -27,7 +27,10 @@ fn neighboring_points_move_and_replay_in_one_atomic_cavity_transaction() {
 fn check_joint_relocation(replace_second: bool) {
     let (base, provenance) = interior_sliver_fixture();
     let mut nodes = base.nodes;
-    nodes[4].coordinates_m = [0.1, 0.1, 0.1];
+    nodes[4].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0.1, 0.1, 0.1]);
     nodes.push(DelaunayVolumeNode::explicit(
         StableDigest::from_bytes([6; 32]),
         [0.6, 0.1, 0.1],

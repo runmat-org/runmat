@@ -186,7 +186,7 @@ model coupled {
         runmat_analysis_core::AuthoredBoundaryKind::ThermalRadiation {
             emissivity: runmat_analysis_core::AuthoredBoundaryCoefficient::Constant(emissivity),
             ..
-        } if emissivity.fraction == 0.8
+        } if emissivity.canonical_value() == 0.8
     )));
     assert_eq!(model.connectors.len(), 4);
     assert!(matches!(

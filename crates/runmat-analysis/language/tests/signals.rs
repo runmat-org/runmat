@@ -116,12 +116,18 @@ model impact {
             parameter(
                 "peak",
                 runmat_types::OperationTypePattern::Quantity(
-                    runmat_types::QuantityDimension::Acceleration,
+                    runmat_types::physical::DynamicDimension::from(
+                        runmat_types::PhysicalDimension::ACCELERATION,
+                    ),
                 ),
             ),
             parameter(
                 "duration",
-                runmat_types::OperationTypePattern::Quantity(runmat_types::QuantityDimension::Time),
+                runmat_types::OperationTypePattern::Quantity(
+                    runmat_types::physical::DynamicDimension::from(
+                        runmat_types::PhysicalDimension::TIME,
+                    ),
+                ),
             ),
         ],
         vec![runmat_types::OperationTypePattern::NumericArray],
@@ -246,7 +252,7 @@ model histories {
             representation: runmat_analysis_core::SignalRepresentation::Tabulated(
                 runmat_analysis_core::TabulatedSignal {
                     domain: runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
-                        ref parameter_id
+                        ref parameter_id, ..
                     },
                     ..
                 }

@@ -37,7 +37,13 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
     };
     let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
         source_path: PathBuf::from(&spec.geometry.source.path),
-        source_units: spec.geometry.units,
+        source_units: match &spec.geometry.source.unit_evidence {
+            runmat_geometry_core::physical::LengthUnitEvidence::ExplicitFallback {
+                declaration,
+                ..
+            } => Some(declaration.unit),
+            _ => None,
+        },
         expected_source_sha256: crate::meshing::parse_source_sha256(&spec.geometry.source.sha256)?,
         settings,
         contact_definitions: meshing_contact_definitions(spec),
@@ -125,7 +131,14 @@ impl runmat_meshing_core::MeshingCancellationSignal for MeshPersistenceCancellat
 }
 
 fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if path.exists() {
+    // The browser's artifacts belong to the installed provider, not std::fs.
+    // Only an authoritative NotFound permits creating a new immutable artifact.
+    let exists = match runmat_filesystem::metadata(path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(format!("failed to inspect {}: {error}", path.display())),
+    };
+    if exists {
         let mut existing = runmat_filesystem::File::open(path)
             .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
         let mut offset = 0;

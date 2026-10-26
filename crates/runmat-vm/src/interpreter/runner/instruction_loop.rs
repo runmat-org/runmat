@@ -243,6 +243,13 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
     };
     #[cfg(all(feature = "native-accel", not(feature = "wgpu")))]
     let mut original_image_span: Option<runmat_accelerate::InstrSpan> = None;
+    // CPU-only bytecode must also yield real browser tasks. Checking a token
+    // alone cannot observe a worker cancellation message during a long loop.
+    // Native adapters retain their NeverYield instruction path.
+    let mut cpu_budget = matches!(
+        context.runtime.execution().cpu_cooperation_policy(),
+        runmat_runtime::execution::CpuCooperationPolicy::WorkQuantum(_)
+    ).then(|| context.runtime.cpu_cooperation());
     while *pc < bytecode.instructions.len() {
         #[cfg(feature = "wgpu")]
         if let Some(route) = fusion_observations.take_completed_original() {
@@ -262,6 +269,15 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         #[cfg(feature = "native-accel")]
         set_current_pc(*pc);
         interp_engine::check_cancelled(&context.runtime)?;
+        if let Some(budget) = cpu_budget.as_mut() {
+            budget.checkpoint(1).await.map_err(|error| match error {
+                runmat_runtime::execution::ExecutionServiceError::Cancelled => interp_engine::cancellation_error(),
+                error => runmat_runtime::runtime_error::semantic_error_with_source(
+                    "ExecutionCooperation", format!("CPU instruction scheduling failed: {error}"), error,
+                ),
+            })?;
+        }
+
         let active_catch = bytecode
             .catch_scopes
             .get(*pc)

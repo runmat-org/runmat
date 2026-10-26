@@ -171,7 +171,7 @@ pub(super) fn solve(
                     .terminals
                     .iter()
                     .find(|t| t.constraint_id == terminal.constraint_id)
-                    .map(|t| t.outward_flux)
+                    .map(|t| t.outward_flux.canonical_value())
                     .ok_or_else(|| {
                         ElectricalStaticError::Boundary(format!(
                             "terminal {} has no flux",

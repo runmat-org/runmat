@@ -8,6 +8,7 @@
 //! with its own matching outgoing operator. Reported input is net incoming power.
 
 mod assembly;
+mod quantity_layout;
 mod boundary;
 mod modal;
 mod real_solve;
@@ -60,8 +61,11 @@ impl Default for AcousticHarmonicPolicy {
 
 impl AcousticHarmonicPolicy {
     pub fn validate(self, frequency: Frequency) -> Result<(), AcousticHarmonicError> {
-        let frequency_hz = frequency.hertz;
-        let omega = std::f64::consts::TAU * frequency_hz;
+        let frequency_hz = frequency.canonical_value();
+        let omega = frequency
+            .angular_frequency()
+            .phasor_derivative_rate()
+            .canonical_value();
         if !frequency_hz.is_finite()
             || frequency_hz <= 0.0
             || !omega.is_finite()
@@ -134,8 +138,7 @@ pub fn solve_canonical_harmonic(
         ));
     }
     let step = validate_input(model, step_id, frequency, policy)?;
-    let frequency_hz = frequency.hertz;
-    let omega = std::f64::consts::TAU * frequency_hz;
+    let frequency_hz = frequency.canonical_value();
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
     let properties = crate::properties::compile_solid_property_map(model, mesh)
@@ -150,12 +153,9 @@ pub fn solve_canonical_harmonic(
     let sample = ExcitationSamplePoint::frequency(frequency_hz);
     let excitations = realize_step_excitations(model, step, sample)
         .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
-    let assembly = AcousticAssembly::assemble(projection, &properties, omega)?.with_boundaries(
-        model,
-        step,
-        &excitations,
-        sample,
-    )?;
+    let assembly =
+        AcousticAssembly::assemble(projection, &properties, frequency.angular_frequency())?
+            .with_boundaries(model, step, &excitations, sample)?;
     let assembly = assembly.with_periodic_constraints(mesh, model, step, &excitations)?;
     response::solve(assembly, frequency_hz, policy, power_tolerance)
 }
@@ -167,7 +167,7 @@ pub(crate) fn validate_input<'a>(
     policy: AcousticHarmonicPolicy,
 ) -> Result<&'a runmat_analysis_core::ProcedureStep, AcousticHarmonicError> {
     policy.validate(frequency)?;
-    let frequency_hz = frequency.hertz;
+    let frequency_hz = frequency.canonical_value();
     let step = model
         .sequence
         .steps

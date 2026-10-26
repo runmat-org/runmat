@@ -8,10 +8,16 @@ use super::super::{
 
 #[derive(Debug, Clone)]
 pub(super) struct ConjugateInterfaceSolution {
-    pub fluid_temperature: Vec<f64>,
-    pub solid_temperature: Vec<f64>,
-    pub temperature_jump: Vec<f64>,
-    pub coupled_heat_flux: Vec<f64>,
+    pub fluid_temperature:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, Vec<f64>>,
+    pub solid_temperature:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, Vec<f64>>,
+    pub temperature_jump: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::TemperatureDifference,
+        Vec<f64>,
+    >,
+    pub coupled_heat_flux:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::HeatFlux, Vec<f64>>,
     pub iteration_count: usize,
     pub coupled_interface_residual_ratio: f64,
     pub flux_temperature_law_residual_ratio: f64,
@@ -106,10 +112,28 @@ pub(super) fn solve_conjugate_interface(
     }
 
     Ok(ConjugateInterfaceSolution {
-        fluid_temperature: resample_scalar_profile(&interface_fluid_temperature, temperature_count),
-        solid_temperature: resample_scalar_profile(&interface_solid_temperature, temperature_count),
-        temperature_jump,
-        coupled_heat_flux,
+        fluid_temperature: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Temperature,
+            _,
+        >::new(resample_scalar_profile(
+            &interface_fluid_temperature,
+            temperature_count,
+        )),
+        solid_temperature: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Temperature,
+            _,
+        >::new(resample_scalar_profile(
+            &interface_solid_temperature,
+            temperature_count,
+        )),
+        temperature_jump: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::TemperatureDifference,
+            _,
+        >::new(temperature_jump),
+        coupled_heat_flux: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::HeatFlux,
+            _,
+        >::new(coupled_heat_flux),
         iteration_count: usize::from(temperature_count > 0),
         coupled_interface_residual_ratio: thermal_network_residual_ratio,
         flux_temperature_law_residual_ratio: max_flux_temperature_law_residual,
@@ -149,7 +173,12 @@ mod tests {
         assert_eq!(solution.interface_connectivity_coverage_ratio, 1.0);
         assert_eq!(solution.mesh_backed_interface_connectivity_ratio, 1.0);
         assert!(solution.thermal_network_residual_ratio <= 1.0e-12);
-        for (jump, flux) in solution.temperature_jump.iter().zip(heat_flux) {
+        for (jump, flux) in solution
+            .temperature_jump
+            .canonical_values()
+            .iter()
+            .zip(heat_flux)
+        {
             assert!((1_000.0 * jump - flux).abs() <= 1.0e-12);
         }
     }

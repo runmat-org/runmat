@@ -119,7 +119,7 @@ pub(super) enum PreparedStructuralStudyExecution {
 pub struct PreparedStructuralStudyIntent {
     pub(super) study_id: String,
     pub(super) geometry_source_digest: runmat_execution::Digest,
-    pub(super) geometry_units: runmat_geometry_core::UnitSystem,
+    pub(super) geometry_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
     pub(super) meshing_request: Option<runmat_meshing_core::MeshingRequest>,
     pub(super) meshing_contacts: Vec<crate::meshing::MeshingContactDefinition>,
     pub(super) context: OperationContext,
@@ -154,7 +154,7 @@ struct StructuralStudyIntentContinuation {
     schema_version: u16,
     study_id: String,
     geometry_source_digest: runmat_execution::Digest,
-    geometry_units: runmat_geometry_core::UnitSystem,
+    geometry_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
     meshing_request: Option<runmat_meshing_core::MeshingRequest>,
     meshing_contacts: Vec<crate::meshing::MeshingContactDefinition>,
     context: OperationContext,
@@ -172,25 +172,36 @@ mod alignment;
 use alignment::linear_workload_matches_prepared_execution;
 
 pub(super) fn resolve_intent_meshing_request(
-    source_units: runmat_geometry_core::UnitSystem,
     settings: Option<runmat_meshing_core::MeshingRequestSettings>,
 ) -> Result<Option<runmat_meshing_core::MeshingRequest>, String> {
     let Some(settings) = settings else {
         return Ok(None);
     };
-    let import_options = runmat_geometry_io::ExactCadImportOptions {
-        source_units,
-        ..runmat_geometry_io::ExactCadImportOptions::default()
-    };
+    let import_options = runmat_geometry_io::ExactCadImportOptions::default();
     import_options
         .validate()
         .map_err(|error| error.to_string())?;
     let tolerance = runmat_geometry_core::GeometryTolerancePolicy {
-        source_tolerance_m: 0.0,
-        absolute_floor_m: import_options.analysis.absolute_tolerance_floor_m,
+        source_tolerance_m: runmat_types::physical::Length::new(0.0),
+        absolute_floor_m: runmat_types::physical::Length::new(
+            import_options
+                .analysis
+                .absolute_tolerance_floor_m
+                .canonical_value(),
+        ),
         model_relative_term: import_options.analysis.model_relative_tolerance,
-        requested_deviation_m: import_options.analysis.requested_deviation_m,
-        maximum_healing_displacement_m: import_options.analysis.maximum_healing_displacement_m,
+        requested_deviation_m: runmat_types::physical::Length::new(
+            import_options
+                .analysis
+                .requested_deviation_m
+                .canonical_value(),
+        ),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(
+            import_options
+                .analysis
+                .maximum_healing_displacement_m
+                .canonical_value(),
+        ),
     };
     runmat_meshing_core::resolve_meshing_request(tolerance, settings)
         .map(Some)

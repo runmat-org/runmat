@@ -411,9 +411,9 @@ impl<'a> FluidStructureProblem<'a> {
             }
         }
         for (node, d) in mesh.topology.nodes.iter_mut().zip(displacement) {
-            for k in 0..3 {
-                node.coordinates_m[k] += d[k];
-            }
+            let current = node.coordinates_m.canonical_value();
+            node.coordinates_m =
+                runmat_types::physical::Quantity::new(std::array::from_fn(|k| current[k] + d[k]));
         }
         mesh.seal_canonical_digest()
             .map_err(|e| FluidStructureError::InvalidDetail(e.to_string()))?;
@@ -487,7 +487,10 @@ impl<'a> FluidStructureProblem<'a> {
                 continue;
             }
             seen += 1;
-            let on_fluid = add3(forces.pressure_traction_n[i], forces.viscous_traction_n[i]);
+            let on_fluid = add3(
+                forces.pressure_traction_n.canonical_values()[i],
+                forces.viscous_traction_n.canonical_values()[i],
+            );
             let f = &p.boundary_faces[index];
             let mut weights = vec![0.0; f.node_indices.len()];
             let mut area = 0.0;

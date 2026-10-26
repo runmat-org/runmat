@@ -95,10 +95,22 @@ fn shared_velocity_and_gauge_histories_advance_original_state_without_absolute_r
         .map(|face| geometry_ops::dot(start, face.owner_area_vector_m2))
         .collect::<Vec<_>>();
     let previous = CanonicalFluidFields {
-        velocity_m_per_s: &u,
-        pressure_fluctuation_pa: &pressure,
-        pressure_reference_pa: &initial.pressure_reference_pa,
-        face_volume_flux_m3_per_s: &q,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(&u),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&pressure),
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(initial.pressure_reference_pa.canonical_values()),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(&q),
     };
     assert!(receiving
         .prepare_backward_euler(0.0, 0.5, previous)
@@ -107,24 +119,43 @@ fn shared_velocity_and_gauge_histories_advance_original_state_without_absolute_r
         .prepare_backward_euler(0.0, 1.0, previous)
         .unwrap();
     let result = interval.solve().unwrap();
-    for v in &result.velocity_m_per_s {
+    for v in result.velocity_m_per_s.canonical_values() {
         assert!(norm(sub(*v, end)) < 1e-8);
     }
-    for g in geometry_ops::pressure_gradient(&receiving, &result.pressure_fluctuation_pa).unwrap() {
+    for g in geometry_ops::pressure_gradient(
+        &receiving,
+        result.pressure_fluctuation_pa.canonical_values(),
+    )
+    .unwrap()
+    {
         assert!(norm(geometry_ops::add(g, acceleration)) < 1e-6);
     }
-    assert!(result.pressure_pa.iter().all(|p| *p == 1e16));
+    assert!(result
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .all(|p| *p == 1e16));
     assert!(result
         .pressure_fluctuation_pa
+        .canonical_values()
         .iter()
         .any(|p| p.abs() > 1e-4));
-    assert_eq!(result.pressure_reference_pa, vec![1e16; u.len()]);
+    assert_eq!(
+        result.pressure_reference_pa.canonical_values().as_slice(),
+        vec![1e16; u.len()]
+    );
     let cold: CanonicalFluidResult =
         serde_json::from_slice(&serde_json::to_vec(&result).unwrap()).unwrap();
     assert_eq!(interval.recover(&cold).unwrap(), result.residual);
     assert!(receiving.recover(&cold).is_err());
     let mut corrupt = cold;
-    corrupt.pressure_reference_pa[0] += 2.0;
+    corrupt.pressure_reference_pa = corrupt
+        .pressure_reference_pa
+        .try_map_canonical_storage(|mut values| {
+            values[0] += 2.0;
+            values
+        })
+        .unwrap();
     assert!(interval.recover(&corrupt).is_err());
 }
 

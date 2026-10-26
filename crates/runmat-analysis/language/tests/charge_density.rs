@@ -75,7 +75,7 @@ fn volume_charge_density_lowers_quantity_target_and_volume_distribution() {
     let SignalRepresentation::Constant(SignalValue::Scalar(value)) = &signal.representation else {
         panic!("constant scalar density")
     };
-    assert_eq!(value.coulombs_per_cubic_meter, 2.0);
+    assert_eq!(value.canonical_value(), 2.0);
 }
 
 #[test]

@@ -231,7 +231,7 @@ impl ImageExporter {
     ) -> Result<Vec<u8>, String> {
         let width = self.settings.width.max(1);
         let height = self.settings.height.max(1);
-        if let Some(theme) = &self.theme {
+        let png = if let Some(theme) = &self.theme {
             crate::export::native_surface::render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
                 scene.clone(),
                 width,
@@ -251,7 +251,8 @@ impl ImageExporter {
                 )
                 .await?;
             self.encode_png_bytes(&rgba)
-        }
+        }?;
+        super::geometry_callouts::annotate_png(png, scene, camera, width, height)
     }
 
     /// Render a geometry scene into a PNG buffer using the default scene camera.

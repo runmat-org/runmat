@@ -331,7 +331,7 @@ fn inventory_counts_all_actions_and_each_case_membership_without_copying_selecti
     entity
         .assembly_path
         .extend((0..100).map(|index| format!("component_{index}_{}", "x".repeat(180))));
-    let mut target = RegionTarget::boundary("resolved_face");
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("resolved_face"));
     target.bind_resolved_entities(vec![entity]).unwrap();
     let ExcitationAction::Force(action) = &mut workload.model.excitations[0] else {
         panic!("force fixture")

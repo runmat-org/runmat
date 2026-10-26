@@ -127,12 +127,16 @@ pub fn compile_canonical_input(
         let scales = frequency_scales(&law.conductivity_frequency_response, frequency_hz)?;
         volumes.push(MaxwellVolumeData {
             element_identity: element.stable_identity,
-            permeability_h_per_m: super::super::magnetic::VACUUM_PERMEABILITY_H_PER_M
-                * law.relative_permeability
-                * scales.permeability,
-            permittivity_f_per_m: super::super::electrical::VACUUM_PERMITTIVITY_F_PER_M
-                * law.relative_permittivity
-                * scales.permittivity,
+            permeability_h_per_m: runmat_types::physical::Quantity::new(
+                super::super::magnetic::VACUUM_PERMEABILITY_H_PER_M.canonical_value()
+                    * law.relative_permeability.canonical_value()
+                    * scales.permeability,
+            ),
+            permittivity_f_per_m: runmat_types::physical::Quantity::new(
+                super::super::electrical::VACUUM_PERMITTIVITY_F_PER_M.canonical_value()
+                    * law.relative_permittivity.canonical_value()
+                    * scales.permittivity,
+            ),
             conductivity_s_per_m: law.conductivity_s_per_m * scales.conductivity,
         });
     }
@@ -154,7 +158,7 @@ pub fn compile_canonical_input(
         frequency_hz,
     })?;
     let input = MaxwellInput {
-        angular_frequency_rad_per_s: omega,
+        angular_frequency_rad_per_s: runmat_types::physical::AngularFrequency::new(omega),
         sampling,
         volumes,
         source_current,
@@ -216,10 +220,14 @@ fn frequency_scales(
     }
     let first = &table[0];
     let last = &table[table.len() - 1];
-    if frequency_hz < first.frequency_hz || frequency_hz > last.frequency_hz {
+    let (first_hz, last_hz) = (
+        first.frequency_hz.canonical_value(),
+        last.frequency_hz.canonical_value(),
+    );
+    if frequency_hz < first_hz || frequency_hz > last_hz {
         return Err(MaxwellError::Unsupported(format!(
             "analysis frequency {frequency_hz} Hz lies outside the material frequency response ({} to {} Hz)",
-            first.frequency_hz, last.frequency_hz
+            first_hz, last_hz
         )));
     }
     let scale = |pick: &dyn Fn(&runmat_analysis_core::ConductivityFrequencyPoint) -> f64| {
@@ -228,11 +236,12 @@ fn frequency_scales(
         }
         let upper = table
             .iter()
-            .position(|point| point.frequency_hz >= frequency_hz)
+            .position(|point| point.frequency_hz.canonical_value() >= frequency_hz)
             .unwrap_or(table.len() - 1)
             .max(1);
         let (a, b) = (&table[upper - 1], &table[upper]);
-        let t = (frequency_hz - a.frequency_hz) / (b.frequency_hz - a.frequency_hz);
+        let (a_hz, b_hz) = (a.frequency_hz.canonical_value(), b.frequency_hz.canonical_value());
+        let t = (frequency_hz - a_hz) / (b_hz - a_hz);
         pick(a) + t * (pick(b) - pick(a))
     };
     let scales = FrequencyScales {

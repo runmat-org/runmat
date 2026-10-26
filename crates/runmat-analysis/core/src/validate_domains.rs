@@ -18,8 +18,11 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
                         .to_string(),
                 });
             };
-            if !electrical.conductivity_s_per_m.is_finite()
-                || electrical.conductivity_s_per_m <= 0.0
+            if !electrical
+                .conductivity_s_per_m
+                .canonical_value()
+                .is_finite()
+                || electrical.conductivity_s_per_m.canonical_value() <= 0.0
             {
                 return Err(AnalysisValidationError::InvalidMaterial {
                     material_id: material.material_id.clone(),
@@ -41,8 +44,11 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
                                 .into(),
                         });
                     };
-                    if !electrical.relative_permeability.is_finite()
-                        || electrical.relative_permeability <= 0.0
+                    if !electrical
+                        .relative_permeability
+                        .canonical_value()
+                        .is_finite()
+                        || electrical.relative_permeability.canonical_value() <= 0.0
                     {
                         return Err(AnalysisValidationError::InvalidMaterial {
                             material_id: material.material_id.clone(),
@@ -56,7 +62,8 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
             crate::ElectromagneticDomain::Harmonic {
                 reference_frequency,
             } => {
-                if !reference_frequency.is_finite() || reference_frequency.hertz <= 0.0 {
+                if !reference_frequency.is_finite() || reference_frequency.canonical_value() <= 0.0
+                {
                     return Err(domain_error(
                         "electromagnetic",
                         "harmonic reference frequency must be finite and positive",
@@ -74,8 +81,11 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
                                 .into(),
                         });
                     };
-                    if !electrical.conductivity_s_per_m.is_finite()
-                        || electrical.conductivity_s_per_m <= 0.0
+                    if !electrical
+                        .conductivity_s_per_m
+                        .canonical_value()
+                        .is_finite()
+                        || electrical.conductivity_s_per_m.canonical_value() <= 0.0
                     {
                         return Err(AnalysisValidationError::InvalidMaterial {
                             material_id: material.material_id.clone(),
@@ -97,20 +107,20 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
 }
 
 fn validate_fluid_domain(domain: &crate::CfdDomain) -> Result<(), AnalysisValidationError> {
-    if !domain.density.is_finite() || domain.density.kilograms_per_cubic_meter <= 0.0 {
+    if !domain.density.is_finite() || domain.density.canonical_value() <= 0.0 {
         return Err(domain_error(
             "fluid",
             "mass density must be finite and positive",
         ));
     }
-    if !domain.dynamic_viscosity.is_finite() || domain.dynamic_viscosity.pascal_seconds <= 0.0 {
+    if !domain.dynamic_viscosity.is_finite() || domain.dynamic_viscosity.canonical_value() <= 0.0 {
         return Err(domain_error(
             "fluid",
             "dynamic viscosity must be finite and positive",
         ));
     }
     if !domain.turbulence_intensity.is_finite()
-        || !(0.0..=1.0).contains(&domain.turbulence_intensity.ratio)
+        || !(0.0..=1.0).contains(&domain.turbulence_intensity.canonical_value())
     {
         return Err(domain_error(
             "fluid",
@@ -175,7 +185,7 @@ fn validate_reference_temperature(
     domain: &'static str,
     value: crate::Temperature,
 ) -> Result<(), AnalysisValidationError> {
-    if value.is_finite() && value.kelvin >= 0.0 {
+    if value.is_finite() && value.canonical_value() >= 0.0 {
         Ok(())
     } else {
         Err(domain_error(

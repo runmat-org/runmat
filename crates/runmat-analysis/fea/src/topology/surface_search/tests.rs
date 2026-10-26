@@ -187,7 +187,7 @@ fn canonical_current_face_snapshots_rotate_outward_normals_without_stale_referen
         let positions: Vec<_> = projection
             .nodes
             .iter()
-            .map(|node| map(node.coordinates_m))
+            .map(|node| map(node.coordinates_m.canonical_value()))
             .collect();
         for (index, face) in projection.boundary_faces.iter().enumerate() {
             let surface = projection

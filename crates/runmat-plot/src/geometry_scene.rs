@@ -30,6 +30,28 @@ pub struct GeometryScene {
     pub bounds: BoundingBox,
     pub show_grid: bool,
     pub axis_equal: bool,
+    /// Unit provenance is attached to the rendered representation, not supplied
+    /// by a later measurement caller. Legacy/unitless scenes remain explicit.
+    pub physical_context: Option<GeometryPhysicalContext>,
+    /// Export-only labels on a request-local agent observation.
+    pub observation_callouts: Vec<GeometrySceneCallout>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryPhysicalContext {
+    pub coordinate_units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::PreviewCoordinates>,
+    pub source_unit_evidence: runmat_types::physical::LengthUnitEvidence,
+}
+
+/// Source face triangles provide candidate leader endpoints. Visibility is
+/// checked against the final clipped scene before placing a label.
+#[derive(Debug, Clone)]
+pub struct GeometrySceneCallout {
+    pub region_id: String,
+    pub color: [f32; 4],
+    pub triangles: Vec<[[f32; 3]; 3]>,
 }
 
 impl GeometryScene {
@@ -48,7 +70,14 @@ impl GeometryScene {
             bounds,
             show_grid: true,
             axis_equal: true,
+            observation_callouts: Vec::new(),
+            physical_context: None,
         }
+    }
+
+    pub fn with_physical_context(mut self, context: GeometryPhysicalContext) -> Self {
+        self.physical_context = Some(context);
+        self
     }
 
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
@@ -149,6 +178,20 @@ impl GeometryScene {
 
     #[cfg(feature = "egui-overlay")]
     pub(crate) fn region_anchor(&self, region_id: &str) -> Option<Vec3> {
+        if let Some(mesh_id) = region_id.strip_prefix("mesh:") {
+            let mut bounds = None::<BoundingBox>;
+            for chunk in self
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.visible && chunk.mesh_id.as_deref() == Some(mesh_id))
+            {
+                bounds = Some(match bounds {
+                    Some(bounds) => bounds.union(&chunk.bounds),
+                    None => chunk.bounds,
+                });
+            }
+            return bounds.map(|bounds| (bounds.min + bounds.max) * 0.5);
+        }
         self.chunks
             .iter()
             .filter(|chunk| chunk.visible)
@@ -371,6 +414,8 @@ pub struct GeometrySceneRegionAnnotation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GeometrySceneAnnotationKind {
+    /// Text-only selection identity; does not add a physical marker.
+    Label,
     Force,
     Moment,
     Pressure,
@@ -2104,26 +2149,31 @@ fn ray_intersects_bounds(ray: &PickRay, bounds: BoundingBox) -> Option<f32> {
 }
 
 fn ray_intersects_triangle(ray: &PickRay, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
-    let edge1 = b - a;
-    let edge2 = c - a;
-    let pvec = ray.direction.cross(edge2);
+    // A fixed determinant cutoff depends on coordinate units and silently drops
+    // small CAD faces. Use f64 and a dimensionless relative parallelism test.
+    let a = a.as_dvec3();
+    let edge1 = b.as_dvec3() - a;
+    let edge2 = c.as_dvec3() - a;
+    let direction = ray.direction.as_dvec3();
+    let pvec = direction.cross(edge2);
     let det = edge1.dot(pvec);
-    if det.abs() < 1e-7 {
+    let scale = edge1.length() * pvec.length();
+    if !det.is_finite() || !scale.is_finite() || det.abs() <= scale * (16.0 * f64::EPSILON) {
         return None;
     }
     let inv_det = 1.0 / det;
-    let tvec = ray.origin - a;
+    let tvec = ray.origin.as_dvec3() - a;
     let u = tvec.dot(pvec) * inv_det;
     if !(0.0..=1.0).contains(&u) {
         return None;
     }
     let qvec = tvec.cross(edge1);
-    let v = ray.direction.dot(qvec) * inv_det;
+    let v = direction.dot(qvec) * inv_det;
     if v < 0.0 || u + v > 1.0 {
         return None;
     }
-    let t = edge2.dot(qvec) * inv_det;
-    (t > 1e-6).then_some(t)
+    let t = (edge2.dot(qvec) * inv_det) as f32;
+    (t.is_finite() && t > 0.0).then_some(t)
 }
 
 #[cfg(test)]
@@ -2724,7 +2774,7 @@ mod tests {
             .and_then(|node| node.render_data.as_ref())
             .expect("vector annotation node");
         assert_eq!(vector.pipeline_type, PipelineType::AnnotationStroke);
-        assert_eq!(vector.vertices.len(), 18);
+        assert_eq!(vector.vertices.len(), 10 * 6);
         assert!(vector.vertices[2].position[2] > vector.vertices[0].position[2]);
         assert!(vector
             .vertices
@@ -2776,11 +2826,11 @@ mod tests {
             .and_then(|node| node.render_data.as_ref())
             .unwrap();
         assert_eq!(symbols.pipeline_type, PipelineType::AnnotationStroke);
-        // Three load arrows (three segments each) and one six-segment support.
-        assert_eq!(symbols.vertices.len(), (3 * 3 + 6) * 6);
-        assert!(symbols.vertices[0].position != symbols.vertices[18].position);
-        assert!(symbols.vertices[18].color[3] > 0.0);
-        assert_eq!(symbols.vertices[54].color[3], 0.0);
+        // Three filled-head load arrows (ten segments each) and one six-segment support.
+        assert_eq!(symbols.vertices.len(), (3 * 10 + 6) * 6);
+        assert!(symbols.vertices[0].position != symbols.vertices[60].position);
+        assert!(symbols.vertices[60].color[3] > 0.0);
+        assert_eq!(symbols.vertices[180].color[3], 0.0);
         // The far endpoint reverses its tangent, so its ribbon side signs reverse too.
         assert_eq!(symbols.vertices[0].tex_coords[0], -1.0);
         assert_eq!(symbols.vertices[2].tex_coords[0], -1.0);
@@ -2888,5 +2938,28 @@ mod tests {
         assert_eq!(topology.vertices[24].position, [0.0, 1.0, 0.0]);
         assert_eq!(topology.vertices[24].tex_coords[1], 2.0);
         assert_eq!(topology.vertices[24].normal, [-1.0, -1.0, 0.0]);
+    }
+    #[test]
+    fn small_cad_face_picking_is_invariant_to_coordinate_scale() {
+        for scale in [1.0e-9, 1.0e-3, 1.0, 1.0e9] {
+            let ray = PickRay {
+                origin: Vec3::new(0.25, 0.25, 1.0) * scale,
+                direction: -Vec3::Z,
+            };
+            let hit = ray_intersects_triangle(&ray, Vec3::ZERO, Vec3::X * scale, Vec3::Y * scale)
+                .expect("valid face must remain selectable");
+            assert!((hit / scale - 1.0).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn scale_independent_picking_still_rejects_parallel_and_behind_faces() {
+        for direction in [Vec3::X, Vec3::Z, Vec3::ZERO] {
+            let ray = PickRay {
+                origin: Vec3::new(0.25, 0.25, 1.0),
+                direction,
+            };
+            assert!(ray_intersects_triangle(&ray, Vec3::ZERO, Vec3::X, Vec3::Y).is_none());
+        }
     }
 }

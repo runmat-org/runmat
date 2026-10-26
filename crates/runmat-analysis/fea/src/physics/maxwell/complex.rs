@@ -91,3 +91,10 @@ pub(super) fn dot_conjugate(left: ComplexVector3, right: ComplexVector3) -> Comp
 pub(super) fn vector_norm_squared(value: ComplexVector3) -> f64 {
     value.into_iter().map(ComplexPhasor::norm_squared).sum()
 }
+
+// A phasor is mathematical storage. Its enclosing shared Quantity owns units.
+impl runmat_types::physical::QuantityStorage for ComplexPhasor {
+    fn all_finite(&self) -> bool {
+        self.is_finite()
+    }
+}

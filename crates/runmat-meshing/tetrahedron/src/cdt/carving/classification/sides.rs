@@ -154,9 +154,12 @@ mod tests {
         };
         let interior = DelaunayVolumeNode {
             identity: StableDigest::from_bytes([4; 32]),
-            coordinates_m: std::array::from_fn(|axis| {
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(std::array::from_fn(|axis| {
                 (2.0 * vertices[0][axis] + vertices[1][axis] + vertices[2][axis]) * 0.25
-            }),
+            })),
             construction: Point3Construction::TriangleDyadic {
                 vertices,
                 weights_numerator: [2, 1, 1],
@@ -171,7 +174,7 @@ mod tests {
         ];
 
         assert_ne!(
-            orient3d(support.map(|node| node.coordinates_m)).unwrap(),
+            orient3d(support.map(|node| node.coordinates_m.canonical_value())).unwrap(),
             PredicateSign::Zero
         );
         assert_ne!(

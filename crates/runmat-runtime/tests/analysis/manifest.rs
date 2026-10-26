@@ -1857,30 +1857,6 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             min_gpu_speedup_ratio: None,
         },
-        FixtureSpec {
-            id: "unit_mismatch",
-            description: "unit mismatch fixture must fail validation with mismatch code",
-            model: || {
-                let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-                model.units = UnitSystem::Inch;
-                model
-            },
-            expect_validate_error: Some("RM.FEA.VALIDATE.UNIT_MISMATCH"),
-            expect_run_error: None,
-            expected_numerically_acceptable: None,
-            parity_tolerance: None,
-            gpu_mode: None,
-            published_field_storage_expectation: None,
-            max_solver_host_sync_count: None,
-            min_solver_device_apply_k_ratio: None,
-            expected_solver_backend: None,
-            modal_mode_count: None,
-            transient_step_count: None,
-            max_modal_orthogonality_offdiag: None,
-            min_modal_relative_frequency_separation: None,
-            max_transient_residual_norm: None,
-            min_gpu_speedup_ratio: None,
-        },
     ]
 }
 

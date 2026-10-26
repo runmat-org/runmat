@@ -2,7 +2,8 @@ use super::{
     p21::{P21Value, PhysicalFile},
     Ap242InspectionError,
 };
-use runmat_geometry_core::{Ap242Measure, Ap242PhysicalDimension};
+use runmat_geometry_core::physical::{UnitAttribution, UnitDefinition};
+use runmat_geometry_core::{Ap242Measure, QuantityKind};
 
 pub(super) fn measure(
     file: &PhysicalFile,
@@ -33,23 +34,26 @@ pub(super) fn measure(
         .and_then(P21Value::as_reference)
         .ok_or_else(|| unsupported(entity_id, "missing unit"))?;
     let unit = resolve_unit(file, unit_id, &mut Vec::new())?;
-    if unit.dimension != dimension {
+    if unit.definition.dimension() != dimension.dimension() {
         return Err(inconsistent(format!(
             "measure #{entity_id} type/unit mismatch"
         )));
     }
-    Ok(Ap242Measure {
+    Ap242Measure::try_new(
         dimension,
-        value_si: source_value * unit.scale,
         source_value,
-        source_unit: unit.label,
-    })
+        unit.definition,
+        unit.label,
+        UnitAttribution::FileDeclaration {
+            context: format!("STEP measure #{entity_id}"),
+        },
+    )
+    .map_err(|error| inconsistent(error.to_string()))
 }
 
 #[derive(Clone)]
 struct Unit {
-    dimension: Ap242PhysicalDimension,
-    scale: f64,
+    definition: UnitDefinition,
     label: String,
 }
 
@@ -90,23 +94,23 @@ fn si_unit(id: u64, args: &[P21Value]) -> Result<Unit, Ap242InspectionError> {
         _ => return Err(unsupported(id, "invalid SI unit")),
     };
     let (dimension, base, symbol) = match name {
-        "METRE" => (Ap242PhysicalDimension::Length, 1.0, "m"),
-        "GRAM" => (Ap242PhysicalDimension::Mass, 1e-3, "g"),
-        "KELVIN" => (Ap242PhysicalDimension::Temperature, 1.0, "K"),
-        "SECOND" => (Ap242PhysicalDimension::Time, 1.0, "s"),
-        "RADIAN" => (Ap242PhysicalDimension::PlaneAngle, 1.0, "rad"),
-        "PASCAL" => (Ap242PhysicalDimension::Pressure, 1.0, "Pa"),
-        "NEWTON" => (Ap242PhysicalDimension::Force, 1.0, "N"),
-        "JOULE" => (Ap242PhysicalDimension::Energy, 1.0, "J"),
-        "WATT" => (Ap242PhysicalDimension::Power, 1.0, "W"),
-        "VOLT" => (Ap242PhysicalDimension::ElectricPotential, 1.0, "V"),
-        "AMPERE" => (Ap242PhysicalDimension::ElectricCurrent, 1.0, "A"),
-        "TESLA" => (Ap242PhysicalDimension::MagneticFluxDensity, 1.0, "T"),
+        "METRE" => (QuantityKind::Length, 1.0, "m"),
+        "GRAM" => (QuantityKind::Mass, 1e-3, "g"),
+        "KELVIN" => (QuantityKind::Temperature, 1.0, "K"),
+        "SECOND" => (QuantityKind::Time, 1.0, "s"),
+        "RADIAN" => (QuantityKind::Angle, 1.0, "rad"),
+        "PASCAL" => (QuantityKind::Pressure, 1.0, "Pa"),
+        "NEWTON" => (QuantityKind::Force, 1.0, "N"),
+        "JOULE" => (QuantityKind::Energy, 1.0, "J"),
+        "WATT" => (QuantityKind::Power, 1.0, "W"),
+        "VOLT" => (QuantityKind::ElectricPotential, 1.0, "V"),
+        "AMPERE" => (QuantityKind::ElectricCurrent, 1.0, "A"),
+        "TESLA" => (QuantityKind::MagneticFluxDensity, 1.0, "T"),
         _ => return Err(unsupported(id, "unsupported SI unit")),
     };
     Ok(Unit {
-        dimension,
-        scale: factor * base,
+        definition: UnitDefinition::try_for_kind(dimension, factor * base, 0.0)
+            .map_err(|e| inconsistent(e.to_string()))?,
         label: format!("{prefix}{symbol}"),
     })
 }
@@ -121,8 +125,9 @@ fn derived_unit(
         .first()
         .and_then(P21Value::as_list)
         .ok_or_else(|| unsupported(id, "missing derived-unit elements"))?;
-    let mut powers = [0_i32; 5];
+    let mut dimension = runmat_geometry_core::physical::QuantityKind::Dimensionless.dimension();
     let mut scale = 1.0;
+    let mut angle_power = 0_i8;
     let mut labels = Vec::new();
     for value in elements {
         let element_id = value
@@ -131,7 +136,7 @@ fn derived_unit(
         let element = file
             .entities
             .get(&element_id)
-            .and_then(|value| value.component("DERIVED_UNIT_ELEMENT"))
+            .and_then(|v| v.component("DERIVED_UNIT_ELEMENT"))
             .ok_or_else(|| unsupported(element_id, "invalid unit element"))?;
         let unit_id = element
             .arguments
@@ -139,75 +144,69 @@ fn derived_unit(
             .and_then(P21Value::as_reference)
             .ok_or_else(|| unsupported(element_id, "missing element unit"))?;
         let exponent = match element.arguments.get(1) {
-            Some(P21Value::Number(value)) if value.fract() == 0.0 => *value as i32,
-            _ => return Err(unsupported(element_id, "noninteger exponent")),
+            Some(P21Value::Number(value))
+                if value.is_finite()
+                    && value.fract() == 0.0
+                    && *value >= i8::MIN as f64
+                    && *value <= i8::MAX as f64 =>
+            {
+                *value as i8
+            }
+            _ => return Err(unsupported(element_id, "invalid or out-of-range exponent")),
         };
         let unit = resolve_unit(file, unit_id, stack)?;
-        let slot = base_slot(unit.dimension)
-            .ok_or_else(|| unsupported(element_id, "unsupported nested dimension"))?;
-        powers[slot] += exponent;
-        scale *= unit.scale.powi(exponent);
+        if unit.definition.offset() != 0.0 {
+            return Err(unsupported(element_id, "affine units cannot be composed"));
+        }
+        dimension = dimension
+            .multiply(
+                unit.definition
+                    .dimension()
+                    .power(exponent)
+                    .ok_or_else(|| unsupported(element_id, "unit exponent overflow"))?,
+            )
+            .ok_or_else(|| unsupported(element_id, "unit dimension overflow"))?;
+        angle_power = angle_power
+            .checked_add(
+                unit.definition
+                    .angle_power()
+                    .checked_mul(exponent)
+                    .ok_or_else(|| unsupported(element_id, "angle exponent overflow"))?,
+            )
+            .ok_or_else(|| unsupported(element_id, "angle exponent overflow"))?;
+        scale *= unit.definition.scale().powi(i32::from(exponent));
         labels.push(format!("{}^{exponent}", unit.label));
     }
-    let dimension = match powers {
-        [0, 0, 0, 0, 0] => Ap242PhysicalDimension::Dimensionless,
-        [2, 0, 0, 0, 0] => Ap242PhysicalDimension::Area,
-        [3, 0, 0, 0, 0] => Ap242PhysicalDimension::Volume,
-        [-3, 1, 0, 0, 0] => Ap242PhysicalDimension::MassDensity,
-        [-1, 1, -2, 0, 0] => Ap242PhysicalDimension::Pressure,
-        [1, 1, -2, 0, 0] => Ap242PhysicalDimension::Force,
-        [2, 1, -2, 0, 0] => Ap242PhysicalDimension::Energy,
-        [2, 1, -3, 0, 0] => Ap242PhysicalDimension::Power,
-        [1, 1, -3, -1, 0] => Ap242PhysicalDimension::ThermalConductivity,
-        [2, 0, -2, -1, 0] => Ap242PhysicalDimension::SpecificHeat,
-        [0, 0, 0, -1, 0] => Ap242PhysicalDimension::InverseTemperature,
-        [-3, -1, 3, 0, 2] => Ap242PhysicalDimension::ElectricalConductivity,
-        [-2, 1, -1, 0, 0] => Ap242PhysicalDimension::AcousticImpedance,
-        [-1, 1, -1, 0, 0] => Ap242PhysicalDimension::DynamicViscosity,
-        _ => return Err(unsupported(id, "unsupported derived dimension")),
-    };
     Ok(Unit {
-        dimension,
-        scale,
+        definition: UnitDefinition::try_with_angle(dimension, scale, 0.0, angle_power)
+            .map_err(|e| inconsistent(e.to_string()))?,
         label: labels.join("*"),
     })
 }
 
-fn base_slot(value: Ap242PhysicalDimension) -> Option<usize> {
-    match value {
-        Ap242PhysicalDimension::Length => Some(0),
-        Ap242PhysicalDimension::Mass => Some(1),
-        Ap242PhysicalDimension::Time => Some(2),
-        Ap242PhysicalDimension::Temperature => Some(3),
-        Ap242PhysicalDimension::ElectricCurrent => Some(4),
-        _ => None,
-    }
-}
-fn dimension(value: &str) -> Option<Ap242PhysicalDimension> {
+fn dimension(value: &str) -> Option<QuantityKind> {
     Some(match value {
-        "RATIO_MEASURE" | "POSITIVE_RATIO_MEASURE" | "COUNT_MEASURE" => {
-            Ap242PhysicalDimension::Dimensionless
-        }
-        "LENGTH_MEASURE" => Ap242PhysicalDimension::Length,
-        "PLANE_ANGLE_MEASURE" => Ap242PhysicalDimension::PlaneAngle,
-        "AREA_MEASURE" => Ap242PhysicalDimension::Area,
-        "VOLUME_MEASURE" => Ap242PhysicalDimension::Volume,
-        "MASS_MEASURE" => Ap242PhysicalDimension::Mass,
-        "MASS_DENSITY_MEASURE" => Ap242PhysicalDimension::MassDensity,
-        "THERMODYNAMIC_TEMPERATURE_MEASURE" => Ap242PhysicalDimension::Temperature,
-        "PRESSURE_MEASURE" => Ap242PhysicalDimension::Pressure,
-        "FORCE_MEASURE" => Ap242PhysicalDimension::Force,
-        "ENERGY_MEASURE" => Ap242PhysicalDimension::Energy,
-        "POWER_MEASURE" => Ap242PhysicalDimension::Power,
-        "THERMAL_CONDUCTIVITY_MEASURE" => Ap242PhysicalDimension::ThermalConductivity,
-        "SPECIFIC_HEAT_CAPACITY_MEASURE" => Ap242PhysicalDimension::SpecificHeat,
-        "THERMAL_EXPANSION_COEFFICIENT_MEASURE" => Ap242PhysicalDimension::InverseTemperature,
-        "ELECTRIC_CONDUCTIVITY_MEASURE" => Ap242PhysicalDimension::ElectricalConductivity,
-        "ACOUSTIC_IMPEDANCE_MEASURE" => Ap242PhysicalDimension::AcousticImpedance,
-        "DYNAMIC_VISCOSITY_MEASURE" => Ap242PhysicalDimension::DynamicViscosity,
-        "ELECTRIC_POTENTIAL_MEASURE" => Ap242PhysicalDimension::ElectricPotential,
-        "ELECTRIC_CURRENT_MEASURE" => Ap242PhysicalDimension::ElectricCurrent,
-        "MAGNETIC_FLUX_DENSITY_MEASURE" => Ap242PhysicalDimension::MagneticFluxDensity,
+        "RATIO_MEASURE" | "POSITIVE_RATIO_MEASURE" | "COUNT_MEASURE" => QuantityKind::Dimensionless,
+        "LENGTH_MEASURE" => QuantityKind::Length,
+        "PLANE_ANGLE_MEASURE" => QuantityKind::Angle,
+        "AREA_MEASURE" => QuantityKind::Area,
+        "VOLUME_MEASURE" => QuantityKind::Volume,
+        "MASS_MEASURE" => QuantityKind::Mass,
+        "MASS_DENSITY_MEASURE" => QuantityKind::MassDensity,
+        "THERMODYNAMIC_TEMPERATURE_MEASURE" => QuantityKind::Temperature,
+        "PRESSURE_MEASURE" => QuantityKind::Pressure,
+        "FORCE_MEASURE" => QuantityKind::Force,
+        "ENERGY_MEASURE" => QuantityKind::Energy,
+        "POWER_MEASURE" => QuantityKind::Power,
+        "THERMAL_CONDUCTIVITY_MEASURE" => QuantityKind::ThermalConductivity,
+        "SPECIFIC_HEAT_CAPACITY_MEASURE" => QuantityKind::SpecificHeat,
+        "THERMAL_EXPANSION_COEFFICIENT_MEASURE" => QuantityKind::InverseTemperature,
+        "ELECTRIC_CONDUCTIVITY_MEASURE" => QuantityKind::ElectricalConductivity,
+        "ACOUSTIC_IMPEDANCE_MEASURE" => QuantityKind::SpecificAcousticImpedance,
+        "DYNAMIC_VISCOSITY_MEASURE" => QuantityKind::DynamicViscosity,
+        "ELECTRIC_POTENTIAL_MEASURE" => QuantityKind::ElectricPotential,
+        "ELECTRIC_CURRENT_MEASURE" => QuantityKind::ElectricCurrent,
+        "MAGNETIC_FLUX_DENSITY_MEASURE" => QuantityKind::MagneticFluxDensity,
         _ => return None,
     })
 }
@@ -239,83 +238,182 @@ fn inconsistent(detail: impl Into<String>) -> Ap242InspectionError {
     Ap242InspectionError::Inconsistent(detail.into())
 }
 
-/// The single length unit a STEP file's global unit contexts declare: the metre with any SI
-/// prefix, or a conversion-based unit (inch, foot, mil, microinch or any other) sized by the
-/// conversion factor the file gives. `None` when the file declares no length unit, several
-/// different ones, or one whose size cannot be resolved.
-pub fn declared_length_unit(source: &str) -> Option<runmat_geometry_core::UnitSystem> {
-    let file = super::p21::parse(source).ok()?;
-    let mut declared = None;
+/// The single length unit a STEP file's global unit contexts declare, when it
+/// is one RunMat geometry can import in (m, mm or inch). `None` when the file
+/// declares no length unit, several different ones, or one RunMat cannot use.
+pub fn declared_length_unit(source: &str) -> Option<runmat_geometry_core::LengthUnit> {
+    inspect_length_units(source).uniform_unit()
+}
+
+/// Preserve each STEP representation context. A mixed-unit assembly is not an
+/// unknown-unit file and a conversion-based unit is resolved from its factor,
+/// not guessed from its name.
+pub fn inspect_length_units(source: &str) -> runmat_geometry_core::physical::LengthUnitEvidence {
+    use runmat_geometry_core::physical::{LengthUnitDeclaration, LengthUnitEvidence};
+    let file = match super::p21::parse(source) {
+        Ok(file) => file,
+        Err(error) => {
+            return LengthUnitEvidence::Unsupported {
+                contexts: Vec::new(),
+                reason: format!("cannot parse STEP unit contexts: {error}"),
+            }
+        }
+    };
+    let mut declarations = Vec::new();
+    let mut unsupported = Vec::new();
+    let mut conflicts = Vec::new();
     for entity in file.entities.values() {
         let Some(context) = entity.component("GLOBAL_UNIT_ASSIGNED_CONTEXT") else {
             continue;
         };
         let Some(references) = context.arguments.first().and_then(P21Value::as_list) else {
+            unsupported.push(format!("#{}", entity.id));
             continue;
         };
-        for unit in references.iter().filter_map(P21Value::as_reference) {
-            let Some(unit) = file
+        let mut local = Vec::new();
+        for id in references.iter().filter_map(P21Value::as_reference) {
+            if !file
                 .entities
-                .get(&unit)
-                .filter(|unit| unit.has("LENGTH_UNIT"))
-            else {
+                .get(&id)
+                .is_some_and(|unit| unit.has("LENGTH_UNIT"))
+            {
                 continue;
-            };
-            let system = length_unit_system(&file, unit)?;
-            if declared.is_some_and(|previous| previous != system) {
-                return None;
             }
-            declared = Some(system);
+            match length_definition(&file, id, &mut Vec::new()) {
+                Ok((unit, symbol)) => local.push(LengthUnitDeclaration {
+                    context: format!("STEP representation #{}", entity.id),
+                    source_symbol: symbol,
+                    unit,
+                }),
+                Err(_) => unsupported.push(format!("#{} unit #{}", entity.id, id)),
+            }
         }
+        if local.len() > 1 {
+            conflicts.extend(local.iter().cloned());
+        }
+        if local.is_empty() {
+            unsupported.push(format!("#{} has no length declaration", entity.id));
+        }
+        declarations.extend(local);
     }
-    declared
+    if !conflicts.is_empty() {
+        return LengthUnitEvidence::Conflicting {
+            contexts: conflicts,
+            reason: "a STEP representation context declares multiple length units".into(),
+        };
+    }
+    if !unsupported.is_empty() {
+        return LengthUnitEvidence::Unsupported {
+            contexts: unsupported,
+            reason: "STEP contains unresolved length-unit contexts".into(),
+        };
+    }
+    if declarations.is_empty() {
+        return LengthUnitEvidence::Unsupported {
+            contexts:Vec::new(),reason: "STEP declares no representation-context length unit; repair the exchange declaration before physical analysis".into(),
+        };
+    }
+    LengthUnitEvidence::Declared {
+        contexts: declarations,
+    }
 }
 
-fn length_unit_system(
+fn length_definition(
     file: &PhysicalFile,
-    unit: &super::p21::Entity,
-) -> Option<runmat_geometry_core::UnitSystem> {
-    use runmat_geometry_core::UnitSystem;
-    if let Some(si) = unit.component("SI_UNIT") {
-        let metre =
-            matches!(si.arguments.get(1), Some(P21Value::Enumeration(base)) if base == "METRE");
-        let factor = match si.arguments.first() {
-            Some(P21Value::Null) | None => 1.0,
-            Some(P21Value::Enumeration(prefix)) => metric_prefix(prefix)?.0,
-            _ => return None,
-        };
-        return metre
-            .then(|| UnitSystem::from_meters_per_unit(factor))
-            .flatten();
+    id: u64,
+    stack: &mut Vec<u64>,
+) -> Result<(runmat_geometry_core::LengthUnit, String), Ap242InspectionError> {
+    use runmat_geometry_core::physical::QuantityKind;
+    use runmat_geometry_core::physical::{LengthUnit, UnitDefinition};
+    if stack.len() >= 64 || stack.contains(&id) {
+        return Err(inconsistent("length-unit dependency cycle or depth limit"));
     }
-    let conversion = unit.component("CONVERSION_BASED_UNIT")?;
-    // The declared conversion factor governs; a known name is the fallback when the factor
-    // entity is absent or not a length measure in SI units.
-    let declared_factor = conversion
-        .arguments
-        .get(1)
-        .and_then(P21Value::as_reference)
-        .and_then(|id| measure(file, id).ok())
-        .filter(|measure| measure.dimension == Ap242PhysicalDimension::Length)
-        .map(|measure| measure.value_si);
-    let named_factor = conversion
-        .arguments
-        .first()
-        .and_then(P21Value::as_string)
-        .and_then(|name| match name.trim().to_ascii_lowercase().as_str() {
-            "inch" | "in" => Some(0.0254),
-            "foot" | "ft" => Some(0.3048),
-            "mil" | "thou" => Some(2.54e-5),
-            "microinch" => Some(2.54e-8),
-            _ => None,
-        });
-    UnitSystem::from_meters_per_unit(declared_factor.or(named_factor)?)
+    stack.push(id);
+    let entity = file
+        .entities
+        .get(&id)
+        .ok_or_else(|| inconsistent("missing length unit"))?;
+    let result = if let Some(si) = entity.component("SI_UNIT") {
+        let metre =
+            matches!(si.arguments.get(1),Some(P21Value::Enumeration(base)) if base=="METRE");
+        if !metre {
+            return Err(unsupported(id, "length context has a non-length SI unit"));
+        }
+        let (scale, prefix) = match si.arguments.first() {
+            Some(P21Value::Null) | None => (1.0, ""),
+            Some(P21Value::Enumeration(prefix)) => {
+                metric_prefix(prefix).ok_or_else(|| unsupported(id, "unknown length prefix"))?
+            }
+            _ => return Err(unsupported(id, "invalid length prefix")),
+        };
+        let definition = UnitDefinition::try_new(QuantityKind::Length.dimension(), scale, 0.0)
+            .map_err(|e| inconsistent(e.to_string()))?;
+        Ok((
+            LengthUnit::try_from_definition(definition).map_err(|e| inconsistent(e.to_string()))?,
+            format!("{prefix}m"),
+        ))
+    } else if let Some(conversion) = entity.component("CONVERSION_BASED_UNIT") {
+        let symbol = conversion
+            .arguments
+            .first()
+            .and_then(P21Value::as_string)
+            .ok_or_else(|| unsupported(id, "conversion unit has no name"))?;
+        let factor = conversion
+            .arguments
+            .get(1)
+            .and_then(P21Value::as_reference)
+            .and_then(|id| file.entities.get(&id));
+        // The declared factor governs; a standard unit name defines a unit whose factor
+        // entity is absent.
+        let Some(factor) = factor else {
+            let unit = LengthUnit::from_conversion_name(symbol)
+                .ok_or_else(|| unsupported(id, "conversion unit has no factor"))?;
+            stack.pop();
+            return Ok((unit, symbol.to_string()));
+        };
+        let measure = factor
+            .component("LENGTH_MEASURE_WITH_UNIT")
+            .or_else(|| factor.component("MEASURE_WITH_UNIT"))
+            .ok_or_else(|| unsupported(id, "conversion factor is not a length measure"))?;
+        let value = match measure.arguments.first() {
+            Some(P21Value::Typed(kind, v))
+                if kind == "LENGTH_MEASURE" || kind == "POSITIVE_LENGTH_MEASURE" =>
+            {
+                match v.as_slice() {
+                    [P21Value::Number(v)] => *v,
+                    _ => return Err(unsupported(id, "invalid conversion factor")),
+                }
+            }
+            Some(P21Value::Number(v)) => *v,
+            _ => return Err(unsupported(id, "invalid conversion factor")),
+        };
+        let base = measure
+            .arguments
+            .get(1)
+            .and_then(P21Value::as_reference)
+            .ok_or_else(|| unsupported(id, "conversion factor has no base unit"))?;
+        let (base, _) = length_definition(file, base, stack)?;
+        let definition = UnitDefinition::try_new(
+            QuantityKind::Length.dimension(),
+            value * base.meters_per_unit(),
+            0.0,
+        )
+        .map_err(|e| inconsistent(e.to_string()))?;
+        Ok((
+            LengthUnit::try_from_definition(definition).map_err(|e| inconsistent(e.to_string()))?,
+            symbol.to_string(),
+        ))
+    } else {
+        Err(unsupported(id, "unrecognized length-unit declaration"))
+    };
+    stack.pop();
+    result
 }
 
 #[cfg(test)]
 mod declared_length_unit_tests {
     use super::declared_length_unit;
-    use runmat_geometry_core::UnitSystem;
+    use runmat_geometry_core::LengthUnit;
 
     fn step(units: &str) -> String {
         format!(
@@ -333,18 +431,17 @@ mod declared_length_unit_tests {
             declared_length_unit(&step(
                 "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.)"
             )),
-            Some(UnitSystem::Millimeter)
+            Some(LengthUnit::Millimeter)
         );
         assert_eq!(
             declared_length_unit(&step("LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.)")),
-            Some(UnitSystem::Meter)
+            Some(LengthUnit::Meter)
         );
         assert_eq!(
             declared_length_unit(&step(
                 "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.)"
-            ))
-            .and_then(UnitSystem::meters_per_unit),
-            Some(0.01)
+            )),
+            Some(LengthUnit::Centimeter)
         );
         assert_eq!(declared_length_unit("not a step file"), None);
     }
@@ -357,11 +454,11 @@ mod declared_length_unit_tests {
              #5=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));\n\
              #6=DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.",
         );
-        let meters = declared_length_unit(&foot).and_then(UnitSystem::meters_per_unit);
+        let meters = declared_length_unit(&foot).map(runmat_geometry_core::LengthUnit::meters_per_unit);
         assert!((meters.unwrap() - 0.3048).abs() < 1.0e-15, "{meters:?}");
         // A named unit without a readable factor falls back to its definition.
         let mil = step("CONVERSION_BASED_UNIT('MIL',#9) LENGTH_UNIT() NAMED_UNIT(*)");
-        let meters = declared_length_unit(&mil).and_then(UnitSystem::meters_per_unit);
+        let meters = declared_length_unit(&mil).map(runmat_geometry_core::LengthUnit::meters_per_unit);
         assert!((meters.unwrap() - 2.54e-5).abs() < 1.0e-18, "{meters:?}");
         // An unknown conversion-based unit without a factor is unresolvable.
         let cubit = step("CONVERSION_BASED_UNIT('CUBIT',#9) LENGTH_UNIT() NAMED_UNIT(*)");
@@ -371,8 +468,55 @@ mod declared_length_unit_tests {
             let unit = step(&format!(
                 "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.{prefix}.,.METRE.)"
             ));
-            let resolved = declared_length_unit(&unit).and_then(UnitSystem::meters_per_unit);
+            let resolved = declared_length_unit(&unit).map(runmat_geometry_core::LengthUnit::meters_per_unit);
             assert_eq!(resolved, Some(meters), "{prefix}");
         }
+    }
+}
+
+#[cfg(test)]
+mod source_context_tests {
+    use super::inspect_length_units;
+    use runmat_geometry_core::{physical::LengthUnitEvidence, LengthUnit};
+    fn step(data: &str) -> String {
+        format!(
+            "ISO-10303-21;HEADER;FILE_SCHEMA(('AP242'));ENDSEC;DATA;{data}ENDSEC;END-ISO-10303-21;"
+        )
+    }
+    #[test]
+    fn mixed_contexts_remain_distinct_and_resolved() {
+        let evidence = inspect_length_units(&step("#1=(GLOBAL_UNIT_ASSIGNED_CONTEXT((#3)) REPRESENTATION_CONTEXT('mm',''));#2=(GLOBAL_UNIT_ASSIGNED_CONTEXT((#4)) REPRESENTATION_CONTEXT('m',''));#3=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));#4=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));"));
+        assert!(evidence.physical_scale_resolved());
+        assert_eq!(evidence.uniform_unit(), None);
+        let LengthUnitEvidence::Declared { contexts } = evidence else {
+            panic!("declared contexts expected")
+        };
+        assert_eq!(contexts.len(), 2);
+        assert_eq!(contexts[0].unit, LengthUnit::Millimeter);
+        assert_eq!(contexts[1].unit, LengthUnit::Meter);
+        assert_ne!(contexts[0].context, contexts[1].context);
+    }
+    #[test]
+    fn competing_units_in_one_context_are_not_a_fallback_opportunity() {
+        let evidence = inspect_length_units(&step("#1=(GLOBAL_UNIT_ASSIGNED_CONTEXT((#3,#4)) REPRESENTATION_CONTEXT('',''));#3=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));#4=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));"));
+        assert!(matches!(&evidence, LengthUnitEvidence::Conflicting { .. }));
+        assert!(!evidence
+            .clone()
+            .resolve_fallback(Some(LengthUnit::Meter), "test override")
+            .physical_scale_resolved());
+    }
+    #[test]
+    fn conversion_factor_controls_scale_instead_of_the_label() {
+        let evidence = inspect_length_units(&step("#1=(GLOBAL_UNIT_ASSIGNED_CONTEXT((#2)) REPRESENTATION_CONTEXT('',''));#2=(CONVERSION_BASED_UNIT('not-inch',#3) LENGTH_UNIT() NAMED_UNIT(*));#3=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0254),#4);#4=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));"));
+        assert_eq!(evidence.uniform_unit(), Some(LengthUnit::Inch));
+        let LengthUnitEvidence::Declared { contexts } = evidence else {
+            panic!("declared context expected")
+        };
+        assert_eq!(contexts[0].source_symbol, "not-inch");
+    }
+    #[test]
+    fn cyclic_conversion_unit_is_explicitly_unresolved() {
+        let evidence = inspect_length_units(&step("#1=(GLOBAL_UNIT_ASSIGNED_CONTEXT((#2)) REPRESENTATION_CONTEXT('',''));#2=(CONVERSION_BASED_UNIT('loop',#3) LENGTH_UNIT() NAMED_UNIT(*));#3=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.0),#2);"));
+        assert!(matches!(evidence, LengthUnitEvidence::Unsupported { .. }));
     }
 }

@@ -49,10 +49,18 @@ fn incidence_derives_vertex_stars_and_outward_boundary_facets() {
         let tetrahedron = &topology.tetrahedra[facet.tetrahedron_index as usize];
         let opposite = tetrahedron.vertex_indices[facet.opposite_vertex_slot as usize];
         let points = [
-            topology.nodes[facet.oriented_vertex_indices[0] as usize].coordinates_m,
-            topology.nodes[facet.oriented_vertex_indices[1] as usize].coordinates_m,
-            topology.nodes[facet.oriented_vertex_indices[2] as usize].coordinates_m,
-            topology.nodes[opposite as usize].coordinates_m,
+            topology.nodes[facet.oriented_vertex_indices[0] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes[facet.oriented_vertex_indices[1] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes[facet.oriented_vertex_indices[2] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes[opposite as usize]
+                .coordinates_m
+                .canonical_value(),
         ];
         assert_eq!(orient3d(points).unwrap(), PredicateSign::Positive);
     }

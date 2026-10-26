@@ -34,7 +34,10 @@ pub(super) fn octahedron_constraints() -> DelaunayConstraints {
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 10) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: vec![DelaunayConstraintSegment {
@@ -68,11 +71,14 @@ fn triangulated_torus_constraints() -> DelaunayConstraints {
             nodes.push(DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m: [
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([
                     radius * major.cos(),
                     radius * major.sin(),
                     0.5 * minor.sin(),
-                ],
+                ]),
             });
         }
     }
@@ -124,7 +130,10 @@ fn cospherical_bipyramid() -> (DelaunayConstraints, DelaunayVolumeTopology) {
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 30) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: vec![
@@ -305,15 +314,15 @@ fn recovery_evidence_is_independently_rejected_after_tampering() {
     let midpoint = StableDigest::from_bytes([99; 32]);
     let midpoint_coordinates = [0.0, 0.0, 0.0];
     let nodes = vec![
-        DelaunayVolumeNode::explicit(first, constraints.nodes[1].coordinates_m),
-        DelaunayVolumeNode::explicit(last, constraints.nodes[4].coordinates_m),
+        DelaunayVolumeNode::explicit(first, constraints.nodes[1].coordinates_m.canonical_value()),
+        DelaunayVolumeNode::explicit(last, constraints.nodes[4].coordinates_m.canonical_value()),
         DelaunayVolumeNode {
             identity: midpoint,
-            coordinates_m: midpoint_coordinates,
+            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(midpoint_coordinates),
             construction: Point3Construction::Segment {
                 endpoints: [
-                    constraints.nodes[1].coordinates_m,
-                    constraints.nodes[4].coordinates_m,
+                    constraints.nodes[1].coordinates_m.canonical_value(),
+                    constraints.nodes[4].coordinates_m.canonical_value(),
                 ],
                 parameter_numerator: 1,
                 parameter_exponent: 1,
@@ -438,7 +447,17 @@ fn recovery_rejects_mismatched_constraints_and_assigned_regions() {
     let constraints = octahedron_constraints();
     let topology = octahedron_topology(&constraints);
     let mut mismatched = constraints.clone();
-    mismatched.nodes[0].coordinates_m[0] += 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut mismatched.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         recover_delaunay_segments(
             topology.clone(),

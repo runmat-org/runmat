@@ -120,9 +120,10 @@ pub fn join_exact_face_charts(
                         .chain(std::iter::once(&use_record))
                         .flat_map(|use_record| &use_record.exact_edge_parameters)
                         .filter_map(|parameter| edge_tolerances.get(&parameter.source_edge_id))
-                        .fold(join_options.coordinate_tolerance_m, |maximum, tolerance| {
-                            maximum.max(*tolerance)
-                        });
+                        .fold(
+                            join_options.coordinate_tolerance_m.canonical_value(),
+                            |maximum, tolerance| maximum.max(tolerance.canonical_value()),
+                        );
                     let discrepancy_m = distance(entry.get().point_m, vertex.point_m);
                     if discrepancy_m > coordinate_tolerance_m {
                         return Err(invalid(
@@ -205,12 +206,18 @@ pub fn join_exact_face_charts(
                 chordal_deviation_m: geometry.chordal_deviation_m,
                 normal_deviation_rad: geometry.normal_deviation_rad,
                 acceptance_sample_count: accepted.sample_count,
-                accepted_chordal_deviation_m: accepted.maximum_chordal_deviation_m,
+                accepted_chordal_deviation_m: accepted
+                    .maximum_chordal_deviation_m
+                    .canonical_value(),
                 accepted_normal_deviation_rad: accepted.maximum_normal_deviation_rad,
             });
         }
-        maximum_chordal_deviation_m =
-            maximum_chordal_deviation_m.max(report.acceptance.maximum_chordal_deviation_m);
+        maximum_chordal_deviation_m = maximum_chordal_deviation_m.max(
+            report
+                .acceptance
+                .maximum_chordal_deviation_m
+                .canonical_value(),
+        );
         maximum_normal_deviation_rad =
             maximum_normal_deviation_rad.max(report.acceptance.maximum_normal_deviation_rad);
         collect_segments(
@@ -257,7 +264,9 @@ pub fn join_exact_face_charts(
                 })
             })
             .collect::<Result<Vec<_>, ExactFaceJoinError>>()?,
-        maximum_chordal_deviation_m,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            maximum_chordal_deviation_m,
+        ),
         maximum_normal_deviation_rad,
     };
     validate_exact_face_mesh_contract_with_cancellation(
@@ -296,8 +305,8 @@ fn validate_options(
     charts: &ExactFaceCharts,
     options: ExactFaceJoinOptions,
 ) -> Result<(), ExactFaceJoinError> {
-    if !options.coordinate_tolerance_m.is_finite()
-        || options.coordinate_tolerance_m <= 0.0
+    if !options.coordinate_tolerance_m.canonical_value().is_finite()
+        || options.coordinate_tolerance_m.canonical_value() <= 0.0
         || options.maximum_nodes == 0
         || options.maximum_triangles == 0
         || options.maximum_boundary_segments == 0

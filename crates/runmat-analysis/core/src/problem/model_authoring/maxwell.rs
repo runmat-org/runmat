@@ -7,7 +7,7 @@ pub(super) fn validate(model: &AuthoredModel) -> Result<(), AuthoredModelError> 
         Some(ElectromagneticDomain::Harmonic {
             reference_frequency,
         }) => {
-            if !reference_frequency.is_finite() || reference_frequency.hertz <= 0.0 {
+            if !reference_frequency.is_finite() || reference_frequency.canonical_value() <= 0.0 {
                 return Err(AuthoredModelError::InvalidPhysics {
                     kind: "electromagnetic domain",
                     detail: "harmonic Maxwell reference frequency must be finite and positive"

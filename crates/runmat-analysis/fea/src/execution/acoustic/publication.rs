@@ -24,7 +24,7 @@ impl AcousticHarmonicWorkload {
         let [declaration] = step.state_outputs.as_slice() else {
             return Ok(None);
         };
-        Ok((frequencies.contains(&self.frequency.hertz)
+        Ok((frequencies.contains(&self.frequency.canonical_value())
             && declaration.kind == StateKind::AcousticComplex
             && declaration.completeness == StateCompleteness::Complete
             && declaration.persistence != StatePersistence::CheckpointOnly)

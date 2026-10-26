@@ -37,14 +37,31 @@ struct ResultData {
     power_tolerance: f64,
     ordered_node_ids: Vec<u64>,
     ordered_element_ids: Vec<u64>,
-    pressure_pa: Vec<ProjectionScalar>,
-    velocity_m_per_s: Vec<ProjectionVector3>,
-    intensity_w_per_m2: Vec<[f64; 3]>,
-    energy_density_j_per_m3: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_pa: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::Pressure,
+        Vec<ProjectionScalar>,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    velocity_m_per_s: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::Velocity,
+        Vec<ProjectionVector3>,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    intensity_w_per_m2: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::AcousticIntensity,
+        Vec<[f64; 3]>,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    energy_density_j_per_m3:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::EnergyDensity, Vec<f64>>,
     iterations: u32,
     relative_residual: f64,
-    mean_input_power_w: f64,
-    mean_impedance_loss_w: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    mean_input_power_w: runmat_types::physical::Quantity<runmat_types::physical::kind::Power, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    mean_impedance_loss_w:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Power, f64>,
     power_relative_error: f64,
     source_evidence: Vec<SpatialProjectionEvidence>,
     certificate: crate::physics::acoustic::AcousticSolveCertificate,
@@ -87,8 +104,8 @@ impl AcousticHarmonicSolverResult {
             frequency: d.frequency,
             iterations: d.iterations,
             relative_residual: d.relative_residual,
-            mean_input_power_w: d.mean_input_power_w,
-            mean_impedance_loss_w: d.mean_impedance_loss_w,
+            mean_input_power_w: d.mean_input_power_w.canonical_value(),
+            mean_impedance_loss_w: d.mean_impedance_loss_w.canonical_value(),
             power_relative_error: d.power_relative_error,
         })
     }
@@ -127,8 +144,16 @@ impl AcousticHarmonicSolverResult {
             energy_density_j_per_m3: response.element_mean_energy_density_j_per_m3,
             iterations: response.iterations,
             relative_residual: response.relative_residual,
-            mean_input_power_w: response.mean_input_power_w,
-            mean_impedance_loss_w: response.mean_impedance_loss_w,
+            mean_input_power_w: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Power,
+                _,
+            >::new(response.mean_input_power_w.canonical_value()),
+            mean_impedance_loss_w: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Power,
+                _,
+            >::new(
+                response.mean_impedance_loss_w.canonical_value()
+            ),
             power_relative_error: response.power_relative_error,
             source_evidence: response.source_evidence,
             certificate: response.certificate,
@@ -171,10 +196,10 @@ impl AcousticHarmonicSolverResult {
             return Err(invalid(format!(
                 "acoustic result rejected: {reason}; family={:?} procedure={:?} mesh={:?} frequency_hz={} refinement_steps={} relative_residual={:e} solver_relative_tolerance={:e} power_relative_error={:e} power_relative_tolerance={:e} mean_input_power_w={:e} mean_impedance_loss_w={:e}",
                 d.formulation.family(), d.formulation.procedure(), d.mesh_digest,
-                d.frequency.hertz, d.iterations,
+                d.frequency.canonical_value(), d.iterations,
                 d.relative_residual, d.solver.relative_tolerance,
                 d.power_relative_error, d.power_tolerance,
-                d.mean_input_power_w, d.mean_impedance_loss_w,
+                d.mean_input_power_w.canonical_value(), d.mean_impedance_loss_w.canonical_value(),
             )));
         }
         let nodes = d.ordered_node_ids.len();
@@ -185,21 +210,25 @@ impl AcousticHarmonicSolverResult {
         };
         if !unique(&d.ordered_node_ids)
             || !unique(&d.ordered_element_ids)
-            || d.pressure_pa.len() != nodes
-            || d.velocity_m_per_s.len() != elements
-            || d.intensity_w_per_m2.len() != elements
-            || d.energy_density_j_per_m3.len() != elements
+            || d.pressure_pa.canonical_values().len() != nodes
+            || d.velocity_m_per_s.canonical_values().len() != elements
+            || d.intensity_w_per_m2.canonical_values().len() != elements
+            || d.energy_density_j_per_m3.canonical_values().len() != elements
             || d.pressure_pa
+                .canonical_values()
                 .iter()
                 .any(|p| !p.real.is_finite() || !p.imaginary.is_finite())
             || d.velocity_m_per_s
+                .canonical_values()
                 .iter()
                 .any(|v| v.real.iter().chain(&v.imaginary).any(|x| !x.is_finite()))
             || d.intensity_w_per_m2
+                .canonical_values()
                 .iter()
                 .flatten()
                 .any(|x| !x.is_finite())
             || d.energy_density_j_per_m3
+                .canonical_values()
                 .iter()
                 .any(|x| !x.is_finite() || *x < 0.0)
             || d.source_evidence
@@ -268,10 +297,10 @@ impl AcousticHarmonicSolverResult {
         )
     }
     pub fn pressure_pa(&self) -> &[ProjectionScalar] {
-        &self.data.pressure_pa
+        self.data.pressure_pa.canonical_values()
     }
     pub fn velocity_m_per_s(&self) -> &[ProjectionVector3] {
-        &self.data.velocity_m_per_s
+        self.data.velocity_m_per_s.canonical_values()
     }
     pub fn source_evidence(&self) -> &[SpatialProjectionEvidence] {
         &self.data.source_evidence
@@ -281,10 +310,10 @@ impl AcousticHarmonicSolverResult {
         self.data.certificate
     }
     pub fn intensity_w_per_m2(&self) -> &[[f64; 3]] {
-        &self.data.intensity_w_per_m2
+        self.data.intensity_w_per_m2.canonical_values()
     }
     pub fn energy_density_j_per_m3(&self) -> &[f64] {
-        &self.data.energy_density_j_per_m3
+        self.data.energy_density_j_per_m3.canonical_values()
     }
     pub fn ordered_node_ids(&self) -> &[u64] {
         &self.data.ordered_node_ids
@@ -309,11 +338,11 @@ impl AcousticHarmonicSolverResult {
     }
     /// Accepted net input power, including reflected-wave subtraction at incident faces.
     pub fn mean_input_power_w(&self) -> f64 {
-        self.data.mean_input_power_w
+        self.data.mean_input_power_w.canonical_value()
     }
     /// Accepted passive boundary loss, excluding incident-inlet Robin bookkeeping.
     pub fn mean_impedance_loss_w(&self) -> f64 {
-        self.data.mean_impedance_loss_w
+        self.data.mean_impedance_loss_w.canonical_value()
     }
     pub fn frequency(&self) -> Frequency {
         self.data.frequency
@@ -342,9 +371,11 @@ fn closure_rejection_reason(d: &ResultData) -> Option<&'static str> {
         Some("invalid power error")
     } else if d.power_relative_error > d.power_tolerance {
         Some("power closure exceeds tolerance")
-    } else if !d.mean_input_power_w.is_finite() {
+    } else if !d.mean_input_power_w.canonical_value().is_finite() {
         Some("nonfinite input power")
-    } else if !d.mean_impedance_loss_w.is_finite() || d.mean_impedance_loss_w < 0.0 {
+    } else if !d.mean_impedance_loss_w.canonical_value().is_finite()
+        || d.mean_impedance_loss_w.canonical_value() < 0.0
+    {
         Some("invalid impedance loss")
     } else {
         None

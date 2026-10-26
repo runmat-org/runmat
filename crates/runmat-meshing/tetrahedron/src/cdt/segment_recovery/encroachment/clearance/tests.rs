@@ -20,8 +20,8 @@ fn problem(
         constraint_index: 7,
         first_identity: endpoints[0].identity,
         last_identity: endpoints[1].identity,
-        first_coordinates: endpoints[0].coordinates_m,
-        last_coordinates: endpoints[1].coordinates_m,
+        first_coordinates: endpoints[0].coordinates_m.canonical_value(),
+        last_coordinates: endpoints[1].coordinates_m.canonical_value(),
     };
     let interval = [
         DyadicNode::endpoint(endpoints[0].identity, false),
@@ -52,7 +52,11 @@ fn acute_offcentre_rounding_requires_exact_child_sphere_clearance_across_scales(
                 witness,
                 context,
                 interval,
-                [0.37, 0.37, witness.coordinates_m[0] / scale],
+                [
+                    0.37,
+                    0.37,
+                    witness.coordinates_m.canonical_value()[0] / scale,
+                ],
                 None,
                 &mut work,
             )
@@ -64,13 +68,13 @@ fn acute_offcentre_rounding_requires_exact_child_sphere_clearance_across_scales(
             );
             // Independent analytic dot products: negative means encroachment.
             for child in [
-                [endpoints[0].coordinates_m, point],
-                [point, endpoints[1].coordinates_m],
+                [endpoints[0].coordinates_m.canonical_value(), point],
+                [point, endpoints[1].coordinates_m.canonical_value()],
             ] {
                 let dot = (0..3)
                     .map(|axis| {
-                        (witness.coordinates_m[axis] - child[0][axis])
-                            * (witness.coordinates_m[axis] - child[1][axis])
+                        (witness.coordinates_m.canonical_value()[axis] - child[0][axis])
+                            * (witness.coordinates_m.canonical_value()[axis] - child[1][axis])
                     })
                     .sum::<f64>();
                 assert!(dot >= 0., "angle={degrees}, scale={scale}, dot={dot}");
@@ -84,7 +88,10 @@ fn acute_offcentre_rounding_requires_exact_child_sphere_clearance_across_scales(
 #[test]
 fn clearance_rejects_an_invalid_preference_then_admits_a_geometric_alternative() {
     let (endpoints, mut witness, context, interval) = problem(1., 0.1);
-    witness.coordinates_m = [0.8, 0.21, 0.];
+    witness.coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0.8, 0.21, 0.]);
     let mut work = RecoveryWork::new(Default::default(), &NeverCancelled);
     let split = choose(
         endpoints,
@@ -142,13 +149,33 @@ fn acute_protection_radius_does_not_erode_through_dyadic_rounding() {
                 problem(scale, 0.73_f64.to_radians());
             if mirrored {
                 for node in &mut endpoints {
-                    node.coordinates_m[0] = scale - node.coordinates_m[0];
+                    {
+                        let quantity_change = scale - node.coordinates_m.canonical_value()[0];
+                        let quantity_index = 0;
+                        let quantity_slot = &mut node.coordinates_m;
+                        let mut quantity_coordinates = quantity_slot.canonical_value();
+                        quantity_coordinates[quantity_index] = quantity_change;
+                        *quantity_slot = runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(quantity_coordinates);
+                    };
                 }
-                witness.coordinates_m[0] = scale - witness.coordinates_m[0];
-                context.first_coordinates = endpoints[0].coordinates_m;
-                context.last_coordinates = endpoints[1].coordinates_m;
+                {
+                    let quantity_change = scale - witness.coordinates_m.canonical_value()[0];
+                    let quantity_index = 0;
+                    let quantity_slot = &mut witness.coordinates_m;
+                    let mut quantity_coordinates = quantity_slot.canonical_value();
+                    quantity_coordinates[quantity_index] = quantity_change;
+                    *quantity_slot = runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(quantity_coordinates);
+                };
+                context.first_coordinates = endpoints[0].coordinates_m.canonical_value();
+                context.last_coordinates = endpoints[1].coordinates_m.canonical_value();
             }
-            let origin = endpoints[0].coordinates_m;
+            let origin = endpoints[0].coordinates_m.canonical_value();
             let mut work = RecoveryWork::new(Default::default(), &NeverCancelled);
             let unguarded = interval[0]
                 .near_parameter_with_clearance(interval[1], 0.37, &mut |candidate| {
@@ -163,7 +190,7 @@ fn acute_protection_radius_does_not_erode_through_dyadic_rounding() {
                     .map(|axis| (point[axis] - origin[axis]).powi(2))
                     .sum::<f64>()
             };
-            let reference_squared = radius_squared(witness.coordinates_m);
+            let reference_squared = radius_squared(witness.coordinates_m.canonical_value());
             let unguarded_point = interpolate(
                 context.first_coordinates,
                 context.last_coordinates,

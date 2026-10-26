@@ -98,7 +98,10 @@ mod tests {
         SolverMeshNode {
             node_id,
             stable_identity: StableDigest::from_bytes([node_id as u8; 32]),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             provenance: Vec::new(),
             exact_parameters: vec![SolverNodeExactParameter::Surface {
                 source_face_id: face(),

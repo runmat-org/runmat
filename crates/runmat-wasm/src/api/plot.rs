@@ -41,7 +41,7 @@ use runmat_runtime::builtins::plotting::{
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
-    render_geometry_scene_snapshot as runtime_render_geometry_scene_snapshot,
+    render_geometry_scene_observation_snapshot as runtime_render_geometry_scene_observation_snapshot,
     reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure,
@@ -162,7 +162,8 @@ pub fn pick_geometry_scene_region(
     };
     let result = runtime_pick_geometry_scene_region(surface_id, x, y, mode)
         .map_err(|err| runtime_error_to_js(&err))?;
-    serde_wasm_bindgen::to_value(&result).map_err(|err| js_error(&err.to_string()))
+    serde::Serialize::serialize(&result, &serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|err| js_error(&err.to_string()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -483,6 +484,18 @@ pub async fn wasm_render_geometry_scene_image(
     height: Option<u32>,
     view: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    wasm_render_geometry_scene_observation_image(handle, width, height, view, JsValue::NULL).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderGeometrySceneObservationImage)]
+pub async fn wasm_render_geometry_scene_observation_image(
+    handle: u32,
+    width: Option<u32>,
+    height: Option<u32>,
+    view: Option<String>,
+    observation: JsValue,
+) -> Result<Uint8Array, JsValue> {
     const DEFAULT_PREVIEW_WIDTH: u32 = 1024;
     const DEFAULT_PREVIEW_HEIGHT: u32 = 768;
     let _ = shared_webgpu_context();
@@ -493,10 +506,49 @@ pub async fn wasm_render_geometry_scene_image(
     } else {
         (normalized_width, normalized_height)
     };
-    let bytes = runtime_render_geometry_scene_snapshot(handle, render_width, render_height, view)
-        .await
-        .map_err(runtime_flow_to_js)?;
+    #[derive(Default, serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Observation {
+        #[serde(default)]
+        visibility: Option<serde_json::Value>,
+        #[serde(default)]
+        section: Option<serde_json::Value>,
+        #[serde(default)]
+        selected_region_ids: Vec<String>,
+    }
+    let observation: Observation = if observation.is_null() || observation.is_undefined() {
+        Observation::default()
+    } else {
+        serde_wasm_bindgen::from_value(observation).map_err(|err| js_error(&err.to_string()))?
+    };
+    let bytes = runtime_render_geometry_scene_observation_snapshot(
+        handle,
+        render_width,
+        render_height,
+        view,
+        observation.visibility,
+        observation.section,
+        observation.selected_region_ids,
+    )
+    .await
+    .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = measureGeometryScene)]
+pub fn wasm_measure_geometry_scene(
+    handle: u32,
+    kind: String,
+    region_ids: JsValue,
+) -> Result<JsValue, JsValue> {
+    let ids: Vec<String> =
+        serde_wasm_bindgen::from_value(region_ids).map_err(|err| js_error(&err.to_string()))?;
+    let result =
+        runmat_runtime::builtins::plotting::measure_geometry_scene_observation(handle, &kind, &ids)
+            .map_err(runtime_flow_to_js)?;
+    serde::Serialize::serialize(&result, &serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|err| js_error(&err.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]

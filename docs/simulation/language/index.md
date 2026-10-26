@@ -32,31 +32,18 @@ objects owned by a declaration, such as regions inside geometry and loads inside
 
 The smallest useful structural example still states its physical ownership explicitly:
 
+The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+
 ```fea
 geometry bracket {
-    file = "../examples/geometry/two-box-assembly.step"
+    file = "./geometry/two-box-assembly.step"
     units = m
 
-    region left_body : solid {
-        select id "solid_000001"
-        expect exactly_one
-    }
-    region right_body : solid {
-        select id "solid_000002"
-        expect exactly_one
-    }
-    region left_support : face {
-        select id "face_000001"
-        expect exactly_one
-    }
-    region left_load_face : face {
-        select id "face_000002"
-        expect exactly_one
-    }
-    region right_support : face {
-        select id "face_000007"
-        expect exactly_one
-    }
+    region left_body : solid { select name "left_body"; expect exactly_one }
+    region right_body : solid { select name "right_body"; expect exactly_one }
+    region left_support : face { select name "left_support"; expect exactly_one }
+    region left_load_face : face { select name "left_load_face"; expect exactly_one }
+    region right_support : face { select name "right_support"; expect exactly_one }
 }
 
 mesh bracket on geometry.bracket {

@@ -54,7 +54,12 @@ fn threshold_is_typed_and_retained() {
     let study = checked.studies.values().next().unwrap();
     assert_eq!(study.assessments.len(), 1);
     assert_eq!(
-        study.assessments[0].rule.bounds().1.unwrap().value_si,
+        study.assessments[0]
+            .rule
+            .bounds()
+            .1
+            .unwrap()
+            .canonical_value(),
         0.001
     );
 }
@@ -128,7 +133,7 @@ fn imported_assessment_requires_a_complete_logical_record() {
             };
             assert_eq!(function.module_path, "project/verify.m");
             assert_eq!(function.source_digest, [9; 32]);
-            assert_eq!(parameters[0].value_si, 0.001);
+            assert_eq!(parameters[0].canonical_value(), 0.001);
         }
     }
 }

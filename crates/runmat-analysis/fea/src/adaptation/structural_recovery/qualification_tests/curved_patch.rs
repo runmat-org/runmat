@@ -15,6 +15,7 @@ pub(super) fn curved_interior_tet10_patch_recovers_affine_stress_and_energy() {
             node.node_id as usize > corner_count
                 && node
                     .coordinates_m
+                    .canonical_value()
                     .iter()
                     .all(|coordinate| *coordinate > 0.0 && *coordinate < 1.0)
         })
@@ -33,16 +34,48 @@ pub(super) fn curved_interior_tet10_patch_recovers_affine_stress_and_energy() {
         .clone();
     let volume = |mesh: &SolverMeshArtifact| {
         let nodes_m = std::array::from_fn(|index| {
-            mesh.topology.nodes[containing_element[index] as usize - 1].coordinates_m
+            mesh.topology.nodes[containing_element[index] as usize - 1]
+                .coordinates_m
+                .canonical_value()
         });
         Tetrahedron10ElementGeometry { nodes_m }
             .volume_m3()
             .unwrap()
     };
     let straight_volume = volume(&mesh);
-    mesh.topology.nodes[moved].coordinates_m[0] += 0.02;
-    mesh.topology.nodes[moved].coordinates_m[1] -= 0.015;
-    mesh.topology.nodes[moved].coordinates_m[2] += 0.01;
+    {
+        let quantity_change = 0.02;
+        let quantity_index = 0;
+        let quantity_slot = &mut mesh.topology.nodes[moved].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
+    {
+        let quantity_change = 0.015;
+        let quantity_index = 1;
+        let quantity_slot = &mut mesh.topology.nodes[moved].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] -= quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 2;
+        let quantity_slot = &mut mesh.topology.nodes[moved].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!((volume(&mesh) - straight_volume).abs() > 1.0e-8);
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
@@ -55,8 +88,8 @@ pub(super) fn curved_interior_tet10_patch_recovers_affine_stress_and_energy() {
     else {
         panic!("expected isotropic linear elasticity");
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     replace_fixture_excitations(&mut model, Vec::new());
     let boundary_nodes = mesh
         .topology
@@ -68,7 +101,9 @@ pub(super) fn curved_interior_tet10_patch_recovers_affine_stress_and_energy() {
     model.constraints = boundary_nodes
         .into_iter()
         .map(|node_id| {
-            let point = mesh.topology.nodes[node_id as usize - 1].coordinates_m;
+            let point = mesh.topology.nodes[node_id as usize - 1]
+                .coordinates_m
+                .canonical_value();
             AnalysisConstraint::Structural(StructuralConstraint {
                 constraint_id: format!("affine_boundary_{node_id}"),
                 frame: CoordinateFrame::Global,
@@ -108,9 +143,9 @@ pub(super) fn curved_interior_tet10_patch_recovers_affine_stress_and_energy() {
     assert_eq!(displacement.len(), mesh.topology.nodes.len() * 3);
     for (actual, node) in displacement.chunks_exact(3).zip(&mesh.topology.nodes) {
         for (&actual, expected) in actual.iter().zip([
-            0.1 * node.coordinates_m[0],
-            0.2 * node.coordinates_m[1],
-            0.3 * node.coordinates_m[2],
+            0.1 * node.coordinates_m.canonical_value()[0],
+            0.2 * node.coordinates_m.canonical_value()[1],
+            0.3 * node.coordinates_m.canonical_value()[2],
         ]) {
             assert!(
                 (actual - expected).abs() < 1.0e-8,

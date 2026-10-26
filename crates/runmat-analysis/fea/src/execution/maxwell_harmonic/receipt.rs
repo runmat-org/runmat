@@ -18,16 +18,29 @@ pub struct MaxwellNumericalReceipt {
     pub elements: usize,
     pub oriented_edges: usize,
     pub integration_samples: usize,
-    pub angular_frequency_rad_per_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub angular_frequency_rad_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::AngularFrequency, f64>,
     pub relative_physical_residual: f64,
     pub relative_charge_continuity_residual: f64,
     pub relative_complex_power_error: f64,
     pub solver_relative_tolerance: f64,
-    pub electric_energy_j: f64,
-    pub magnetic_energy_j: f64,
-    pub ohmic_power_w: f64,
-    pub source_power_va: ComplexPhasor,
-    pub reactive_power_var: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub electric_energy_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub magnetic_energy_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub ohmic_power_w: runmat_types::physical::Quantity<runmat_types::physical::kind::Power, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub source_power_va: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ApparentPower,
+        ComplexPhasor,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub reactive_power_var:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::ReactivePower, f64>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ReceiptWire")]
@@ -75,18 +88,38 @@ impl MaxwellNumericalReceiptArtifact {
             element_order: mesh.resolved_request.element_order,
             nodes: mesh.topology.nodes.len(),
             elements: mesh.topology.volume_elements.len(),
-            oriented_edges: r.edge_circulations_v.len(),
+            oriented_edges: r.edge_circulations_v.canonical_values().len(),
             integration_samples: r.samples.len(),
-            angular_frequency_rad_per_s: r.angular_frequency_rad_per_s,
+            angular_frequency_rad_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::AngularFrequency,
+                _,
+            >::new(
+                r.angular_frequency_rad_per_s.canonical_value()
+            ),
             relative_physical_residual: r.relative_physical_residual,
             relative_charge_continuity_residual: r.relative_charge_continuity_residual,
             relative_complex_power_error: r.relative_complex_power_error,
             solver_relative_tolerance: workload.relative_residual_target,
-            electric_energy_j: r.electric_energy_j,
-            magnetic_energy_j: r.magnetic_energy_j,
-            ohmic_power_w: r.ohmic_power_w,
-            source_power_va: r.source_power_va,
-            reactive_power_var: r.reactive_power_var,
+            electric_energy_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(r.electric_energy_j.canonical_value()),
+            magnetic_energy_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(r.magnetic_energy_j.canonical_value()),
+            ohmic_power_w:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Power, _>::new(
+                    r.ohmic_power_w.canonical_value(),
+                ),
+            source_power_va: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ApparentPower,
+                _,
+            >::new(r.source_power_va.canonical_value()),
+            reactive_power_var: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ReactivePower,
+                _,
+            >::new(r.reactive_power_var.canonical_value()),
         };
         let source_workload = workload.identity()?;
         let source_result = result.identity()?;
@@ -124,11 +157,14 @@ impl MaxwellNumericalReceiptArtifact {
             .elements
             .checked_mul(6)
             .ok_or_else(|| invalid("Maxwell receipt edge overflow"))?;
-        let reactive =
-            2.0 * r.angular_frequency_rad_per_s * (r.magnetic_energy_j - r.electric_energy_j);
-        let predicted = ComplexPhasor::new(r.ohmic_power_w, reactive);
-        let scale = predicted.abs().max(r.source_power_va.abs());
-        let defect = (r.source_power_va - predicted).abs();
+        let reactive = 2.0
+            * r.angular_frequency_rad_per_s.canonical_value()
+            * (r.magnetic_energy_j.canonical_value() - r.electric_energy_j.canonical_value());
+        let predicted = ComplexPhasor::new(r.ohmic_power_w.canonical_value(), reactive);
+        let scale = predicted
+            .abs()
+            .max(r.source_power_va.canonical_value().abs());
+        let defect = (r.source_power_va.canonical_value() - predicted).abs();
         let closure = if scale > 0.0 { defect / scale } else { defect };
         if self.schema_version != 1
             || r.nodes == 0
@@ -136,20 +172,20 @@ impl MaxwellNumericalReceiptArtifact {
             || r.oriented_edges == 0
             || r.oriented_edges > edges
             || r.integration_samples != samples
-            || !r.angular_frequency_rad_per_s.is_finite()
-            || r.angular_frequency_rad_per_s <= 0.0
+            || !r.angular_frequency_rad_per_s.canonical_value().is_finite()
+            || r.angular_frequency_rad_per_s.canonical_value() <= 0.0
             || !t.is_finite()
             || t <= 0.0
             || t >= 1.0
             || !within(r.relative_physical_residual, 8.0 * t)
             || !within(r.relative_charge_continuity_residual, 16.0 * t)
             || !within(r.relative_complex_power_error, 16.0 * t)
-            || !within(r.electric_energy_j, f64::MAX)
-            || !within(r.magnetic_energy_j, f64::MAX)
-            || !within(r.ohmic_power_w, f64::MAX)
-            || !r.source_power_va.is_finite()
-            || !r.reactive_power_var.is_finite()
-            || r.reactive_power_var != reactive
+            || !within(r.electric_energy_j.canonical_value(), f64::MAX)
+            || !within(r.magnetic_energy_j.canonical_value(), f64::MAX)
+            || !within(r.ohmic_power_w.canonical_value(), f64::MAX)
+            || !r.source_power_va.canonical_value().is_finite()
+            || !r.reactive_power_var.canonical_value().is_finite()
+            || r.reactive_power_var.canonical_value() != reactive
             || !closure.is_finite()
             || r.relative_complex_power_error != closure
             || self.identity != receipt_identity(self.source_workload, self.source_result, &r)?

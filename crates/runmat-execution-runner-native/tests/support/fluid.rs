@@ -26,11 +26,12 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
     model.response_spectra.clear();
     model.random_excitations.clear();
     model.frame = CoordinateFrame::Global;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
@@ -51,12 +52,12 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
             constraint_id: "wall".into(),
             kind: if nonzero {
                 FluidConstraintKind::MovingWall {
-                    target: RegionTarget::boundary("slab_insulated"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
                     velocity: PrescribedValue::Constant(velocity),
                 }
             } else {
                 FluidConstraintKind::NoSlipWall {
-                    target: RegionTarget::boundary("slab_insulated"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
                 }
             },
         }));
@@ -65,13 +66,13 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant(velocity),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(reference_pa)),
         },

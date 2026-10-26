@@ -66,7 +66,7 @@ fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
         .acoustic
         .as_mut()
         .unwrap()
-        .speed_of_sound_m_per_s = 3.0;
+        .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(3.0);
     entries[0] = other.execute(&mesh).unwrap();
     assert!(assemble_acoustic_frequency_result(workload, &mesh, entries, &none(3)).is_err());
 }

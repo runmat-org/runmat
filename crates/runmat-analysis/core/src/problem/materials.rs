@@ -1,5 +1,5 @@
 mod storage;
-use runmat_types::PhysicalDimension;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -78,7 +78,9 @@ pub enum FluidMaterialError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConductivityFrequencyPoint {
-    pub frequency_hz: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub frequency_hz:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Frequency, f64>,
     pub conductivity_scale: f64,
     #[serde(default)]
     pub dispersive_loss_scale: Option<f64>,
@@ -91,8 +93,10 @@ pub struct ConductivityFrequencyPoint {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialMechanicalModel {
-    pub youngs_modulus_pa: f64,
-    pub poisson_ratio: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub poisson_ratio: runmat_types::physical::PoissonRatio,
 }
 
 /// Orthotropic plane-stress and transverse-shear law for one shell laminate ply.
@@ -103,12 +107,18 @@ pub struct MaterialMechanicalModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialOrthotropicLaminaModel {
-    pub longitudinal_modulus_pa: f64,
-    pub transverse_modulus_pa: f64,
-    pub major_poisson_ratio: f64,
-    pub in_plane_shear_modulus_pa: f64,
-    pub transverse_shear_modulus_13_pa: f64,
-    pub transverse_shear_modulus_23_pa: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub longitudinal_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub transverse_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub major_poisson_ratio: runmat_types::physical::PoissonRatio,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub in_plane_shear_modulus_pa: runmat_types::physical::ShearModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub transverse_shear_modulus_13_pa: runmat_types::physical::ShearModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub transverse_shear_modulus_23_pa: runmat_types::physical::ShearModulus,
 }
 
 /// Closed mechanical elasticity law owned by a material.
@@ -135,28 +145,40 @@ pub enum MechanicalDampingModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialThermalModel {
-    pub reference_temperature_k: f64,
-    pub modulus_temp_coeff_per_k: f64,
-    pub conductivity_w_per_mk: f64,
-    pub specific_heat_j_per_kgk: f64,
-    pub expansion_coefficient_per_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub conductivity_w_per_mk: runmat_types::physical::ThermalConductivity,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialAcousticModel {
-    pub speed_of_sound_m_per_s: f64,
-    pub damping_ratio: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub damping_ratio: runmat_types::physical::DampingRatio,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialElectricalModel {
-    pub reference_temperature_k: f64,
-    pub conductivity_s_per_m: f64,
-    pub resistive_heating_coefficient: f64,
-    pub relative_permittivity: f64,
-    pub relative_permeability: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub conductivity_s_per_m: runmat_types::physical::ElectricalConductivity,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub relative_permittivity: runmat_types::physical::RelativePermittivity,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub relative_permeability: runmat_types::physical::RelativePermeability,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conductivity_frequency_response: Vec<ConductivityFrequencyPoint>,
 }
@@ -165,9 +187,11 @@ pub struct MaterialElectricalModel {
 #[serde(tag = "law", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MaterialPlasticModel {
     J2IsotropicLinearHardening {
-        yield_stress_pa: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        yield_stress_pa: runmat_types::physical::YieldStress,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
         /// Yield-stress increase per unit equivalent plastic strain, not a uniaxial tangent.
-        isotropic_hardening_modulus_pa: f64,
+        isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus,
     },
 }
 
@@ -177,8 +201,9 @@ pub struct MaterialModel {
     pub material_id: String,
     pub name: String,
     pub provenance: MaterialProvenance,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
     #[serde(default)]
-    pub mass_density_kg_per_m3: Option<f64>,
+    pub mass_density_kg_per_m3: Option<runmat_types::physical::MassDensity>,
     #[serde(default)]
     pub elasticity: Option<MaterialElasticityModel>,
     #[serde(default)]
@@ -199,7 +224,8 @@ pub struct MaterialModel {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SolverMaterialModel<'a> {
     pub material_id: &'a str,
-    pub mass_density_kg_per_m3: Option<f64>,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
+    pub mass_density_kg_per_m3: Option<runmat_types::physical::MassDensity>,
     pub elasticity: &'a Option<MaterialElasticityModel>,
     pub damping: Option<MechanicalDampingModel>,
     pub thermal: &'a Option<MaterialThermalModel>,
@@ -257,10 +283,7 @@ pub struct ImportedCadMaterialProperty {
     pub source_name: String,
     pub source_entity_id: u64,
     pub representation_entity_id: u64,
-    pub dimension: PhysicalDimension,
-    pub value_si: f64,
-    pub source_value: f64,
-    pub source_unit: String,
+    pub value: runmat_types::physical::SourceQuantity,
     pub specification: Option<String>,
     pub environment: Vec<ImportedCadEnvironmentCondition>,
 }
@@ -285,10 +308,7 @@ pub enum ImportedCadMaterialPropertyKind {
 #[serde(deny_unknown_fields)]
 pub struct ImportedCadEnvironmentCondition {
     pub name: String,
-    pub dimension: PhysicalDimension,
-    pub value_si: f64,
-    pub source_value: f64,
-    pub source_unit: String,
+    pub value: runmat_types::physical::SourceQuantity,
 }
 
 /// Closed constitutive facts that a formulation may require from an assigned material.
@@ -330,7 +350,10 @@ impl MaterialModel {
 
     pub fn has_capability(&self, capability: MaterialCapability) -> bool {
         match capability {
-            MaterialCapability::MassDensity => self.mass_density_kg_per_m3.is_some(),
+            MaterialCapability::MassDensity => self
+                .mass_density_kg_per_m3
+                .map(|quantity| quantity.canonical_value())
+                .is_some(),
             MaterialCapability::IsotropicLinearElasticity => matches!(
                 self.elasticity,
                 Some(MaterialElasticityModel::IsotropicLinear(_))
@@ -348,7 +371,9 @@ impl MaterialModel {
         }
     }
 
-    pub fn require_mass_density(&self) -> Result<f64, MissingMaterialCapability> {
+    pub fn require_mass_density(
+        &self,
+    ) -> Result<runmat_types::physical::MassDensity, MissingMaterialCapability> {
         self.mass_density_kg_per_m3
             .ok_or_else(|| self.missing(MaterialCapability::MassDensity))
     }
@@ -422,7 +447,7 @@ impl MaterialModel {
             let reference = law.low_shear_viscosity();
             if !law.is_valid()
                 || !density.is_finite()
-                || density <= 0.0
+                || density.canonical_value() <= 0.0
                 || !reference.is_finite()
                 || reference <= 0.0
             {
@@ -432,7 +457,7 @@ impl MaterialModel {
                 });
             }
             return Ok(IncompressibleFluidMaterial {
-                density: crate::MassDensity::new(density),
+                density,
                 dynamic_viscosity: crate::DynamicViscosity::new(reference),
                 rheology: Some(law),
             });
@@ -456,8 +481,8 @@ impl MaterialModel {
         };
         let density = self.require_mass_density()?;
         for (property, value) in [
-            ("density", density),
-            ("dynamic viscosity", dynamic_viscosity.pascal_seconds),
+            ("density", density.canonical_value()),
+            ("dynamic viscosity", dynamic_viscosity.canonical_value()),
         ] {
             if !value.is_finite() || value <= 0.0 {
                 return Err(FluidMaterialError::Invalid {
@@ -467,7 +492,7 @@ impl MaterialModel {
             }
         }
         Ok(IncompressibleNewtonianMaterial {
-            density: crate::MassDensity::new(density),
+            density,
             dynamic_viscosity,
         })
     }
@@ -504,7 +529,7 @@ mod tests {
             material_id: "fluid".into(),
             name: "Fluid".into(),
             provenance: MaterialProvenance::Authored,
-            mass_density_kg_per_m3: Some(997.0),
+            mass_density_kg_per_m3: (Some(997.0)).map(runmat_types::physical::MassDensity::new),
             elasticity: None,
             damping: None,
             thermal: None,
@@ -534,7 +559,10 @@ mod tests {
         let material = density_only_material();
         assert!(material.has_capability(MaterialCapability::MassDensity));
         assert!(!material.has_capability(MaterialCapability::IsotropicLinearElasticity));
-        assert_eq!(material.require_mass_density(), Ok(997.0));
+        assert_eq!(
+            material.require_mass_density(),
+            Ok(crate::MassDensity::new(997.0))
+        );
         assert_eq!(
             material.require_mechanical(),
             Err(MissingMaterialCapability {
@@ -577,7 +605,8 @@ mod tests {
         );
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let mut invalid = material.clone();
-            invalid.mass_density_kg_per_m3 = Some(bad);
+            invalid.mass_density_kg_per_m3 =
+                (Some(bad)).map(runmat_types::physical::MassDensity::new);
             assert!(invalid.require_incompressible_newtonian().is_err());
             assert!(crate::validate_material_definitions(&[invalid]).is_err());
             let mut invalid = material.clone();
@@ -587,7 +616,7 @@ mod tests {
             assert!(invalid.require_incompressible_newtonian().is_err());
             assert!(crate::validate_material_definitions(&[invalid]).is_err());
         }
-        material.mass_density_kg_per_m3 = None;
+        material.mass_density_kg_per_m3 = (None).map(runmat_types::physical::MassDensity::new);
         assert!(material.require_incompressible_newtonian().is_err());
         assert!(crate::validate_material_definitions(&[material]).is_err());
     }

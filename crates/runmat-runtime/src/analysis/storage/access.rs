@@ -159,6 +159,9 @@ impl FilesystemAccess<'_> {
 }
 
 impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
+    fn filesystem_scope(&self) -> Option<(PathBuf, Arc<dyn runmat_filesystem::FsProvider>)> {
+        Some((self.root.clone(), self.provider.clone()))
+    }
     fn export_initial_field(
         &self,
         run_id: &str,

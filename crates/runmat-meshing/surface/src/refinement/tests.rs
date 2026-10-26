@@ -873,7 +873,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     };
     let converged = refine_exact_face_until_blocked(
@@ -968,7 +968,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         converged.geometry.triangles.len()
     );
     assert!(acceptance.sample_count > acceptance.triangles.len() as u64);
-    assert!(acceptance.maximum_chordal_deviation_m < 1.0e-12);
+    assert!(acceptance.maximum_chordal_deviation_m.canonical_value() < 1.0e-12);
     assert!(acceptance.maximum_normal_deviation_rad < 1.0e-7);
     let chart_acceptance = crate::accept_exact_face_chart_mesh(
         &chart,
@@ -1008,7 +1008,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         crate::ExactFaceAcceptanceErrorKind::InvalidInput
     );
     let mut tampered_acceptance = acceptance.clone();
-    tampered_acceptance.maximum_chordal_deviation_m = 1.0;
+    tampered_acceptance.maximum_chordal_deviation_m = runmat_types::physical::Length::new(1.0);
     assert_eq!(
         crate::validate_exact_face_acceptance(
             &tampered_acceptance,
@@ -1227,7 +1227,7 @@ pub(super) fn geometry(
         maximum_metric_edge_length: metric_edges.into_iter().fold(0.0, f64::max),
         minimum_metric_angle_rad: minimum_angle,
         maximum_physical_aspect_ratio: aspect,
-        maximum_chordal_deviation_m: chordal,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(chordal),
         maximum_normal_deviation_rad: normal,
     }
 }
@@ -1412,7 +1412,7 @@ fn acute_corner_geometry() -> (ExactFacePslg, ExactFaceGeometry) {
         maximum_metric_edge_length: 0.5,
         minimum_metric_angle_rad: 5.0_f64.to_radians(),
         maximum_physical_aspect_ratio: 100.0,
-        maximum_chordal_deviation_m: 0.0,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
         maximum_normal_deviation_rad: 0.0,
     };
     (pslg, geometry)
@@ -1460,7 +1460,7 @@ fn quality() -> SurfaceQualityTargets {
         minimum_metric_edge_length: 0.01,
         minimum_metric_angle_degrees: 10.0,
         maximum_physical_aspect_ratio: 10.0,
-        maximum_chordal_deviation_m: 0.1,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.1),
         maximum_normal_deviation_degrees: 30.0,
     }
 }
@@ -1479,16 +1479,16 @@ fn metric_request() -> MetricFieldRequest {
 fn curve_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: 0.01,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
             maximum_tangent_change_rad: 0.2,
             minimum_metric_edge_length: 0.01,
             maximum_metric_edge_length: 1.0,
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
-        geometry_absolute_error_m: 1.0e-10,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: 1.0e-10,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
     }
 }
 

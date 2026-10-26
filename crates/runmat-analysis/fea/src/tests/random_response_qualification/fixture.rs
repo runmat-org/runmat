@@ -74,7 +74,7 @@ pub(super) fn constant_spectrum(
 ) -> RandomExcitationSpectrum {
     RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("qualification-spectrum".into()),
-        frequencies_hz: bounds_hz.to_vec(),
+        frequencies_hz: runmat_types::physical::Quantity::new(bounds_hz.to_vec()),
         channels,
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
             vec![matrix.clone(), matrix],
@@ -84,7 +84,8 @@ pub(super) fn constant_spectrum(
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     }
@@ -101,12 +102,12 @@ pub(super) fn hermitian_density(
         magnitude * phase_radians.sin(),
     );
     CrossPowerSpectralDensity {
-        values: vec![
+        values: runmat_types::physical::Quantity::new(vec![
             ComplexSpectralDensity::new(diagonal[0], 0.0),
             cross,
             ComplexSpectralDensity::new(cross.real, -cross.imaginary),
             ComplexSpectralDensity::new(diagonal[1], 0.0),
-        ],
+        ]),
     }
 }
 

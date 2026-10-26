@@ -134,7 +134,7 @@ pub(super) fn component_operators(
         if let FaceBoundary::Symmetry { .. } = p.boundaries[i] {
             let (coefficient, _) =
                 symmetry_traction(p, i, [0.0; 3], &viscosity_gradients[f.owner])?;
-            let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+            let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
             for (k, values) in blocks.iter_mut().enumerate() {
                 values[diagonal[f.owner]] -= coefficient * (1.0 - normal[k] * normal[k]);
             }
@@ -194,7 +194,7 @@ pub(super) fn assemble(
             // b gains c (u − (u·n̂)n̂).
             let (coefficient, _) =
                 symmetry_traction(p, i, [0.0; 3], &viscosity_gradients[f.owner])?;
-            let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+            let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
             let block = std::array::from_fn(|k| {
                 std::array::from_fn(|j| {
                     coefficient * (f64::from(u8::from(k == j)) - normal[k] * normal[j])

@@ -1597,7 +1597,7 @@ fn mixed_fixture(
 ) {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0]
         .provenance
         .push(PersistentEntityId::new(
@@ -1627,11 +1627,12 @@ fn mixed_fixture(
     let mut beam_material = model.materials[0].clone();
     beam_material.material_id = "mat_beam_alloy".into();
     beam_material.name = "Beam alloy".into();
-    beam_material.mass_density_kg_per_m3 = Some(4_430.0);
+    beam_material.mass_density_kg_per_m3 =
+        (Some(4_430.0)).map(runmat_types::physical::MassDensity::new);
     beam_material
         .require_mechanical_mut()
         .unwrap()
-        .youngs_modulus_pa = 113.8e9;
+        .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(113.8e9);
     model.materials.push(beam_material);
     let beam_assignment = model
         .material_assignments
@@ -1648,11 +1649,12 @@ fn mixed_fixture(
     let mut shell_material = model.materials[0].clone();
     shell_material.material_id = "mat_shell_alloy".into();
     shell_material.name = "Shell alloy".into();
-    shell_material.mass_density_kg_per_m3 = Some(2_700.0);
+    shell_material.mass_density_kg_per_m3 =
+        (Some(2_700.0)).map(runmat_types::physical::MassDensity::new);
     shell_material
         .require_mechanical_mut()
         .unwrap()
-        .youngs_modulus_pa = 69.0e9;
+        .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(69.0e9);
     model.materials.push(shell_material);
     let shell_assignment = model
         .material_assignments
@@ -1692,14 +1694,10 @@ fn mixed_fixture(
             },
         ));
     let assignment = model.material_assignments.first().unwrap();
-    let region = PersistentEntityId::new(
-        PersistentEntityKind::Region,
-        assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        vec!["root".into()],
-    );
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -2132,14 +2130,10 @@ fn solver_mesh(
         face.provenance.sort();
     }
     let assignment = model.material_assignments.first().unwrap();
-    let region = PersistentEntityId::new(
-        PersistentEntityKind::Region,
-        assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        vec!["root".into()],
-    );
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;

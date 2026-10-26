@@ -6,11 +6,14 @@ use super::domain::CfdDomainTopology;
 
 #[derive(Clone, Copy, Debug)]
 pub struct CfdCouplingEvidence {
-    pub inlet_velocity_m_per_s: f64,
+    pub inlet_velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, f64>,
     pub executed_sample_count: usize,
-    pub nominal_time_step_s: f64,
+    pub nominal_time_step_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Time, f64>,
     pub transient: bool,
-    pub pressure_drop_pa: f64,
+    pub pressure_drop_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, f64>,
     pub mass_balance_residual: f64,
     pub max_momentum_residual: f64,
     pub max_continuity_residual: f64,
@@ -35,13 +38,13 @@ pub fn coupling_diagnostics(
             severity: FeaDiagnosticSeverity::Info,
             message: format!(
                 "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} executed_sample_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
-                domain.density.kilograms_per_cubic_meter,
-                domain.dynamic_viscosity.pascal_seconds,
-                evidence.inlet_velocity_m_per_s,
-                domain.turbulence_intensity.ratio,
+                domain.density.canonical_value(),
+                domain.dynamic_viscosity.canonical_value(),
+                evidence.inlet_velocity_m_per_s.canonical_value(),
+                domain.turbulence_intensity.canonical_value(),
                 super::domain::reynolds_number_for_velocity(
                     domain,
-                    evidence.inlet_velocity_m_per_s,
+                    evidence.inlet_velocity_m_per_s.canonical_value(),
                 ),
                 if evidence.transient { "transient" } else { "steady_state" },
                 evidence.executed_sample_count,
@@ -51,8 +54,8 @@ pub fn coupling_diagnostics(
                 topology.control_volume_internal_face_count,
                 topology.control_volume_boundary_face_count,
                 topology.control_volume_connectivity_coverage_ratio,
-                topology.domain_length_m,
-                topology.hydraulic_diameter_m,
+                topology.domain_length_m.canonical_value(),
+                topology.hydraulic_diameter_m.canonical_value(),
             ),
         },
         FeaDiagnostic {
@@ -70,9 +73,9 @@ pub fn coupling_diagnostics(
         assembly_diagnostic(
             topology,
             domain,
-            evidence.inlet_velocity_m_per_s,
-            evidence.nominal_time_step_s,
-            evidence.pressure_drop_pa,
+            evidence.inlet_velocity_m_per_s.canonical_value(),
+            evidence.nominal_time_step_s.canonical_value(),
+            evidence.pressure_drop_pa.canonical_value(),
             evidence.mass_balance_residual,
             evidence.residual_warn_threshold,
         ),
@@ -91,9 +94,9 @@ pub fn assembly_diagnostic(
     let face_area_m2 = topology.face_area_m2();
     let control_volume_volume_m3 = topology.control_volume_volume_m3();
     let nominal_mass_flow_rate_kg_per_s =
-        domain.density.kilograms_per_cubic_meter * inlet_velocity_m_per_s * face_area_m2;
-    let courant_number =
-        inlet_velocity_m_per_s.abs() * time_step_s.max(0.0) / topology.dx_m.max(1.0e-12);
+        domain.density.canonical_value() * inlet_velocity_m_per_s * face_area_m2;
+    let courant_number = inlet_velocity_m_per_s.abs() * time_step_s.max(0.0)
+        / topology.dx_m.canonical_value().max(1.0e-12);
     FeaDiagnostic {
         code: "FEA_CFD_ASSEMBLY".to_string(),
         severity: if mass_balance_residual <= residual_warn_threshold {
@@ -110,9 +113,9 @@ pub fn assembly_diagnostic(
             topology.control_volume_internal_face_count,
             topology.control_volume_boundary_face_count,
             topology.control_volume_connectivity_coverage_ratio,
-            topology.hydraulic_diameter_m,
-            topology.domain_length_m,
-            topology.dx_m,
+            topology.hydraulic_diameter_m.canonical_value(),
+            topology.domain_length_m.canonical_value(),
+            topology.dx_m.canonical_value(),
             face_area_m2,
             control_volume_volume_m3,
             nominal_mass_flow_rate_kg_per_s,

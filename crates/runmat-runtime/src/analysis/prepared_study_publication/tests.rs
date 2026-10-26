@@ -48,10 +48,13 @@ fn fixture() -> (
             assessment_id: definition.assessment_id.clone(),
             output_id: definition.output_id.clone(),
             status: AssessmentStatus::Indeterminate,
-            measured: Some(runmat_analysis_core::AssessmentQuantity {
-                value_si: 0.002,
-                dimension: runmat_types::PhysicalDimension::LENGTH,
-            }),
+            measured: Some(
+                runmat_analysis_core::AssessmentQuantity::try_from_descriptor(
+                    (runmat_types::PhysicalDimension::LENGTH).into(),
+                    0.002,
+                )
+                .expect("checked finite assessment quantity"),
+            ),
             issue: Some(AssessmentIssue::FunctionExecutionUnavailable),
         },
         definition,

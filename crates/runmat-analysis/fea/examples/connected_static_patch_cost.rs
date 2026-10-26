@@ -72,7 +72,9 @@ fn refine(
         for parent in parents {
             let mut center = [0.0; 3];
             for &node_id in &parent.node_ids {
-                let point = mesh.topology.nodes[node_id as usize - 1].coordinates_m;
+                let point = mesh.topology.nodes[node_id as usize - 1]
+                    .coordinates_m
+                    .canonical_value();
                 for axis in 0..3 {
                     center[axis] += point[axis] / 4.0;
                 }
@@ -83,7 +85,10 @@ fn refine(
             mesh.topology.nodes.push(SolverMeshNode {
                 node_id: center_id,
                 stable_identity: StableDigest::from_bytes(identity_bytes),
-                coordinates_m: center,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(center),
                 provenance: parent.provenance.clone(),
                 exact_parameters: Vec::new(),
             });
@@ -162,8 +167,8 @@ fn patch_model(mesh: &SolverMeshArtifact) -> runmat_analysis_core::AnalysisModel
     else {
         panic!("expected isotropic linear elasticity");
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     model.signals.clear();
     model.excitations.clear();
     model.excitation_cases.clear();
@@ -176,7 +181,9 @@ fn patch_model(mesh: &SolverMeshArtifact) -> runmat_analysis_core::AnalysisModel
     model.constraints = boundary_nodes
         .into_iter()
         .map(|node_id| {
-            let coordinates = mesh.topology.nodes[node_id as usize - 1].coordinates_m;
+            let coordinates = mesh.topology.nodes[node_id as usize - 1]
+                .coordinates_m
+                .canonical_value();
             AnalysisConstraint::Structural(StructuralConstraint {
                 constraint_id: format!("affine_boundary_node_{node_id}"),
                 frame: CoordinateFrame::Global,
@@ -298,7 +305,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .ok_or("non-host displacement field")?;
         for (actual, node) in displacement.chunks_exact(3).zip(&mesh.topology.nodes) {
             for axis in 0..3 {
-                let expected = [0.1, 0.2, 0.3][axis] * node.coordinates_m[axis];
+                let expected = [0.1, 0.2, 0.3][axis] * node.coordinates_m.canonical_value()[axis];
                 let error = (actual[axis] - expected).abs();
                 maximum_displacement_error_m = maximum_displacement_error_m.max(error);
                 if error > 1.0e-6 {

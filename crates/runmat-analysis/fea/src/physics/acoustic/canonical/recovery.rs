@@ -24,7 +24,7 @@ pub(super) fn recover(
     let elements = &assembly.projection.elements;
     let recovered = crate::algebra::element_assembly::ordered_map_range(count, |index| {
         let element = &elements[index];
-        let rho = assembly.density[index];
+        let rho = assembly.density.canonical_values()[index];
         let mut velocity = ProjectionVector3 {
             real: [0.0; 3],
             imaginary: [0.0; 3],
@@ -42,8 +42,9 @@ pub(super) fn recover(
                     pressure[0] += point.shape_values()[local] * real[node];
                     pressure[1] += point.shape_values()[local] * imaginary[node];
                     for axis in 0..3 {
-                        let factor =
-                            point.physical_shape_gradients()[local][axis] / assembly.omega / rho;
+                        let factor = point.physical_shape_gradients()[local][axis]
+                            / assembly.derivative_rate.canonical_value()
+                            / rho;
                         v_real[axis] -= imaginary[node] * factor;
                         v_imaginary[axis] += real[node] * factor;
                     }
@@ -60,7 +61,7 @@ pub(super) fn recover(
                     speed_squared += v_real[axis].powi(2) + v_imaginary[axis].powi(2);
                 }
                 energy += 0.25
-                    * (assembly.compressibility[index]
+                    * (assembly.compressibility.canonical_values()[index]
                         * (pressure[0].powi(2) + pressure[1].powi(2))
                         + rho * speed_squared)
                     * weight;

@@ -122,7 +122,7 @@ impl CanonicalNonlinearSolidBasis {
                     FollowerIntensity::NominalTraction(value.real)
                 }
                 RealizedExcitationKind::Force(value) => {
-                    let area = selected.iter().map(|face| face.area_m2).sum::<f64>();
+                    let area = selected.iter().map(|face| face.area_m2.canonical_value()).sum::<f64>();
                     if !area.is_finite() || area <= 0.0 {
                         return Err(NonlinearSolidError::Authority(format!(
                             "follower force `{}` needs a positive reference area",
@@ -196,14 +196,14 @@ impl CanonicalNonlinearSolidBasis {
             let reference = face
                 .nodes
                 .iter()
-                .map(|&node| self.nodes[node].coordinates_m)
+                .map(|&node| self.nodes[node].coordinates_m.canonical_value())
                 .collect::<Vec<_>>();
             let current = face
                 .nodes
                 .iter()
                 .map(|&node| {
                     let n = &self.nodes[node];
-                    std::array::from_fn(|k| n.coordinates_m[k] + displacement[n.rows[k]])
+                    std::array::from_fn(|k| n.coordinates_m.canonical_value()[k] + displacement[n.rows[k]])
                 })
                 .collect::<Vec<[f64; 3]>>();
             let face_force = face_force(face, &reference, &current)?;

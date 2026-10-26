@@ -141,8 +141,9 @@ fn recover_beam_result_values(
         }
         let q_global = beam_global_displacement(summary, solution, beam);
         let q_local = multiply_beam_matrix_vector(&beam.transform_global_to_local, &q_global);
-        let k_local = local_stiffness_matrix(beam.section, beam.material, beam.length_m)
-            .unwrap_or([[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT]);
+        let k_local =
+            local_stiffness_matrix(beam.section, beam.material, beam.length_m.canonical_value())
+                .unwrap_or([[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT]);
         let f_local = multiply_beam_matrix_vector(&k_local, &q_local);
 
         let axial = signed_peak_pair(f_local[0], f_local[6]);
@@ -157,13 +158,21 @@ fn recover_beam_result_values(
         values.torsion_moment.push(torsion);
         values.bending_moment.extend([bending_y, bending_z]);
         values.bending_stress.extend([
-            bending_stress_from_moment(bending_y, beam.section.outer_fiber_z_m, beam.section.iy_m4),
-            bending_stress_from_moment(bending_z, beam.section.outer_fiber_y_m, beam.section.iz_m4),
+            bending_stress_from_moment(
+                bending_y,
+                beam.section.outer_fiber_z_m.canonical_value(),
+                beam.section.iy_m4.canonical_value(),
+            ),
+            bending_stress_from_moment(
+                bending_z,
+                beam.section.outer_fiber_y_m.canonical_value(),
+                beam.section.iz_m4.canonical_value(),
+            ),
         ]);
         values.torsion_stress.push(torsion_stress_from_moment(
             torsion,
-            beam.section.torsion_outer_radius_m,
-            beam.section.torsion_j_m4,
+            beam.section.torsion_outer_radius_m.canonical_value(),
+            beam.section.torsion_j_m4.canonical_value(),
         ));
     }
 

@@ -13,6 +13,9 @@ mod geometry;
 mod input;
 mod preparation;
 mod prepared_validation;
+mod duration;
+pub use duration::execute_checked_fea_locally_with_timing;
+mod planning;
 pub use execution::{execute_prepared_fea_study_locally, prepare_study_publication};
 use execution::execute_prepared_with_source;
 pub(crate) use family_execution::local_result as local_family_result;
@@ -22,6 +25,7 @@ pub use family_execution::{
     CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy,
 };
+pub use planning::{plan_checked_fea_locally, plan_checked_fea_locally_with_timing};
 
 #[cfg(all(test, feature = "occt-native"))]
 mod tests;
@@ -96,6 +100,9 @@ pub type LocalFeaMeshObserver =
 pub struct LocalFeaExecutionOptions {
     pub root: Option<FeaRootSelector>,
     pub workers: Option<u32>,
+    /// Explicit host allocation; independent of worker-slot count.
+    pub cpu_threads_per_worker: Option<runmat_analysis_fea::planning::resource::LocalThreadCount>,
+    pub max_concurrent_cases: Option<std::num::NonZeroU16>,
     pub backend: runmat_analysis_fea::ComputeBackend,
     pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
     /// Receives coarse, ordered pipeline progress directly from local execution.
@@ -110,6 +117,8 @@ impl Default for LocalFeaExecutionOptions {
         Self {
             root: None,
             workers: None,
+            cpu_threads_per_worker: None,
+            max_concurrent_cases: None,
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
             accelerators: Vec::new(),
             progress_observer: None,
@@ -124,6 +133,8 @@ impl std::fmt::Debug for LocalFeaExecutionOptions {
             .debug_struct("LocalFeaExecutionOptions")
             .field("root", &self.root)
             .field("workers", &self.workers)
+            .field("cpu_threads_per_worker", &self.cpu_threads_per_worker)
+            .field("max_concurrent_cases", &self.max_concurrent_cases)
             .field("backend", &self.backend)
             .field("accelerators", &self.accelerators)
             .field("progress_observer", &self.progress_observer.is_some())
@@ -468,7 +479,11 @@ async fn execute_study_cases(
             .states
             .iter()
             .filter_map(|state| state.payload.thermal())
-            .max_by(|a, b| a.sample_time_s.total_cmp(&b.sample_time_s))
+            .max_by(|a, b| {
+                a.sample_time_s
+                    .canonical_value()
+                    .total_cmp(&b.sample_time_s.canonical_value())
+            })
             .ok_or("the electrothermal heat case published no thermal state")?;
         let transient = !matches!(
             thermal.completion.workload.procedure,

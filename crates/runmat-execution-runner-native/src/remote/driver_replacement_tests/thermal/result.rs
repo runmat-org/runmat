@@ -299,7 +299,10 @@ fn assert_compression(
             .filter(|face| face.provenance.contains(identity))
             .collect::<Vec<_>>();
         assert!(!faces.is_empty());
-        let area = faces.iter().map(|face| face.area_m2).sum::<f64>();
+        let area = faces
+            .iter()
+            .map(|face| face.area_m2.canonical_value())
+            .sum::<f64>();
         let normal: [f64; 3] = std::array::from_fn(|axis| {
             faces
                 .iter()
@@ -310,7 +313,7 @@ fn assert_compression(
         let center: [f64; 3] = std::array::from_fn(|axis| {
             faces
                 .iter()
-                .map(|face| face.centroid_m[axis] * face.area_m2)
+                .map(|face| face.centroid_m[axis] * face.area_m2.canonical_value())
                 .sum::<f64>()
                 / area
         });
@@ -333,11 +336,16 @@ fn assert_compression(
     let mean_axial =
         stress.chunks_exact(6).map(|tensor| tensor[0]).sum::<f64>() / (stress.len() / 6) as f64;
     let material = &result.thermal.as_ref().unwrap().compiled.model.materials[0];
-    let thermal_scale = material.require_mechanical().unwrap().youngs_modulus_pa
+    let thermal_scale = material
+        .require_mechanical()
+        .unwrap()
+        .youngs_modulus_pa
+        .canonical_value()
         * material
             .require_thermal()
             .unwrap()
             .expansion_coefficient_per_k
+            .canonical_value()
         * 10.0;
     assert!(
         mean_axial < -0.25 * thermal_scale,

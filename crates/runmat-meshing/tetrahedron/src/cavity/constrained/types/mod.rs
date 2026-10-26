@@ -122,7 +122,9 @@ impl Default for ConstrainedCavityRefillOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavityNode {
     pub node_id: u32,
-    pub coordinates_m: Point3,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, Point3>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -149,7 +151,8 @@ pub struct CavityTetrahedron {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ConnectivityPoint {
     pub(super) node_id: u32,
-    pub(super) coordinates_m: Point3,
+    pub(super) coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, Point3>,
     pub(super) is_super: bool,
 }
 

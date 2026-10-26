@@ -19,7 +19,10 @@ fn two_cells() -> AnalysisProjection {
     // Two unit right tetrahedra share z=0; exact volumes are 1/6 each.
     let mut source = projected(ElementOrder::Tet4);
     let mut node = source.nodes[3].clone();
-    node.coordinates_m = [0.0, 0.0, -1.0];
+    node.coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0.0, 0.0, -1.0]);
     node.node_id = 5;
     node.stable_identity = StableDigest::from_bytes([231; 32]);
     source.nodes.push(node);
@@ -57,13 +60,13 @@ fn two_cells() -> AnalysisProjection {
                 .to_owned(),
         );
         let (centroid, area, magnitude) = geometry::face_geometry(
-            nodes.map(|n| source.nodes[n].coordinates_m),
+            nodes.map(|n| source.nodes[n].coordinates_m.canonical_value()),
             source.elements[cell].centroid_m,
         )
         .unwrap();
         face.centroid_m = centroid;
         face.oriented_area_vector_m2 = area;
-        face.area_m2 = magnitude;
+        face.area_m2 = runmat_types::physical::Area::new(magnitude);
         source.boundary_faces.push(face);
     }
     source
@@ -80,7 +83,7 @@ fn exact_two_cell_geometry_is_conservative_and_retains_original_boundary_mapping
     assert_eq!(fv.cells.len(), 2);
     assert_eq!(fv.faces.len(), 7);
     let internal = fv.faces.iter().find(|f| f.neighbor.is_some()).unwrap();
-    assert_eq!(internal.area_m2, 0.5);
+    assert_eq!(internal.area_m2.canonical_value(), 0.5);
     assert_eq!(internal.centroid_m, [1.0 / 3.0, 1.0 / 3.0, 0.0]);
     assert!((fv.cells.iter().map(|c| c.volume_m3).sum::<f64>() - 1.0 / 3.0).abs() < 1e-15);
     for (i, cell) in fv.cells.iter().enumerate() {
@@ -123,7 +126,7 @@ fn refined_cube_exact_volume_and_both_affine_orders_have_closed_faces() {
                 .faces
                 .iter()
                 .filter(|f| f.neighbor.is_none())
-                .map(|f| f.area_m2)
+                .map(|f| f.area_m2.canonical_value())
                 .sum::<f64>();
             assert!((outer - 6.0).abs() < 1e-13);
         }
@@ -177,8 +180,11 @@ fn stable_cell_face_physics_is_invariant_to_reordered_source_access_indices() {
 fn rigid_rotation_tiny_scale_and_translation_preserve_vector_geometry() {
     let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for node in &mut mesh.topology.nodes {
-        let [x, y, z] = node.coordinates_m;
-        node.coordinates_m = [-y * 1e-6 + 2e-6, x * 1e-6 - 3e-6, z * 1e-6 + 4e-6];
+        let [x, y, z] = node.coordinates_m.canonical_value();
+        node.coordinates_m = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new([-y * 1e-6 + 2e-6, x * 1e-6 - 3e-6, z * 1e-6 + 4e-6]);
     }
     mesh.seal_canonical_digest().unwrap();
     let source = AnalysisProjection::derive(&mesh).unwrap();
@@ -215,7 +221,17 @@ fn rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record()
     assert!(FiniteVolumeTopology::derive(&source, policy()).is_err());
     let mut source = projected(ElementOrder::Tet10);
     let mid = source.elements[0].node_indices[4];
-    source.nodes[mid].coordinates_m[2] += 0.01;
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 2;
+        let quantity_slot = &mut source.nodes[mid].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         FiniteVolumeTopology::derive(&source, policy()),
         Err(FiniteVolumeProjectionError::CurvedTet10(_))

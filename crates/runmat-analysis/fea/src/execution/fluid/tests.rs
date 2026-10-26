@@ -28,11 +28,12 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.response_spectra.clear();
     model.random_excitations.clear();
     model.frame = CoordinateFrame::Global;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
@@ -49,7 +50,7 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "stationary".into(),
             kind: FluidConstraintKind::NoSlipWall {
-                target: RegionTarget::boundary("slab_insulated"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
             },
         }));
     model
@@ -57,13 +58,13 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant([Velocity::new(0.0); 3]),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(0.0)),
         },
@@ -139,13 +140,20 @@ fn original_zero_flow_cold_fields_and_traction_evidence_roundtrip_without_resolv
     assert!(result
         .original()
         .velocity_m_per_s
+        .canonical_values()
         .iter()
         .flatten()
         .all(|&v| v == 0.0));
-    assert!(result.original().pressure_pa.iter().all(|&v| v == 0.0));
+    assert!(result
+        .original()
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .all(|&v| v == 0.0));
     assert!(result
         .original()
         .face_volume_flux_m3_per_s
+        .canonical_values()
         .iter()
         .all(|&v| v == 0.0));
     let bytes = result.canonical_bytes().unwrap();
@@ -252,7 +260,7 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     // every original owner-oriented face has volume flux S_x. Moving side
     // walls are tangential; no fabricated spatial profile or solver RHS.
     let result = workload.execute(&mesh).unwrap();
-    for u in &result.original().velocity_m_per_s {
+    for u in result.original().velocity_m_per_s.canonical_values() {
         assert!((u[0] - 1.0).abs() < 1e-6 && u[1].abs() < 1e-6 && u[2].abs() < 1e-6);
     }
     let source = workload.prepare(&mesh).unwrap();
@@ -266,14 +274,15 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     cells.sort_by_key(|&cell| source.topology.cells[cell].source_element_index);
     for (field, expected) in native.fields().iter().zip([
         cells
+            
             .iter()
-            .flat_map(|&cell| result.original().velocity_m_per_s[cell])
+            .flat_map(|&cell| result.original().velocity_m_per_s.canonical_values()[cell])
             .collect::<Vec<_>>(),
         cells
             .iter()
-            .map(|&cell| result.original().pressure_pa[cell])
+            .map(|&cell| result.original().pressure_pa.canonical_values()[cell])
             .collect(),
-        result.original().face_volume_flux_m3_per_s.clone(),
+        result.original().face_volume_flux_m3_per_s.canonical_values().clone(),
     ]) {
         assert_eq!(
             field.storage().values,
@@ -283,6 +292,7 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     for (q, face) in result
         .original()
         .face_volume_flux_m3_per_s
+        .canonical_values()
         .iter()
         .zip(&source.topology.faces)
     {
@@ -389,7 +399,7 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
         .all(|field| field.definition().support().is_complete()));
     assert_eq!(
         artifact.fields()[2].storage().as_host_f64().unwrap(),
-        &result.original().face_volume_flux_m3_per_s[..]
+        &result.original().face_volume_flux_m3_per_s.canonical_values()[..]
     );
     let definitions = artifact
         .fields()
@@ -555,7 +565,7 @@ fn missing_original_cell_material_boundary_or_source_and_stale_cfd_reject() {
     wrong.model.material_assignments.clear();
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
-    wrong.model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    wrong.model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
     wrong.model.constraints.pop();

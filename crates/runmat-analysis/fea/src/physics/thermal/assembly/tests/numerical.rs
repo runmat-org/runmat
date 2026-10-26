@@ -94,8 +94,8 @@ fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() 
 
     let material = &model.materials[0];
     let thermal = material.require_thermal().unwrap();
-    let expected_capacity = material.require_mass_density().unwrap()
-        * thermal.specific_heat_j_per_kgk
+    let expected_capacity = material.require_mass_density().unwrap().canonical_value()
+        * thermal.specific_heat_j_per_kgk.canonical_value()
         * assembly.projection.elements[0].signed_volume_m3;
     let integrated_capacity = assembly.capacity.values().iter().sum::<f64>();
     assert!((integrated_capacity - expected_capacity).abs() <= expected_capacity * 1.0e-12);
@@ -105,7 +105,9 @@ fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() 
         .nodes
         .iter()
         .map(|node| {
-            2.0 * node.coordinates_m[0] + 3.0 * node.coordinates_m[1] - node.coordinates_m[2]
+            2.0 * node.coordinates_m.canonical_value()[0]
+                + 3.0 * node.coordinates_m.canonical_value()[1]
+                - node.coordinates_m.canonical_value()[2]
         })
         .collect::<Vec<_>>();
     let gradient = assembly
@@ -117,7 +119,7 @@ fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() 
     let flux = assembly
         .recover_element_heat_flux(&linear_temperature)
         .unwrap()[0];
-    let conductivity = thermal.conductivity_w_per_mk;
+    let conductivity = thermal.conductivity_w_per_mk.canonical_value();
     assert!((flux[0] + 2.0 * conductivity).abs() <= conductivity * 1.0e-12);
     assert!((flux[1] + 3.0 * conductivity).abs() <= conductivity * 1.0e-12);
     assert!((flux[2] - conductivity).abs() <= conductivity * 1.0e-12);
@@ -139,7 +141,11 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     )
     .unwrap();
     let expected_source = density * assembly.projection.elements[0].signed_volume_m3;
-    let projected_source = assembly.applied_source.iter().sum::<f64>();
+    let projected_source = assembly
+        .applied_source
+        .canonical_values()
+        .iter()
+        .sum::<f64>();
     assert!((projected_source - expected_source).abs() <= expected_source * 1.0e-12);
     assert_eq!(assembly.source_evidence.len(), 1);
     assert!(assembly.source_evidence[0].accepted);
@@ -226,7 +232,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let selector = face.provenance[0].analysis_selection_id().unwrap();
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "applied_flux".into(),
-        target: RegionTarget::boundary(selector.clone()),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector.clone()))),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Constant(HeatFlux::new(240.0)),
         },
@@ -241,15 +247,15 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
         ExcitationSamplePoint::Static,
     )
     .unwrap();
-    let expected_power = 240.0 * face.area_m2;
+    let expected_power = 240.0 * face.area_m2.canonical_value();
     assert!(
-        (flux.applied_source.iter().sum::<f64>() - expected_power).abs()
+        (flux.applied_source.canonical_values().iter().sum::<f64>() - expected_power).abs()
             <= expected_power * 1.0e-12
     );
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "ambient_convection".into(),
-        target: RegionTarget::boundary(selector),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(305.0)),
             coefficient: HeatTransferCoefficient::new(18.0),
@@ -315,7 +321,7 @@ fn prescribed_face_temperature_is_enforced_exactly() {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "fixed_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(selector),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                 value: PrescribedValue::Constant(Temperature::new(290.0)),
             },
         }));
@@ -450,7 +456,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let ambient_temperature_k = 290.0;
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "side_convection".into(),
-        target: RegionTarget::boundary(convection_region.source_topology_id.clone()),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(convection_region.source_topology_id.clone()))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient_temperature_k)),
             coefficient: HeatTransferCoefficient::new(coefficient),
@@ -476,7 +482,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
                 .iter()
                 .any(|id| id.source_topology_id == "convective_sides")
         })
-        .map(|face| face.area_m2)
+        .map(|face| face.area_m2.canonical_value())
         .sum::<f64>();
     let conductivity_term = 1.0 / 6.0;
     let convection_diagonal = coefficient * side_area_m2 / 6.0;

@@ -6,7 +6,7 @@ use super::{
 use super::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{
     surface_principal_curvature, ExactEdge, ExactFace, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    GeometryAllocationReservation, GeometryEvaluationControl, SurfaceDerivatives,
+    GeometryAllocationReservation, GeometryEvaluationControl,
 };
 use runmat_meshing_core::{
     MetricContribution, MetricContributionScope, MetricSourceKind, MetricTensor3,
@@ -83,7 +83,7 @@ impl<'a> FaceMetricSamples<'a> {
             let raw = ExactSurfaceEvaluator::derivatives(
                 evaluator,
                 &face.surface_evaluator_id,
-                uv,
+                uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)),
                 control,
             )
             .map_err(|error| geometry_error(edge, error))?;
@@ -94,14 +94,9 @@ impl<'a> FaceMetricSamples<'a> {
                 )
                 .for_edge(&edge.id)
             })?;
-            let derivatives = SurfaceDerivatives {
-                point_m: transform.transform_point(raw.point_m),
-                du_m: transform.transform_vector(raw.du_m),
-                dv_m: transform.transform_vector(raw.dv_m),
-                duu_m: transform.transform_vector(raw.duu_m),
-                duv_m: transform.transform_vector(raw.duv_m),
-                dvv_m: transform.transform_vector(raw.dvv_m),
-            };
+            let derivatives = raw
+                .transformed(&transform)
+                .map_err(|error| geometry_error(edge, error))?;
             let failure = || {
                 SharedCurveError::new(
                     SharedCurveErrorKind::GeometryEvaluation(
@@ -116,8 +111,14 @@ impl<'a> FaceMetricSamples<'a> {
             // derivatives span no tangent plane, so the sample has no normal or principal frame.
             // The edge's other samples carry the face's curvature and its normal for feature
             // detection.
-            let area = cross(derivatives.du_m, derivatives.dv_m);
-            let scale = norm(derivatives.du_m).powi(2) + norm(derivatives.dv_m).powi(2);
+            let du = derivatives
+                .du_m
+                .with_canonical_storage(|values, _axes| *values);
+            let dv = derivatives
+                .dv_m
+                .with_canonical_storage(|values, _axes| *values);
+            let area = cross(du, dv);
+            let scale = norm(du).powi(2) + norm(dv).powi(2);
             if !(norm(area) > SINGULAR_PARAMETERIZATION_RATIO * scale) {
                 continue;
             }
@@ -126,21 +127,20 @@ impl<'a> FaceMetricSamples<'a> {
                 .map_err(|error| geometry_error(edge, error))?;
             normals.push(FaceNormalSample {
                 face_id: face.id.clone(),
-                point_m: derivatives.point_m,
+                point_m: derivatives.point_m.canonical_value(),
                 normal,
             });
-            if curvature.minimum_1_per_m == 0.0 && curvature.maximum_1_per_m == 0.0 {
+            if curvature.minimum_1_per_m.canonical_value() == 0.0
+                && curvature.maximum_1_per_m.canonical_value() == 0.0
+            {
                 continue;
             }
-            let physical = |uv: [f64; 2]| {
-                std::array::from_fn(|axis| {
-                    derivatives.du_m[axis] * uv[0] + derivatives.dv_m[axis] * uv[1]
-                })
-            };
+            let physical =
+                |uv: [f64; 2]| std::array::from_fn(|axis| du[axis] * uv[0] + dv[axis] * uv[1]);
             let (first, second) = principal_frame(
                 physical(curvature.minimum_direction_uv),
                 physical(curvature.maximum_direction_uv),
-                derivatives.du_m,
+                du,
                 normal,
             )
             .ok_or_else(failure)?;
@@ -150,15 +150,15 @@ impl<'a> FaceMetricSamples<'a> {
                 .expect("validated exact face inventory");
             let mut metric = self.metrics[index].unwrap_or(self.base);
             for (curvature, direction) in [
-                (curvature.minimum_1_per_m, first),
-                (curvature.maximum_1_per_m, second),
+                (curvature.minimum_1_per_m.canonical_value(), first),
+                (curvature.maximum_1_per_m.canonical_value(), second),
             ] {
                 if curvature == 0.0 {
                     continue;
                 }
                 let length = curvature_target_size(
                     curvature.abs(),
-                    self.quality.maximum_chordal_deviation_m,
+                    self.quality.maximum_chordal_deviation_m.canonical_value(),
                     self.quality.maximum_normal_deviation_degrees,
                 )
                 .ok_or_else(failure)?;

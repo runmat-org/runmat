@@ -147,10 +147,15 @@ pub async fn prepare_study_with_role(
         .unwrap_or(1);
     let cpu_threads_per_worker = crate::machine_capacity::study_allocation(
         workers,
-        resolved
-            .execution_policy
-            .as_ref()
-            .and_then(|policy| policy.resources.cpu_threads_per_worker),
+        options
+            .cpu_threads_per_worker
+            .map(|count| u32::from(count.get()))
+            .or_else(|| {
+                resolved
+                    .execution_policy
+                    .as_ref()
+                    .and_then(|policy| policy.resources.cpu_threads_per_worker)
+            }),
     )?;
     let local_thread_count = u16::try_from(cpu_threads_per_worker)
         .map_err(|_| "CPU threads per worker exceed the FEA contract maximum".to_string())?;
@@ -272,44 +277,9 @@ pub async fn prepare_study_with_role(
 pub(super) fn program_revision(
     source: &runmat_core::CheckedFeaSessionSource,
 ) -> Result<ProgramRevision, String> {
-    let (graph, source_digest) = match source.frozen_project() {
-        Some(project) => (
-            Digest::from_bytes(*project.graph_digest().bytes()),
-            Digest::from_bytes(*project.source_revision().bytes()),
-        ),
-        None => {
-            let mut graph = Vec::new();
-            for (path, digest) in source.program.bound.graph.source_digests() {
-                graph.extend_from_slice(path.as_str().as_bytes());
-                graph.push(0);
-                graph.extend_from_slice(&digest.0);
-            }
-            let root = source
-                .program
-                .bound
-                .graph
-                .modules
-                .get(&source.root_module)
-                .ok_or_else(|| "checked root module is absent".to_string())?;
-            (
-                Digest::sha256(graph),
-                Digest::from_bytes(root.source.source_digest.0),
-            )
-        }
-    };
-    ProgramRevision::new(graph, source_digest, source.program_environment().clone())
-        .map_err(|error| error.to_string())
+    source.program_revision()
 }
 
 pub fn checked_fea_artifact_access(authority: &str) -> ArtifactAccess {
-    ArtifactAccess {
-        authorization_scope: authority.to_string(),
-        encryption_context: Digest::sha256(
-            [
-                b"runmat-typed-fea-access/v1\0".as_slice(),
-                authority.as_bytes(),
-            ]
-            .concat(),
-        ),
-    }
+    runmat_analysis_execution::checked_fea_artifact_access(authority)
 }

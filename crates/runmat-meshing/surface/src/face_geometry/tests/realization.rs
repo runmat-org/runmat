@@ -24,7 +24,17 @@ fn boundary_realization_preserves_original_surface_samples_and_geometric_accepta
         let offset = 1e-4;
         for edge in &mut coordinates.edges {
             for node in &mut edge.nodes {
-                node.coordinates_m[2] += offset;
+                {
+                    let quantity_change = offset;
+                    let quantity_index = 2;
+                    let quantity_slot = &mut node.coordinates_m;
+                    let mut quantity_coordinates = quantity_slot.canonical_value();
+                    quantity_coordinates[quantity_index] += quantity_change;
+                    *quantity_slot = runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(quantity_coordinates);
+                };
             }
         }
         let authority = ExactBoundaryNodeCoordinates::prepare(&coordinates, &Control).unwrap();
@@ -44,7 +54,7 @@ fn boundary_realization_preserves_original_surface_samples_and_geometric_accepta
             .vertices
             .iter()
             .all(|vertex| vertex.point_m[2] == vertex.evaluation.point_m[2] + offset));
-        assert!((geometry.maximum_chordal_deviation_m - offset).abs() < 1e-14);
+        assert!((geometry.maximum_chordal_deviation_m.canonical_value() - offset).abs() < 1e-14);
         validate_exact_face_geometry_in_parameterization(
             &geometry,
             &fixture.trimmed,
@@ -67,7 +77,7 @@ fn boundary_realization_preserves_original_surface_samples_and_geometric_accepta
             minimum_metric_edge_length: 0.01,
             minimum_metric_angle_degrees: 0.1,
             maximum_physical_aspect_ratio: 1000.0,
-            maximum_chordal_deviation_m: offset * 2.0,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(offset * 2.0),
             maximum_normal_deviation_degrees: 180.0,
         };
         let collars =
@@ -92,9 +102,9 @@ fn boundary_realization_preserves_original_surface_samples_and_geometric_accepta
         .with_boundary_coordinates(&authority);
         let report =
             crate::accept_exact_face_mesh(&mesh, context, quality, Default::default()).unwrap();
-        assert!((report.maximum_chordal_deviation_m - offset).abs() < 1e-14);
+        assert!((report.maximum_chordal_deviation_m.canonical_value() - offset).abs() < 1e-14);
         let strict = runmat_meshing_core::SurfaceQualityTargets {
-            maximum_chordal_deviation_m: offset * 0.5,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(offset * 0.5),
             ..quality
         };
         let policy = crate::ExactFaceRefinementPolicy {
@@ -137,7 +147,17 @@ fn boundary_coordinate_index_rejects_conflicting_shared_identities_and_denied_pr
     let fixture = fixture(None);
     let mut curves = fixture.curves.clone();
     let mut extra = curves.edges[0].clone();
-    extra.nodes[0].coordinates_m[2] += 1.0;
+    {
+        let quantity_change = 1.0;
+        let quantity_index = 2;
+        let quantity_slot = &mut extra.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     curves.edges.push(extra);
     assert!(ExactBoundaryNodeCoordinates::prepare(&curves, &Control).is_err());
     assert!(ExactBoundaryNodeCoordinates::prepare(&fixture.curves, &CancelledControl).is_err());
@@ -239,7 +259,7 @@ fn large_borrowed_boundary_index_preserves_every_point_and_bounds_sort_preparati
         for node in &edge.nodes {
             assert_eq!(
                 authority.point(node.node_id, &control).unwrap(),
-                Some(node.coordinates_m)
+                Some(node.coordinates_m.canonical_value())
             );
         }
     }

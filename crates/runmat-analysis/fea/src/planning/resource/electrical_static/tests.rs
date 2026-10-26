@@ -8,13 +8,13 @@ fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
     prescribe(
         &mut model,
         "left".repeat(128),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         0.0,
     );
     prescribe(
         &mut model,
         "right".repeat(128),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         2.0,
     );
     ElectricalStaticWorkload {
@@ -238,7 +238,10 @@ fn planning_support_budget_is_checked_before_geometry_or_graph_materialization()
         .resources
         .maximum_resident_bytes = required - 1;
     // Invalid geometry would fail canonical admission if it were reached first.
-    mesh.topology.nodes[0].coordinates_m = mesh.topology.nodes[1].coordinates_m;
+    mesh.topology.nodes[0].coordinates_m =
+        runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+            mesh.topology.nodes[1].coordinates_m.canonical_value(),
+        );
     let rejection = electrical_static_solver_admission(&workload, &mesh);
     assert!(
         matches!(

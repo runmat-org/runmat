@@ -143,7 +143,12 @@ fn acoustic_sweep_entries_keep_distinct_original_complex_state_authority() {
         let state =
             CanonicalSemanticState::from_acoustic_result(&workload, &mesh, &result).unwrap();
         assert_eq!(
-            state.payload.acoustic().unwrap().frequency.hertz,
+            state
+                .payload
+                .acoustic()
+                .unwrap()
+                .frequency
+                .canonical_value(),
             entry.frequency_hz()
         );
         assert_eq!(

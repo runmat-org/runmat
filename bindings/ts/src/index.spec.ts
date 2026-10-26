@@ -234,6 +234,26 @@ describe("initRunMat wiring", () => {
     vi.restoreAllMocks();
   });
 
+  it("returns plain geometry preview objects from flattened WASM maps", async () => {
+    const payload = new Map<string, unknown>([
+      ["geometrySceneHandle", 17], ["sceneKind", "mesh"],
+      ["geometrySummary", new Map([["units", "meter"]])],
+      ["regions", [new Map([["id", "face_000008"]])]],
+    ]);
+    const previewGeometry = vi.fn(async () => payload);
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession({ previewGeometry: previewGeometry as NativeSession["previewGeometry"] }),
+    } as NativeModule);
+    const session = await initRunMat({ enableGpu: false });
+    await expect(session.previewGeometry("bracket.stp")).resolves.toEqual({
+      geometrySceneHandle: 17, sceneKind: "mesh", geometrySummary: { units: "meter" },
+      regions: [{ id: "face_000008" }],
+    });
+    expect(previewGeometry).toHaveBeenCalledWith("bracket.stp", null);
+    await session.dispose();
+  });
+
   it("delegates FEA source checks to the typed WASM API", async () => {
     const checkResult: FeaSourceCheckResult = {
       contract: "assessments_v1",

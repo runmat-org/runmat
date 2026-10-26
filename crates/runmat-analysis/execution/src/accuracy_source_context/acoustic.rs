@@ -76,7 +76,7 @@ pub(super) fn validate(
     let sampled = runmat_analysis_fea::results::observation::authored_observations_sample(
         step,
         runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
-            workload.frequency.hertz,
+            workload.frequency.canonical_value(),
         ),
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

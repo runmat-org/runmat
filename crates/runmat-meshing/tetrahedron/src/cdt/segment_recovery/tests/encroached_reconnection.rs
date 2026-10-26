@@ -25,7 +25,10 @@ fn encroached_cospherical_edge_recovers_without_subdivision() {
             .enumerate()
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 source_vertex_id: None,
             })
             .collect(),
@@ -145,8 +148,8 @@ fn completed_fragment_retains_depth_and_acute_corner_lineage() {
         constraint_index: 0,
         first_identity: first.identity,
         last_identity: last.identity,
-        first_coordinates: first.coordinates_m,
-        last_coordinates: last.coordinates_m,
+        first_coordinates: first.coordinates_m.canonical_value(),
+        last_coordinates: last.coordinates_m.canonical_value(),
     };
     let options = DelaunaySegmentRecoveryOptions::default();
     let mut work = RecoveryWork::new(options, &NeverCancelled);

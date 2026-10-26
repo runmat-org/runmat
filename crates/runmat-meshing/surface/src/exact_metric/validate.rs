@@ -168,8 +168,15 @@ fn independent_sample(
                 .map_err(|error| geometry(source_face_id, error))?;
             Ok(IndependentSample {
                 evaluator_uv,
-                point_m: derivatives.point_m,
-                derivatives: [derivatives.du_m, derivatives.dv_m],
+                point_m: *derivatives.point_m.canonical_values(),
+                derivatives: [
+                    derivatives
+                        .du_m
+                        .with_canonical_storage(|values, _axes| *values),
+                    derivatives
+                        .dv_m
+                        .with_canonical_storage(|values, _axes| *values),
+                ],
             })
         }
         ExactFaceChartParameterization::AffineEvaluatorParameters {
@@ -186,13 +193,15 @@ fn independent_sample(
                 .map_err(|error| geometry(source_face_id, error))?;
             Ok(IndependentSample {
                 evaluator_uv,
-                point_m: derivatives.point_m,
+                point_m: *derivatives.point_m.canonical_values(),
                 derivatives: [
                     derivatives
                         .du_m
+                        .with_canonical_storage(|values, _axes| *values)
                         .map(|value| value * evaluator_units_per_chart_unit[0]),
                     derivatives
                         .dv_m
+                        .with_canonical_storage(|values, _axes| *values)
                         .map(|value| value * evaluator_units_per_chart_unit[1]),
                 ],
             })
@@ -223,7 +232,9 @@ fn independent_sample(
                         .point(evaluator_id, sample_uv, control)
                         .map_err(|error| geometry(source_face_id, error))?;
                     result[axis] = std::array::from_fn(|component| {
-                        (sample[component] - center.point_m[component]) / differential_step
+                        (sample.canonical_values()[component]
+                            - center.point_m.canonical_values()[component])
+                            / differential_step
                     });
                 }
                 result
@@ -240,14 +251,16 @@ fn independent_sample(
                 ];
                 [0, 1].map(|chart_axis| {
                     std::array::from_fn(|component| {
-                        center.du_m[component] * jacobian[0][chart_axis]
-                            + center.dv_m[component] * jacobian[1][chart_axis]
+                        center.du_m.with_canonical_storage(|values, _axes| *values)[component]
+                            * jacobian[0][chart_axis]
+                            + center.dv_m.with_canonical_storage(|values, _axes| *values)[component]
+                                * jacobian[1][chart_axis]
                     })
                 })
             };
             if evaluator_uv
                 .iter()
-                .chain(&center.point_m)
+                .chain(center.point_m.canonical_values())
                 .chain(derivatives.iter().flatten())
                 .any(|value| !value.is_finite())
             {
@@ -258,7 +271,7 @@ fn independent_sample(
             }
             Ok(IndependentSample {
                 evaluator_uv,
-                point_m: center.point_m,
+                point_m: *center.point_m.canonical_values(),
                 derivatives,
             })
         }

@@ -25,7 +25,7 @@ fn face(topology: &ExactBRepTopology, index: usize, nodes: &[(u8, f64)]) -> Exac
         triangles: vec![],
         boundary_segments: vec![],
         joined_chart_cuts: vec![],
-        maximum_chordal_deviation_m: 0.0,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
         maximum_normal_deviation_rad: 0.0,
     }
 }
@@ -71,7 +71,7 @@ fn canonical_stream_merge_moves_original_nodes_and_orders_all_shared_uses() {
 #[test]
 fn shared_coordinate_admission_uses_all_previously_merged_edge_tolerances() {
     let (_, mut topology, _) = runmat_geometry_fixtures::exact_circle();
-    topology.edges[0].tolerance_m = 0.1;
+    topology.edges[0].tolerance_m = runmat_types::physical::Length::new(0.1);
     let mut faces = vec![
         face(&topology, 0, &[(1, 0.0)]),
         face(&topology, 1, &[(1, 0.05)]),

@@ -21,7 +21,8 @@ impl TestHost {
     pub fn with_geometry(mut self, path: &str, digest: u8) -> Self {
         self = self.with_geometry_inspection(
             path,
-            GeometryInspection {
+            GeometryInspection {preview_extent_m: None, 
+                unit_evidence: Default::default(),
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
                 capabilities: vec![
@@ -30,7 +31,6 @@ impl TestHost {
                 ],
                 exchange: None,
                 resolved_units: None,
-                declared_units: None,
                 authored_names: Default::default(),
             },
         );
@@ -50,6 +50,7 @@ impl TestHost {
         self.with_geometry_inspection(
             path,
             GeometryInspection {
+                preview_extent_m: None,
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
                 capabilities: vec![
@@ -58,7 +59,7 @@ impl TestHost {
                 ],
                 exchange: None,
                 resolved_units: None,
-                declared_units: None,
+                unit_evidence: Default::default(),
                 authored_names,
             },
         )

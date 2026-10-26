@@ -59,8 +59,15 @@ fn definition(
     reject_unsupported_top_level(declaration, diagnostics);
     reject_unsupported_settings(declaration, header, settings_block, diagnostics);
 
-    // Shell triangles and beam segments are linear; solids choose their tetrahedral order.
-    let order = if dimension == MeshDimension::Solid {
+    // Omitted settings use the canonical mesher defaults; explicit settings still pass the
+    // normal type, duplicate, and value checks. Shell triangles and beam segments are linear;
+    // solids choose their tetrahedral order.
+    let defaults = MeshingRequestSettings::default();
+    let order = if dimension != MeshDimension::Solid {
+        Some(ElementOrder::Tet4)
+    } else if assignment(settings_block, "order").is_none() {
+        Some(defaults.element_order)
+    } else {
         required_enum(declaration, settings_block, "order", diagnostics).and_then(|value| match value
         {
             "linear" => Some(ElementOrder::Tet4),
@@ -75,14 +82,19 @@ fn definition(
                 None
             }
         })
-    } else {
-        Some(ElementOrder::Tet4)
     };
-    let target_edge_length_m = required_length(declaration, settings_block, "target_size", diagnostics);
-    let maximum_chordal_deviation_m =
-        required_length(declaration, settings_block, "maximum_deviation", diagnostics);
+    let target_edge_length_m = if assignment(settings_block, "target_size").is_none() {
+        Some(defaults.target_edge_length_m.canonical_value())
+    } else {
+        required_length(declaration, settings_block, "target_size", diagnostics)
+    };
+    let maximum_chordal_deviation_m = if assignment(settings_block, "maximum_deviation").is_none()
+    {
+        Some(defaults.maximum_chordal_deviation_m.canonical_value())
+    } else {
+        required_length(declaration, settings_block, "maximum_deviation", diagnostics)
+    };
 
-    let defaults = MeshingRequestSettings::default();
     let maximum_grading_ratio = optional_scalar(
         declaration,
         settings_block,
@@ -121,8 +133,10 @@ fn definition(
         element_order: order?,
         dimension,
         deterministic_seed,
-        target_edge_length_m: target_edge_length_m?,
-        maximum_chordal_deviation_m: maximum_chordal_deviation_m?,
+        target_edge_length_m: runmat_types::physical::Length::new(target_edge_length_m?),
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            maximum_chordal_deviation_m?,
+        ),
         maximum_grading_ratio,
         cells_across_gap,
         size_controls,
@@ -231,11 +245,14 @@ fn element_block<'a>(
                 .map(|(name, dimension)| ((*name, statements.as_slice()), *dimension))
         })
         .collect::<Vec<_>>();
-    if matching.len() != 1 {
+    if matching.is_empty() {
+        // An omitted element block requests solid tetrahedra with the canonical mesher defaults.
+        Some(((ELEMENT_BLOCKS[0].0, &[]), ELEMENT_BLOCKS[0].1))
+    } else if matching.len() != 1 {
         diagnostic(
             declaration,
             declaration.span,
-            "mesh requires exactly one `tetrahedra`, `triangles`, or `lines` block",
+            "mesh accepts at most one `tetrahedra`, `triangles`, or `lines` block",
             diagnostics,
         );
         None
@@ -535,7 +552,7 @@ fn required_length(
         missing(declaration, name, diagnostics);
         return None;
     };
-    if value.value_type != FeaType::Quantity(PhysicalDimension::LENGTH) {
+    if !(value.value_type).is_quantity((PhysicalDimension::LENGTH).into()) {
         if let Some((message, label)) =
             super::units::unit_mismatch(name, value, PhysicalDimension::LENGTH)
         {
@@ -634,12 +651,9 @@ fn scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
         CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-            ..
-        } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            unit.to_canonical(scalar(value)?).ok()
+        }
         CheckedExpressionKind::Unary { operator, operand } => {
             let scalar = scalar(operand)?;
             Some(match operator {

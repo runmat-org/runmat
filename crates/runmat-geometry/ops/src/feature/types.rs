@@ -46,19 +46,27 @@ impl GeometryFeatureCapabilities {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ResolvedGeometryFeatureOperation {
     Box {
-        width_m: f64,
-        depth_m: f64,
-        height_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        width_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        depth_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        height_m: runmat_types::physical::Length,
     },
     Cylinder {
-        radius_m: f64,
-        height_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        height_m: runmat_types::physical::Length,
         axis: [f64; 3],
-        origin_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        origin_m: runmat_types::physical::Position,
     },
     Sphere {
-        radius_m: f64,
-        center_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        center_m: runmat_types::physical::Position,
     },
     Transform {
         source: GeometryFeatureRef,
@@ -70,14 +78,17 @@ pub enum ResolvedGeometryFeatureOperation {
     },
     Extrude {
         profile: GeometryFeatureRef,
-        distance_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        distance_m: runmat_types::physical::Length,
         direction: [f64; 3],
     },
     Revolve {
         profile: GeometryFeatureRef,
         axis: [f64; 3],
-        origin_m: [f64; 3],
-        angle_rad: f64,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        origin_m: runmat_types::physical::Position,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        angle_rad: runmat_types::physical::Angle,
     },
     Union {
         operands: Vec<GeometryFeatureRef>,
@@ -91,26 +102,32 @@ pub enum ResolvedGeometryFeatureOperation {
     },
     Hole {
         target: GeometryFeatureRef,
-        radius_m: f64,
-        depth_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        depth_m: runmat_types::physical::Length,
         axis: [f64; 3],
-        origin_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        origin_m: runmat_types::physical::Position,
     },
     Pocket {
         target: GeometryFeatureRef,
         profile: GeometryFeatureRef,
-        depth_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        depth_m: runmat_types::physical::Length,
         direction: [f64; 3],
     },
     Fillet {
         target: GeometryFeatureRef,
         edges: GeometryFeatureRegionSelection,
-        radius_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
     },
     Chamfer {
         target: GeometryFeatureRef,
         edges: GeometryFeatureRegionSelection,
-        distance_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        distance_m: runmat_types::physical::Length,
     },
     RegenerateSource {
         parameters: BTreeMap<String, GeometryAuthoringValue>,

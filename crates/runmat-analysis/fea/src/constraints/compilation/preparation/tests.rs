@@ -17,7 +17,7 @@ fn preparation_composes_shared_inventories_and_preserves_original_dispatch() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = crate::constraints::compilation_tests::mesh(order);
         let solid = fixture_model(FixtureId::CantileverLinearStatic);
-        let mixed = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+        let mixed = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m.canonical_value());
         let explicit = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         for (model, mesh) in [
             (&solid, Some(&mesh)),
@@ -77,7 +77,7 @@ fn reference_inventory_contains_original_identity_workspace_and_retained_copies(
                 constraint_id: format!("original/{ordinal}"),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                    target: RegionTarget::boundary("face:0"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                     reference_point: ReferencePoint {
                         reference_point_id: id.clone(),
                         position: Position::new(position),

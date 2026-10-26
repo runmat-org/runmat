@@ -19,15 +19,21 @@ fn exercise(condition: Condition) {
     match condition {
         Condition::Rotated => {
             for node in &mut constraints.nodes {
-                let [x, y, z] = node.coordinates_m;
-                node.coordinates_m = [z, x, y];
+                let [x, y, z] = node.coordinates_m.canonical_value();
+                node.coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([z, x, y]);
             }
         }
         Condition::TranslatedAndScaled => {
             for node in &mut constraints.nodes {
-                node.coordinates_m = std::array::from_fn(|axis| {
-                    node.coordinates_m[axis] * 1024.0 + [0.125, -0.25, 0.5][axis]
-                });
+                node.coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(std::array::from_fn(|axis| {
+                    node.coordinates_m.canonical_value()[axis] * 1024.0 + [0.125, -0.25, 0.5][axis]
+                }));
             }
         }
         Condition::HalfThickness | Condition::DoubleThickness => {
@@ -37,7 +43,17 @@ fn exercise(condition: Condition) {
                 2.0
             };
             for node in &mut constraints.nodes {
-                node.coordinates_m[1] *= factor;
+                {
+                    let quantity_change = factor;
+                    let quantity_index = 1;
+                    let quantity_slot = &mut node.coordinates_m;
+                    let mut quantity_coordinates = quantity_slot.canonical_value();
+                    quantity_coordinates[quantity_index] *= quantity_change;
+                    *quantity_slot = runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(quantity_coordinates);
+                };
             }
         }
         Condition::ReversedSegments => constraints.segments.reverse(),

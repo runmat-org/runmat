@@ -442,7 +442,9 @@ pub async fn render_figure_snapshot_with_camera_state(
 mod geometry_export;
 #[cfg(feature = "plot-core")]
 pub use geometry_export::{
-    render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state,
+    measure_geometry_scene_observation, render_geometry_observation_snapshot,
+    render_geometry_scene_observation_snapshot, render_geometry_scene_snapshot,
+    render_geometry_scene_snapshot_with_camera_state,
 };
 
 #[cfg(feature = "plot-core")]

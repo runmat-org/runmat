@@ -23,8 +23,8 @@ fn exact_closed_newtonian_law_keeps_shared_density_and_typed_viscosity() {
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let material = program.materials.values().next().unwrap();
     let coefficients = material.require_incompressible_newtonian().unwrap();
-    assert_eq!(coefficients.density.kilograms_per_cubic_meter, 1000.0);
-    assert_eq!(coefficients.dynamic_viscosity.pascal_seconds, 0.001);
+    assert_eq!(coefficients.density.canonical_value(), 1000.0);
+    assert_eq!(coefficients.dynamic_viscosity.canonical_value(), 0.001);
     assert!(matches!(
         material.fluid,
         Some(MaterialFluidModel::IncompressibleNewtonian { .. })
@@ -56,16 +56,18 @@ fn authored_cell_material_compiles_through_realization_to_exact_mesh_ownership()
 geometry part {
     file = "./part.step"
     units = m
-    region volume : cell { select id "region_000001"; expect exactly_one }
+    region volume : cell { select persistent_id "VOLUME_ID"; expect exactly_one }
 }
 mesh part on geometry.part { tetrahedra { order = linear; target_size = 0.5 m; maximum_deviation = 0.01 m } }
 material water { mass_density = 1000 kg/m^3; fluid { law = incompressible_newtonian; dynamic_viscosity = 0.001 Pa*s } }
 model flow { assign material.water to geometry.part.region.volume }
 study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; analysis solve { fluid static {} } }
 "#;
+    let source = source.replace("VOLUME_ID", &topology.regions[0].id.analysis_selection_id().unwrap());
     let host = TestHost::default().with_geometry_inspection(
         "project/part.step",
-        GeometryInspection {
+        GeometryInspection {preview_extent_m: None, 
+            unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
             capabilities: vec![
@@ -74,14 +76,13 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
             ],
             exchange: None,
             resolved_units: None,
-            declared_units: None,
             authored_names: Default::default(),
         },
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
-            root: source_module("project/main.fea", source, 1),
+            root: source_module("project/main.fea", &source, 1),
         },
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
@@ -141,8 +142,8 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
         &compiled.properties,
     )
     .unwrap();
-    assert_eq!(domain.density.kilograms_per_cubic_meter, 1000.0);
-    assert_eq!(domain.dynamic_viscosity.pascal_seconds, 0.001);
+    assert_eq!(domain.density.canonical_value(), 1000.0);
+    assert_eq!(domain.dynamic_viscosity.canonical_value(), 0.001);
 }
 
 #[test]

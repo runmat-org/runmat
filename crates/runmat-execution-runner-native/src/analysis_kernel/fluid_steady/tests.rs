@@ -95,7 +95,7 @@ fn native_original_zero_and_analytic_translation_are_chunk_policy_invariant() {
                 assert_eq!(previous, result.identity().unwrap());
             }
             identity = Some(result.identity().unwrap());
-            for velocity in &result.original().velocity_m_per_s {
+            for velocity in result.original().velocity_m_per_s.canonical_values() {
                 assert!((velocity[0] - if nonzero { 1.0 } else { 0.0 }).abs() < 1e-6);
                 assert!(velocity[1].abs() < 1e-6 && velocity[2].abs() < 1e-6);
             }

@@ -417,7 +417,7 @@ mod face_diagnostic {
                 mesh.topology
                     .nodes
                     .binary_search_by_key(id, |node| node.node_id)
-                    .map(|index| mesh.topology.nodes[index].coordinates_m)
+                    .map(|index| mesh.topology.nodes[index].coordinates_m.canonical_value())
                     .unwrap()
             };
             let rejected = mesh
@@ -454,6 +454,7 @@ mod face_diagnostic {
                     .find(|node| node.node_id == *id)
                     .unwrap()
                     .coordinates_m
+                    .canonical_value()
             })
             .collect::<Vec<_>>();
         let corner_normal = cross(

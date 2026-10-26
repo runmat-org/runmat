@@ -364,7 +364,9 @@ fn materialize_recovered_coordinates(
     let nodes = topology
         .nodes
         .into_iter()
-        .map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m))
+        .map(|node| {
+            DelaunayVolumeNode::explicit(node.identity, node.coordinates_m.canonical_value())
+        })
         .collect();
     let tetrahedra = topology
         .tetrahedra

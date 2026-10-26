@@ -28,8 +28,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
     assert_eq!(
         material.plastic,
         Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: 5.0,
-            isotropic_hardening_modulus_pa: 30.0,
+            yield_stress_pa: runmat_types::physical::Quantity::new(5.0),
+            isotropic_hardening_modulus_pa: runmat_types::physical::Quantity::new(30.0),
         })
     );
     let mut model = sample_solid_model();
@@ -64,7 +64,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                         .iter()
                         .find(|n| n.node_id == *id)
                         .unwrap()
-                        .coordinates_m[axis]
+                        .coordinates_m
+                        .canonical_value()[axis]
                         == 0.0
                 })
             })
@@ -76,7 +77,7 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                 constraint_id: region.clone(),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                    target: RegionTarget::boundary(region),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region))),
                     translations: vec![TranslationDofValue {
                         dof,
                         value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -97,7 +98,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                     .iter()
                     .find(|n| n.node_id == *id)
                     .unwrap()
-                    .coordinates_m;
+                    .coordinates_m
+                    .canonical_value();
                 (x.iter().sum::<f64>() - 1.0).abs() < 1e-14
             })
         })
@@ -132,7 +134,7 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
         .excitations
         .push(ExcitationAction::Traction(AnalysisExcitation {
             excitation_id: ExcitationId("traction".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary("loaded")),
+            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("loaded"))),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,
@@ -204,6 +206,7 @@ fn physical_j2_tet4_tet10_history_survives_cold_filesystem_and_query() {
             .iter()
             .flat_map(|node| {
                 node.coordinates_m
+                    .canonical_value()
                     .into_iter()
                     .zip(strain)
                     .map(|(x, e)| x * e)

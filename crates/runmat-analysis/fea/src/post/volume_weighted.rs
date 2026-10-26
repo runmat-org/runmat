@@ -106,9 +106,9 @@ mod tests {
     #[test]
     fn adjacent_tetrahedra_use_physical_volume_weights() {
         let material = SolidMaterial {
-            youngs_modulus_pa: 1.0,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(1.0),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
         let elements = vec![
             SolidRecoveryElementSummary {
@@ -120,12 +120,12 @@ mod tests {
                 solved_thermal_quadrature: None,
                 geometry: SolidRecoveryGeometry::Tetrahedron4 {
                     node_indices: [0, 1, 2, 3],
-                    coordinates_m: [
+                    coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
                         [0.0, 0.0, 0.0],
                         [1.0, 0.0, 0.0],
                         [0.0, 1.0, 0.0],
                         [0.0, 0.0, 1.0],
-                    ],
+                    ]),
                 },
             },
             SolidRecoveryElementSummary {
@@ -137,12 +137,12 @@ mod tests {
                 solved_thermal_quadrature: None,
                 geometry: SolidRecoveryGeometry::Tetrahedron4 {
                     node_indices: [0, 4, 5, 6],
-                    coordinates_m: [
+                    coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
                         [0.0, 0.0, 0.0],
                         [2.0, 0.0, 0.0],
                         [0.0, 2.0, 0.0],
                         [0.0, 0.0, 2.0],
-                    ],
+                    ]),
                 },
             },
         ];
@@ -170,9 +170,9 @@ mod tests {
     fn tet10_nodal_stress_is_exact_for_a_linear_field_and_keeps_regions_apart() {
         use crate::assembly::elements::solid::tetrahedron10::interpolate_nodal_samples;
         let material = SolidMaterial {
-            youngs_modulus_pa: 1.0,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::Quantity::new(1.0),
+            poisson_ratio: runmat_types::physical::Quantity::new(0.25),
+            density_kg_per_m3: runmat_types::physical::Quantity::new(1.0),
         };
         let field = |x: [f64; 3]| -> [f64; 6] {
             [
@@ -221,7 +221,7 @@ mod tests {
             solved_thermal_quadrature: None,
             geometry: SolidRecoveryGeometry::Tetrahedron10 {
                 node_indices: indices[element],
-                coordinates_m: coordinates[element],
+                coordinates_m: runmat_types::physical::Quantity::new(coordinates[element]),
             },
         };
         // Samples at the canonical four points of each element, from the linear field.

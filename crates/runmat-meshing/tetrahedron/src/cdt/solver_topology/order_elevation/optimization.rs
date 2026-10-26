@@ -67,7 +67,8 @@ struct MovableNode<'a> {
 struct Candidate {
     fraction: f64,
     objective: f64,
-    coordinates_m: [f64; 3],
+    coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     exact_parameters: Vec<SolverNodeExactParameter>,
 }
 

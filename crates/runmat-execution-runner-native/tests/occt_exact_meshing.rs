@@ -101,9 +101,11 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     let mut second_material = model.materials[0].clone();
     second_material.material_id = "second-solid-material".into();
     second_material.name = "Second solid material".into();
-    second_material.mass_density_kg_per_m3 = second_material
+    second_material.mass_density_kg_per_m3 = (second_material
         .mass_density_kg_per_m3
-        .map(|density| density * 0.5);
+        .map(|quantity| quantity.canonical_value())
+        .map(|density| density * 0.5))
+    .map(runmat_types::physical::MassDensity::new);
     model.materials.push(second_material);
     model.material_assignments = vec![
         material_assignment("solid_000001", &model.materials[0].material_id),
@@ -278,7 +280,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 0.1,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.1),
                 maximum_tangent_change_degrees: 180.0,
                 minimum_metric_edge_length: 0.01,
                 maximum_metric_edge_length: 10.0,
@@ -287,7 +289,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
                 minimum_metric_edge_length: 0.01,
                 minimum_metric_angle_degrees: 0.1,
                 maximum_physical_aspect_ratio: 1_000.0,
-                maximum_chordal_deviation_m: 0.1,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.1),
                 maximum_normal_deviation_degrees: 180.0,
             },
             volume: VolumeQualityTargets {

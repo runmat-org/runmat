@@ -26,7 +26,7 @@ fn local_scale(
     let mut minimum = [f64::INFINITY; 3];
     let mut maximum = [f64::NEG_INFINITY; 3];
     for vertex in vertices {
-        let point = topology.node(vertex).coordinates_m;
+        let point = topology.node(vertex).coordinates_m.canonical_value();
         for axis in 0..3 {
             minimum[axis] = minimum[axis].min(point[axis]);
             maximum[axis] = maximum[axis].max(point[axis]);

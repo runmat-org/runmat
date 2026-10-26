@@ -13,10 +13,10 @@ fn slab() -> (AnalysisModel, runmat_meshing_core::SolverMeshArtifact) {
         .thermal
         .as_mut()
         .unwrap()
-        .conductivity_w_per_mk = 1.0;
+        .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "gray_surface".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::ThermalRadiation {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
             emissivity: runmat_analysis_core::SurfaceEmissivity::new(0.8),
@@ -45,7 +45,7 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "hot_face".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant(Temperature::new(surface + flux)),
             },
         }));
@@ -64,7 +64,7 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         .projection
         .nodes
         .iter()
-        .map(|n| flux * (1.0 - n.coordinates_m[0]))
+        .map(|n| flux * (1.0 - n.coordinates_m.canonical_values()[0]))
         .collect::<Vec<_>>();
     let physical = assembly
         .nonlinear_residual(
@@ -76,12 +76,12 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
             0.0,
         )
         .unwrap();
-    for (node, &power) in physical.residual_w.iter().enumerate() {
-        if assembly.prescribed_temperature_k[node].is_none() {
+    for (node, &power) in physical.residual_w.canonical_values().iter().enumerate() {
+        if assembly.prescribed_temperature_k.canonical_values()[node].is_none() {
             assert!(power.abs() < 1e-10, "node={node}, power={power}");
         }
     }
-    assert!((physical.physical_power_scale_w - flux).abs() < 1e-10);
+    assert!((physical.physical_power_scale_w.canonical_value() - flux).abs() < 1e-10);
     let operator = assembly
         .nonlinear_increment_operator(
             &model,
@@ -92,9 +92,11 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
             0.0,
         )
         .unwrap();
-    assert!(operator.nullspace_evidence().is_some());
+    assert!(operator
+        .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+        .is_some());
     for (node, &power) in operator.load().iter().enumerate() {
-        if let Some(target) = assembly.prescribed_temperature_k[node] {
+        if let Some(target) = assembly.prescribed_temperature_k.canonical_values()[node] {
             // Preserve the original authored operands: (surface+flux)-surface
             // need not round to the independently constructed flux exactly.
             assert_eq!(power, (target - reference[node]) - departure[node]);
@@ -112,7 +114,7 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         .projection
         .nodes
         .iter()
-        .map(|n| 0.2 + n.coordinates_m[0] * 0.1)
+        .map(|n| 0.2 + n.coordinates_m.canonical_values()[0] * 0.1)
         .collect::<Vec<_>>();
     let h = 1e-3;
     let plus = departure
@@ -146,7 +148,13 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         )
         .unwrap();
     let action = apply_matrix(operator.operators().stiffness(), &direction);
-    for ((p, m), j) in rp.residual_w.iter().zip(&rm.residual_w).zip(action) {
+    for ((p, m), j) in rp
+        .residual_w
+        .canonical_values()
+        .iter()
+        .zip(rm.residual_w.canonical_values())
+        .zip(action)
+    {
         assert!(((p - m) / (2.0 * h) - j).abs() < 1e-7);
     }
     // Backward Euler adds exactly the original consistent capacity divided by dt.
@@ -177,8 +185,8 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         )
         .unwrap();
     energy.validate().unwrap();
-    assert!((energy.boundary_loss_w - flux).abs() < 1e-10);
-    assert!((energy.prescribed_boundary_power_w + flux).abs() < 1e-10);
+    assert!((energy.boundary_loss_w.canonical_value() - flux).abs() < 1e-10);
+    assert!((energy.prescribed_boundary_power_w.canonical_value() + flux).abs() < 1e-10);
     assert!(energy.relative_residual < 1e-12);
 }
 
@@ -206,7 +214,9 @@ fn radiation_anchor_is_actual_positive_tangent_not_nonzero_emissivity_alone() {
             0.0,
         )
         .unwrap();
-    assert!(zero.nullspace_evidence().is_none());
+    assert!(zero
+        .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+        .is_none());
     let warm = vec![300.0; zeros.len()];
     let positive = assembly
         .nonlinear_increment_operator(
@@ -218,7 +228,9 @@ fn radiation_anchor_is_actual_positive_tangent_not_nonzero_emissivity_alone() {
             0.0,
         )
         .unwrap();
-    assert!(positive.nullspace_evidence().is_some());
+    assert!(positive
+        .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+        .is_some());
     let negative = vec![-1.0; zeros.len()];
     assert!(assembly
         .nonlinear_residual(

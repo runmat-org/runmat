@@ -135,15 +135,15 @@ fn acoustic_response_accuracy_context_binds_the_authored_accuracy_plan() {
     model.constraints.clear();
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "closed_end".into(),
-        target: RegionTarget::boundary("slab_left"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: BoundaryOperator::AcousticRigidWall,
     }];
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(3.0));
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![ProcedureStep::acoustic_modal("cavity", 4)];
     let workload = AcousticResponseWorkload {
         model,

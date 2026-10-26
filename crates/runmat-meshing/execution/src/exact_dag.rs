@@ -148,6 +148,7 @@ impl ExactMeshingDagPlanner {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage: MeshingStageKind::CurveMesh,
             geometry: GeometryRevisionRef {
+                source_unit_evidence: document.source.unit_evidence.clone(),
                 source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
                 geometry_revision: document.revision.revision,
                 persistent_mapping_version: document.revision.persistent_mapping_version,

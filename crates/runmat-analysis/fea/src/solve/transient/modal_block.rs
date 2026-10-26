@@ -54,14 +54,26 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
     let expansion = reduced.clone();
     let mut map_physical_state =
         |_: f64, _: SignalSampleApproach, summary: &AssemblySummary, state: &SecondOrderState| {
-            let displacement = expansion
-                .expand_vector(state.displacement())
+            let displacement = (expansion)
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Displacement,
+                    _,
+                >::new(state.displacement()))
+                .map(|field| field.into_canonical_storage())
                 .map_err(|error| error.to_string())?;
-            let velocity = expansion
-                .expand_vector(state.velocity())
+            let velocity = (expansion)
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(state.velocity()))
+                .map(|field| field.into_canonical_storage())
                 .map_err(|error| error.to_string())?;
-            let acceleration = expansion
-                .expand_vector(state.acceleration())
+            let acceleration = (expansion)
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Acceleration,
+                    _,
+                >::new(state.acceleration()))
+                .map(|field| field.into_canonical_storage())
                 .map_err(|error| error.to_string())?;
             let physical = SecondOrderState::try_new(displacement, velocity, acceleration)
                 .map_err(|error| error.to_string())?;
@@ -162,29 +174,39 @@ fn project_initial_conditions<E>(
     reduced: &ModalReducedSystem,
     initial: &StructuralTransientInitialConditions,
 ) -> Result<StructuralTransientInitialConditions, TransientSolveError<E>> {
-    let displacement = project_representable_state(reduced, &initial.displacement, "displacement")?;
-    let velocity = project_representable_state(reduced, &initial.velocity, "velocity")?;
+    let displacement = project_representable_state::<E, runmat_types::physical::kind::Displacement>(
+        reduced,
+        &initial.displacement,
+        "displacement",
+    )?;
+    let velocity = project_representable_state::<E, runmat_types::physical::kind::Velocity>(
+        reduced,
+        &initial.velocity,
+        "velocity",
+    )?;
     Ok(StructuralTransientInitialConditions {
         displacement,
         velocity,
     })
 }
 
-fn project_representable_state<E>(
+fn project_representable_state<E, K: crate::solve::dynamics::ModalCoordinateQuantity>(
     reduced: &ModalReducedSystem,
     physical: &[f64],
     quantity: &'static str,
 ) -> Result<Vec<f64>, TransientSolveError<E>> {
-    let coordinates = reduced.project_physical_state(physical).map_err(|error| {
-        TransientSolveError::InvalidContinuationState {
+    let coordinates = reduced
+        .state_field::<K>(physical)
+        .and_then(|field| reduced.project_state::<K, _>(&field))
+        .map_err(|error| TransientSolveError::InvalidContinuationState {
             detail: error.to_string(),
-        }
-    })?;
-    let reconstructed = reduced.expand_vector(&coordinates).map_err(|error| {
-        TransientSolveError::InvalidContinuationState {
+        })?;
+    let reconstructed = reduced
+        .expand_state(&coordinates)
+        .map(|field| field.into_canonical_storage())
+        .map_err(|error| TransientSolveError::InvalidContinuationState {
             detail: error.to_string(),
-        }
-    })?;
+        })?;
     let error = reconstructed
         .iter()
         .zip(physical)
@@ -201,7 +223,7 @@ fn project_representable_state<E>(
             ),
         });
     }
-    Ok(coordinates)
+    Ok(coordinates.into_canonical_values())
 }
 
 struct ModalTransientStepStrategy {
@@ -234,16 +256,22 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
         summary: &AssemblySummary,
         initial: TransientInitialVectors,
     ) -> Result<TransientNumericalStepOutcome, String> {
-        let load = self
-            .reduced
-            .project_vector(&physical_load(summary))
+        let load = (self.reduced)
+            .load_field(&physical_load(summary))
+            .and_then(|field| (self.reduced).project_load(&field))
             .map_err(|error| error.to_string())?;
         initialize_modal_transient_state(
             &self.reduced,
-            &load,
+            load.canonical_values(),
             ModalTransientInitialState {
-                displacement: initial.displacement,
-                velocity: initial.velocity,
+                displacement: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Displacement,
+                    _,
+                >::new(initial.displacement),
+                velocity: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(initial.velocity),
             },
         )
         .map_err(|error| error.to_string())
@@ -256,14 +284,14 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
         previous: &SecondOrderState,
         time_step_s: f64,
     ) -> Result<TransientNumericalStepOutcome, String> {
-        let load = self
-            .reduced
-            .project_vector(&physical_load(summary))
+        let load = (self.reduced)
+            .load_field(&physical_load(summary))
+            .and_then(|field| (self.reduced).project_load(&field))
             .map_err(|error| error.to_string())?;
         advance_modal_transient_state(
             &self.reduced,
             time_step_s,
-            &load,
+            load.canonical_values(),
             modal_coordinates(previous),
         )
         .map_err(|error| error.to_string())
@@ -275,13 +303,13 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
         summary: &AssemblySummary,
         previous: &SecondOrderState,
     ) -> Result<TransientNumericalStepOutcome, String> {
-        let load = self
-            .reduced
-            .project_vector(&physical_load(summary))
+        let load = (self.reduced)
+            .load_field(&physical_load(summary))
+            .and_then(|field| (self.reduced).project_load(&field))
             .map_err(|error| error.to_string())?;
         refresh_modal_transient_state(
             &self.reduced,
-            &load,
+            load.canonical_values(),
             previous.displacement().to_vec(),
             previous.velocity().to_vec(),
         )
@@ -300,9 +328,18 @@ fn modal_outcome(step: ModalTransientStep) -> Result<TransientNumericalStepOutco
 
 fn modal_coordinates(state: &SecondOrderState) -> ModalTransientCoordinateState {
     ModalTransientCoordinateState {
-        displacement: state.displacement().to_vec(),
-        velocity: state.velocity().to_vec(),
-        acceleration: state.acceleration().to_vec(),
+        displacement: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Displacement,
+            _,
+        >::new(state.displacement().to_vec()),
+        velocity:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                state.velocity().to_vec(),
+            ),
+        acceleration: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Acceleration,
+            _,
+        >::new(state.acceleration().to_vec()),
     }
 }
 
@@ -310,9 +347,9 @@ fn coordinate_state(
     coordinates: ModalTransientCoordinateState,
 ) -> Result<SecondOrderState, String> {
     SecondOrderState::try_new(
-        coordinates.displacement,
-        coordinates.velocity,
-        coordinates.acceleration,
+        coordinates.displacement.into_canonical_values(),
+        coordinates.velocity.into_canonical_values(),
+        coordinates.acceleration.into_canonical_values(),
     )
     .map_err(|error| error.to_string())
 }

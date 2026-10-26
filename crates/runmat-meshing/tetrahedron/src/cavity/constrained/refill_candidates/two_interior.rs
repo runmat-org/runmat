@@ -28,13 +28,19 @@ pub(in super::super) fn two_interior_node_refill_candidate(
                 .iter()
                 .map(|node_id| ConnectivityPoint {
                     node_id: *node_id,
-                    coordinates_m: boundary_nodes[node_id],
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(boundary_nodes[node_id]),
                     is_super: false,
                 })
                 .collect::<Vec<_>>();
             points.extend(pair.iter().map(|node| ConnectivityPoint {
                 node_id: node.node_id,
-                coordinates_m: node.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(node.coordinates_m.canonical_value()),
                 is_super: false,
             }));
             let mut refill_tetrahedra = Vec::<ConstrainedCavityRefillTetrahedron>::new();
@@ -42,7 +48,7 @@ pub(in super::super) fn two_interior_node_refill_candidate(
                 let node_ids = tetrahedron.vertices.map(|index| points[index].node_id);
                 let tetrahedron_points = tetrahedron
                     .vertices
-                    .map(|index| points[index].coordinates_m);
+                    .map(|index| points[index].coordinates_m.canonical_value());
                 if point_in_closed_triangle_surface(
                     tetrahedron_centroid(tetrahedron_points),
                     boundary_triangles,

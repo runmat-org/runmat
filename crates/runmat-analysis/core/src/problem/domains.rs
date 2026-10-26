@@ -27,6 +27,27 @@ pub enum StaticElectricalEquation {
     SteadyConduction,
 }
 
+impl StaticElectricalEquation {
+    pub const fn constitutive_coefficient_kind(self) -> runmat_types::physical::QuantityKind {
+        match self {
+            Self::Electrostatics => runmat_types::physical::QuantityKind::ElectricPermittivity,
+            Self::SteadyConduction => runmat_types::physical::QuantityKind::ElectricalConductivity,
+        }
+    }
+    pub const fn conjugate_flux_kind(self) -> runmat_types::physical::QuantityKind {
+        match self {
+            Self::Electrostatics => runmat_types::physical::QuantityKind::ElectricCharge,
+            Self::SteadyConduction => runmat_types::physical::QuantityKind::ElectricCurrent,
+        }
+    }
+    pub const fn work_kind(self) -> runmat_types::physical::QuantityKind {
+        match self {
+            Self::Electrostatics => runmat_types::physical::QuantityKind::Energy,
+            Self::SteadyConduction => runmat_types::physical::QuantityKind::Power,
+        }
+    }
+}
+
 /// Magnetostatic unknowns are distinct from scalar electrical potential and from
 /// harmonic electromagnetic fields. No frequency is implied by this formulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

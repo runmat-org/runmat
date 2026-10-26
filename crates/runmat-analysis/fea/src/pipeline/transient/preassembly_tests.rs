@@ -96,7 +96,7 @@ fn direct_host_samples_follow_the_shared_preassembly_schedule() {
         .schedule
         .points
         .iter()
-        .map(|point| point.time_s)
+        .map(|point| point.time_s.canonical_value())
         .collect::<Vec<_>>();
     let result = run_transient_with_options(&model, ComputeBackend::Cpu, options).unwrap();
     assert_eq!(result.time_points_s, expected);

@@ -31,7 +31,12 @@ fn acute_incident_rays_recover_simultaneously_across_scale_and_identity_order() 
                     .enumerate()
                     .map(|(index, point)| DelaunayConstraintNode {
                         identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-                        coordinates_m: point.map(|value| value * scale),
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(
+                            point.map(|value| value * scale)
+                        ),
                         source_vertex_id: None,
                     })
                     .collect(),

@@ -8,40 +8,38 @@ use support::{source_module, TestHost};
 //   boundary: Compiler checks source alias versus persistent-id selectors remain distinct typed
 //   values; no native CAD feature history, regeneration or AP242 export evidence.
 #[test]
-fn imported_source_aliases_and_persistent_ids_remain_distinct() {
-    let source = r#"
-geometry imported_part {
-    file = "./part.brep"
-    units = m
-    region support : face {
-        select id "face_000001"
-        expect exactly_one
-    }
-    region canonical_support : face {
-        select persistent_id "face:canonical"
-        expect exactly_one
-    }
-}
-"#;
+fn imported_source_aliases_are_rejected() {
+    let source = r#"geometry part {
+        file = "./part.brep"
+        units = m
+        region support : face { select id "face_000001"; expect exactly_one }
+    }"#;
     let program = FeaCompiler::new(&TestHost::default().with_geometry("project/part.brep", 2))
-        .check(CheckRequest {
-            modules: ModuleGraphRequest {
-                source_root: LogicalSourcePath::new("project").unwrap(),
-                root: source_module("project/main.fea", source, 1),
-            },
-        });
-    assert!(program.is_valid(), "{:#?}", program.diagnostics);
-    let geometry = program.geometries.values().next().unwrap();
-    assert!(matches!(
-        geometry.regions[0].selector,
-        runmat_geometry_core::GeometryRegionSelector::SourceAlias(ref alias)
-            if alias == "face_000001"
-    ));
-    assert!(matches!(
-        geometry.regions[1].selector,
-        runmat_geometry_core::GeometryRegionSelector::PersistentId(ref id)
-            if id == "face:canonical"
-    ));
+        .check(CheckRequest { modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        }});
+    assert!(!program.is_valid());
+    assert!(format!("{:?}", program.diagnostics).contains("canonical occurrence-qualified ID"));
+}
+
+#[test]
+fn canonical_occurrence_selection_is_preserved_by_the_compiler() {
+    let entity = runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Face, "exact-face".into(), vec!["root".into(), "part-a".into()]);
+    let id = entity.analysis_selection_id().unwrap();
+    let source = r#"geometry part {
+        file = "./part.brep"
+        units = m
+        region support : face { select persistent_id "CANONICAL"; expect exactly_one }
+    }"#.replace("CANONICAL", &id);
+    let program = FeaCompiler::new(&TestHost::default().with_geometry("project/part.brep", 2))
+        .check(CheckRequest { modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", &source, 1),
+        }});
+    assert!(program.is_valid(), "{:?}", program.diagnostics);
+    assert!(matches!(&program.geometries.values().next().unwrap().regions[0].selector,
+        runmat_geometry_core::GeometryRegionSelector::PersistentId(value) if value == &id));
 }
 
 #[test]
@@ -139,7 +137,14 @@ geometry bracket {
     file = "./part.step"
 }
 "#;
-    let inspection = GeometryInspection {
+    let inspection = GeometryInspection {preview_extent_m: None, 
+        unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
+            contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {
+                context: "STEP fixture #1".into(),
+                source_symbol: "mm".into(),
+                unit: runmat_geometry_core::LengthUnit::Millimeter,
+            }],
+        },
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![
@@ -147,8 +152,7 @@ geometry bracket {
             GeometryInspectionCapability::PersistentIds,
         ],
         exchange: None,
-        resolved_units: Some(runmat_geometry_core::UnitSystem::Millimeter),
-        declared_units: None,
+        resolved_units: Some(runmat_geometry_core::LengthUnit::Millimeter),
         authored_names: Default::default(),
     };
     let program = FeaCompiler::new(
@@ -165,7 +169,7 @@ geometry bracket {
     assert!(matches!(
         &geometry.source,
         runmat_geometry_core::GeometryDefinitionSource::Imported(imported)
-            if imported.units == runmat_geometry_core::UnitSystem::Millimeter
+            if imported.unit_evidence.uniform_unit() == Some(runmat_geometry_core::LengthUnit::Millimeter)
     ));
 }
 
@@ -188,8 +192,15 @@ geometry channel {
             GeometryInspectionCapability::PersistentIds,
         ],
         exchange: None,
-        resolved_units: Some(runmat_geometry_core::UnitSystem::Meter),
-        declared_units: Some(runmat_geometry_core::UnitSystem::Millimeter),
+        preview_extent_m: None,
+        resolved_units: Some(runmat_geometry_core::LengthUnit::Meter),
+        unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
+            contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {
+                context: "STEP representation #1".into(),
+                source_symbol: "mm".into(),
+                unit: runmat_geometry_core::LengthUnit::Millimeter,
+            }],
+        },
         authored_names: Default::default(),
     };
     let program = FeaCompiler::new(
@@ -218,6 +229,8 @@ geometry channel {
     assert!(matches!(
         &geometry.source,
         runmat_geometry_core::GeometryDefinitionSource::Imported(imported)
-            if imported.units == runmat_geometry_core::UnitSystem::Meter
+            if imported.authored_units == Some(runmat_geometry_core::LengthUnit::Meter)
+                && imported.unit_evidence.overridden_declared_unit()
+                    == Some(runmat_geometry_core::LengthUnit::Millimeter)
     ));
 }

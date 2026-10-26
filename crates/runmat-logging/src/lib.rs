@@ -72,6 +72,7 @@ static LOG_HOOK: OnceCell<LogHook> = OnceCell::new();
 static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
 static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
 static EVENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+#[cfg(not(target_arch = "wasm32"))]
 type LogFilterReloader = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// Reloads the filter of the subscriber that is actually installed process-wide.

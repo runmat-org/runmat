@@ -46,7 +46,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 &result.residual_norms,
                 result.residual_target,
                 &result.energy_balances,
-                result.reference_temperature_k,
+                result.reference_temperature_k.canonical_value(),
                 result.topology_digest,
                 result.producer,
                 &result.ordered_node_ids,
@@ -178,7 +178,9 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             .push(result.temperature_snapshots[0].clone());
         assert!(malformed.validate().is_err());
         let mut malformed = manifest.clone();
-        malformed.reference_temperature_k += 1.0;
+        malformed.reference_temperature_k = runmat_types::physical::Quantity::new(
+            malformed.reference_temperature_k.canonical_value() + (1.0),
+        );
         assert!(malformed.validate().is_err());
         let mut malformed = manifest.clone();
         malformed.schema_version = 2;
@@ -187,16 +189,28 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         malformed.energy_balances.pop();
         assert!(malformed.validate().is_err());
         let mut malformed = manifest.clone();
-        malformed.energy_balances[0].residual_w += 1.0;
+        malformed.energy_balances[0].residual_w = malformed.energy_balances[0]
+            .residual_w
+            .clone()
+            .try_map_canonical_storage(|value| value + (1.0))
+            .unwrap();
         assert!(malformed.validate().is_err());
         let mut excessive = result.clone();
-        excessive.energy_balances[0] =
-            crate::contracts::ThermalEnergyBalance::from_powers(1.0, 0.0, 0.0, 0.0);
+        excessive.energy_balances[0] = crate::contracts::ThermalEnergyBalance::from_powers(
+            runmat_types::physical::Power::new(1.0),
+            runmat_types::physical::Power::new(0.0),
+            runmat_types::physical::Power::new(0.0),
+            runmat_types::physical::Power::new(0.0),
+        );
         excessive.energy_balances[0].validate().unwrap();
         assert!(excessive.validate_complete().is_err());
         let mut changed_energy = result.clone();
-        changed_energy.energy_balances[0] =
-            crate::contracts::ThermalEnergyBalance::from_powers(1.0, 0.0, 1.0, 0.0);
+        changed_energy.energy_balances[0] = crate::contracts::ThermalEnergyBalance::from_powers(
+            runmat_types::physical::Power::new(1.0),
+            runmat_types::physical::Power::new(0.0),
+            runmat_types::physical::Power::new(1.0),
+            runmat_types::physical::Power::new(0.0),
+        );
         assert_ne!(
             changed_energy.source_result_identity().unwrap(),
             result.source_result_identity().unwrap()

@@ -32,18 +32,18 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     model.excitations = vec![ExcitationAction::HeatGeneration(action)];
     model.boundaries.clear();
     model.constraints.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let MaterialElasticityModel::IsotropicLinear(elasticity) =
         model.materials[0].elasticity.as_mut().unwrap()
     else {
         panic!("isotropic fixture")
     };
-    elasticity.youngs_modulus_pa = YOUNGS;
-    elasticity.poisson_ratio = 0.0;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(YOUNGS);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.0);
     let thermal = model.materials[0].thermal.as_mut().unwrap();
-    thermal.conductivity_w_per_mk = CONDUCTIVITY;
-    thermal.expansion_coefficient_per_k = ALPHA;
-    thermal.reference_temperature_k = REFERENCE;
+    thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(CONDUCTIVITY);
+    thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(ALPHA);
+    thermal.reference_temperature_k = runmat_types::physical::Temperature::new(REFERENCE);
     model.thermal = Some(ThermalDomain {
         reference_temperature: Temperature::new(REFERENCE),
     });
@@ -59,7 +59,7 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: id.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(region),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(region)),
                     value: PrescribedValue::Constant(Temperature::new(REFERENCE)),
                 },
             }));
@@ -71,7 +71,9 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
             StructuralTranslationDof::Uz,
         ]
         .into_iter()
-        .filter(|dof| node.coordinates_m[0] == 0.0 || *dof != StructuralTranslationDof::Ux)
+        .filter(|dof| {
+            node.coordinates_m.canonical_value()[0] == 0.0 || *dof != StructuralTranslationDof::Ux
+        })
         .map(|dof| TranslationDofValue {
             dof,
             value: PrescribedValue::Constant(Displacement::new(0.0)),

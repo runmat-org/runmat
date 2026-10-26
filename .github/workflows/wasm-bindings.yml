@@ -8,6 +8,7 @@ on:
       - "bindings/ts/**"
       - "crates/runmat-wasm/**"
       - "crates/runmat-runtime/**"
+      - "crates/runmat-geometry/**"
       - "crates/runmat-lsp/**"
       - "scripts/regenerate-wasm-registry.sh"
       - "scripts/regenerate-wasm-registry.mjs"
@@ -95,6 +96,18 @@ jobs:
             rust@1.90.0 + wasm32-unknown-unknown
             wasm-pack@0.14.0
 
+      - name: Install exact CAD browser toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.93.0 --profile minimal --target wasm32-unknown-emscripten
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "${RUNNER_TEMP}/runmat-emsdk"
+          python3 "${RUNNER_TEMP}/runmat-emsdk/emsdk.py" install 4.0.23
+          python3 "${RUNNER_TEMP}/runmat-emsdk/emsdk.py" activate 4.0.23
+          echo "${RUNNER_TEMP}/runmat-emsdk/upstream/emscripten" >> "${GITHUB_PATH}"
+          echo "${RUNNER_TEMP}/runmat-emsdk/upstream/bin" >> "${GITHUB_PATH}"
+          echo "EM_CONFIG=${RUNNER_TEMP}/runmat-emsdk/.emscripten" >> "${GITHUB_ENV}"
+
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -104,6 +117,7 @@ jobs:
           # are immutable.
           shared-key: wasm-bindings-workspace-v1
           cache-workspace-crates: true
+          cache-directories: target-exact-cad-wasm
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -275,6 +289,10 @@ jobs:
       - name: Build publishable bindings once
         working-directory: bindings/ts
         run: npm run build
+
+      - name: Qualify exact CAD imports against browser publish bytes
+        working-directory: bindings/ts
+        run: npm run test:exact-cad:wasm
 
       - name: Bind browser runtime entrypoints to exact publish bytes
         shell: bash

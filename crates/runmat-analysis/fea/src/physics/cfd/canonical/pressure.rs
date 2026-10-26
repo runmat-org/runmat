@@ -83,7 +83,9 @@ pub(super) fn corrected_flux(
                         return Ok(qh[i])
                     }
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
-                        alpha * ((pb - p.pressure_reference_pa[f.owner]) - pressure[f.owner])
+                        alpha
+                            * ((pb - p.pressure_reference_pa.canonical_values()[f.owner])
+                                - pressure[f.owner])
                             + dot(gp[f.owner], tangent)
                     }
                     _ => return Err(Error::Invalid("missing face law")),
@@ -148,7 +150,7 @@ pub(super) fn solve(
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
                         a.add(f.owner, f.owner, d);
                         b[f.owner] += -qh[i]
-                            + d * (pb - p.pressure_reference_pa[f.owner])
+                            + d * (pb - p.pressure_reference_pa.canonical_values()[f.owner])
                             + rf[i] * dot(gp[f.owner], tangent);
                     }
                     _ => return Err(Error::Invalid("missing face law")),

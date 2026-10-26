@@ -107,7 +107,7 @@ impl SolidEnergyPreparation {
                             mesh.topology
                                 .nodes
                                 .iter()
-                                .map(|node| (node.node_id, node.coordinates_m)),
+                                .map(|node| (node.node_id, node.coordinates_m.canonical_value())),
                             elements.into_iter(),
                             fixed,
                         ) {

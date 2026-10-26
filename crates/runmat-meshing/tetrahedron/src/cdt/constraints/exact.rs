@@ -83,7 +83,10 @@ pub fn build_delaunay_constraints(
             Ok(DelaunayConstraintNode {
                 identity: *identity,
                 source_vertex_id: source_vertex_by_node.get(identity).cloned(),
-                coordinates_m: source.point_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(source.point_m),
             })
         })
         .collect::<Result<Vec<_>, DelaunayConstraintError>>()?;

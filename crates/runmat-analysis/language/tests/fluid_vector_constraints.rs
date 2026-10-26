@@ -12,12 +12,14 @@ geometry part {{
         feature body = box(width = 1 m, depth = 1 m, height = 1 m)
         result = feature.body
     }}
-    region inlet : face {{ select id "face_000001"; expect exactly_one }}
-    region wall : face {{ select id "face_000002"; expect exactly_one }}
+    region inlet : face {{ select persistent_id "INLET_ID"; expect exactly_one }}
+    region wall : face {{ select persistent_id "WALL_ID"; expect exactly_one }}
 }}
 model flow {{ {body} }}
 "#
     );
+    let selection = |name: &str| runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Face, name.into(), vec!["root".into()]).analysis_selection_id().unwrap();
+    let source = source.replace("INLET_ID", &selection("inlet")).replace("WALL_ID", &selection("wall"));
     FeaCompiler::new(&TestHost::default()).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),

@@ -57,7 +57,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         node_points.insert(next_node_id, coordinates_m);
         inserted_nodes.push(ConstrainedCavityNode {
             node_id: next_node_id,
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         });
         candidate_tetrahedra.push(cap_tetrahedron);
         diagnostic.capped_face_count += 1;

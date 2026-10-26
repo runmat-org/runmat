@@ -17,7 +17,10 @@ fn scoped_beam_waves_preserve_serial_operators_and_recovery_order() {
     structural.nodes = (1..=20)
         .map(|node_id| StructuralNode {
             node_id,
-            coordinates_m: [f64::from(node_id - 1), 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([f64::from(node_id - 1), 0.0, 0.0]),
             solid_attachment: None,
         })
         .collect();
@@ -151,11 +154,14 @@ fn scoped_shell_waves_preserve_damped_operators_and_recovery_order() {
                 .enumerate()
                 .map(move |(local, node)| StructuralNode {
                     node_id: (3 * element_index + local + 1) as u32,
-                    coordinates_m: [
-                        node.coordinates_m[0] + 10.0 * element_index as f64,
-                        node.coordinates_m[1],
-                        node.coordinates_m[2],
-                    ],
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([
+                        node.coordinates_m.canonical_value()[0] + 10.0 * element_index as f64,
+                        node.coordinates_m.canonical_value()[1],
+                        node.coordinates_m.canonical_value()[2],
+                    ]),
                     solid_attachment: None,
                 })
         })

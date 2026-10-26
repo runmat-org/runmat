@@ -42,6 +42,13 @@ async fn prepared_execution_rejects_metadata_and_envelope_substitution_before_ex
     .unwrap();
     validate_prepared_execution(&prepared, &options).unwrap();
 
+    let current_threads = prepared.root.local_execution.thread_count().get();
+    let changed_options=LocalFeaExecutionOptions {
+        cpu_threads_per_worker:Some(runmat_analysis_fea::planning::resource::LocalThreadCount::new(if current_threads==1 {2} else {1}).unwrap()),
+        ..options.clone()
+    };
+    assert!(validate_prepared_execution(&prepared,&changed_options).unwrap_err().contains("threads"));
+
     let workers = prepared.workers;
     prepared.workers = 0;
     assert!(validate_prepared_execution(&prepared, &options)

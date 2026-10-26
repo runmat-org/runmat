@@ -139,7 +139,10 @@ fn compact_face_inventory_preserves_canonical_topology_under_input_permutations(
     )
     .is_err());
     let mut overlapping = baseline.nodes;
-    overlapping[4].coordinates_m = [0., 0., 2.];
+    overlapping[4].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0., 0., 2.]);
     assert_eq!(
         build_delaunay_volume_topology(
             overlapping,

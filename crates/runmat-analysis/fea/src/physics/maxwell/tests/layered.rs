@@ -39,7 +39,7 @@ pub(crate) fn mesh(
                 nodes.push(SolverMeshNode {
                     node_id: i as u64 + 1,
                     stable_identity: StableDigest::from_bytes(bytes),
-                    coordinates_m: [xs[x], ys[y], zs[z]],
+                    coordinates_m: runmat_types::physical::Quantity::new([xs[x], ys[y], zs[z]]),
                     provenance: Vec::new(),
                     exact_parameters: Vec::new(),
                 });
@@ -134,9 +134,9 @@ pub(crate) fn mesh(
         };
         let points = key.map(|id| nodes[id as usize - 1].coordinates_m);
         let centroid: [f64; 3] =
-            std::array::from_fn(|a| (points[0][a] + points[1][a] + points[2][a]) / 3.0);
-        let u: [f64; 3] = std::array::from_fn(|a| points[1][a] - points[0][a]);
-        let v: [f64; 3] = std::array::from_fn(|a| points[2][a] - points[0][a]);
+            std::array::from_fn(|a| (points[0].canonical_value()[a] + points[1].canonical_value()[a] + points[2].canonical_value()[a]) / 3.0);
+        let u: [f64; 3] = std::array::from_fn(|a| points[1].canonical_value()[a] - points[0].canonical_value()[a]);
+        let v: [f64; 3] = std::array::from_fn(|a| points[2].canonical_value()[a] - points[0].canonical_value()[a]);
         let mut normal = [
             u[1] * v[2] - u[2] * v[1],
             u[2] * v[0] - u[0] * v[2],
@@ -150,7 +150,7 @@ pub(crate) fn mesh(
             owner
                 .node_ids
                 .iter()
-                .map(|id| nodes[*id as usize - 1].coordinates_m[a])
+                .map(|id| nodes[*id as usize - 1].coordinates_m.canonical_value()[a])
                 .sum::<f64>()
                 / 4.0
         });
@@ -241,9 +241,9 @@ fn topology(id: &str, location: FieldTopologyLocation, ids: Vec<u64>) -> FieldTo
 
 fn six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
     let p = corners.map(|id| nodes[id as usize - 1].coordinates_m);
-    let a: [f64; 3] = std::array::from_fn(|i| p[1][i] - p[0][i]);
-    let b: [f64; 3] = std::array::from_fn(|i| p[2][i] - p[0][i]);
-    let c: [f64; 3] = std::array::from_fn(|i| p[3][i] - p[0][i]);
+    let a: [f64; 3] = std::array::from_fn(|i| p[1].canonical_value()[i] - p[0].canonical_value()[i]);
+    let b: [f64; 3] = std::array::from_fn(|i| p[2].canonical_value()[i] - p[0].canonical_value()[i]);
+    let c: [f64; 3] = std::array::from_fn(|i| p[3].canonical_value()[i] - p[0].canonical_value()[i]);
     a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
         + a[2] * (b[0] * c[1] - b[1] * c[0])
 }

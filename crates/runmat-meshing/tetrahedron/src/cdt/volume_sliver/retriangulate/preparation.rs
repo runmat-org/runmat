@@ -58,7 +58,7 @@ pub(super) fn prepare<'a>(
             topology
                 .nodes
                 .get(index as usize)
-                .map(|node| node.coordinates_m)
+                .map(|node| node.coordinates_m.canonical_value())
         }) {
             star_refill = Some(tetrahedra);
             break;
@@ -116,9 +116,11 @@ fn local_cavity_inventory(
                 local_selected.push(local_index);
             }
             let tetrahedron = &topology.tetrahedra[index];
-            let points = tetrahedron
-                .vertex_indices
-                .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            let points = tetrahedron.vertex_indices.map(|vertex| {
+                topology.nodes[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            });
             CavityTetrahedron {
                 tetrahedron_id: index as u32,
                 component_id: 0,

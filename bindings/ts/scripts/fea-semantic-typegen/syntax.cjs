@@ -113,6 +113,32 @@ function parseDeclarations(files, options = {}) {
   };
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
+    // Expand the one canonical quantity catalog for its actual serde wire
+    // projections. Do not infer physical schemas from field suffixes.
+    const physicalCatalog = source.match(/catalog!\s*\{([\s\S]*?)\n\}/);
+    if (physicalCatalog) {
+      const entries = [...physicalCatalog[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*),\s*"([^"]+)",\s*\[[^\]]+\],\s*(?:true|false);/g)];
+      if (!entries.length) throw new Error(`Empty physical quantity catalog in ${file}`);
+      register({ name: "QuantityKind", kind: "enum", attrs: '#[derive(Serialize)] #[serde(rename_all = "snake_case")]', body: entries.map(e=>e[1]).join(","), shape: "named", generics: [], file });
+      for (const entry of entries) {
+        const storage = ["Position","Translation"].includes(entry[1]) ? "[f64; 3]" : "f64";
+        register({ name:entry[1], kind:"struct", attrs:"#[derive(Serialize)]", body:`pub ${entry[2]}: ${storage}`, shape:"named", generics:[], file });
+      }
+    }
+    if (source.includes("pub struct UnitDefinitionWire")) {
+      for (const name of ["UnitDefinition","LengthUnit"]) register({ name, kind:"type", attrs:"#[derive(Serialize)]", body:"UnitDefinitionWire", shape:"alias", generics:[], file });
+    }
+    if (/pub use runmat_types::physical::QuantityKind as PhysicalQuantityKind/.test(source)) {
+      register({name:"PhysicalQuantityKind",kind:"type",attrs:"#[derive(Serialize)]",body:"QuantityKind",shape:"alias",generics:[],file});
+    }
+    if (/pub type DimensionedScalar\s*=\s*Quantity<DynamicDimension>/.test(source)) {
+      register({name:"DimensionedScalar",kind:"type",attrs:"#[derive(Serialize)]",body:"DimensionedQuantityWire<f64>",shape:"alias",generics:[],file});
+    }
+    // Stable public aliases share the serialization implementation of their
+    // physical target; Rust aliases do not carry a redundant Serialize derive.
+    for (const alias of source.matchAll(/pub type ([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*(DimensionedScalar|SourceQuantity|DynamicDimension)\s*;/g)) {
+      register({name:alias[1],kind:"type",attrs:"#[derive(Serialize)]",body:alias[2],shape:"alias",generics:[],file});
+    }
     for (const quantity of source.matchAll(/scalar_quantity!\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\);/g)) {
       register({
         name: quantity[1],
@@ -157,6 +183,8 @@ function parseDeclarations(files, options = {}) {
         continue;
       }
       body = body.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      if (body.includes("$")) continue; // macro templates are not declarations
+      if (physicalCatalog && ["QuantityKind","AnyQuantity"].includes(name)) continue;
       register({
         name,
         kind,

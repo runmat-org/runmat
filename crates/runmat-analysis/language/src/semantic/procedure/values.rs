@@ -57,14 +57,9 @@ pub fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
         CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-            ..
-        } => Some(
-            canonical_scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits),
-        ),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            unit.to_canonical(canonical_scalar(value)?).ok()
+        }
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = canonical_scalar(operand)?;
             Some(match operator {
@@ -79,17 +74,12 @@ pub fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
 pub fn canonical_list(value: &CheckedExpression) -> Option<Vec<f64>> {
     match &value.kind {
         CheckedExpressionKind::List(values) => values.iter().map(canonical_scalar).collect(),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-            ..
-        } => {
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
             let CheckedExpressionKind::List(values) = &value.kind else {
                 return None;
             };
-            let scale = f64::from_bits(*scale_bits);
-            let offset = f64::from_bits(*offset_bits);
+            let scale = unit.scale();
+            let offset = unit.offset();
             values
                 .iter()
                 .map(|value| Some(canonical_scalar(value)? * scale + offset))
@@ -101,17 +91,12 @@ pub fn canonical_list(value: &CheckedExpression) -> Option<Vec<f64>> {
 
 pub fn canonical_vector3(value: &CheckedExpression) -> Option<[f64; 3]> {
     let values = match &value.kind {
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-            ..
-        } => {
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
             let CheckedExpressionKind::List(values) = &value.kind else {
                 return None;
             };
-            let scale = f64::from_bits(*scale_bits);
-            let offset = f64::from_bits(*offset_bits);
+            let scale = unit.scale();
+            let offset = unit.offset();
             values
                 .iter()
                 .map(|component| Some(canonical_scalar(component)? * scale + offset))

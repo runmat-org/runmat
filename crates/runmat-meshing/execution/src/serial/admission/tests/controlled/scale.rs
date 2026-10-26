@@ -15,7 +15,17 @@ fn components(count: usize) -> (FacetedSolid, FacetedSolidModel) {
         let mut part = seed.clone();
         for vertex in &mut part.vertices {
             vertex.id.assembly_path.push(component.to_string());
-            vertex.coordinates_m[0] += 2.0 * component as f64;
+            {
+                let quantity_change = 2.0 * component as f64;
+                let quantity_index = 0;
+                let quantity_slot = &mut vertex.coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
         }
         for triangle in &mut part.triangles {
             triangle.id.assembly_path.push(component.to_string());

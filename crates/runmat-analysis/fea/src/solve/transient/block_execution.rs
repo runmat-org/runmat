@@ -128,12 +128,13 @@ pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Dis
     let schedule = &input.request.scope.schedule;
     validate_options(
         input.options,
-        schedule.points[0].time_s,
+        schedule.points[0].time_s.canonical_value(),
         schedule
             .points
             .last()
             .expect("a validated transient schedule has a terminal point")
-            .time_s,
+            .time_s
+            .canonical_value(),
     )?;
     if input.request.scope.dof_count != physical_dof_count || input.initial_summary.dof_count == 0 {
         return Err(TransientSolveError::DofCountChanged);
@@ -162,12 +163,12 @@ pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Dis
                     SignalSampleApproach::RightLimit
                 }
             };
-            let continuation_summary = assembly_at(predecessor.continuation.time_s, approach)
+            let continuation_summary = assembly_at(predecessor.continuation.time_s.canonical_value(), approach)
                 .map_err(TransientSolveError::Assembly)?;
             require_stable_system(input.initial_summary, &continuation_summary)?;
             let numerical_state = restore_checkpoint_state(predecessor)?;
             let (physical_summary, mapped_physical_state) = map_physical_state(
-                predecessor.continuation.time_s,
+                predecessor.continuation.time_s.canonical_value(),
                 approach,
                 &continuation_summary,
                 &numerical_state,
@@ -249,12 +250,13 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
     let schedule = &input.request.scope.schedule;
     validate_options(
         input.options,
-        schedule.points[0].time_s,
+        schedule.points[0].time_s.canonical_value(),
         schedule
             .points
             .last()
             .expect("a validated transient schedule has a terminal point")
-            .time_s,
+            .time_s
+            .canonical_value(),
     )?;
     if input.request.scope.dof_count != physical_dof_count || input.initial_summary.dof_count != 0 {
         return Err(TransientSolveError::DofCountChanged);
@@ -268,7 +270,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
     ) = match (input.predecessor, input.initial_conditions) {
             (None, Some(initial_conditions)) => {
                 let (summary, state) = map_physical_state(
-                    schedule.points[0].time_s,
+                    schedule.points[0].time_s.canonical_value(),
                     SignalSampleApproach::At,
                     input.initial_summary,
                 )
@@ -287,14 +289,14 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                     }
                 })?;
                 let initial_sample = TransientInitialSample {
-                    time_s: schedule.points[0].time_s,
+                    time_s: runmat_types::physical::Time::new(schedule.points[0].time_s.canonical_value()),
                     state: state.clone(),
                     summary: summary.clone(),
                     projected_residual_norm: 0.0,
                     reaction: history.reaction_snapshots()[0].clone(),
-                    strain_energy_j: history.strain_energy_j()[0],
-                    kinetic_energy_j: history.kinetic_energy_j()[0],
-                    energy_balance_residual_j: history.energy_balance_residual_j()[0],
+                    strain_energy_j: runmat_types::physical::Energy::new(history.strain_energy_j()[0]),
+                    kinetic_energy_j: runmat_types::physical::Energy::new(history.kinetic_energy_j()[0]),
+                    energy_balance_residual_j: runmat_types::physical::Energy::new(history.energy_balance_residual_j()[0]),
                     relative_energy_balance_error: history.relative_energy_balance_error()[0],
                     dynamic_balance: history.balances()[0].clone(),
                 };
@@ -308,10 +310,10 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
             }
             (Some(predecessor), None) => {
                 let approach = continuation_approach(predecessor.continuation.approach);
-                let reduced_summary = assembly_at(predecessor.continuation.time_s, approach)
+                let reduced_summary = assembly_at(predecessor.continuation.time_s.canonical_value(), approach)
                     .map_err(TransientSolveError::Assembly)?;
                 let (summary, state) = map_physical_state(
-                    predecessor.continuation.time_s,
+                    predecessor.continuation.time_s.canonical_value(),
                     approach,
                     &reduced_summary,
                 )
@@ -358,17 +360,20 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
     for sample in empty_block.samples {
         let interval = sample.integration_interval;
         let (integration_end_summary, integration_end_state) = map_physical_state(
-            interval.end_time_s,
+            interval.end_time_s.canonical_value(),
             interval.end_approach,
             &interval.end_summary,
         )
         .map_err(TransientSolveError::Assembly)?;
         let (public_summary, public_state) =
             if interval.end_approach == SignalSampleApproach::LeftLimit {
-                let point_summary = assembly_at(interval.end_time_s, SignalSampleApproach::At)
-                    .map_err(TransientSolveError::Assembly)?;
+                let point_summary = assembly_at(
+                    interval.end_time_s.canonical_value(),
+                    SignalSampleApproach::At,
+                )
+                .map_err(TransientSolveError::Assembly)?;
                 map_physical_state(
-                    interval.end_time_s,
+                    interval.end_time_s.canonical_value(),
                     SignalSampleApproach::At,
                     &point_summary,
                 )
@@ -387,16 +392,19 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                 integration_end_state: &integration_end_state,
                 published_summary: &public_summary,
                 published_state: &public_state,
-                time_step_s: sample.accepted_time_step_s,
+                time_step_s: sample.accepted_time_step_s.canonical_value(),
             })
             .map_err(|error| TransientSolveError::DynamicBalance {
                 detail: error.to_string(),
             })?;
         if interval.end_approach == SignalSampleApproach::LeftLimit {
-            let right_summary = assembly_at(interval.end_time_s, SignalSampleApproach::RightLimit)
-                .map_err(TransientSolveError::Assembly)?;
+            let right_summary = assembly_at(
+                interval.end_time_s.canonical_value(),
+                SignalSampleApproach::RightLimit,
+            )
+            .map_err(TransientSolveError::Assembly)?;
             (continuation_summary, continuation_state) = map_physical_state(
-                interval.end_time_s,
+                interval.end_time_s.canonical_value(),
                 SignalSampleApproach::RightLimit,
                 &right_summary,
             )
@@ -408,18 +416,32 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
         let history_index = history.balances().len() - 1;
         samples.push(TransientAcceptedSample {
             schedule_ordinal: sample.schedule_ordinal,
-            time_s: sample.time_s,
-            accepted_time_step_s: sample.accepted_time_step_s,
+            time_s: runmat_types::physical::Time::new(sample.time_s.canonical_value()),
+            accepted_time_step_s: runmat_types::physical::Time::new(
+                sample.accepted_time_step_s.canonical_value(),
+            ),
             state: public_state,
             summary: public_summary,
             projected_residual_norm: 0.0,
             reaction: history.reaction_snapshots()[history_index].clone(),
-            strain_energy_j: history.strain_energy_j()[history_index],
-            kinetic_energy_j: history.kinetic_energy_j()[history_index],
-            applied_load_work_j: history.external_work_j()[history_index],
-            support_work_j: history.support_work_j()[history_index],
-            damping_dissipation_j: history.damping_dissipation_j()[history_index],
-            energy_balance_residual_j: history.energy_balance_residual_j()[history_index],
+            strain_energy_j: runmat_types::physical::Energy::new(
+                history.strain_energy_j()[history_index],
+            ),
+            kinetic_energy_j: runmat_types::physical::Energy::new(
+                history.kinetic_energy_j()[history_index],
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                history.external_work_j()[history_index],
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                history.support_work_j()[history_index],
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                history.damping_dissipation_j()[history_index],
+            ),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(
+                history.energy_balance_residual_j()[history_index],
+            ),
             relative_energy_balance_error: history.relative_energy_balance_error()[history_index],
             dynamic_balance: history.balances()[history_index].clone(),
             integration_interval: None,

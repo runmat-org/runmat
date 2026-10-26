@@ -1,3 +1,6 @@
+use super::quantity_layout::{
+    MagneticPhysicalOperator, MagneticSaddleOperator, MagneticUnknownLayout,
+};
 use super::{
     boundary::MagneticBoundarySpace, MagneticSystemPlan, MagneticVolumeData, MagnetostaticError,
 };
@@ -8,11 +11,14 @@ use crate::{
             ElementOutputShape, ElementOutputs,
         },
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
-        RealSparseAssembler, RealSparseMatrix,
+        RealSparseAssembler,
     },
     topology::{AnalysisProjection, TetrahedralEdgeSpace},
 };
 use runmat_meshing_core::ElementOrder;
+use runmat_types::physical::{
+    kind, Length, MagneticPermeability, Quantity, QuantityLinearOperator, UniformQuantityLayout,
+};
 use std::collections::BTreeMap;
 
 pub(super) struct MagneticAssembly<'a> {
@@ -20,13 +26,13 @@ pub(super) struct MagneticAssembly<'a> {
     pub edge_space: TetrahedralEdgeSpace,
     pub boundary: MagneticBoundarySpace,
     pub volumes: Vec<MagneticVolumeData>,
-    pub saddle: RealSparseMatrix,
-    pub physical_stiffness: RealSparseMatrix,
-    pub physical_load: Vec<f64>,
-    pub scaled_rhs: Vec<f64>,
-    pub permeability_scale: f64,
+    pub saddle: MagneticSaddleOperator,
+    pub physical_stiffness: MagneticPhysicalOperator,
+    pub physical_load: Quantity<kind::ElectricCurrent, Vec<f64>>,
+    pub scaled_rhs: Quantity<kind::MagneticVectorPotential, Vec<f64>>,
+    pub permeability_scale: MagneticPermeability,
     /// Prescribed circulation on every grounded edge (zero where A is grounded at zero).
-    pub grounded_circulation: Vec<f64>,
+    pub grounded_circulation: Quantity<kind::MagneticFlux, Vec<f64>>,
 }
 
 impl<'a> MagneticAssembly<'a> {
@@ -52,10 +58,11 @@ impl<'a> MagneticAssembly<'a> {
             MagneticBoundarySpace::derive(projection, &edge_space, plan.grounded_faces())?;
         let mut inventory = BTreeMap::new();
         for volume in volumes {
-            if !volume.permeability_h_per_m.is_finite()
-                || volume.permeability_h_per_m <= 0.0
+            if !volume.permeability_h_per_m.canonical_value().is_finite()
+                || volume.permeability_h_per_m.canonical_value() <= 0.0
                 || volume
                     .current_density_a_per_m2
+                    .canonical_value()
                     .iter()
                     .any(|v| !v.is_finite())
                 || inventory.insert(volume.element_identity, *volume).is_some()
@@ -81,7 +88,7 @@ impl<'a> MagneticAssembly<'a> {
         }
         // Scalar rescaling of the entire physical equation is invertible and
         // changes neither source compatibility nor the solution/physical residual.
-        let permeability_scale = volumes[0].permeability_h_per_m;
+        let permeability_scale = volumes[0].permeability_h_per_m.canonical_value();
         let edge_rows: BTreeMap<_, _> = boundary
             .free_edges
             .iter()
@@ -158,21 +165,21 @@ impl<'a> MagneticAssembly<'a> {
                 let local = out.matrix(0);
                 for i in 0..6 {
                     for j in 0..6 {
-                        local[i * 6 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m;
+                        local[i * 6 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m.canonical_value();
                     }
                 }
                 let edges = edge_indices(index)?;
                 for (i, value) in out.vector(0).iter_mut().enumerate() {
                     *value = moments.constant_vector_load[i]
                         .iter()
-                        .zip(data.current_density_a_per_m2)
+                        .zip(data.current_density_a_per_m2.canonical_value())
                         .map(|(n, j)| n * j)
                         .sum::<f64>();
                     // Lift the prescribed tangential potential of grounded edges.
                     if lifted {
                         for j in 0..6 {
                             if edge_row[edges[j]].is_none() {
-                                *value -= moments.curl_curl[i][j] / data.permeability_h_per_m
+                                *value -= moments.curl_curl[i][j] / data.permeability_h_per_m.canonical_value()
                                     * grounded_circulation[edges[j]];
                             }
                         }
@@ -212,7 +219,7 @@ impl<'a> MagneticAssembly<'a> {
                 let local = out.matrix(0);
                 for i in 0..6 {
                     for j in 0..6 {
-                        local[i * 10 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m
+                        local[i * 10 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m.canonical_value()
                             * permeability_scale;
                     }
                     for j in 0..4 {
@@ -304,21 +311,43 @@ impl<'a> MagneticAssembly<'a> {
                 }
             }
         }
+        let unknown_layout = MagneticUnknownLayout::try_new(
+            edge_rows.len(),
+            gauge_rows.len(),
+            MagneticPermeability::new(permeability_scale),
+            Length::new(length),
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.into()))?;
+        let saddle = QuantityLinearOperator::try_new(
+            unknown_layout,
+            UniformQuantityLayout::new(dimension),
+            saddle
+                .finish()
+                .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
+        let physical_stiffness = QuantityLinearOperator::try_new(
+            UniformQuantityLayout::new(edge_rows.len()),
+            UniformQuantityLayout::new(edge_rows.len()),
+            stiffness
+                .finish()
+                .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
         Ok(Self {
             projection,
             edge_space,
             boundary,
             volumes,
-            saddle: saddle
-                .finish()
+            saddle,
+            physical_stiffness,
+            physical_load: Quantity::try_new(load)
                 .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
-            physical_stiffness: stiffness
-                .finish()
+            scaled_rhs: Quantity::try_new(scaled_rhs)
                 .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
-            physical_load: load,
-            scaled_rhs,
-            permeability_scale,
-            grounded_circulation,
+            permeability_scale: MagneticPermeability::new(permeability_scale),
+            grounded_circulation: Quantity::try_new(grounded_circulation)
+                .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
         })
     }
 }
@@ -340,9 +369,9 @@ pub(super) fn validate_affine_geometry(
             .into_iter()
             .enumerate()
         {
-            let midpoint = projection.nodes[element.node_indices[4 + midside]].coordinates_m;
-            let left = projection.nodes[element.node_indices[a]].coordinates_m;
-            let right = projection.nodes[element.node_indices[b]].coordinates_m;
+            let midpoint = projection.nodes[element.node_indices[4 + midside]].coordinates_m.canonical_value();
+            let left = projection.nodes[element.node_indices[a]].coordinates_m.canonical_value();
+            let right = projection.nodes[element.node_indices[b]].coordinates_m.canonical_value();
             if (0..3).any(|axis| {
                 (midpoint[axis] - (left[axis] + right[axis]) * 0.5).abs()
                     > 64.0 * f64::EPSILON * length
@@ -396,8 +425,8 @@ fn grounded_circulation(
             }
             let [start, end] = edge_space.edges()[edge].node_indices;
             let (p, q) = (
-                projection.nodes[start].coordinates_m,
-                projection.nodes[end].coordinates_m,
+                projection.nodes[start].coordinates_m.canonical_value(),
+                projection.nodes[end].coordinates_m.canonical_value(),
             );
             let value: f64 = (0..3).map(|axis| potential[axis] * (q[axis] - p[axis])).sum();
             if assigned[edge] && (circulation[edge] - value).abs() > 1e-12 * value.abs().max(1e-30) {

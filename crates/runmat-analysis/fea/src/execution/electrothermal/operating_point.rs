@@ -98,7 +98,7 @@ pub fn conduction_operating_temperatures(
     } else {
         side_element_temperatures(&projection, interfaces, &nodal, &second)?
     };
-    Ok((element_temperature_k, transient.then_some(state.sample_time_s)))
+    Ok((element_temperature_k, transient.then_some(state.sample_time_s.canonical_value())))
 }
 
 /// Element means where second-side elements of conductance interfaces read that side's

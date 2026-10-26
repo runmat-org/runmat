@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 mod shape;
 pub use shape::{AuthoredSignalFieldLocation, AuthoredSignalTopologySelector, SignalShape};
 mod physical;
+mod axis;
+pub use axis::SignalAxisCoordinates;
 mod value;
 pub use value::SignalValue;
 
@@ -20,33 +22,8 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SignalId(pub String);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PhysicalQuantityKind {
-    Displacement,
-    Rotation,
-    Velocity,
-    Acceleration,
-    AngularVelocity,
-    AngularAcceleration,
-    Force,
-    Moment,
-    Traction,
-    Pressure,
-    BodyForceDensity,
-    Temperature,
-    TemperatureDifference,
-    HeatFlux,
-    HeatGenerationDensity,
-    ElectricPotential,
-    ElectricCurrent,
-    ElectricCharge,
-    ElectricCurrentDensity,
-    ElectricChargeDensity,
-    MagneticVectorPotential,
-    MassFlowRate,
-    VolumeFlowRate,
-}
+/// Stable signal-facing import path for the shared semantic quantity authority.
+pub use runmat_types::physical::QuantityKind as PhysicalQuantityKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,7 +108,12 @@ pub struct TabulatedSignal<Q> {
 pub enum TabulatedSignalDomain {
     TimeSeconds,
     FrequencyHertz,
-    StudyParameter { parameter_id: String },
+    StudyParameter {
+        parameter_id: String,
+        /// None is an unresolved declaration reference, never a ratio default.
+        #[serde(default)]
+        quantity: Option<runmat_types::physical::DynamicDimension>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -214,10 +196,14 @@ pub struct StandardWaveform<Q> {
     pub kind: StandardWaveformKind,
     pub amplitude: SignalValue<Q>,
     pub offset: Option<SignalValue<Q>>,
-    pub start_seconds: f64,
-    pub duration_seconds: Option<f64>,
-    pub frequency_hz: Option<f64>,
-    pub phase_radians: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub start_seconds: runmat_types::physical::Time,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
+    pub duration_seconds: Option<runmat_types::physical::Time>,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
+    pub frequency_hz: Option<runmat_types::physical::Frequency>,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub phase_radians: runmat_types::physical::Angle,
     pub duty_cycle: Option<f64>,
 }
 
@@ -266,6 +252,8 @@ pub enum SignalArtifactDomain {
     },
     StudyParameter {
         parameter_id: String,
+        #[serde(default)]
+        quantity: Option<runmat_types::physical::DynamicDimension>,
         start: f64,
         end: f64,
     },
@@ -459,7 +447,12 @@ pub struct ImportedFunctionIdentity {
 pub enum GeneratorDomain {
     TimeSeconds,
     FrequencyHertz,
-    StudyParameter { parameter_id: String },
+    StudyParameter {
+        parameter_id: String,
+        /// None is an unresolved declaration reference, never a ratio default.
+        #[serde(default)]
+        quantity: Option<runmat_types::physical::DynamicDimension>,
+    },
 }
 
 impl GeneratorDomain {

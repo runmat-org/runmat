@@ -142,11 +142,11 @@ fn region_volume(topology: &DelaunayVolumeTopology, region: &PersistentEntityId)
         .iter()
         .filter(|tetrahedron| tetrahedron.region_id.as_ref() == Some(region))
         .map(|tetrahedron| {
-            tetrahedron_volume(
-                tetrahedron
-                    .vertex_indices
-                    .map(|vertex| topology.nodes[vertex as usize].coordinates_m),
-            )
+            tetrahedron_volume(tetrahedron.vertex_indices.map(|vertex| {
+                topology.nodes[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            }))
         })
         .sum()
 }

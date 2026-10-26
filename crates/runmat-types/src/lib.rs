@@ -10,6 +10,7 @@ pub mod geometry;
 pub mod identity;
 pub mod integer_literal;
 pub mod operation;
+pub mod physical;
 mod matrix_work;
 pub use matrix_work::MatrixWorkGeometry;
 pub mod rules;

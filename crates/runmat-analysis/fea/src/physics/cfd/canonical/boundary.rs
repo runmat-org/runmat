@@ -188,7 +188,8 @@ fn bind_face<'a>(
     } = &law
     {
         let normal = super::geometry_ops::dot(*value, f.owner_area_vector_m2).abs();
-        let roundoff = 128.0 * f64::EPSILON * super::geometry_ops::norm(*value) * f.area_m2;
+        let roundoff =
+            128.0 * f64::EPSILON * super::geometry_ops::norm(*value) * f.area_m2.canonical_value();
         if normal > roundoff {
             return Err(Error::Unsupported(
                 "normal moving-wall motion requires ALE geometry",

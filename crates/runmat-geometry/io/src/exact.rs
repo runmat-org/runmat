@@ -8,7 +8,7 @@ use runmat_geometry_core::{
     ExactBRepModel, ExactBRepTopology, ExactContactDefinition, ExactEvaluatorRegistry,
     GeometryDigest, GeometryDocument, GeometryHealingPolicy, GeometryHealingReport, GeometryModel,
     GeometryRevisionIdentity, GeometrySourceFormat, GeometrySourceIdentity,
-    GeometryTolerancePolicy, UnitSystem, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
+    GeometryTolerancePolicy, LengthUnit, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,22 +19,21 @@ use crate::{
     GeometryFormat,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ImportedExactCad {
     pub source_digest: GeometryDigest,
     pub source_format: GeometrySourceFormat,
-    /// Coordinate unit of the source: the authored unit when the import options make it
-    /// authoritative, otherwise the fallback for unitless formats.
-    pub source_units: UnitSystem,
-    /// The single length unit the exchange file declares, retained only when an authoritative
-    /// authored unit overrides a different declaration.
-    pub declared_units: Option<UnitSystem>,
+    /// File-declared contexts or an explicitly applied unitless-source fallback.
+    pub source_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
     pub kernel_version: String,
-    /// Scale of the retained kernel representation. STEP and IGES are retained in the exchange
-    /// reader's millimetre normalization of the declared unit (rescaled by authored/declared when
-    /// an authoritative authored unit overrides the declaration); unitless BREP uses `source_units`.
-    pub meters_per_source_unit: f64,
+    /// Scale of the retained kernel representation, independent of the authored fallback.
+    /// STEP and IGES are retained in millimetres; unitless BREP uses `source_units`.
+    pub kernel_units: runmat_geometry_core::physical::CoordinateUnits<
+        runmat_geometry_core::physical::KernelCoordinates,
+    >,
     /// Canonical OCCT B-rep with all derived polygonal caches removed.
+    #[serde(with = "representation_wire")]
     pub representation: Vec<u8>,
     /// Authoritative topology extracted directly from the kernel B-rep.
     pub topology: ExactBRepTopology,
@@ -64,10 +63,115 @@ pub struct ImportedExactCad {
         BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
     /// Exact result-table join used only while translating kernel feature history. Shape-table
     /// keys never become semantic identity and never cross the geometry contract boundary.
+    #[serde(with = "kernel_entity_id_wire")]
     pub(crate) kernel_entity_ids: BTreeMap<
         (u64, runmat_geometry_core::PersistentEntityKind, u64),
         runmat_geometry_core::PersistentEntityId,
     >,
+}
+
+/// Resolve source evidence and retained kernel coordinate scale once for every host.
+/// A browser host response must agree with independently inspected input bytes.
+#[cfg(any(
+    feature = "occt-native",
+    all(target_arch = "wasm32", feature = "occt-wasm-host"),
+    test
+))]
+pub(crate) fn exact_import_units(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &ExactCadImportOptions,
+) -> Result<
+    (
+        runmat_geometry_core::physical::LengthUnitEvidence,
+        runmat_geometry_core::physical::CoordinateUnits<
+            runmat_geometry_core::physical::KernelCoordinates,
+        >,
+    ),
+    GeometryImportError,
+> {
+    use runmat_geometry_core::physical::{CoordinateUnits, LengthUnitEvidence};
+    let inspected = crate::source_units::inspect_source_units(path, bytes, format);
+    let authored = options.source_units_authority == SourceUnitsAuthority::Authored;
+    let exchange = match format {
+        OcctCadFormat::Step => "STEP",
+        OcctCadFormat::Iges => "IGES",
+        OcctCadFormat::Brep => "BREP",
+    };
+    // STEP and IGES readers resolve file-declared units into a stable millimetre kernel
+    // representation, which keeps kernel tolerances independent of the caller's units. An
+    // authoritative authored unit reinterprets the coordinates of a file that declares a
+    // different single length unit: the reader stays in millimetres and the kernel coordinate
+    // scale becomes millimetres x authored/declared. A STEP or IGES file that declares no length
+    // unit, several different ones, or an unsupported one cannot be reinterpreted and is
+    // refused. BREP declares nothing and uses the explicit `source_units`.
+    let evidence = match (authored, options.source_units, format) {
+        (true, Some(unit), OcctCadFormat::Step | OcctCadFormat::Iges) => {
+            match inspected.apply_authored(unit, "authored geometry units") {
+                Ok(evidence @ (LengthUnitEvidence::Declared { .. }
+                | LengthUnitEvidence::AuthoredOverride { .. })) => evidence,
+                Ok(_) | Err(_) => {
+                    return Err(GeometryImportError::UnresolvedUnits(format!(
+                        "authored {} units cannot be applied: the {exchange} file declares no single resolvable length unit (none, or several different ones)",
+                        unit.symbol()
+                    )))
+                }
+            }
+        }
+        (_, fallback, _) => {
+            inspected.resolve_fallback(fallback, "explicit exact-import source units")
+        }
+    };
+    evidence
+        .validate()
+        .map_err(|e| GeometryImportError::InvalidOptions(e.to_string()))?;
+    if !evidence.physical_scale_resolved() {
+        return Err(GeometryImportError::UnresolvedUnits(format!(
+            "{exchange} source length units are missing, unsupported or conflicting; explicit fallback units are admitted only for unitless formats"
+        )));
+    }
+    let kernel_unit = match format {
+        OcctCadFormat::Step | OcctCadFormat::Iges => match evidence.overridden_declared_unit() {
+            Some(declared) => LengthUnit::from_meters_per_unit(
+                LengthUnit::Millimeter.meters_per_unit() * evidence
+                    .uniform_unit()
+                    .expect("authored override carries its unit")
+                    .meters_per_unit()
+                    / declared.meters_per_unit(),
+            )
+            .ok_or_else(|| {
+                GeometryImportError::InvalidOptions(
+                    "authored/declared unit ratio is not a finite positive length".into(),
+                )
+            })?,
+            None => LengthUnit::Millimeter,
+        },
+        OcctCadFormat::Brep => evidence.uniform_unit().ok_or_else(|| {
+            GeometryImportError::InvalidOptions(
+                "exact CAD import requires explicit source units".into(),
+            )
+        })?,
+    };
+    Ok((evidence, CoordinateUnits::new(kernel_unit)))
+}
+
+#[cfg(any(
+    feature = "occt-native",
+    all(target_arch = "wasm32", feature = "occt-wasm-host")
+))]
+/// Length unit the exchange reader converts declared coordinates into: STEP and IGES read into
+/// millimetres; unitless BREP keeps its explicit source unit.
+pub(crate) fn exchange_reader_unit(
+    format: OcctCadFormat,
+    kernel_units: runmat_geometry_core::physical::CoordinateUnits<
+        runmat_geometry_core::physical::KernelCoordinates,
+    >,
+) -> LengthUnit {
+    match format {
+        OcctCadFormat::Step | OcctCadFormat::Iges => LengthUnit::Millimeter,
+        OcctCadFormat::Brep => kernel_units.unit(),
+    }
 }
 
 impl ImportedExactCad {
@@ -175,16 +279,25 @@ impl ImportedExactCad {
         &self,
     ) -> Result<GeometryDocument, runmat_geometry_core::GeometryContractError> {
         let tolerance = GeometryTolerancePolicy {
-            source_tolerance_m: self
-                .topology
-                .vertices
-                .iter()
-                .map(|vertex| vertex.tolerance_m)
-                .fold(0.0_f64, f64::max),
-            absolute_floor_m: self.analysis.absolute_tolerance_floor_m,
+            source_tolerance_m: runmat_types::physical::Length::new(
+                self.topology
+                    .vertices
+                    .iter()
+                    .map(|vertex| vertex.tolerance_m.canonical_value())
+                    .fold(0.0_f64, f64::max),
+            ),
+            absolute_floor_m: runmat_types::physical::Length::new(
+                self.analysis.absolute_tolerance_floor_m.canonical_value(),
+            ),
             model_relative_term: self.analysis.model_relative_tolerance,
-            requested_deviation_m: self.analysis.requested_deviation_m,
-            maximum_healing_displacement_m: self.analysis.maximum_healing_displacement_m,
+            requested_deviation_m: runmat_types::physical::Length::new(
+                self.analysis.requested_deviation_m.canonical_value(),
+            ),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(
+                self.analysis
+                    .maximum_healing_displacement_m
+                    .canonical_value(),
+            ),
         };
         let document = GeometryDocument {
             schema_version: GEOMETRY_DOCUMENT_SCHEMA_VERSION,
@@ -193,9 +306,8 @@ impl ImportedExactCad {
                 format: self.source_format,
                 importer_version: "runmat-exact-cad-import/1".into(),
                 kernel_version: Some(self.kernel_version.clone()),
-                source_units: self.source_units,
-                declared_units: self.declared_units,
-                meters_per_source_unit: self.meters_per_source_unit,
+                unit_evidence: self.source_unit_evidence.clone(),
+                representation_units: self.kernel_units,
             },
             revision: self.analysis.revision.clone(),
             tolerance,
@@ -226,10 +338,13 @@ impl ImportedExactCad {
 #[serde(deny_unknown_fields)]
 pub struct ExactCadAnalysisOptions {
     pub revision: GeometryRevisionIdentity,
-    pub absolute_tolerance_floor_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub absolute_tolerance_floor_m: runmat_types::physical::Length,
     pub model_relative_tolerance: f64,
-    pub requested_deviation_m: f64,
-    pub maximum_healing_displacement_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub requested_deviation_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_healing_displacement_m: runmat_types::physical::Length,
     pub healing: GeometryHealingPolicy,
 }
 
@@ -241,10 +356,10 @@ impl Default for ExactCadAnalysisOptions {
                 persistent_mapping_version: 1,
                 parent_document_digest: None,
             },
-            absolute_tolerance_floor_m: 1.0e-12,
+            absolute_tolerance_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_tolerance: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
             healing: GeometryHealingPolicy {
                 algorithm_version: "occt-healing/1".into(),
                 sew: false,
@@ -285,7 +400,7 @@ impl SourceUnitsAuthority {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExactCadImportOptions {
-    pub source_units: UnitSystem,
+    pub source_units: Option<LengthUnit>,
     #[serde(default, skip_serializing_if = "SourceUnitsAuthority::is_fallback")]
     pub source_units_authority: SourceUnitsAuthority,
     /// Geometry identity, tolerance, and healing authority for this import. These settings are
@@ -308,7 +423,7 @@ pub struct ExactCadImportOptions {
 impl Default for ExactCadImportOptions {
     fn default() -> Self {
         Self {
-            source_units: UnitSystem::Meter,
+            source_units: None,
             source_units_authority: SourceUnitsAuthority::UndeclaredFallback,
             analysis: ExactCadAnalysisOptions::default(),
             max_representation_bytes: 512 * 1024 * 1024,
@@ -336,11 +451,19 @@ impl ExactCadImportOptions {
             ));
         }
         let tolerance = GeometryTolerancePolicy {
-            source_tolerance_m: 0.0,
-            absolute_floor_m: self.analysis.absolute_tolerance_floor_m,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(
+                self.analysis.absolute_tolerance_floor_m.canonical_value(),
+            ),
             model_relative_term: self.analysis.model_relative_tolerance,
-            requested_deviation_m: self.analysis.requested_deviation_m,
-            maximum_healing_displacement_m: self.analysis.maximum_healing_displacement_m,
+            requested_deviation_m: runmat_types::physical::Length::new(
+                self.analysis.requested_deviation_m.canonical_value(),
+            ),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(
+                self.analysis
+                    .maximum_healing_displacement_m
+                    .canonical_value(),
+            ),
         };
         tolerance
             .validate()
@@ -360,7 +483,11 @@ impl ExactCadImportOptions {
         }
         if (self.analysis.healing.repair_tolerance_scale_gaps
             || self.analysis.healing.simplify_short_edges_and_sliver_faces)
-            && self.analysis.maximum_healing_displacement_m <= 0.0
+            && self
+                .analysis
+                .maximum_healing_displacement_m
+                .canonical_value()
+                <= 0.0
         {
             return Err(GeometryImportError::InvalidOptions(
                 "gap or small-topology repair requires a positive maximum healing displacement"
@@ -399,3 +526,83 @@ pub fn import_exact_cad(
 
 #[cfg(test)]
 mod tests;
+
+// JSON object keys cannot represent the kernel-private composite join key.
+// Keep every entry when transferring the validated native import to a WASM host.
+mod kernel_entity_id_wire {
+    use super::*;
+    type Key = (u64, runmat_geometry_core::PersistentEntityKind, u64);
+    type Id = runmat_geometry_core::PersistentEntityId;
+    pub fn serialize<S: serde::Serializer>(
+        value: &BTreeMap<Key, Id>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<Key, Id>, D::Error> {
+        let entries = Vec::<(Key, Id)>::deserialize(deserializer)?;
+        let count = entries.len();
+        let result: BTreeMap<_, _> = entries.into_iter().collect();
+        if result.len() != count {
+            return Err(serde::de::Error::custom("duplicate kernel entity identity"));
+        }
+        Ok(result)
+    }
+}
+
+mod representation_wire {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Serialize};
+    pub fn serialize<S: serde::Serializer>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        STANDARD.encode(value).serialize(serializer)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        STANDARD
+            .decode(String::deserialize(deserializer)?)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod unit_resolution_tests {
+    use super::*;
+    #[test]
+    fn unitless_exact_source_requires_an_explicit_interpretation() {
+        let mut options = ExactCadImportOptions::default();
+        assert!(exact_import_units(
+            "part.brep",
+            b"DBRep_DrawableShape",
+            OcctCadFormat::Brep,
+            &options
+        )
+        .is_err());
+        options.source_units = Some(LengthUnit::Millimeter);
+        let (source, kernel) = exact_import_units(
+            "part.brep",
+            b"DBRep_DrawableShape",
+            OcctCadFormat::Brep,
+            &options,
+        )
+        .unwrap();
+        assert_eq!(source.uniform_unit(), Some(LengthUnit::Millimeter));
+        assert_eq!(kernel.unit(), LengthUnit::Millimeter);
+        assert!(matches!(
+            source,
+            runmat_geometry_core::physical::LengthUnitEvidence::ExplicitFallback { .. }
+        ));
+    }
+    #[test]
+    fn absent_step_context_cannot_be_replaced_by_a_requested_fallback_unit() {
+        let mut options = ExactCadImportOptions::default();
+        options.source_units = Some(LengthUnit::Meter);
+        let source =
+            b"ISO-10303-21;HEADER;FILE_SCHEMA(('AP242'));ENDSEC;DATA;ENDSEC;END-ISO-10303-21;";
+        assert!(
+            exact_import_units("unitless.step", source, OcctCadFormat::Step, &options).is_err()
+        );
+    }
+}

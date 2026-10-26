@@ -24,7 +24,7 @@ fn homogeneous(mesh: &SolverMeshArtifact, initial: &AssemblySummary, g: [[f64; 3
             .enumerate()
         {
             u[initial.structural_dof_layout.index(i, kind).unwrap()] =
-                (0..3).map(|j| g[axis][j] * x[j]).sum::<f64>() - x[axis];
+                (0..3).map(|j| g[axis][j] * x.canonical_value()[j]).sum::<f64>() - x.canonical_value()[axis];
         }
     }
     u

@@ -147,7 +147,10 @@ fn fixture(oblique: bool) -> (AnalysisModel, SolverMeshArtifact, AnalysisProject
         // Genuinely oblique affine geometry (not merely axis-aligned scale).
         let transform = [[1.3, 0.2, 0.1], [0.1, 1.1, 0.3], [0.2, 0.1, 0.9]];
         for node in &mut mesh.topology.nodes {
-            node.coordinates_m = transform.map(|row| dot(row, node.coordinates_m));
+            node.coordinates_m =
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    transform.map(|row| dot(row, node.coordinates_m.canonical_value())),
+                );
         }
         mesh.seal_canonical_digest().unwrap();
     }
@@ -210,10 +213,14 @@ fn assemble(
     let step = &model.sequence.steps[0];
     let sample = ExcitationSamplePoint::frequency(0.2);
     let sources = realize_step_excitations(model, step, sample).unwrap();
-    AcousticAssembly::assemble(projection, &properties, std::f64::consts::TAU * 0.2)
-        .unwrap()
-        .with_boundaries(model, step, &sources, sample)
-        .unwrap()
+    AcousticAssembly::assemble(
+        projection,
+        &properties,
+        runmat_types::physical::AngularFrequency::new(std::f64::consts::TAU * 0.2),
+    )
+    .unwrap()
+    .with_boundaries(model, step, &sources, sample)
+    .unwrap()
 }
 
 #[test]
@@ -249,7 +256,8 @@ fn tet10_and_tri6_all_entries_match_independent_simplex_moments_on_every_face() 
             let omitted = boundary_setup(&mut model, &projection, face, None);
             let element = &projection.elements[0];
             let nodes = element.node_indices.clone();
-            let corners = std::array::from_fn(|i| projection.nodes[nodes[i]].coordinates_m);
+            let corners =
+                std::array::from_fn(|i| projection.nodes[nodes[i]].coordinates_m.canonical_value());
             let expected = exact(corners, omitted, 3.0, 2.0);
             let assembly = assemble(&model, &mesh, projection);
             for (i, &row) in nodes.iter().enumerate() {
@@ -257,13 +265,29 @@ fn tet10_and_tri6_all_entries_match_independent_simplex_moments_on_every_face() 
                     for (name, actual, reference) in [
                         (
                             "K",
-                            assembly.stiffness.get(row, column),
+                            assembly
+                                .stiffness
+                                .coefficient(row, column)
+                                .unwrap()
+                                .canonical_value(),
                             expected.stiffness[i][j],
                         ),
-                        ("M", assembly.mass.get(row, column), expected.mass[i][j]),
+                        (
+                            "M",
+                            assembly
+                                .mass
+                                .coefficient(row, column)
+                                .unwrap()
+                                .canonical_value(),
+                            expected.mass[i][j],
+                        ),
                         (
                             "B",
-                            assembly.impedance.get(row, column),
+                            assembly
+                                .impedance
+                                .coefficient(row, column)
+                                .unwrap()
+                                .canonical_value(),
                             expected.radiation[i][j],
                         ),
                     ] {
@@ -324,7 +348,9 @@ fn complex_prescribed_pressure_lifting_matches_independent_reduced_block_system(
                     Some((pressure_face, amplitude)),
                 );
                 let nodes = projection.elements[0].node_indices.clone();
-                let corners = std::array::from_fn(|i| projection.nodes[nodes[i]].coordinates_m);
+                let corners = std::array::from_fn(|i| {
+                    projection.nodes[nodes[i]].coordinates_m.canonical_value()
+                });
                 let expected = exact(corners, omitted, 3.0, 2.0);
                 let constrained = (0..10)
                     .filter(|&i| {
@@ -363,7 +389,7 @@ fn complex_prescribed_pressure_lifting_matches_independent_reduced_block_system(
                 let assembly = assemble(&model, &mesh, projection);
                 for (i, &node) in nodes.iter().enumerate() {
                     assert_eq!(
-                        assembly.prescribed[node].is_some(),
+                        assembly.prescribed.canonical_values()[node].is_some(),
                         constrained.contains(&i)
                     );
                 }
@@ -378,15 +404,15 @@ fn complex_prescribed_pressure_lifting_matches_independent_reduced_block_system(
                 )
                 .unwrap();
                 for (r, &i) in free.iter().enumerate() {
-                    let p = actual.pressure_pa[nodes[i]];
+                    let p = actual.pressure_pa.canonical_values()[nodes[i]];
                     assert!((p.real-reference[r]).abs()<1e-9 && (p.imaginary-reference[r+n]).abs()<1e-9,
                         "free local node{i} oblique={oblique} radiation_face={radiation_face} phase={amplitude:?}");
                 }
                 for &i in &constrained {
                     assert_eq!(
                         [
-                            actual.pressure_pa[nodes[i]].real,
-                            actual.pressure_pa[nodes[i]].imaginary
+                            actual.pressure_pa.canonical_values()[nodes[i]].real,
+                            actual.pressure_pa.canonical_values()[nodes[i]].imaginary
                         ],
                         amplitude
                     );

@@ -13,28 +13,40 @@ pub(super) fn materialize(
     );
     for (matrix, scale, imaginary) in [
         (&assembly.stiffness, 1.0, false),
-        (&assembly.mass, -assembly.omega * assembly.omega, false),
-        (&assembly.impedance, assembly.omega, true),
+        (
+            &assembly.mass,
+            -assembly.derivative_rate.canonical_value()
+                * assembly.derivative_rate.canonical_value(),
+            false,
+        ),
+        (
+            &assembly.impedance,
+            assembly.derivative_rate.canonical_value(),
+            true,
+        ),
     ] {
-        for contribution in matrix.contributions() {
-            result.add_contribution(contribution.clone());
-        }
-        for row in 0..n {
-            if crate::is_fea_cancelled() {
-                return Err(AcousticHarmonicError::Cancelled);
+        matrix.with_canonical_storage(|matrix| -> Result<(), AcousticHarmonicError> {
+            for contribution in matrix.contributions() {
+                result.add_contribution(contribution.clone());
             }
-            for entry in matrix.pattern().row_range(row) {
-                let column = matrix.pattern().column(entry);
-                let value = scale * matrix.values()[entry];
-                if imaginary {
-                    result.add(row, n + column, -value);
-                    result.add(n + row, column, value);
-                } else {
-                    result.add(row, column, value);
-                    result.add(n + row, n + column, value);
+            for row in 0..n {
+                if crate::is_fea_cancelled() {
+                    return Err(AcousticHarmonicError::Cancelled);
+                }
+                for entry in matrix.pattern().row_range(row) {
+                    let column = matrix.pattern().column(entry);
+                    let value = scale * matrix.values()[entry];
+                    if imaginary {
+                        result.add(row, n + column, -value);
+                        result.add(n + row, column, value);
+                    } else {
+                        result.add(row, column, value);
+                        result.add(n + row, n + column, value);
+                    }
                 }
             }
-        }
+            Ok(())
+        })?;
     }
     result
         .finish()

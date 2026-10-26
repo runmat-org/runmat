@@ -12,14 +12,16 @@ use super::node_space::CanonicalStructuralNodeSpace;
 pub(crate) struct ExplicitShellTriangle<'a> {
     pub element_id: &'a str,
     pub node_identities: [StableDigest; 3],
-    pub coordinates_m: [[f64; 3]; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [[f64; 3]; 3]>,
     pub oriented_area_vector_m2: [f64; 3],
-    pub area_m2: f64,
+    pub area_m2: runmat_types::physical::Area,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ExplicitShellSurfaceNode {
-    pub coordinates_m: [f64; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub nodal_measure_m2: f64,
     pub oriented_normal: [f64; 3],
 }
@@ -27,7 +29,7 @@ pub(crate) struct ExplicitShellSurfaceNode {
 pub(crate) struct ExplicitShellSurfaceGeometry<'a> {
     pub nodes: SortedValues<StableDigest, ExplicitShellSurfaceNode>,
     pub triangles: Vec<ExplicitShellTriangle<'a>>,
-    pub area_m2: f64,
+    pub area_m2: runmat_types::physical::Area,
 }
 
 /// Requested vector slots, including overlapping raw candidates and retained nodes.
@@ -117,7 +119,7 @@ pub(crate) fn explicit_shell_surface_geometry<'a>(
                     node_id,
                 })?;
             *identity = node.identity;
-            *point = node.coordinates_m;
+            *point = node.coordinates_m.canonical_value();
         }
         let area_vector = cross(
             subtract(points[1], points[0]),
@@ -135,9 +137,12 @@ pub(crate) fn explicit_shell_surface_geometry<'a>(
         triangles.push(ExplicitShellTriangle {
             element_id: &element.element_id,
             node_identities: identities,
-            coordinates_m: points,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(points),
             oriented_area_vector_m2: scale(area_vector, 0.5),
-            area_m2: triangle_area,
+            area_m2: runmat_types::physical::Area::new(triangle_area),
         });
     }
     if triangles.is_empty() {
@@ -152,7 +157,10 @@ pub(crate) fn explicit_shell_surface_geometry<'a>(
             (
                 *id,
                 ExplicitShellSurfaceNode {
-                    coordinates_m: *coordinates,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(*coordinates),
                     nodal_measure_m2: 0.0,
                     oriented_normal: [0.0; 3],
                 },
@@ -163,7 +171,7 @@ pub(crate) fn explicit_shell_surface_geometry<'a>(
     drop(candidates);
     for triangle in &triangles {
         storage::check_cancelled()?;
-        let points = triangle.coordinates_m;
+        let points = triangle.coordinates_m.canonical_value();
         // Recompute the original raw cross product; reversing the stored half-vector
         // would change floating-point arithmetic. Accumulate in authored face order.
         let area_vector = cross(
@@ -177,7 +185,7 @@ pub(crate) fn explicit_shell_surface_geometry<'a>(
             } else {
                 add(node.oriented_normal, area_vector)
             };
-            node.nodal_measure_m2 += triangle.area_m2 / 3.0;
+            node.nodal_measure_m2 += triangle.area_m2.canonical_value() / 3.0;
         }
     }
     for (identity, node) in nodes.entries_mut() {
@@ -192,7 +200,7 @@ pub(crate) fn explicit_shell_surface_geometry<'a>(
     Ok(ExplicitShellSurfaceGeometry {
         nodes,
         triangles,
-        area_m2,
+        area_m2: runmat_types::physical::Area::new(area_m2),
     })
 }
 

@@ -592,7 +592,7 @@ fn completed_scalar_series(
     let mut request = spec(
         "series",
         ObservationTarget::Point {
-            position: Position::new(projection.nodes[0].coordinates_m),
+            position: Position::new(projection.nodes[0].coordinates_m.canonical_value()),
         },
     );
     request.sampling = SamplingPolicy::TimeSeconds(times.to_vec());
@@ -716,7 +716,7 @@ fn field_and_exact_probe_use_typed_source_and_canonical_entities() {
     let probe_request = ObservationRequest::Probe(spec(
         "probe",
         ObservationTarget::Point {
-            position: Position::new(node.coordinates_m),
+            position: Position::new(node.coordinates_m.canonical_value()),
         },
     ));
     let step = thermal_step(vec![field_request, probe_request]);
@@ -958,7 +958,7 @@ fn path_interpolation_reproduces_linear_fields_for_tet4_and_tet10() {
             .nodes
             .iter()
             .map(|node| {
-                let [x, y, z] = node.coordinates_m;
+                let [x, y, z] = node.coordinates_m.canonical_value();
                 10.0 + 2.0 * x - 3.0 * y + 4.0 * z
             })
             .collect::<Vec<_>>();
@@ -1028,7 +1028,7 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
     let linear_values = projection
         .nodes
         .iter()
-        .map(|node| node.coordinates_m.iter().sum())
+        .map(|node| node.coordinates_m.canonical_value().iter().sum())
         .collect::<Vec<f64>>();
     let definition = scalar_definition();
     let mut volume = spec("volume_average", ObservationTarget::WholeModel);
@@ -1045,7 +1045,7 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
     let mut boundary = spec(
         "boundary_average",
         ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(face_selector),
+            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector))),
         )),
     );
     boundary.reduction = volume.reduction.clone();
@@ -2948,7 +2948,7 @@ fn element_field_point_sample_reads_the_containing_element() {
         // A point strictly inside the element, away from its centroid.
         let corner = projection.nodes[element.node_indices[0]].coordinates_m;
         let position = std::array::from_fn(|axis| {
-            0.7 * element.centroid_m[axis] + 0.3 * corner[axis]
+            0.7 * element.centroid_m[axis] + 0.3 * corner.canonical_value()[axis]
         });
         let mut request = spec("sample", ObservationTarget::Point {
             position: Position::new(position),
@@ -3029,8 +3029,8 @@ fn element_field_over_a_boundary_region_reads_the_face_owners() {
     {
         let [a, b, c] = [0, 1, 2].map(|k| projection.nodes[face.node_indices[k]].coordinates_m);
         let (u, v) = (
-            [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
-            [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+            [b.canonical_value()[0] - a.canonical_value()[0], b.canonical_value()[1] - a.canonical_value()[1], b.canonical_value()[2] - a.canonical_value()[2]],
+            [c.canonical_value()[0] - a.canonical_value()[0], c.canonical_value()[1] - a.canonical_value()[1], c.canonical_value()[2] - a.canonical_value()[2]],
         );
         let cross = [
             u[1] * v[2] - u[2] * v[1],
@@ -3106,13 +3106,13 @@ fn node_located_von_mises_binds_its_declared_transfer_and_interpolates() {
     let values = projection
         .nodes
         .iter()
-        .map(|node| 1.0e6 * node.coordinates_m[0] + 3.0e6)
+        .map(|node| 1.0e6 * node.coordinates_m.canonical_value()[0] + 3.0e6)
         .collect::<Vec<_>>();
     let fields = catalog(&projection, &definition, vec![values.len()], values);
     let element = &projection.elements[1];
     let corner = projection.nodes[element.node_indices[0]].coordinates_m;
     let position =
-        std::array::from_fn(|axis| 0.6 * element.centroid_m[axis] + 0.4 * corner[axis]);
+        std::array::from_fn(|axis| 0.6 * element.centroid_m[axis] + 0.4 * corner.canonical_value()[axis]);
     let mut request = spec(
         "surface_sample",
         ObservationTarget::Point {

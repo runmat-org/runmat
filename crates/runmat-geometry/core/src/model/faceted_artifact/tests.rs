@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     FacetedSolidModel, GeometryDigest, GeometryHealingPolicy, GeometryModel, GeometryObjectRef,
     GeometryRevisionIdentity, GeometrySourceFormat, GeometrySourceIdentity,
-    GeometryTolerancePolicy, PersistentEntityKind, UnitSystem, FACETED_SOLID_MEDIA_TYPE,
+    GeometryTolerancePolicy, LengthUnit, PersistentEntityKind, FACETED_SOLID_MEDIA_TYPE,
     GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
 
@@ -27,7 +27,10 @@ fn tetrahedron() -> FacetedSolid {
                 PersistentEntityKind::Vertex,
                 &format!("faceted:vertex:{index}"),
             ),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         })
         .collect(),
         triangles: [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
@@ -55,9 +58,11 @@ fn document() -> GeometryDocument {
             format: GeometrySourceFormat::Stl,
             importer_version: "runmat-faceted-import/1".into(),
             kernel_version: None,
-            source_units: UnitSystem::Meter,
-            declared_units: None,
-            meters_per_source_unit: 1.0,
+            unit_evidence: crate::physical::LengthUnitEvidence::explicit_fallback(
+                LengthUnit::Meter,
+                "authored fixture",
+            ),
+            representation_units: crate::physical::CoordinateUnits::new(LengthUnit::Meter),
         },
         revision: GeometryRevisionIdentity {
             revision: 1,
@@ -65,11 +70,11 @@ fn document() -> GeometryDocument {
             parent_document_digest: None,
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 0.0,
-            absolute_floor_m: 1.0e-12,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_term: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 0.0,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(0.0),
         },
         healing: GeometryHealingPolicy {
             algorithm_version: "none/1".into(),
@@ -146,7 +151,10 @@ fn faceted_solid_rejects_unreferenced_vertices() {
     let mut solid = tetrahedron();
     solid.vertices.push(FacetedVertex {
         id: id(PersistentEntityKind::Vertex, "faceted:vertex:unused"),
-        coordinates_m: [2.0, 2.0, 2.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                2.0, 2.0, 2.0,
+            ]),
     });
 
     assert!(solid.validate_against(&model_for(&solid)).is_err());

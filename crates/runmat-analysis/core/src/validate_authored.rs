@@ -237,7 +237,7 @@ fn validate_boundaries(
             } => {
                 ambient_temperature.is_well_formed(signals)
                     && coefficient.is_finite()
-                    && coefficient.watts_per_square_meter_kelvin >= 0.0
+                    && coefficient.canonical_value() >= 0.0
             }
             BoundaryOperator::ThermalRadiation {
                 ambient_temperature,
@@ -245,14 +245,14 @@ fn validate_boundaries(
             } => {
                 ambient_temperature.is_well_formed(signals)
                     && match ambient_temperature {
-                        crate::PrescribedValue::Constant(value) => value.kelvin >= 0.0,
+                        crate::PrescribedValue::Constant(value) => value.canonical_value() >= 0.0,
                         crate::PrescribedValue::Signal(_) => true,
                     }
                     && emissivity.is_finite()
-                    && (0.0..=1.0).contains(&emissivity.fraction)
+                    && (0.0..=1.0).contains(&emissivity.canonical_value())
             }
             BoundaryOperator::AcousticImpedance { impedance } => {
-                impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
+                impedance.is_finite() && impedance.canonical_value() > 0.0
             }
             BoundaryOperator::AcousticImpedanceLaw { law } => law.is_valid(),
             BoundaryOperator::AcousticSphericalRadiation { center_m } => {
@@ -322,7 +322,9 @@ pub(crate) fn validate_target(target: &crate::RegionTarget) -> Result<(), String
 fn pairing_is_valid(pairing: &PairingPolicy) -> bool {
     match pairing {
         PairingPolicy::Matching => true,
-        PairingPolicy::GeometricTolerance(value) => value.is_finite() && value.meters >= 0.0,
+        PairingPolicy::GeometricTolerance(value) => {
+            value.is_finite() && value.canonical_value() >= 0.0
+        }
     }
 }
 

@@ -65,6 +65,8 @@ pub(crate) struct GeometryScreenAnnotation {
     pub color: [f32; 4],
     pub kind: GeometrySceneAnnotationKind,
     pub label: String,
+    /// Projected vector extent reserved for the actual arrow, even without a caption.
+    pub vector_extent: Option<[[f32; 2]; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1564,6 +1566,8 @@ impl PlotRenderer {
         // Update uniforms
         let mut cam = self.camera().clone();
         let view_proj_matrix = cam.view_proj_matrix();
+        self.wgpu_renderer
+            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
 
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
@@ -1683,6 +1687,8 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         cam.update_aspect_ratio(aspect_ratio);
         let view_proj_matrix = cam.view_proj_matrix();
+        self.wgpu_renderer
+            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
             .update_uniforms(emission, view_proj_matrix, model_matrix);
@@ -2024,7 +2030,7 @@ impl PlotRenderer {
                     }
                 }
             }
-            // drop render_pass at end of scope
+            // Drop render_pass at end of scope.
         }
 
         let render_time = start_time.elapsed().as_secs_f64() * 1000.0;
@@ -2218,6 +2224,8 @@ impl PlotRenderer {
             }
         }
         let view_proj_matrix = cam.view_proj_matrix();
+        self.wgpu_renderer
+            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
         let model_matrix = self.axes_model_matrix(axes_index);
         self.wgpu_renderer.update_uniforms_for_axes(
             emission,
@@ -3857,8 +3865,8 @@ impl PlotRenderer {
             .region_annotations
             .iter()
             .filter_map(|annotation| {
-                let label = annotation.label.as_deref()?.trim();
-                if label.is_empty() {
+                let label = annotation.label.as_deref().unwrap_or("").trim();
+                if label.is_empty() && annotation.direction.is_none() {
                     return None;
                 }
                 let anchor = scene.region_anchor(&annotation.region_id)?;
@@ -3882,6 +3890,28 @@ impl PlotRenderer {
                     color: annotation.color.unwrap_or([0.9, 0.9, 0.9, 1.0]),
                     kind: annotation.kind,
                     label: label.to_string(),
+                    vector_extent: annotation.direction.and_then(|direction| {
+                        let points =
+                            scene.annotation_vector_points(&annotation.region_id, direction)?;
+                        let mut minimum = [f32::INFINITY; 2];
+                        let mut maximum = [f32::NEG_INFINITY; 2];
+                        for point in points {
+                            let clip = view_projection * point.extend(1.0);
+                            if !clip.is_finite() || clip.w <= 0.0 {
+                                return None;
+                            }
+                            let ndc = clip.truncate() / clip.w;
+                            let screen = [
+                                (ndc.x + 1.0) * 0.5 * viewport_size[0],
+                                (1.0 - ndc.y) * 0.5 * viewport_size[1],
+                            ];
+                            for axis in 0..2 {
+                                minimum[axis] = minimum[axis].min(screen[axis]);
+                                maximum[axis] = maximum[axis].max(screen[axis]);
+                            }
+                        }
+                        Some([minimum, maximum])
+                    }),
                 })
             })
             .collect()

@@ -5,8 +5,8 @@ use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 #[cfg(feature = "plot-core")]
 use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
-    SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
+    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind,
+    Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
 };
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,
@@ -132,7 +132,11 @@ pub struct GeometryAssetSummary {
     pub source: GeometrySource,
     pub source_geometry: SourceGeometry,
     pub tessellation_profile: TessellationProfile,
-    pub units: UnitSystem,
+    pub coordinate_units: Option<
+        runmat_geometry_core::physical::CoordinateUnits<
+            runmat_geometry_core::physical::PreviewCoordinates,
+        >,
+    >,
     pub meshes: Vec<GeometryMeshSummary>,
     pub mapping_summary: GeometryRegionMappingSummary,
     pub cad: GeometryCadSummary,
@@ -445,7 +449,7 @@ pub fn geometry_asset_summary_with_options(
         source: asset.source.clone(),
         source_geometry: asset.source_geometry.clone(),
         tessellation_profile: asset.tessellation_profile.clone(),
-        units: asset.units,
+        coordinate_units: asset.coordinate_units,
         meshes: mesh_summaries(asset),
         mapping_summary: region_mapping_summary(asset, range_preview_limit),
         cad: cad_summary(asset),
@@ -1131,10 +1135,17 @@ pub fn geometry_preview_scene(
         return Err("geometry asset did not contain renderable surface mesh triangles".to_string());
     }
 
-    Ok(
+    let scene =
         runmat_plot::GeometryScene::new(geometry_scene_id(asset), asset.revision as u64, chunks)
-            .with_title(title),
-    )
+            .with_title(title);
+    Ok(if let Some(coordinate_units) = asset.coordinate_units {
+        scene.with_physical_context(runmat_plot::geometry_scene::GeometryPhysicalContext {
+            coordinate_units,
+            source_unit_evidence: asset.source.unit_evidence.clone(),
+        })
+    } else {
+        scene
+    })
 }
 
 #[cfg(feature = "plot-core")]

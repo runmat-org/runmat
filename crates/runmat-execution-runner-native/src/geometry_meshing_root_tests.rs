@@ -305,13 +305,13 @@ fn scalar(value: f64) -> GeometryScalarExpression {
 fn make_coarse(request: &mut runmat_meshing_core::MeshingRequest) {
     request.metric.global_metric =
         runmat_meshing_core::MetricTensor3::isotropic_length_m(10.0).unwrap();
-    request.quality.curve.maximum_chordal_deviation_m = 0.1;
+    request.quality.curve.maximum_chordal_deviation_m = runmat_types::physical::Length::new(0.1);
     request.quality.curve.maximum_tangent_change_degrees = 180.0;
     request.quality.curve.minimum_metric_edge_length = 0.01;
     request.quality.curve.maximum_metric_edge_length = 10.0;
     request.quality.surface.minimum_metric_angle_degrees = 0.1;
     request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
-    request.quality.surface.maximum_chordal_deviation_m = 0.1;
+    request.quality.surface.maximum_chordal_deviation_m = runmat_types::physical::Length::new(0.1);
     request.quality.surface.maximum_normal_deviation_degrees = 180.0;
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;

@@ -482,7 +482,7 @@ async fn await_parallel_tasks(
                     Err(error) => return Err(error),
                 }
             }
-            TaskResultClaim::Pending => tasks::yield_once().await,
+            TaskResultClaim::Pending => tasks::yield_execution(context).await?,
             TaskResultClaim::Exhausted => {
                 return Err(crate::interpreter::errors::mex(
                     "ParallelTaskState",

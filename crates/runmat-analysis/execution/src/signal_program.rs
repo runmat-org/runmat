@@ -117,16 +117,24 @@ impl SignalMaterializationExpectation {
                 "signal materialization expectation is not callable-backed".into(),
             )
         })?;
-        if generator.invocation.callable.display_name() != self.admitted.callable.qualified_name
-            || self.admitted.sample_points.len() < 2
+        if self.admitted.schema_version != 2
+            || self.admitted.sample_points.descriptor()
+                != generator
+                    .domain
+                    .axis_descriptor(None)
+                    .map_err(AnalysisBridgeError::Invalid)?
+            || generator.invocation.callable.display_name() != self.admitted.callable.qualified_name
+            || self.admitted.sample_points.scalar_count() < 2
             || self
                 .admitted
                 .sample_points
+                .canonical_values()
                 .iter()
                 .any(|point| !point.is_finite())
             || self
                 .admitted
                 .sample_points
+                .canonical_values()
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
         {

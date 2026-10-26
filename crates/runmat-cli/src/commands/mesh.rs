@@ -5,7 +5,7 @@ use runmat_execution_runner_native::{
     mesh_source_with_native_execution, native_meshing_execution_provider,
     NativeMeshingSourceRequest,
 };
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::LengthUnit;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{ElementOrder, MeshingRequestSettings};
 use runmat_runtime::meshing::MeshingExecutionProvider;
@@ -96,8 +96,10 @@ fn meshing_settings(command: &MeshCommand) -> MeshingRequestSettings {
             MeshElementOrderArg::Tet10 => ElementOrder::Tet10,
         },
         deterministic_seed: command.deterministic_seed,
-        target_edge_length_m: command.target_size_m,
-        maximum_chordal_deviation_m: command.maximum_deviation_m,
+        target_edge_length_m: runmat_types::physical::Length::new(command.target_size_m),
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            command.maximum_deviation_m,
+        ),
         ..MeshingRequestSettings::default()
     };
     settings.limits.maximum_elements = command.maximum_elements;
@@ -106,11 +108,11 @@ fn meshing_settings(command: &MeshCommand) -> MeshingRequestSettings {
 
 fn import_options(command: &MeshCommand) -> ExactCadImportOptions {
     let mut options = ExactCadImportOptions {
-        source_units: match command.source_units {
-            MeshSourceUnitsArg::Meter => UnitSystem::Meter,
-            MeshSourceUnitsArg::Millimeter => UnitSystem::Millimeter,
-            MeshSourceUnitsArg::Inch => UnitSystem::Inch,
-        },
+        source_units: Some(match command.source_units {
+            MeshSourceUnitsArg::Meter => LengthUnit::Meter,
+            MeshSourceUnitsArg::Millimeter => LengthUnit::Millimeter,
+            MeshSourceUnitsArg::Inch => LengthUnit::Inch,
+        }),
         ..ExactCadImportOptions::default()
     };
     options.analysis.healing.shared_interfaces = command.shared_interfaces;

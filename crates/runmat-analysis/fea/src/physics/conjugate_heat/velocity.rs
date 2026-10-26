@@ -59,7 +59,7 @@ pub(super) fn lift(
                 ));
             };
             *slot = (
-                projection.nodes[vertex].coordinates_m,
+                projection.nodes[vertex].coordinates_m.canonical_value(),
                 f64::from(incidence.sign) * flux[incidence.face_index],
             );
         }

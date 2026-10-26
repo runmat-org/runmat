@@ -61,7 +61,7 @@ pub(super) fn prove(
         .map(|nodes| {
             let positions = nodes
                 .iter()
-                .map(|node| mesh.topology.nodes[*node].coordinates_m)
+                .map(|node| mesh.topology.nodes[*node].coordinates_m.canonical_value())
                 .collect::<Vec<_>>();
             RigidBodyFrame::from_positions(&positions)
         })
@@ -241,7 +241,7 @@ pub(super) fn prove_with_connector_anchors(
         .topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let identities = mesh
         .topology
@@ -295,7 +295,7 @@ fn rigid_mode_response(
                 .component_by_node
                 .get(&address.node_index)
                 .ok_or(NullspaceEvidenceError::DimensionMismatch)?,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             address.kind,
         )
     } else {

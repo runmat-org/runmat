@@ -46,7 +46,7 @@ pub(super) fn recover(
                 "invalid field recovery".into(),
             ));
         }
-        let coefficient = assembly.coefficients[index];
+        let coefficient = assembly.coefficients.canonical_values()[index];
         if average
             .iter()
             .any(|value| !(value * coefficient).is_finite())

@@ -11,7 +11,10 @@ fn boundary_face_centroid_split_refines_target_face_and_remains_refillable() {
     nodes.push(split_node.clone());
 
     assert_eq!(split_node.node_id, 4);
-    assert_eq!(split_node.coordinates_m, [1.0 / 3.0, 1.0 / 3.0, 0.0]);
+    assert_eq!(
+        split_node.coordinates_m.canonical_value(),
+        [1.0 / 3.0, 1.0 / 3.0, 0.0]
+    );
     assert_eq!(
         split_cavity.boundary_faces.len(),
         cavity.boundary_faces.len() + 2
@@ -61,7 +64,10 @@ fn boundary_face_barycentric_split_places_node_and_remains_refillable() {
     nodes.push(split_node.clone());
 
     assert_eq!(split_node.node_id, 4);
-    assert_eq!(split_node.coordinates_m, [0.25, 0.25, 0.0]);
+    assert_eq!(
+        split_node.coordinates_m.canonical_value(),
+        [0.25, 0.25, 0.0]
+    );
     validate_constrained_cavity(&split_cavity).expect("split cavity should remain valid");
     let evaluation =
         evaluate_constrained_cavity_refill_candidates(&split_cavity, &nodes, &[], refill_options())
@@ -116,8 +122,14 @@ fn boundary_face_centroid_split_refines_adjacent_face_pair_and_remains_refillabl
     assert_eq!(split_nodes.len(), 2);
     assert_eq!(split_nodes[0].node_id, 4);
     assert_eq!(split_nodes[1].node_id, 5);
-    assert_eq!(split_nodes[0].coordinates_m, [1.0 / 3.0, 1.0 / 3.0, 0.0]);
-    assert_eq!(split_nodes[1].coordinates_m, [1.0 / 3.0, 0.0, 1.0 / 3.0]);
+    assert_eq!(
+        split_nodes[0].coordinates_m.canonical_value(),
+        [1.0 / 3.0, 1.0 / 3.0, 0.0]
+    );
+    assert_eq!(
+        split_nodes[1].coordinates_m.canonical_value(),
+        [1.0 / 3.0, 0.0, 1.0 / 3.0]
+    );
     assert_eq!(
         split_cavity.boundary_faces.len(),
         cavity.boundary_faces.len() + 4

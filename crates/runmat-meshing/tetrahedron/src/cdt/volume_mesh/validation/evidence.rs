@@ -213,6 +213,7 @@ fn validate_node(node: DelaunayVolumeNode) -> Result<(), DelaunayVolumeMeshError
     if node.identity == StableDigest::ZERO
         || node
             .coordinates_m
+            .canonical_value()
             .iter()
             .any(|coordinate| !coordinate.is_finite())
     {

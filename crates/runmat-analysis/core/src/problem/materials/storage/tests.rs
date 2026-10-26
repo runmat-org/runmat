@@ -11,7 +11,7 @@ fn retained_material_buffers_include_unused_electrical_capacity() {
     let baseline = material.owned_buffer_bytes().unwrap();
     let mut response = Vec::with_capacity(128);
     response.push(ConductivityFrequencyPoint {
-        frequency_hz: 1.0,
+        frequency_hz: runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency,_>::new(1.0),
         conductivity_scale: 1.0,
         dispersive_loss_scale: None,
         relative_permittivity_scale: None,
@@ -20,11 +20,11 @@ fn retained_material_buffers_include_unused_electrical_capacity() {
     response.clear();
     let allocated = response.capacity() * std::mem::size_of::<ConductivityFrequencyPoint>();
     material.electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 298.15,
-        conductivity_s_per_m: 1.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(298.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
         conductivity_frequency_response: response,
     });
     assert_eq!(

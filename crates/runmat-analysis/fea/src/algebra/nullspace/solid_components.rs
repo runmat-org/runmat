@@ -87,7 +87,10 @@ mod tests {
         mesh.topology.nodes.push(SolverMeshNode {
             node_id,
             stable_identity: StableDigest([node_id as u8; 32]),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             provenance: mesh.topology.nodes[0].provenance.clone(),
             exact_parameters: Vec::new(),
         });

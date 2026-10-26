@@ -272,7 +272,10 @@ fn authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium() {
                     .zip(&render_mesh.vertex_volume_node_indices)
                 {
                     if let Some(index) = index {
-                        assert_eq!(*vertex, mesh.topology.nodes[*index].coordinates_m);
+                        assert_eq!(
+                            *vertex,
+                            mesh.topology.nodes[*index].coordinates_m.canonical_value()
+                        );
                     }
                 }
             }

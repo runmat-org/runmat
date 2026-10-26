@@ -209,7 +209,7 @@ fn both_orders_native_solve_recovery_complex_observation_state_and_accuracy_cold
             .response()
             .samples
             .iter()
-            .flat_map(|s| s.electric_field_v_per_m)
+            .flat_map(|s| s.electric_field_v_per_m.canonical_value())
             .flat_map(|v| [v.real, v.imaginary])
             .collect::<Vec<_>>();
         assert_eq!(

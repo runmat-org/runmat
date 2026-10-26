@@ -25,14 +25,14 @@ pub(crate) fn fixture(
     model.constraints.clear();
     model.materials[0].elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
-            youngs_modulus_pa: 1200.0,
-            poisson_ratio: 0.25,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(1200.0),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
         },
     ));
     model.materials[0].plastic = if plastic {
         Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: 5.0,
-            isotropic_hardening_modulus_pa: 30.0,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(5.0),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(30.0),
         })
     } else {
         None
@@ -69,7 +69,7 @@ fn affine_displacement(
         {
             u[initial.structural_dof_layout.index(i, kind).unwrap()] = gradient[axis]
                 .iter()
-                .zip(node.coordinates_m)
+                .zip(node.coordinates_m.canonical_value())
                 .map(|(g, x)| g * x)
                 .sum();
         }
@@ -89,7 +89,7 @@ fn constant_stress_force(
         .nodes
         .iter()
         .enumerate()
-        .map(|(i, n)| (n.node_id, (i, n.coordinates_m)))
+        .map(|(i, n)| (n.node_id, (i, n.coordinates_m.canonical_value())))
         .collect::<BTreeMap<_, _>>();
     let mut force = vec![0.0; initial.dof_count];
     let sigma = [
@@ -193,7 +193,7 @@ fn elastic_constant_strain_matches_independent_stress_energy_and_traction_both_o
         let energy_density = 0.5 * strain.iter().zip(stress).map(|(e, s)| e * s).sum::<f64>();
         let evidence = &evaluation.element_evidence[0];
         assert!((evidence.volume_m3 - 1.0 / 6.0).abs() < 1e-13);
-        assert!((evidence.elastic_energy_j - energy_density / 6.0).abs() < 1e-12);
+        assert!((evidence.elastic_energy_j.canonical_value() - energy_density / 6.0).abs() < 1e-12);
         assert_eq!(evaluation.trial_state, committed);
     }
 }

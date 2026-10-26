@@ -63,7 +63,8 @@ impl AcousticFrequencyWorkload {
                 "acoustic frequency workload requires an authored frequency domain",
             ));
         };
-        FrequencyResponsePlan::new(template.frequency.hertz, frequencies, &[]).map_err(invalid)
+        FrequencyResponsePlan::new(template.frequency.canonical_value(), frequencies, &[])
+            .map_err(invalid)
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
@@ -199,7 +200,7 @@ impl AcousticFrequencyResult {
         for result in results {
             result.validate()?;
             if by_frequency
-                .insert(result.frequency().hertz.to_bits(), result)
+                .insert(result.frequency().canonical_value().to_bits(), result)
                 .is_some()
             {
                 return Err(invalid(

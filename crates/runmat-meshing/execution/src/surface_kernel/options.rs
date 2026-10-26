@@ -69,7 +69,12 @@ pub(super) fn surface_options(
 pub(crate) fn surface_join_options(host: &crate::MeshingHostWorkload) -> ExactFaceJoinOptions {
     let resources = &host.resolved_request.limits;
     ExactFaceJoinOptions {
-        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+        coordinate_tolerance_m: runmat_types::physical::Length::new(
+            host.resolved_request
+                .tolerance
+                .absolute_floor_m
+                .canonical_value(),
+        ),
         maximum_nodes: resources.maximum_nodes,
         maximum_triangles: resources.maximum_elements,
         maximum_boundary_segments: resources.maximum_elements,
@@ -81,7 +86,12 @@ pub(crate) fn exact_surface_join_options(
 ) -> ExactSurfaceJoinOptions {
     let resources = &host.resolved_request.limits;
     ExactSurfaceJoinOptions {
-        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+        coordinate_tolerance_m: runmat_types::physical::Length::new(
+            host.resolved_request
+                .tolerance
+                .absolute_floor_m
+                .canonical_value(),
+        ),
         maximum_nodes: resources.maximum_nodes,
         maximum_triangles: resources.maximum_elements,
         maximum_boundary_segments: resources.maximum_elements,

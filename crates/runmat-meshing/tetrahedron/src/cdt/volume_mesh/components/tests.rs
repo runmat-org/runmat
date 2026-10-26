@@ -101,8 +101,11 @@ fn multiple_components_match_original_assembly_and_merge_shared_provenance() {
     // Disjoint cells sharing an original boundary node exercise identity merging.
     // Reflect one tetrahedral component across its original corner.
     for node in &mut second.topology.nodes {
-        if node.coordinates_m != [0.0; 3] {
-            node.coordinates_m = node.coordinates_m.map(|value| -value);
+        if node.coordinates_m.canonical_value() != [0.0; 3] {
+            node.coordinates_m =
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    node.coordinates_m.canonical_value().map(|value| -value),
+                );
             let mut bytes = *node.identity.bytes();
             bytes[0] ^= 0xff;
             node.identity = StableDigest::from_bytes(bytes);
@@ -129,7 +132,17 @@ fn multiple_components_match_original_assembly_and_merge_shared_provenance() {
 fn conflicting_identity_and_cancelled_handoff_reject() {
     let first = component();
     let mut second = first.clone();
-    second.topology.nodes[0].coordinates_m[0] += 1.0;
+    {
+        let quantity_change = 1.0;
+        let quantity_index = 0;
+        let quantity_slot = &mut second.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         assemble(
             vec![first, second],

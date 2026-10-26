@@ -12,8 +12,8 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     else {
         panic!("fixture elasticity")
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     model.constraints = mesh
         .topology
         .nodes
@@ -25,7 +25,10 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
                 kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
                     target: RegionTarget::point(format!("node:{}", node.node_id)),
                     translations: [
-                        (StructuralTranslationDof::Ux, 0.02 * node.coordinates_m[0]),
+                        (
+                            StructuralTranslationDof::Ux,
+                            0.02 * node.coordinates_m.canonical_value()[0],
+                        ),
                         (StructuralTranslationDof::Uy, 0.0),
                         (StructuralTranslationDof::Uz, 0.0),
                     ]
@@ -203,7 +206,7 @@ pub(super) fn lineage(
         mutations: vec![SolverMeshAdaptationMutation {
             source_mark_identity: Some(parent.stable_identity),
             node_identity: inserted.stable_identity,
-            node_coordinates_m: inserted.coordinates_m,
+            node_coordinates_m: inserted.coordinates_m.canonical_value(),
             removed_cells: vec![parent],
             created_cells: children,
         }],
@@ -236,7 +239,11 @@ pub(super) fn assert_affine_original(
         .unwrap();
     assert_eq!(displacements.len(), mesh.topology.nodes.len() * 3);
     for (values, node) in displacements.chunks_exact(3).zip(&mesh.topology.nodes) {
-        for (actual, expected) in values.iter().zip([0.02 * node.coordinates_m[0], 0.0, 0.0]) {
+        for (actual, expected) in
+            values
+                .iter()
+                .zip([0.02 * node.coordinates_m.canonical_value()[0], 0.0, 0.0])
+        {
             assert!((actual - expected).abs() < 1e-12);
         }
     }

@@ -468,14 +468,10 @@ fn fixture() -> (
     model.response_spectra = spectra;
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let volume_region = PersistentEntityId::new(
-        PersistentEntityKind::Region,
-        model.material_assignments[0]
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        vec!["root".into()],
-    );
+    let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     for (face_index, region) in [(0, "root"), (1, "tip"), (3, "dynamic_force")] {
@@ -543,7 +539,10 @@ fn fixture() -> (
 fn spectrum(id: &str, direction: [f64; 3]) -> ResponseSpectrum {
     ResponseSpectrum {
         spectrum_id: ResponseSpectrumId(id.into()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0e-3, 1.0e8]),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![1.0e-3, 1.0e8])),
         ordinates: runmat_analysis_core::NumericalDataSource::authored(
             vec![1.0e-3, 1.0e-3],
             format!("sha256:{id}"),

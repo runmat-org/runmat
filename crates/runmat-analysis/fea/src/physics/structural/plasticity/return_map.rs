@@ -86,8 +86,8 @@ pub(super) fn update(
     let mut dissipation = 0.0;
     let hardening = model.plastic.map_or(0.0, |law| law.modulus_pa);
     if let Some(law) = model.plastic {
-        let current_yield =
-            law.yield_stress_pa + law.modulus_pa * committed.equivalent_plastic_strain;
+        let current_yield = law.yield_stress_pa.canonical_value()
+            + law.modulus_pa * committed.equivalent_plastic_strain;
         if !current_yield.is_finite() {
             return Err(PlasticityError::NonFiniteResponse);
         }
@@ -101,7 +101,7 @@ pub(super) fn update(
                 *value +=
                     if i < 3 { 1.5 } else { 3.0 } * increment * deviator[i] / equivalent_trial;
             }
-            dissipation = law.yield_stress_pa * increment;
+            dissipation = law.yield_stress_pa.canonical_value() * increment;
             // Differentiate sigma = K tr(e) I + beta*s_trial with committed history fixed.
             // dq/de_engineering = 3G*s_trial/q. The rank-one term is symmetric because
             // physical stress and engineering strain are energy-conjugate six-vectors.

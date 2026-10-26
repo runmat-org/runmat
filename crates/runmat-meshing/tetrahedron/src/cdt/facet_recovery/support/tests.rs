@@ -37,7 +37,7 @@ fn captured_rounded_facet_recovers_every_original_edge_without_a_degenerate_ear(
     nodes[fixture.split_node].construction = Point3Construction::Segment {
         endpoints: fixture
             .split_endpoints
-            .map(|index| nodes[index].coordinates_m),
+            .map(|index| nodes[index].coordinates_m.canonical_value()),
         parameter_numerator: fixture.parameter_numerator,
         parameter_exponent: fixture.parameter_exponent,
     };
@@ -52,7 +52,7 @@ fn captured_rounded_facet_recovers_every_original_edge_without_a_degenerate_ear(
                 .map(|edges| edges.into_iter().collect::<BTreeSet<_>>()),
         )
         .collect::<BTreeMap<_, _>>();
-    let mut apex = nodes[0].coordinates_m;
+    let mut apex = nodes[0].coordinates_m.canonical_value();
     apex[0] += 0.01;
     nodes.push(DelaunayVolumeNode::explicit(
         StableDigest::from_bytes([5; 32]),

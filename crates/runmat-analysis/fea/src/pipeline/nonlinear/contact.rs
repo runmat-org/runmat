@@ -109,7 +109,7 @@ pub(super) fn prepare_inputs(
         .materials
         .iter()
         .filter_map(|material| material.require_mechanical().ok())
-        .map(|mechanical| mechanical.youngs_modulus_pa)
+        .map(|mechanical| mechanical.youngs_modulus_pa.canonical_value())
         .fold(f64::INFINITY, f64::min);
     if !youngs.is_finite() || youngs <= 0.0 {
         return Err(FeaRunError::InvalidModel(
@@ -131,7 +131,7 @@ pub(super) fn prepare_inputs(
                 })
             })
             .fold((0.0, 0usize), |(area, count), face| {
-                (area + face.area_m2, count + 1)
+                (area + face.area_m2.canonical_value(), count + 1)
             });
         if count == 0 || !(area > 0.0) {
             return Err(FeaRunError::InvalidModel(format!(

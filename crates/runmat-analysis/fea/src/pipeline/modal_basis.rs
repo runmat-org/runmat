@@ -1,4 +1,6 @@
 mod metrics;
+mod coordinates;
+pub use coordinates::{ModalBasisCoordinates, ModalShapeLayout};
 
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -22,7 +24,7 @@ use metrics::{
     residual_directions_are_canonical, scalar_close,
 };
 
-const MODAL_BASIS_PREFIX: &[u8] = b"runmat-fea-modal-basis/v1\0";
+const MODAL_BASIS_PREFIX: &[u8] = b"runmat-fea-modal-basis/v2\0";
 const MODAL_BASIS_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
 
@@ -115,6 +117,8 @@ pub struct ModalBasisArtifact {
     source_run: AnalysisRunIdentity,
     operator_digest: Digest,
     node_count: usize,
+    #[serde(with = "coordinates::shared_wire")]
+    coordinates: std::sync::Arc<ModalBasisCoordinates>,
     modes: Vec<ModalBasisMode>,
     residual_vectors: Vec<ModalResidualVector>,
     total_free_mass: [f64; 3],
@@ -131,6 +135,8 @@ struct ModalBasisArtifactData {
     source_run: AnalysisRunIdentity,
     operator_digest: Digest,
     node_count: usize,
+    #[serde(with = "coordinates::shared_wire")]
+    coordinates: std::sync::Arc<ModalBasisCoordinates>,
     modes: Vec<ModalBasisMode>,
     residual_vectors: Vec<ModalResidualVector>,
     total_free_mass: [f64; 3],
@@ -159,6 +165,7 @@ impl TryFrom<ModalBasisArtifactData> for ModalBasisArtifact {
             source_run: data.source_run,
             operator_digest: data.operator_digest,
             node_count: data.node_count,
+            coordinates: data.coordinates,
             modes: data.modes,
             residual_vectors: data.residual_vectors,
             total_free_mass: data.total_free_mass,
@@ -286,6 +293,9 @@ impl ModalBasisArtifact {
             source_run,
             operator_digest,
             node_count: summary.structural_dof_layout.node_count(),
+            coordinates: std::sync::Arc::new(ModalBasisCoordinates::for_layout(
+                summary.structural_dof_layout.clone(),
+            )),
             modes,
             residual_vectors: Vec::new(),
             total_free_mass,
@@ -310,6 +320,24 @@ impl ModalBasisArtifact {
     }
     pub const fn node_count(&self) -> usize {
         self.node_count
+    }
+    pub fn coordinates(&self) -> &ModalBasisCoordinates {
+        &self.coordinates
+    }
+    pub(crate) fn shared_coordinates(&self) -> std::sync::Arc<ModalBasisCoordinates> {
+        std::sync::Arc::clone(&self.coordinates)
+    }
+    pub fn mode_shape_field(
+        &self,
+        index: usize,
+    ) -> Result<runmat_types::physical::QuantityField<ModalShapeLayout<'_>, &[f64]>, FeaRunError>
+    {
+        let mode = self.modes.get(index).ok_or_else(|| {
+            FeaRunError::Assembly("modal coordinate index is out of bounds".into())
+        })?;
+        self.coordinates
+            .shape_field(&mode.dof_shape)
+            .map_err(|error| FeaRunError::Assembly(error.into()))
     }
     pub fn modes(&self) -> &[ModalBasisMode] {
         &self.modes
@@ -351,7 +379,9 @@ impl ModalBasisArtifact {
 
     pub fn validate_for(&self, summary: &AssemblySummary) -> Result<(), FeaRunError> {
         self.validate()?;
-        if self.operator_digest != crate::assembly::identity::structural_operator_digest(summary)?
+        if self.coordinates.full_dof_layout() != &summary.structural_dof_layout
+            || self.operator_digest
+                != crate::assembly::identity::structural_operator_digest(summary)?
             || self
                 .modes
                 .iter()
@@ -410,6 +440,18 @@ impl ModalBasisArtifact {
     }
 
     pub(crate) fn validate(&self) -> Result<(), FeaRunError> {
+        self.coordinates
+            .validate()
+            .map_err(|error| FeaRunError::Assembly(error.into()))?;
+        if self.coordinates.full_dof_layout().node_count() != self.node_count
+            || self.modes.iter().any(|mode| {
+                mode.dof_shape.len() != self.coordinates.full_dof_layout().total_dof_count()
+            })
+        {
+            return Err(FeaRunError::Assembly(
+                "modal transform dimensions disagree with retained full layout".into(),
+            ));
+        }
         let count = self.modes.len();
         let valid_scalar = |value: f64| value.is_finite();
         let frequencies = self
@@ -541,6 +583,7 @@ impl ModalBasisArtifact {
                 &self.source_run,
                 self.operator_digest,
                 self.node_count,
+                self.coordinates.as_ref(),
                 &self.modes,
                 &self.residual_vectors,
                 self.total_free_mass,

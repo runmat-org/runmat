@@ -54,9 +54,9 @@ pub(super) fn discretize_degenerate_edge(
             .map_err(|error| geometry_error(edge, error))?;
         let point = curves
             .point(&edge.curve_evaluator_id, parameter, control)
-            .map(|point| transform.transform_point(point))
+            .map(|point| transform.transform_point(point.canonical_value()))
             .map_err(|error| geometry_error(edge, error))?;
-        if norm(sub(point, anchor)) > options.geometry_absolute_error_m {
+        if norm(sub(point, anchor)) > options.geometry_absolute_error_m.canonical_value() {
             return Err(edge_error(
                 edge,
                 SharedCurveErrorKind::GeometricMismatch,
@@ -73,8 +73,11 @@ pub(super) fn discretize_degenerate_edge(
             node_id,
             source_vertex_id: edge.start_vertex_id.clone(),
             parameter,
-            arc_length_m: 0.0,
-            coordinates_m: anchor,
+            arc_length_m: runmat_types::physical::Length::new(0.0),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(anchor),
         })
         .collect();
     let face_uses = face_uses_for_parameters(
@@ -93,7 +96,7 @@ pub(super) fn discretize_degenerate_edge(
         face_uses,
         requested: options.resolution,
         achieved: CurveResolutionEvidence {
-            maximum_chordal_deviation_m: 0.0,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
             maximum_tangent_change_rad: 0.0,
             minimum_metric_edge_length: 0.0,
             maximum_metric_edge_length: 0.0,

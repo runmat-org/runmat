@@ -19,9 +19,13 @@ fn elevate(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
                     stable_identity: solver_midside_node_identity(
                         endpoints.map(|n| n.stable_identity),
                     ),
-                    coordinates_m: std::array::from_fn(|i| {
-                        0.5 * (endpoints[0].coordinates_m[i] + endpoints[1].coordinates_m[i])
-                    }),
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(std::array::from_fn(|i| {
+                        0.5 * (endpoints[0].coordinates_m.canonical_value()[i]
+                            + endpoints[1].coordinates_m.canonical_value()[i])
+                    })),
                     provenance: vec![region()],
                     exact_parameters: Vec::new(),
                 };
@@ -92,13 +96,13 @@ fn quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage() {
             .topology
             .nodes
             .iter()
-            .map(|n| (n.stable_identity, n.coordinates_m))
+            .map(|n| (n.stable_identity, n.coordinates_m.canonical_value()))
             .collect::<BTreeMap<_, _>>();
         let target_nodes = target
             .topology
             .nodes
             .iter()
-            .map(|n| (n.stable_identity, n.coordinates_m))
+            .map(|n| (n.stable_identity, n.coordinates_m.canonical_value()))
             .collect::<BTreeMap<_, _>>();
         assert_eq!(
             result.transfer_map.node_transfers.len(),
@@ -143,7 +147,17 @@ fn quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage() {
                 .iter()
                 .any(|t| t.sources.iter().any(|s| s.weight < 0.0)));
             let mut curved = source.clone();
-            curved.topology.nodes[4].coordinates_m[2] += 0.01;
+            {
+                let quantity_change = 0.01;
+                let quantity_index = 2;
+                let quantity_slot = &mut curved.topology.nodes[4].coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
             curved.seal_canonical_digest().unwrap();
             assert_eq!(
                 build(
@@ -280,13 +294,13 @@ fn quadratic_coarsening_preserves_original_nodal_inventory() {
         .topology
         .nodes
         .iter()
-        .map(|n| (n.stable_identity, n.coordinates_m))
+        .map(|n| (n.stable_identity, n.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     assert!(restored
         .topology
         .nodes
         .iter()
-        .all(|n| retained.get(&n.stable_identity) == Some(&n.coordinates_m)));
+        .all(|n| retained.get(&n.stable_identity) == Some(&n.coordinates_m.canonical_value())));
     reverse
         .lineage
         .validate_against(&refined, &restored, &reverse.transfer_map)

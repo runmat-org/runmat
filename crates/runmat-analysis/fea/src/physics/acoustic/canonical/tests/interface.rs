@@ -43,16 +43,17 @@ fn outward_recovered_power(result: &CanonicalAcousticResponse, target: &str) -> 
     let mut power = 0.0;
     for face in result
         .projection
-        .boundary_faces_for_target(&RegionTarget::boundary(target))
+        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
     {
-        let velocity = &result.element_velocity_m_per_s[face.adjacent_element_indices[0]];
+        let velocity =
+            &result.element_velocity_m_per_s.canonical_values()[face.adjacent_element_indices[0]];
         result
             .projection
             .visit_boundary_quadrature(face, |point| {
                 let mut pressure = [0.0; 2];
                 for (&index, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                    pressure[0] += shape * result.pressure_pa[index].real;
-                    pressure[1] += shape * result.pressure_pa[index].imaginary;
+                    pressure[0] += shape * result.pressure_pa.canonical_values()[index].real;
+                    pressure[1] += shape * result.pressure_pa.canonical_values()[index].imaginary;
                 }
                 for (i, area) in point.area_vector_weight_m2.iter().enumerate() {
                     power += 0.5
@@ -179,8 +180,11 @@ pub(super) fn two_medium(
     if rotated {
         let a = std::f64::consts::FRAC_1_SQRT_2;
         for node in &mut mesh.topology.nodes {
-            let [x, y, z] = node.coordinates_m;
-            node.coordinates_m = [a * (x - y), a * (x + y), z];
+            let [x, y, z] = node.coordinates_m.canonical_value();
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([a * (x - y), a * (x + y), z]);
         }
     }
     let mut model = model();
@@ -195,13 +199,13 @@ pub(super) fn two_medium(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "total_inlet_pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "matched_transmitted_medium".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(Z2),
         },
@@ -217,7 +221,9 @@ pub(super) fn two_medium(
             .iter()
             .map(|id| {
                 axial(
-                    mesh.topology.nodes[*id as usize - 1].coordinates_m,
+                    mesh.topology.nodes[*id as usize - 1]
+                        .coordinates_m
+                        .canonical_value(),
                     direction,
                 )
             })
@@ -238,19 +244,21 @@ pub(super) fn two_medium(
         .collect();
     mesh.seal_canonical_digest().unwrap();
     mesh.validate().unwrap();
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0]
         .acoustic
         .as_mut()
         .unwrap()
-        .speed_of_sound_m_per_s = 2.0;
-    model.material_assignments[0].target = PropertyRegionTarget::solid("incident_medium");
+        .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(2.0);
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("incident_medium"));
     let mut right = model.materials[0].clone();
     right.material_id = "transmitted_fluid".into();
-    right.mass_density_kg_per_m3 = Some(5.0);
-    right.acoustic.as_mut().unwrap().speed_of_sound_m_per_s = 4.0;
+    right.mass_density_kg_per_m3 = (Some(5.0)).map(runmat_types::physical::MassDensity::new);
+    right.acoustic.as_mut().unwrap().speed_of_sound_m_per_s =
+        runmat_types::physical::SpeedOfSound::new(4.0);
     let mut assignment = model.material_assignments[0].clone();
-    assignment.target = PropertyRegionTarget::solid("transmitted_medium");
+    assignment.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("transmitted_medium"));
     assignment.assigned_material_id = right.material_id.clone();
     assignment.expected_material_id = right.material_id.clone();
     model.materials.push(right);
@@ -298,24 +306,28 @@ fn two_fluid_interface_pressure_mean_velocity_and_power_refine() {
                         .projection
                         .nodes
                         .iter()
-                        .zip(&result.pressure_pa)
+                        .zip(result.pressure_pa.canonical_values())
                         .map(|(node, p)| {
-                            let reference =
-                                exact_pressure(axial(node.coordinates_m, direction), amplitude);
+                            let reference = exact_pressure(
+                                axial(node.coordinates_m.canonical_value(), direction),
+                                amplitude,
+                            );
                             (p.real - reference[0]).powi(2) + (p.imaginary - reference[1]).powi(2)
                         })
                         .sum::<f64>()
-                        / result.pressure_pa.len() as f64)
+                        / result.pressure_pa.canonical_values().len() as f64)
                         .sqrt();
                     let velocity = (result
                         .projection
                         .elements
                         .iter()
-                        .zip(&result.element_velocity_m_per_s)
+                        .zip(result.element_velocity_m_per_s.canonical_values())
                         .map(|(element, v)| {
                             let xs = std::array::from_fn(|i| {
                                 axial(
-                                    result.projection.nodes[element.node_indices[i]].coordinates_m,
+                                    result.projection.nodes[element.node_indices[i]]
+                                        .coordinates_m
+                                        .canonical_value(),
                                     direction,
                                 )
                             });
@@ -344,10 +356,12 @@ fn two_fluid_interface_pressure_mean_velocity_and_power_refine() {
                             && velocity < 0.01
                             && inlet < 0.0
                             && outlet > 0.0
-                            && result.mean_impedance_loss_w > 0.0
+                            && result.mean_impedance_loss_w.canonical_value() > 0.0
                             && (inlet + expected_power).abs() < 0.005
                             && (outlet - expected_power).abs() < 0.005
-                            && (result.mean_impedance_loss_w - expected_power).abs() < 0.005)
+                            && (result.mean_impedance_loss_w.canonical_value() - expected_power)
+                                .abs()
+                                < 0.005)
                     {
                         failures.push(format!("independent finest field/power gate q={quadratic} rotated={rotated} phase={phase}"));
                     }

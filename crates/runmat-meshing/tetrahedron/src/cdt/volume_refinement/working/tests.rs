@@ -67,7 +67,7 @@ fn production_local_refinement_work_is_independent_of_unrelated_mesh_inventory()
                 scoped_work,
                 inserted
                     .iter()
-                    .map(|node| node.coordinates_m)
+                    .map(|node| node.coordinates_m.canonical_value())
                     .collect::<Vec<_>>(),
             );
             if let Some(expected) = &baseline {

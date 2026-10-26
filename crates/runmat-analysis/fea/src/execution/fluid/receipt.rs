@@ -150,8 +150,10 @@ pub struct FluidNumericalReceipt {
     pub flux_constitutive_relative: f64,
     pub global_momentum_relative: f64,
     pub maximum_cell_momentum_relative: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Signed physical flux, not a dimensionless tolerance or fabricated accuracy.
-    pub global_boundary_flux_m3_per_s: f64,
+    pub global_boundary_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, f64>,
     /// Requested analytic bounds, NOT measured allocator/operator usage.
     pub reservation: CanonicalFluidReservation,
     pub preparation_resident_bytes: u64,
@@ -194,8 +196,8 @@ impl FluidNumericalReceiptArtifact {
         result.validate_for(w, mesh)?;
         let original = result.original();
         let r = &original.residual;
-        let cells = original.velocity_m_per_s.len() as u64;
-        let faces = original.face_volume_flux_m3_per_s.len() as u64;
+        let cells = original.velocity_m_per_s.canonical_values().len() as u64;
+        let faces = original.face_volume_flux_m3_per_s.canonical_values().len() as u64;
         let boundary_faces = mesh.topology.boundary_faces.len() as u64;
         let receipt = FluidNumericalReceipt {
             producer: result.producer_identity(),
@@ -226,7 +228,12 @@ impl FluidNumericalReceiptArtifact {
                 .iter()
                 .copied()
                 .fold(0.0, f64::max),
-            global_boundary_flux_m3_per_s: r.global_boundary_flux_m3_per_s,
+            global_boundary_flux_m3_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::VolumeFlowRate,
+                _,
+            >::new(
+                r.global_boundary_flux_m3_per_s.canonical_value()
+            ),
             reservation: result.reservation(),
             preparation_resident_bytes: result.preparation_resident_bytes(),
         };
@@ -284,7 +291,10 @@ impl FluidNumericalReceiptArtifact {
             ]
             .into_iter()
             .all(within)
-            || !r.global_boundary_flux_m3_per_s.is_finite()
+            || !r
+                .global_boundary_flux_m3_per_s
+                .canonical_value()
+                .is_finite()
             || self.identity != receipt_identity(self.source_workload, self.source_result, &r)?
         {
             return Err(invalid(

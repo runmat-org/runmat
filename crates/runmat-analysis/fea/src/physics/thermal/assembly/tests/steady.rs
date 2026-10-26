@@ -30,7 +30,7 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                     vec!["root".into()],
                 ));
                 face.provenance.sort();
-                let target = RegionTarget::boundary(name.clone());
+                let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name.clone())));
                 if mixed_anchors && component > 0 {
                     model.boundaries.push(AnalysisBoundary {
                         boundary_id: name,
@@ -72,13 +72,15 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                 .steady_reference_temperatures(&model, ExcitationSamplePoint::Static, 293.15)
                 .unwrap();
             for (node, &temperature) in assembly.projection.nodes.iter().zip(&reference) {
-                let component = (node.coordinates_m[0] / 2.0).floor();
+                let component = (node.coordinates_m.canonical_value()[0] / 2.0).floor();
                 assert_eq!(temperature, 300.0 + 40.0 * component);
             }
             let operator = assembly
                 .steady_increment_operator(&model, ExcitationSamplePoint::Static, &reference)
                 .unwrap();
-            assert!(operator.nullspace_evidence().is_some());
+            assert!(operator
+                .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+                .is_some());
             assert!(operator.load().iter().all(|&power| power == 0.0));
             let solve = solve_operator_system(
                 &operator,
@@ -99,7 +101,7 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                     0.0,
                 )
                 .unwrap();
-            assert_eq!(energy.residual_w, 0.0);
+            assert_eq!(energy.residual_w.canonical_value(), 0.0);
             assert_eq!(energy.relative_residual, 0.0);
 
             // Reference choice must never turn a freely floating body into an anchored one.
@@ -115,7 +117,9 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
             let operator = unanchored
                 .steady_increment_operator(&model, ExcitationSamplePoint::Static, &reference)
                 .unwrap();
-            assert!(operator.nullspace_evidence().is_none());
+            assert!(operator
+                .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+                .is_none());
             match operator.prepare_linear() {
                 Ok(prepared) => assert!(crate::algebra::validate_prepared_solver_compatibility(
                     &prepared,
@@ -147,8 +151,14 @@ fn component_reference_preserves_dirichlet_contrasts_within_a_connected_body() {
             ExcitationSamplePoint::Static,
         )
         .unwrap();
-        assembly.prescribed_temperature_k[0] = Some(300.0);
-        assembly.prescribed_temperature_k[1] = Some(400.0);
+        assembly
+            .prescribed_temperature_k
+            .try_replace(0, runmat_types::physical::Quantity::new(Some(300.0)))
+            .unwrap();
+        assembly
+            .prescribed_temperature_k
+            .try_replace(1, runmat_types::physical::Quantity::new(Some(400.0)))
+            .unwrap();
         let reference = assembly
             .steady_reference_temperatures(&model, ExcitationSamplePoint::Static, 293.15)
             .unwrap();
@@ -158,7 +168,9 @@ fn component_reference_preserves_dirichlet_contrasts_within_a_connected_body() {
             .unwrap();
         assert_eq!(operator.load()[0], 0.0);
         assert_eq!(operator.load()[1], 100.0);
-        assert!(operator.nullspace_evidence().is_some());
+        assert!(operator
+            .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+            .is_some());
         let mut invalid_reference = reference;
         invalid_reference[1] = 400.0;
         assert!(assembly

@@ -279,8 +279,8 @@ fn face_frames(fluid: &FiniteVolumeTopology) -> Vec<([f64; 3], f64)> {
         .iter()
         .map(|face| {
             (
-                face.owner_area_vector_m2.map(|x| x / face.area_m2),
-                face.area_m2,
+                face.owner_area_vector_m2.map(|x| x / face.area_m2.canonical_value()),
+                face.area_m2.canonical_value(),
             )
         })
         .collect()
@@ -472,11 +472,11 @@ impl FluidSteadySolverResult {
                 layout
                     .cells
                     .iter()
-                    .flat_map(|&cell| original.velocity_m_per_s[cell]),
+                    .flat_map(|&cell| original.velocity_m_per_s.canonical_values()[cell]),
             ),
-            Box::new(layout.cells.iter().map(|&cell| original.pressure_pa[cell])),
+            Box::new(layout.cells.iter().map(|&cell| original.pressure_pa.canonical_values()[cell])),
             Box::new(layout.faces.iter().map(|&(face, reversed)| {
-                let q = original.face_volume_flux_m3_per_s[face];
+                let q = original.face_volume_flux_m3_per_s.canonical_values()[face];
                 if reversed {
                     -q
                 } else {
@@ -488,7 +488,7 @@ impl FluidSteadySolverResult {
                 // Shear exerted by the owner fluid across the face: the negated tangential part
                 // of the viscous force on the owner, per unit area.
                 let (normal, area) = layout.face_frames[face];
-                let t = viscous[face];
+                let t = viscous.canonical_values()[face];
                 let tn = t[0] * normal[0] + t[1] * normal[1] + t[2] * normal[2];
                 let sign = if reversed { 1.0 } else { -1.0 };
                 std::array::from_fn::<f64, 3, _>(|k| sign * (t[k] - tn * normal[k]) / area)

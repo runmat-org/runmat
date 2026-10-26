@@ -26,7 +26,10 @@ pub(in crate::cdt::volume_sliver) fn smooth_vertex_star_points_with_metrics(
         .collect::<Vec<_>>();
     link_faces.sort_unstable_by_key(|face| face.map(|vertex| topology.node(vertex).identity));
     link_faces.dedup();
-    let start = topology.node((source_index) as u32).coordinates_m;
+    let start = topology
+        .node((source_index) as u32)
+        .coordinates_m
+        .canonical_value();
     let initial_score = prepared.score(start);
     let mut results = Vec::new();
     for step in CAVITY_SMOOTHING_STEPS {
@@ -44,7 +47,7 @@ pub(in crate::cdt::volume_sliver) fn smooth_vertex_star_points_with_metrics(
             for face in link_faces.iter().take(MAXIMUM_CAVITY_SEARCH_DIRECTIONS) {
                 let centroid: [f64; 3] = std::array::from_fn(|axis| {
                     face.iter()
-                        .map(|vertex| topology.node(*vertex).coordinates_m[axis])
+                        .map(|vertex| topology.node(*vertex).coordinates_m.canonical_value()[axis])
                         .sum::<f64>()
                         / 3.0
                 });
@@ -113,7 +116,10 @@ pub(in crate::cdt::volume_sliver) fn pattern_search_vertex_star_with_metrics(
     prepared: &PreparedStar,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<[f64; 3]>, DelaunayVolumeSliverError> {
-    let source = topology.node((source_index) as u32).coordinates_m;
+    let source = topology
+        .node((source_index) as u32)
+        .coordinates_m
+        .canonical_value();
     let mut neighbors = star
         .iter()
         .flat_map(|tetrahedron| topology.cell(*tetrahedron).vertex_indices)
@@ -127,6 +133,7 @@ pub(in crate::cdt::volume_sliver) fn pattern_search_vertex_star_with_metrics(
             topology
                 .node(vertex)
                 .coordinates_m
+                .canonical_value()
                 .into_iter()
                 .zip(source)
                 .map(|(left, right)| (left - right) * (left - right))

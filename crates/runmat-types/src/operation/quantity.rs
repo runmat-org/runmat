@@ -1,30 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum QuantityDimension {
-    Dimensionless,
-    Length,
-    Area,
-    Volume,
-    Time,
-    Frequency,
-    Mass,
-    Density,
-    Temperature,
-    Velocity,
-    Acceleration,
-    Force,
-    Moment,
-    Pressure,
-    Energy,
-    Power,
-    HeatFlux,
-    ThermalConductivity,
-    HeatTransferCoefficient,
-    ElectricPotential,
-    ElectricCurrent,
-    MagneticFluxDensity,
-}
+/// Stable signature API name for the one checked physical descriptor authority.
+pub type QuantityDimension = crate::physical::DynamicDimension;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum OperationQuantityRule {

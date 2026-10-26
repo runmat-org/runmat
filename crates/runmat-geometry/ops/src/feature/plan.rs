@@ -123,9 +123,18 @@ fn resolve_operation(
             depth_m,
             height_m,
         } => Target::Box {
-            width_m: positive(parameters.scalar(width_m)?, "box width")?,
-            depth_m: positive(parameters.scalar(depth_m)?, "box depth")?,
-            height_m: positive(parameters.scalar(height_m)?, "box height")?,
+            width_m: runmat_types::physical::Length::new(positive(
+                parameters.length(width_m)?,
+                "box width",
+            )?),
+            depth_m: runmat_types::physical::Length::new(positive(
+                parameters.length(depth_m)?,
+                "box depth",
+            )?),
+            height_m: runmat_types::physical::Length::new(positive(
+                parameters.length(height_m)?,
+                "box height",
+            )?),
         },
         Source::Cylinder {
             radius_m,
@@ -133,14 +142,23 @@ fn resolve_operation(
             axis,
             origin_m,
         } => Target::Cylinder {
-            radius_m: positive(parameters.scalar(radius_m)?, "cylinder radius")?,
-            height_m: positive(parameters.scalar(height_m)?, "cylinder height")?,
+            radius_m: runmat_types::physical::Length::new(positive(
+                parameters.length(radius_m)?,
+                "cylinder radius",
+            )?),
+            height_m: runmat_types::physical::Length::new(positive(
+                parameters.length(height_m)?,
+                "cylinder height",
+            )?),
             axis: direction(parameters.vector(axis)?, "cylinder axis")?,
-            origin_m: parameters.vector(origin_m)?,
+            origin_m: parameters.position(origin_m)?,
         },
         Source::Sphere { radius_m, center_m } => Target::Sphere {
-            radius_m: positive(parameters.scalar(radius_m)?, "sphere radius")?,
-            center_m: parameters.vector(center_m)?,
+            radius_m: runmat_types::physical::Length::new(positive(
+                parameters.length(radius_m)?,
+                "sphere radius",
+            )?),
+            center_m: parameters.position(center_m)?,
         },
         Source::Transform { source, matrix } => Target::Transform {
             source: source.clone(),
@@ -159,7 +177,10 @@ fn resolve_operation(
             direction: axis,
         } => Target::Extrude {
             profile: profile.clone(),
-            distance_m: positive(parameters.scalar(distance_m)?, "extrusion distance")?,
+            distance_m: runmat_types::physical::Length::new(positive(
+                parameters.length(distance_m)?,
+                "extrusion distance",
+            )?),
             direction: direction(parameters.vector(axis)?, "extrusion direction")?,
         },
         Source::Revolve {
@@ -170,8 +191,11 @@ fn resolve_operation(
         } => Target::Revolve {
             profile: profile.clone(),
             axis: direction(parameters.vector(axis)?, "revolution axis")?,
-            origin_m: parameters.vector(origin_m)?,
-            angle_rad: positive(parameters.scalar(angle_rad)?, "revolution angle")?,
+            origin_m: parameters.position(origin_m)?,
+            angle_rad: runmat_types::physical::Angle::new(positive(
+                parameters.angle(angle_rad)?,
+                "revolution angle",
+            )?),
         },
         Source::Union { operands } => Target::Union {
             operands: operands.clone(),
@@ -191,10 +215,16 @@ fn resolve_operation(
             origin_m,
         } => Target::Hole {
             target: target.clone(),
-            radius_m: positive(parameters.scalar(radius_m)?, "hole radius")?,
-            depth_m: positive(parameters.scalar(depth_m)?, "hole depth")?,
+            radius_m: runmat_types::physical::Length::new(positive(
+                parameters.length(radius_m)?,
+                "hole radius",
+            )?),
+            depth_m: runmat_types::physical::Length::new(positive(
+                parameters.length(depth_m)?,
+                "hole depth",
+            )?),
             axis: direction(parameters.vector(axis)?, "hole axis")?,
-            origin_m: parameters.vector(origin_m)?,
+            origin_m: parameters.position(origin_m)?,
         },
         Source::Pocket {
             target,
@@ -204,7 +234,10 @@ fn resolve_operation(
         } => Target::Pocket {
             target: target.clone(),
             profile: profile.clone(),
-            depth_m: positive(parameters.scalar(depth_m)?, "pocket depth")?,
+            depth_m: runmat_types::physical::Length::new(positive(
+                parameters.length(depth_m)?,
+                "pocket depth",
+            )?),
             direction: direction(parameters.vector(axis)?, "pocket direction")?,
         },
         Source::Fillet {
@@ -214,7 +247,10 @@ fn resolve_operation(
         } => Target::Fillet {
             target: target.clone(),
             edges: edges.clone(),
-            radius_m: positive(parameters.scalar(radius_m)?, "fillet radius")?,
+            radius_m: runmat_types::physical::Length::new(positive(
+                parameters.length(radius_m)?,
+                "fillet radius",
+            )?),
         },
         Source::Chamfer {
             target,
@@ -223,7 +259,10 @@ fn resolve_operation(
         } => Target::Chamfer {
             target: target.clone(),
             edges: edges.clone(),
-            distance_m: positive(parameters.scalar(distance_m)?, "chamfer distance")?,
+            distance_m: runmat_types::physical::Length::new(positive(
+                parameters.length(distance_m)?,
+                "chamfer distance",
+            )?),
         },
         Source::RegenerateSource { parameters: values } => Target::RegenerateSource {
             parameters: values

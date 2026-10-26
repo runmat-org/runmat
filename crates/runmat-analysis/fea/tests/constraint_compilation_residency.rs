@@ -29,7 +29,8 @@ fn mixed_compilation_does_not_clone_unrelated_model_payload() {
         }
         mesh.canonical_digest = StableDigest::ZERO;
         mesh.seal_canonical_digest().unwrap();
-        let mut model = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+        let mut model =
+            mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m.canonical_value());
         let mut baseline = None;
         for bytes in [8, 1_048_576, 4_194_304] {
             model.geometry_id = "x".repeat(bytes);

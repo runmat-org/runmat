@@ -317,6 +317,12 @@ impl PipelineBundle {
             .map(|workgroup| (self.shader_source.as_ref(), workgroup))
     }
 
+    fn with_binary_launch(mut self, launch: FrozenLinearLaunch) -> Self {
+        self.shader_source = Cow::Owned(freeze_binary_source(&self.shader_source, launch));
+        self.linear_launch = Some(launch);
+        self
+    }
+
     fn with_linear_launch(mut self, tokens: FrozenShaderTokens) -> Self {
         self.shader_source = Cow::Owned(tokens.substitute(&self.shader_source));
         self.linear_launch = Some(tokens.linear());
@@ -608,7 +614,8 @@ impl WgpuPipelines {
                 }
                 NumericPrecision::F32 => BINARY_SHADER_F32.to_owned(),
             },
-        );
+        )
+        .with_binary_launch(linear_launch);
 
         let binary_broadcast = create_pipeline(
             access,
@@ -630,7 +637,8 @@ impl WgpuPipelines {
                 }
                 NumericPrecision::F32 => BINARY_BROADCAST_SHADER_F32.to_owned(),
             },
-        );
+        )
+        .with_binary_launch(linear_launch);
 
         let binary_max = create_pipeline(
             access,
@@ -649,6 +657,7 @@ impl WgpuPipelines {
                 crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
             ),
         )
+        .with_binary_launch(linear_launch)
         .requiring(ieee_word_features(precision));
         let binary_broadcast_max = create_pipeline(
             access,
@@ -667,6 +676,7 @@ impl WgpuPipelines {
                 crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
             ),
         )
+        .with_binary_launch(linear_launch)
         .requiring(ieee_word_features(precision));
 
         let binary_atan2 = (precision == NumericPrecision::F64).then(|| {
@@ -686,6 +696,7 @@ impl WgpuPipelines {
                     false,
                 ),
             )
+            .with_binary_launch(linear_launch)
             .requiring(ieee_word_features(precision))
         });
         let binary_broadcast_atan2 = (precision == NumericPrecision::F64).then(|| {
@@ -705,6 +716,7 @@ impl WgpuPipelines {
                     true,
                 ),
             )
+            .with_binary_launch(linear_launch)
             .requiring(ieee_word_features(precision))
         });
 
@@ -2393,6 +2405,16 @@ impl WgpuPipelines {
     }
 }
 
+fn freeze_binary_source(source: &str, launch: FrozenLinearLaunch) -> String {
+    let marker = "@workgroup_size(512)";
+    assert_eq!(
+        source.matches(marker).count(),
+        1,
+        "canonical binary launch ABI changed"
+    );
+    source.replace(marker, &format!("@workgroup_size({})", launch.workgroup()))
+}
+
 pub(crate) fn create_pipeline(
     access: &runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
@@ -2506,3 +2528,7 @@ mod feature_tests;
 #[cfg(test)]
 #[path = "pipelines/frozen_matmul_geometry_tests.rs"]
 mod frozen_matmul_geometry_tests;
+
+#[cfg(test)]
+#[path = "pipelines/binary_launch_tests.rs"]
+mod binary_launch_tests;

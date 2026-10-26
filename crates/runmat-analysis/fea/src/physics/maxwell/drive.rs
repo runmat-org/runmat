@@ -74,7 +74,7 @@ pub(super) fn model_length_m(projection: &AnalysisProjection) -> f64 {
 }
 
 pub(super) fn transparent(volume: &MaxwellVolumeData, omega: f64, length_m: f64) -> bool {
-    omega * volume.permeability_h_per_m * volume.conductivity_s_per_m * length_m * length_m < 1.0
+    omega * volume.permeability_h_per_m.canonical_value() * volume.conductivity_s_per_m.canonical_value() * length_m * length_m < 1.0
 }
 
 struct Terminal {
@@ -111,7 +111,7 @@ pub(super) fn compile(context: &DriveContext<'_>) -> Result<Vec<MaxwellTerminalD
     let positive: Vec<bool> = context
         .volumes
         .iter()
-        .map(|volume| volume.conductivity_s_per_m > 0.0)
+        .map(|volume| volume.conductivity_s_per_m.canonical_value() > 0.0)
         .collect();
     let candidates = conductor_components(context, &positive);
     let mut kept = BTreeSet::new();
@@ -410,7 +410,7 @@ fn build_drive(
     let mut rhs = vec![0.0; free.len()];
     for &e in elements {
         let data = &context.corner[e];
-        let sigma = context.volumes[e].conductivity_s_per_m;
+        let sigma = context.volumes[e].conductivity_s_per_m.canonical_value();
         for i in 0..4 {
             let Some(&row) = free.get(&data.corners[i]) else {
                 continue;
@@ -440,7 +440,7 @@ fn build_drive(
     let mut reaction: BTreeMap<usize, f64> = BTreeMap::new();
     for &e in elements {
         let data = &context.corner[e];
-        let sigma = context.volumes[e].conductivity_s_per_m;
+        let sigma = context.volumes[e].conductivity_s_per_m.canonical_value();
         let mut gradient = [0.0; 3];
         for i in 0..4 {
             let value = v0(data.corners[i]);

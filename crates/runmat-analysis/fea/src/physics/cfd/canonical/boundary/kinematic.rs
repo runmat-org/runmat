@@ -58,7 +58,7 @@ pub(super) fn compile<'a>(
             }
         }
         let sampled =
-            crate::excitation::sample_signal(signal, input.sample, |v| v.meters_per_second)
+            crate::excitation::sample_signal(signal, input.sample, |v| v.canonical_value())
                 .and_then(|value| crate::excitation::expect_vector3_or_direction(value, a.direction))
                 .map_err(|e| Error::InputRealization(e.to_string()))?;
         if sampled.imaginary != [0.0; 3] || sampled.real.iter().any(|v| !v.is_finite()) {

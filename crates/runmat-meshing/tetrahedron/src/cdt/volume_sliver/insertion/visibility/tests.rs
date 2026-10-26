@@ -107,9 +107,9 @@ fn reference_smooth_visibility_cavity_point(
             .iter()
             .filter_map(|(_, _, face)| {
                 let points = [
-                    topology.node(face[0]).coordinates_m,
-                    topology.node(face[1]).coordinates_m,
-                    topology.node(face[2]).coordinates_m,
+                    topology.node(face[0]).coordinates_m.canonical_value(),
+                    topology.node(face[1]).coordinates_m.canonical_value(),
+                    topology.node(face[2]).coordinates_m.canonical_value(),
                     point,
                 ];
                 crate::cdt::volume_quality::evaluate_tetrahedron_geometry(
@@ -142,7 +142,7 @@ fn reference_smooth_visibility_cavity_point(
         .collect::<BTreeSet<_>>();
     let points = cavity_vertices
         .iter()
-        .map(|vertex| topology.node(*vertex).coordinates_m)
+        .map(|vertex| topology.node(*vertex).coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let spans = std::array::from_fn::<_, 3, _>(|axis| {
         points

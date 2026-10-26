@@ -198,7 +198,7 @@ fn verify_original_publication(
     let mut by_element = topology
         .cells
         .iter()
-        .zip(&imported.result.original().velocity_m_per_s)
+        .zip(imported.result.original().velocity_m_per_s.canonical_values())
         .map(|(cell, velocity)| (cell.source_element_index, *velocity))
         .collect::<Vec<_>>();
     by_element.sort_by_key(|(element, _)| *element);

@@ -21,7 +21,7 @@ impl ObservationTopology<'_> {
             projection
                 .nodes
                 .iter()
-                .map(|node| (node.stable_identity, node.coordinates_m)),
+                .map(|node| (node.stable_identity, node.coordinates_m.canonical_value())),
             projection.nodes.len(),
         )
         .map_err(storage_error)?;
@@ -78,7 +78,10 @@ impl ObservationTopology<'_> {
                 .iter()
                 .map(|node| ObservationNode {
                     identity: node.stable_identity,
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                 })
                 .collect(),
             volume_elements: projection

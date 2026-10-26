@@ -26,10 +26,10 @@ impl InterfaceLaw {
         let law = match transfer {
             ThermalInterfaceTransfer::Perfect => Self::Perfect,
             ThermalInterfaceTransfer::Conductance(h) => {
-                Self::Conductance(h.watts_per_square_meter_kelvin)
+                Self::Conductance(h.canonical_value())
             }
             ThermalInterfaceTransfer::Resistance(r) => {
-                Self::Conductance(1.0 / r.square_meter_kelvin_per_watt)
+                Self::Conductance(1.0 / r.canonical_value())
             }
         };
         if let Self::Conductance(h) = law {

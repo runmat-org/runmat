@@ -67,10 +67,7 @@ pub(super) fn render_topology_from_solver_mesh(
         let region_ids: Vec<String> = face
             .provenance
             .iter()
-            .flat_map(|entity| {
-                std::iter::once(entity.source_topology_id.clone())
-                    .chain(entity.analysis_selection_id().ok())
-            })
+            .filter_map(|entity| entity.analysis_selection_id().ok())
             .collect();
         for triangle in face_triangles {
             let triangle_index = triangles.len() as u32;
@@ -99,7 +96,7 @@ pub(super) fn render_topology_from_solver_mesh(
                 .topology
                 .nodes
                 .iter()
-                .map(|node| node.coordinates_m)
+                .map(|node| node.coordinates_m.canonical_value())
                 .collect(),
             triangles,
             regions,
@@ -120,7 +117,7 @@ fn faces_into_element(
     let position = |id: &u64| {
         node_indices
             .get(id)
-            .map(|index| mesh.topology.nodes[*index as usize].coordinates_m)
+            .map(|index| mesh.topology.nodes[*index as usize].coordinates_m.canonical_value())
     };
     let corners = face_node_ids.iter().take(3).map(position).collect::<Option<Vec<_>>>();
     let element_corners = element

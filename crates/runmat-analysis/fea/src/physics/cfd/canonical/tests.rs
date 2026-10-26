@@ -135,7 +135,8 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            reference::pressure(f.reference, c.centroid_m, false) - p.pressure_reference_pa[i]
+            reference::pressure(f.reference, c.centroid_m, false)
+                - p.pressure_reference_pa.canonical_values()[i]
         })
         .collect::<Vec<_>>();
     let gradients = geometry_ops::pressure_gradient(&p, &samples).unwrap();
@@ -160,22 +161,28 @@ fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
     let error = l2(&fixture, &result);
     eprintln!(
         "canonical Couette cells={} relative L2={} momentum={} continuity={} flux={}",
-        result.velocity_m_per_s.len(),
+        result.velocity_m_per_s.canonical_values().len(),
         error,
         recovered.momentum_relative,
         recovered.continuity_relative,
         recovered.flux_constitutive_relative
     );
     assert!(error < 0.25, "independent affine velocity error {error}");
-    assert!(norm(recovered.global_momentum_n) < 1e-6);
-    assert!(recovered.global_boundary_flux_m3_per_s.abs() < 1e-8);
+    assert!(norm(recovered.global_momentum_n.canonical_value()) < 1e-6);
+    assert!(
+        recovered
+            .global_boundary_flux_m3_per_s
+            .canonical_value()
+            .abs()
+            < 1e-8
+    );
     let top = fixture
         .topology
         .faces
         .iter()
         .enumerate()
         .filter(|(_, f)| f.neighbor.is_none() && (f.centroid_m[1] - 1.0).abs() < 1e-12)
-        .map(|(i, _)| recovered.face_forces.viscous_traction_n[i][0])
+        .map(|(i, _)| recovered.face_forces.viscous_traction_n.canonical_values()[i][0])
         .sum::<f64>();
     let bottom = fixture
         .topology
@@ -183,7 +190,7 @@ fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
         .iter()
         .enumerate()
         .filter(|(_, f)| f.neighbor.is_none() && f.centroid_m[1].abs() < 1e-12)
-        .map(|(i, _)| recovered.face_forces.viscous_traction_n[i][0])
+        .map(|(i, _)| recovered.face_forces.viscous_traction_n.canonical_values()[i][0])
         .sum::<f64>();
     assert!(
         (top - 1.0).abs() < 0.25 && (bottom + 1.0).abs() < 0.25,
@@ -194,16 +201,46 @@ fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
         .iter()
         .all(|r| *r <= policy().physical_relative_tolerance));
     let mut changed = result.clone();
-    changed.residual.face_forces.viscous_traction_n[0][0] += 1.0;
+    changed.residual.face_forces.viscous_traction_n = changed
+        .residual
+        .face_forces
+        .viscous_traction_n
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[0][0] += 1.0;
+            values
+        })
+        .unwrap();
     assert!(p.recover(&changed).is_err());
     let mut changed = result.clone();
-    changed.velocity_m_per_s[0][0] += 0.1;
+    changed.velocity_m_per_s = changed
+        .velocity_m_per_s
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[0][0] += 0.1;
+            values
+        })
+        .unwrap();
     assert!(p.recover(&changed).is_err());
     let mut changed = result.clone();
-    changed.face_volume_flux_m3_per_s[0] += 0.1;
+    changed.face_volume_flux_m3_per_s = changed
+        .face_volume_flux_m3_per_s
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[0] += 0.1;
+            values
+        })
+        .unwrap();
     assert!(p.recover(&changed).is_err());
     let mut changed = result.clone();
-    changed.pressure_pa[0] += 0.1;
+    changed.pressure_pa = changed
+        .pressure_pa
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[0] += 0.1;
+            values
+        })
+        .unwrap();
     assert!(p.recover(&changed).is_err());
     let mut changed = result.clone();
     changed.residual.momentum_relative = 1.0;
@@ -239,7 +276,7 @@ fn affine_nonzero_convection_reproduces_independent_velocity_and_pressure() {
             .cell_continuity_relative
             .iter()
             .all(|x| *x <= policy().physical_relative_tolerance));
-        assert!(r.global_boundary_flux_m3_per_s.abs() < 1e-7);
+        assert!(r.global_boundary_flux_m3_per_s.canonical_value().abs() < 1e-7);
     }
     // Both analytic fields are affine and are reproduced by this reconstruction.
     // Their remaining error is iterative, not a spatial truncation error: demanding
@@ -274,14 +311,14 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
         errors.push(error);
         eprintln!("canonical duct n={n} independent Fourier L2={error}");
         let r = p.recover(&result).unwrap();
-        assert!(r.global_boundary_flux_m3_per_s.abs() < 1e-8);
+        assert!(r.global_boundary_flux_m3_per_s.canonical_value().abs() < 1e-8);
         let flow = fixture
             .topology
             .faces
             .iter()
             .enumerate()
             .filter(|(_, f)| f.neighbor.is_none() && reference::outlet(f.centroid_m, false))
-            .map(|(i, _)| result.face_volume_flux_m3_per_s[i])
+            .map(|(i, _)| result.face_volume_flux_m3_per_s.canonical_values()[i])
             .sum::<f64>();
         let exact_flow = reference::duct_flow(255);
         let flow_error = (flow - exact_flow).abs() / exact_flow;
@@ -295,7 +332,7 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
             .iter()
             .enumerate()
             .filter(|(_, f)| f.neighbor.is_none())
-            .map(|(i, _)| r.face_forces.viscous_traction_n[i])
+            .map(|(i, _)| r.face_forces.viscous_traction_n.canonical_values()[i])
             .fold([0.0; 3], geometry_ops::add);
         let pressure = fixture
             .topology
@@ -303,7 +340,7 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
             .iter()
             .enumerate()
             .filter(|(_, f)| f.neighbor.is_none())
-            .map(|(i, _)| r.face_forces.pressure_traction_n[i])
+            .map(|(i, _)| r.face_forces.pressure_traction_n.canonical_values()[i])
             .fold([0.0; 3], geometry_ops::add);
         let advective = fixture
             .topology
@@ -311,7 +348,7 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
             .iter()
             .enumerate()
             .filter(|(_, f)| f.neighbor.is_none())
-            .map(|(i, _)| r.face_forces.advective_momentum_n[i])
+            .map(|(i, _)| r.face_forces.advective_momentum_n.canonical_values()[i])
             .fold([0.0; 3], geometry_ops::add);
         assert!(
             norm(sub(
@@ -402,16 +439,27 @@ fn rigid_rotation_covariance_preserves_velocity_pressure_and_flux() {
     let pb = CanonicalFluidProblem::prepare(b.input()).unwrap();
     let ra = pa.solve().unwrap();
     let rb = pb.solve().unwrap();
-    for (u, v) in ra.velocity_m_per_s.iter().zip(&rb.velocity_m_per_s) {
+    for (u, v) in ra
+        .velocity_m_per_s
+        .canonical_values()
+        .iter()
+        .zip(rb.velocity_m_per_s.canonical_values())
+    {
         assert!(norm(sub(reference::rotate(*u), *v)) < 1e-6);
     }
-    for (p, q) in ra.pressure_pa.iter().zip(&rb.pressure_pa) {
+    for (p, q) in ra
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .zip(rb.pressure_pa.canonical_values())
+    {
         assert!((p - q).abs() < 1e-6);
     }
     for (p, q) in ra
         .face_volume_flux_m3_per_s
+        .canonical_values()
         .iter()
-        .zip(&rb.face_volume_flux_m3_per_s)
+        .zip(rb.face_volume_flux_m3_per_s.canonical_values())
     {
         assert!((p - q).abs() < 1e-6);
     }
@@ -446,7 +494,7 @@ fn closed_gauge_overlap_nonfinite_and_resource_inputs_fail_closed() {
     assert!(CanonicalFluidProblem::prepare(f.input()).is_err());
     let mut f = case(1, ReferenceCase::Couette, false);
     f.material = material();
-    f.material.dynamic_viscosity.pascal_seconds = f64::NAN;
+    f.material.dynamic_viscosity = runmat_types::physical::Quantity::new(f64::NAN);
     assert!(CanonicalFluidProblem::prepare(f.input()).is_err());
 }
 
@@ -455,7 +503,7 @@ fn weak_and_strong_original_forcing_preserve_relative_accuracy() {
     let mut normalized = Vec::new();
     for amplitude in [1e-6, 1.0, 1e6] {
         let mut f = case(2, ReferenceCase::Couette, false);
-        f.material.density.kilograms_per_cubic_meter = 1.0 / amplitude;
+        f.material.density = runmat_types::physical::Quantity::new(1.0 / amplitude);
         for c in &mut f.constraints {
             if let runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
                 value: runmat_analysis_core::PrescribedValue::Constant(v),
@@ -463,7 +511,7 @@ fn weak_and_strong_original_forcing_preserve_relative_accuracy() {
             } = &mut c.kind
             {
                 for k in v {
-                    k.meters_per_second *= amplitude;
+                    *k = runmat_types::physical::Quantity::new(k.canonical_value() * (amplitude));
                 }
             }
         }
@@ -472,6 +520,7 @@ fn weak_and_strong_original_forcing_preserve_relative_accuracy() {
         p.recover(&r).unwrap();
         normalized.push(
             r.velocity_m_per_s
+                .canonical_values()
                 .iter()
                 .map(|v| v.map(|x| x / amplitude))
                 .collect::<Vec<_>>(),
@@ -487,7 +536,12 @@ fn weak_and_strong_original_forcing_preserve_relative_accuracy() {
 fn pressure_l2(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
     let mut error = 0.0;
     let mut exact = 0.0;
-    for (c, p) in f.topology.cells.iter().zip(&r.pressure_pa) {
+    for (c, p) in f
+        .topology
+        .cells
+        .iter()
+        .zip(r.pressure_pa.canonical_values())
+    {
         let reference = reference::pressure(f.reference, c.centroid_m, f.rotated);
         error += c.volume_m3 * (p - reference).powi(2);
         exact += c.volume_m3 * reference.powi(2);
@@ -510,16 +564,16 @@ fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
     for w in &r.residual.cell_vorticity_per_s {
         assert!(norm(sub(*w, [0.0, 0.0, -1.0])) < 1e-6, "vorticity {w:?}");
     }
-    let mu = f.material.dynamic_viscosity.pascal_seconds;
+    let mu = f.material.dynamic_viscosity.canonical_value();
     let mut walls = 0;
     for (i, face) in p.topology.faces.iter().enumerate() {
         if face.neighbor.is_some() || face.centroid_m[1].abs() > 1e-12 {
             continue;
         }
-        let n = face.owner_area_vector_m2.map(|x| x / face.area_m2);
-        let t = r.residual.face_forces.viscous_traction_n[i];
+        let n = face.owner_area_vector_m2.map(|x| x / face.area_m2.canonical_value());
+        let t = r.residual.face_forces.viscous_traction_n.canonical_values()[i];
         let tn = geometry_ops::dot(t, n);
-        let shear: [f64; 3] = std::array::from_fn(|k| -(t[k] - tn * n[k]) / face.area_m2);
+        let shear: [f64; 3] = std::array::from_fn(|k| -(t[k] - tn * n[k]) / face.area_m2.canonical_value());
         assert!(norm(sub(shear, [mu, 0.0, 0.0])) < 1e-6 * mu.max(1.0), "{shear:?}");
         walls += 1;
     }
@@ -563,7 +617,7 @@ fn coupled_solve_reaches_the_segregated_fixed_point_in_far_fewer_outer_iteration
     let coupled = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
     f.policy.pressure_velocity_coupling = PressureVelocityCoupling::Segregated;
     let segregated = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
-    for (u, v) in coupled.velocity_m_per_s.iter().zip(&segregated.velocity_m_per_s) {
+    for (u, v) in coupled.velocity_m_per_s.canonical_values().iter().zip(segregated.velocity_m_per_s.canonical_values()) {
         assert!(norm(sub(*u, *v)) < 1e-6 * norm(*v).max(1e-3));
     }
     assert!(

@@ -87,13 +87,13 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "time_prescribed_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(base_region),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(base_region))),
                 value: PrescribedValue::Signal(SignalId("prescribed_temperature".into())),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "time_heat_flux".into(),
-        target: RegionTarget::boundary(flux_region.clone()),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(flux_region.clone()))),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Signal(SignalId("boundary_flux".into())),
         },
@@ -121,21 +121,27 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     .unwrap();
     assert!(at_start
         .prescribed_temperature_k
+        .canonical_values()
         .iter()
         .flatten()
         .all(|value| *value == 300.0));
     assert!(at_end
         .prescribed_temperature_k
+        .canonical_values()
         .iter()
         .flatten()
         .all(|value| *value == 320.0));
-    let start_flux_power = at_start.applied_source.iter().sum::<f64>();
-    let end_flux_power = at_end.applied_source.iter().sum::<f64>();
+    let start_flux_power = at_start
+        .applied_source
+        .canonical_values()
+        .iter()
+        .sum::<f64>();
+    let end_flux_power = at_end.applied_source.canonical_values().iter().sum::<f64>();
     assert!((end_flux_power - 2.0 * start_flux_power).abs() <= 1.0e-12);
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "time_convection".into(),
-        target: RegionTarget::boundary(flux_region),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(flux_region))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Signal(SignalId("ambient_temperature".into())),
             coefficient: HeatTransferCoefficient::new(5.0),
@@ -206,7 +212,7 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
     model.signals.push(signal);
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "jump_convection".into(),
-        target: RegionTarget::boundary(selector),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Signal(SignalId("jump_ambient".into())),
             coefficient: HeatTransferCoefficient::new(5.0),
@@ -235,8 +241,12 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
         let energy = assembly
             .energy_balance(&model, sample, &equilibrium, &equilibrium, 1.0, 0.0)
             .unwrap();
-        assert_eq!(energy.boundary_loss_w, 0.0, "{approach:?}");
-        assert_eq!(energy.applied_power_w, 0.0);
+        assert_eq!(
+            energy.boundary_loss_w.canonical_value(),
+            0.0,
+            "{approach:?}"
+        );
+        assert_eq!(energy.applied_power_w.canonical_value(), 0.0);
         assert_eq!(energy.relative_residual, 0.0);
     }
 }

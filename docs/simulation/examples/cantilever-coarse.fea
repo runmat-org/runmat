@@ -1,3 +1,5 @@
+// Engineering physics belongs in the importing study.
+
 geometry beam {
     file = "./geometry/cantilever.step"
     units = mm

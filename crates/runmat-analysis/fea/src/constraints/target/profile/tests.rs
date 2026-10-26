@@ -13,7 +13,7 @@ fn selection_counts_raw_candidates_but_retains_unique_metadata_and_nodes() {
     for face in &mut mesh.topology.boundary_faces {
         face.provenance.push(entity.clone());
     }
-    let mut target = RegionTarget::boundary("shared");
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("shared"));
     target.cardinality = TargetCardinality::One;
     let p = constraint_target_workspace_profile(&mesh, &target).unwrap();
     assert_eq!(p.entity_reference_slots, 4);

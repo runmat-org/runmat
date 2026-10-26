@@ -23,8 +23,11 @@ pub(crate) fn validate_options(
     options: SharedCurveDiscretizationOptions,
 ) -> Result<(), SharedCurveError> {
     let resolution = options.resolution;
-    if !resolution.maximum_chordal_deviation_m.is_finite()
-        || resolution.maximum_chordal_deviation_m <= 0.0
+    if !resolution
+        .maximum_chordal_deviation_m
+        .canonical_value()
+        .is_finite()
+        || resolution.maximum_chordal_deviation_m.canonical_value() <= 0.0
         || !resolution.maximum_tangent_change_rad.is_finite()
         || resolution.maximum_tangent_change_rad <= 0.0
         || !resolution.minimum_metric_edge_length.is_finite()
@@ -33,12 +36,18 @@ pub(crate) fn validate_options(
         || resolution.minimum_metric_edge_length > resolution.maximum_metric_edge_length
         || options.maximum_nodes_per_edge < 2
         || options.maximum_subdivision_depth == 0
-        || !options.geometry_absolute_error_m.is_finite()
-        || options.geometry_absolute_error_m <= 0.0
+        || !options
+            .geometry_absolute_error_m
+            .canonical_value()
+            .is_finite()
+        || options.geometry_absolute_error_m.canonical_value() <= 0.0
         || !options.pcurve_absolute_error.is_finite()
         || options.pcurve_absolute_error <= 0.0
-        || !options.arc_length_absolute_error_m.is_finite()
-        || options.arc_length_absolute_error_m <= 0.0
+        || !options
+            .arc_length_absolute_error_m
+            .canonical_value()
+            .is_finite()
+        || options.arc_length_absolute_error_m.canonical_value() <= 0.0
     {
         return Err(SharedCurveError::invalid_request(
             "shared curve discretization options",

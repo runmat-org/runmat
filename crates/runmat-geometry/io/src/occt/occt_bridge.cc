@@ -15,6 +15,8 @@
 #include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <gp_Trsf.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom2d_Curve.hxx>
 #include <IGESControl_Reader.hxx>
@@ -39,6 +41,12 @@
 #include <XSControl_Reader.hxx>
 #include <XSControl_WorkSession.hxx>
 #include <STEPControl_Reader.hxx>
+#include <STEPConstruct_UnitContext.hxx>
+#include <StepData_Factors.hxx>
+#include <StepData_StepModel.hxx>
+#include <StepRepr_GlobalUnitAssignedContext.hxx>
+#include <StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext.hxx>
+#include <StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TCollection_HAsciiString.hxx>
@@ -74,7 +82,6 @@
 #include <XCAFDoc_ShapeTool.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Mat.hxx>
-#include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
@@ -363,7 +370,49 @@ static void label_named_step_faces(const Handle(XSControl_WorkSession)& session,
   }
 }
 
+// Inspect the reader's source entities before transfer. The destination document
+// unit is a separate preference and is never evidence of a file declaration.
+void verify_step_source_units(const STEPControl_Reader& reader,
+                              rust::Slice<const std::uint8_t> bytes,
+                              const OcctImportOptions& options) {
+  const auto model = reader.StepModel();
+  if (model.IsNull()) throw std::runtime_error("OCCT STEP reader has no source model");
+  std::vector<OcctStepContextUnitPayload> contexts;
+  StepData_Factors factors;
+  // CascadeUnit is expressed in millimetres. A local 1000-mm reference makes
+  // ComputeFactors return metres per source coordinate, independent of transfer.
+  factors.SetCascadeUnit(1000.0);
+  for (Standard_Integer index = 1; index <= model->NbEntities(); ++index) {
+    check_cancelled(options);
+    const auto entity = model->Entity(index);
+    Handle(StepRepr_GlobalUnitAssignedContext) context =
+        Handle(StepRepr_GlobalUnitAssignedContext)::DownCast(entity);
+    if (context.IsNull()) {
+      auto combined = Handle(StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext)::DownCast(entity);
+      if (!combined.IsNull()) context = combined->GlobalUnitAssignedContext();
+    }
+    if (context.IsNull()) {
+      auto combined = Handle(StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx)::DownCast(entity);
+      if (!combined.IsNull()) context = combined->GlobalUnitAssignedContext();
+    }
+    if (context.IsNull()) continue;
+    if (contexts.size() >= 4096) throw std::runtime_error("STEP source-unit context limit exceeded");
+    const auto label = model->IdentLabel(entity);
+    if (label <= 0) throw std::runtime_error("OCCT source-unit context has no STEP entity identity");
+    STEPConstruct_UnitContext units;
+    const auto status = units.ComputeFactors(context, factors);
+    const bool length_done = status == 0 && units.LengthDone();
+    contexts.push_back(OcctStepContextUnitPayload{
+        static_cast<std::uint64_t>(label), length_done,
+        length_done ? units.LengthFactor() : 0.0});
+  }
+  occt_validate_step_source_units(bytes,
+      rust::Slice<const OcctStepContextUnitPayload>(contexts.data(), contexts.size()),
+      options.require_declared_step_units);
+}
+
 CadDocument read_step_shape(const std::string& path,
+                            rust::Slice<const std::uint8_t> bytes,
                             std::istream& stream,
                             const OcctImportOptions& options) {
   auto exchange_lock = lock_cad_exchange(options);
@@ -388,6 +437,7 @@ CadDocument read_step_shape(const std::string& path,
     throw std::runtime_error("OCCT STEP reader produced no STEP model");
   }
   step_model->InternalParameters.ReadSubshapeNames = true;
+  verify_step_source_units(reader.Reader(), bytes, options);
   // STEP declares physical units. Exact imports request a stable millimetre
   // kernel representation to preserve tolerance-scale features; preview imports
   // request their display coordinate unit. Rust projects exact contracts to SI.
@@ -465,6 +515,16 @@ CadDocument read_brep_shape(std::istream& stream, const OcctImportOptions& optio
   if (shape.IsNull()) {
     throw std::runtime_error("OCCT BREP reader returned a null shape");
   }
+  const double scale = options.unitless_source_unit_m / options.step_coordinate_unit_m;
+  if (!std::isfinite(scale) || scale <= 0.0) {
+    throw std::runtime_error("BREP source/output coordinate conversion must be finite and positive");
+  }
+  if (scale != 1.0) {
+    gp_Trsf transform;
+    transform.SetScale(gp_Pnt(0.0, 0.0, 0.0), scale);
+    shape = BRepBuilderAPI_Transform(shape, transform, Standard_True).Shape();
+    check_cancelled(options);
+  }
   CadDocument result;
   result.shape = shape;
   return result;
@@ -479,7 +539,7 @@ CadDocument read_shape(const std::string& path,
   std::istringstream stream(payload);
   switch (format) {
     case OcctCadFormat::Step:
-      return read_step_shape(path, stream, options);
+      return read_step_shape(path, bytes, stream, options);
     case OcctCadFormat::Iges:
       return read_iges_shape(path, stream, materialized_path, options);
     case OcctCadFormat::Brep:

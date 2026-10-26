@@ -37,7 +37,7 @@ pub(super) fn resolve_explicit_surface(
             reason: "constraint target is not one complete explicit shell region",
         });
     }
-    let total_measure = surface.area_m2;
+    let total_measure = surface.area_m2.canonical_value();
     if !total_measure.is_finite() || total_measure <= 0.0 {
         return Err(ConstraintPlanError::NormalUnavailable {
             constraint_id: constraint_id.into(),

@@ -31,12 +31,12 @@ pub(super) fn assemble(
             solution,
             assembler,
             ElementOrder::Tet4,
-            coordinates_m,
+            coordinates_m.canonical_values(),
             false,
         ),
         SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } => {
             let geometry = Tetrahedron10ElementGeometry {
-                nodes_m: *coordinates_m,
+                nodes_m: coordinates_m.canonical_value(),
             };
             geometry
                 .volume_m3()
@@ -47,7 +47,7 @@ pub(super) fn assemble(
                 solution,
                 assembler,
                 ElementOrder::Tet10,
-                coordinates_m,
+                coordinates_m.canonical_values(),
                 !tetrahedron10_is_affine(geometry),
             )
         }

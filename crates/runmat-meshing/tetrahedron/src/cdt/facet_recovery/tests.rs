@@ -44,7 +44,10 @@ fn constraints_with_coordinates(
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 50) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: segments
@@ -113,27 +116,26 @@ fn split_boundary_segment_recovery(
     let midpoint_identity = StableDigest::from_bytes(midpoint_identity);
     let mut nodes = vec![DelaunayVolumeNode::explicit(
         constraints.nodes[0].identity,
-        constraints.nodes[0].coordinates_m,
+        constraints.nodes[0].coordinates_m.canonical_value(),
     )];
     nodes.push(DelaunayVolumeNode {
         identity: midpoint_identity,
-        coordinates_m: [2.5, 2.5, 0.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                2.5, 2.5, 0.0,
+            ]),
         construction: Point3Construction::Segment {
             endpoints: [
-                constraints.nodes[0].coordinates_m,
-                constraints.nodes[1].coordinates_m,
+                constraints.nodes[0].coordinates_m.canonical_value(),
+                constraints.nodes[1].coordinates_m.canonical_value(),
             ],
             parameter_numerator: 1,
             parameter_exponent: 1,
         },
     });
-    nodes.extend(
-        constraints
-            .nodes
-            .iter()
-            .skip(1)
-            .map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)),
-    );
+    nodes.extend(constraints.nodes.iter().skip(1).map(|node| {
+        DelaunayVolumeNode::explicit(node.identity, node.coordinates_m.canonical_value())
+    }));
     let topology = build_delaunay_volume_topology(
         nodes,
         vec![[0, 1, 3, 4], [1, 2, 3, 4], [0, 3, 1, 5], [1, 3, 2, 5]],
@@ -313,11 +315,11 @@ fn facet_star_refill_exceeds_small_exact_cover_inventory() {
         .tetrahedra
         .iter()
         .map(|tetrahedron| {
-            tetrahedron_volume(
-                tetrahedron
-                    .vertex_indices
-                    .map(|node| topology.nodes[node as usize].coordinates_m),
-            )
+            tetrahedron_volume(tetrahedron.vertex_indices.map(|node| {
+                topology.nodes[node as usize]
+                    .coordinates_m
+                    .canonical_value()
+            }))
         })
         .sum();
     let cavity = crate::cavity::constrained::ConstrainedCavity {

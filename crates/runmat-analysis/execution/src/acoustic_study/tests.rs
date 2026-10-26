@@ -24,10 +24,11 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
     model.constraints.clear();
     model.boundaries.clear();
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     let face = AnalysisProjection::derive(&mesh).unwrap().boundary_faces[0].provenance[0]
         .analysis_selection_id()
         .unwrap();
@@ -36,7 +37,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(face),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));

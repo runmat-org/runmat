@@ -293,13 +293,11 @@ fn validate_projection(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.stable_identity, node.coordinates_m))
+        .map(|node| (node.stable_identity, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
-    if topology
-        .nodes
-        .iter()
-        .any(|node| artifact_nodes.get(&node.identity).copied() != Some(node.coordinates_m))
-    {
+    if topology.nodes.iter().any(|node| {
+        artifact_nodes.get(&node.identity).copied() != Some(node.coordinates_m.canonical_value())
+    }) {
         return Err(invalid_artifact(
             "solver corner coordinates do not exactly project the adaptive CDT nodes",
         ));

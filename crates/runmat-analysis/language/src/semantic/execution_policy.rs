@@ -10,7 +10,7 @@ use runmat_parser::fea::{FeaAssignmentRelation, FeaBinaryOperator};
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
     CheckedFeaStatementKind, ExecutionProfileSource, FeaDiagnostic, FeaDiagnosticLocation,
-    FeaDiagnosticPhase, FeaSymbolKey, FeaSymbolKind, FeaType, LogicalSourcePath, PhysicalDimension,
+    FeaDiagnosticPhase, FeaSymbolKey, FeaSymbolKind, LogicalSourcePath, PhysicalDimension,
 };
 
 mod profile;
@@ -146,7 +146,7 @@ fn resource_limits(
     let maximum_memory_bytes_per_worker =
         assignment(statements, "memory_per_worker").and_then(|(relation, value)| {
             if relation != FeaAssignmentRelation::LessEqual
-                || value.value_type != FeaType::Quantity(PhysicalDimension::INFORMATION)
+                || !(value.value_type).is_quantity((PhysicalDimension::INFORMATION).into())
             {
                 return invalid(
                     declaration,

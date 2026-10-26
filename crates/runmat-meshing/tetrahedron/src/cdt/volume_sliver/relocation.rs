@@ -265,7 +265,7 @@ pub(super) fn relocation_candidates(
                     "sliver source node is absent from canonical topology",
                 )
             })?;
-        let source_coordinates = topology.nodes[source_index].coordinates_m;
+        let source_coordinates = topology.nodes[source_index].coordinates_m.canonical_value();
         let mut candidate_coordinates = smooth_vertex_star_points_with_metrics(
             topology,
             source_index,

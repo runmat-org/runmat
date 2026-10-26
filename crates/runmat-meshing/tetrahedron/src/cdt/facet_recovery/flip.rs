@@ -228,7 +228,11 @@ fn opposite_sides(
     facet: [u32; 3],
     constraint_index: u32,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let coordinates = |index: u32| topology.nodes[index as usize].coordinates_m;
+    let coordinates = |index: u32| {
+        topology.nodes[index as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let left = orient3d([facet[0], facet[1], facet[2], edge[0]].map(coordinates)).map_err(
         |predicate| {
             error(

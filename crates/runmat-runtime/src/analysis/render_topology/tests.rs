@@ -29,7 +29,9 @@ fn canonical_quadratic_mesh_keeps_node_element_and_region_bindings() {
             );
             assert_eq!(
                 boundary.vertices[*index as usize],
-                original.topology.nodes[*index as usize].coordinates_m
+                original.topology.nodes[*index as usize]
+                    .coordinates_m
+                    .canonical_value()
             );
         }
     }
@@ -171,7 +173,7 @@ fn boundary_triangles_face_out_of_their_elements_whatever_the_stored_winding() {
                     .coordinates_m
             };
             let centroid: [f64; 3] = std::array::from_fn(|axis| {
-                element.node_ids[..4].iter().map(|id| position(*id)[axis]).sum::<f64>() / 4.0
+                element.node_ids[..4].iter().map(|id| position(*id).canonical_values()[axis]).sum::<f64>() / 4.0
             });
             for triangle in &rendered.triangles {
                 let [a, b, c] = triangle.map(|index| rendered.vertices[index as usize]);

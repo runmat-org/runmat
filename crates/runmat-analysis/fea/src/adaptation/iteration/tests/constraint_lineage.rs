@@ -40,7 +40,7 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
         constraint_id: "persistent_clamp".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: RegionTarget::boundary("adaptive_clamp"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("adaptive_clamp")),
         },
     })];
     let source_plan = CanonicalStructuralConstraintPlan::compile(&model, &source).unwrap();

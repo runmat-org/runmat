@@ -8,8 +8,8 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     else {
         panic!("fixture elasticity")
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     model.constraints = mesh
         .topology
         .nodes
@@ -21,7 +21,10 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
                 kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
                     target: RegionTarget::point(format!("node:{}", node.node_id)),
                     translations: [
-                        (StructuralTranslationDof::Ux, 0.02 * node.coordinates_m[0]),
+                        (
+                            StructuralTranslationDof::Ux,
+                            0.02 * node.coordinates_m.canonical_value()[0],
+                        ),
                         (StructuralTranslationDof::Uy, 0.0),
                         (StructuralTranslationDof::Uz, 0.0),
                     ]

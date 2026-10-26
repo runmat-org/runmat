@@ -174,8 +174,6 @@ fn resolve_reference(
         parameter_id: parameter.source.parameter_id.clone(),
         source_entity_id: parameter.source.source_entity_id,
         persistent_id: parameter.source.persistent_id.clone(),
-        value_si_bits: parameter.source.value.value_si.to_bits(),
-        source_value_bits: parameter.source.value.source_value.to_bits(),
-        source_unit: parameter.source.value.source_unit.clone(),
+        measure: parameter.source.value.clone(),
     })
 }

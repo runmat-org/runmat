@@ -73,8 +73,8 @@ pub(super) fn recover_pass(
             constraint_index: constraint_index as u32,
             first_identity: first.identity,
             last_identity: last.identity,
-            first_coordinates: first.coordinates_m,
-            last_coordinates: last.coordinates_m,
+            first_coordinates: first.coordinates_m.canonical_value(),
+            last_coordinates: last.coordinates_m.canonical_value(),
         };
         let mut identity_for_node = |context, midpoint, _| steiner_identity(context, midpoint);
         scratch.clear();

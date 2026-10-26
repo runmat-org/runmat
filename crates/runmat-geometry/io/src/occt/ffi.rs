@@ -104,9 +104,19 @@ pub(crate) mod bridge {
     }
 
     #[derive(Debug, Clone, Copy)]
+    struct OcctStepContextUnitPayload {
+        entity_id: u64,
+        length_done: bool,
+        meters_per_unit: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
     struct OcctImportOptions {
         // Metres per coordinate unit requested for STEP XCAF transfer.
         step_coordinate_unit_m: f64,
+        require_declared_step_units: bool,
+        // Explicit interpretation of a unitless BREP coordinate.
+        unitless_source_unit_m: f64,
         linear_deflection: f64,
         angular_deflection: f64,
         relative_deflection: bool,
@@ -361,6 +371,8 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctCurveDerivativesPayload {
+        parameter_unit: u8,
+        parameter_scale: f64,
         point_x: f64,
         point_y: f64,
         point_z: f64,
@@ -374,6 +386,8 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctCurveProjectionPayload {
+        parameter_unit: u8,
+        parameter_scale: f64,
         parameter: f64,
         point_x: f64,
         point_y: f64,
@@ -383,6 +397,10 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctPcurveDerivativesPayload {
+        parameter_unit: u8,
+        u_parameter_unit: u8,
+        v_parameter_unit: u8,
+        parameter_scale: f64,
         range_start: f64,
         range_end: f64,
         point_u: f64,
@@ -407,6 +425,9 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctSurfaceDerivativesPayload {
+        u_parameter_unit: u8,
+        v_parameter_unit: u8,
+        parameter_scale: f64,
         point_x: f64,
         point_y: f64,
         point_z: f64,
@@ -429,6 +450,9 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctSurfaceProjectionPayload {
+        u_parameter_unit: u8,
+        v_parameter_unit: u8,
+        parameter_scale: f64,
         u: f64,
         v: f64,
         point_x: f64,
@@ -605,6 +629,11 @@ pub(crate) mod bridge {
         fn occt_import_cancelled(cancel_token_id: u64) -> bool;
         fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8>;
         fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8>;
+        fn occt_validate_step_source_units(
+            bytes: &[u8],
+            contexts: &[OcctStepContextUnitPayload],
+            require_declared: bool,
+        ) -> Result<()>;
     }
 }
 
@@ -702,4 +731,36 @@ mod cancellation_tests {
         assert_eq!(Arc::strong_count(&probe), 1);
         assert!(!occt_import_cancelled(id));
     }
+}
+
+fn occt_validate_step_source_units(
+    bytes: &[u8],
+    contexts: &[bridge::OcctStepContextUnitPayload],
+    require_declared: bool,
+) -> Result<(), String> {
+    use runmat_geometry_core::physical::{LengthUnit, QuantityKind, UnitDefinition};
+    let mut checked = Vec::with_capacity(contexts.len());
+    for context in contexts {
+        let unit = if context.length_done {
+            let definition = UnitDefinition::try_new(
+                QuantityKind::Length.dimension(),
+                context.meters_per_unit,
+                0.0,
+            )
+            .map_err(|error| {
+                format!(
+                    "invalid OCCT source-unit factor in STEP #{}: {error}",
+                    context.entity_id
+                )
+            })?;
+            Some(LengthUnit::try_from_definition(definition).map_err(|error| error.to_string())?)
+        } else {
+            None
+        };
+        checked.push(crate::source_units::StepContextUnits {
+            entity_id: context.entity_id,
+            unit,
+        });
+    }
+    crate::source_units::verify_step_context_units(bytes, &checked, require_declared)
 }

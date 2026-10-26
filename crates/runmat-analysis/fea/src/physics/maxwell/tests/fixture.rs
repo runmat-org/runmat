@@ -20,9 +20,9 @@ pub(super) fn problem(
         .iter()
         .map(|&element_identity| MaxwellVolumeData {
             element_identity,
-            permeability_h_per_m: 1.0,
-            permittivity_f_per_m: 1.0,
-            conductivity_s_per_m: 0.3,
+            permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(1.0),
+            permittivity_f_per_m: runmat_types::physical::ElectricPermittivity::new(1.0),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.3),
         })
         .collect();
     let source_current = sampling
@@ -34,10 +34,13 @@ pub(super) fn problem(
             let reactive = 2.0 * std::f64::consts::PI.powi(2) - 1.0;
             MaxwellCurrentSample {
                 sample_identity: sample.identity,
-                current_density_a_per_m2: e.map(|value| ComplexPhasor {
+                current_density_a_per_m2: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::ElectricCurrentDensity,
+                    _,
+                >::new(e.map(|value| ComplexPhasor {
                     real: -0.3 * value.real - reactive * value.imaginary,
                     imaginary: reactive * value.real - 0.3 * value.imaginary,
-                }),
+                })),
             }
         })
         .collect();
@@ -51,7 +54,10 @@ pub(super) fn problem(
     (
         mesh,
         MaxwellInput {
-            angular_frequency_rad_per_s: 1.0,
+            angular_frequency_rad_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::AngularFrequency,
+                _,
+            >::new(1.0),
             sampling,
             volumes,
             source_current,

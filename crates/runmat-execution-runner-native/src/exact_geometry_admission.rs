@@ -157,26 +157,13 @@ fn resolve_face_selectors(
     selectors
         .iter()
         .map(|selector| {
-            if let Some(ordinal) = selector
-                .strip_prefix("face_")
-                .and_then(|value| value.parse::<u64>().ok())
-            {
-                let source_index = ordinal.checked_sub(1).ok_or_else(|| {
-                    invalid_contact_selector(selector, "source face ordinal is one-based")
-                })?;
-                return imported
-                    .source_face_ids
-                    .get(&source_index)
-                    .cloned()
-                    .ok_or_else(|| {
-                        invalid_contact_selector(selector, "source face ordinal does not exist")
-                    });
-            }
+            PersistentEntityId::validate_analysis_selection_id(selector)
+                .map_err(|error| invalid_contact_selector(selector, &error.to_string()))?;
             let matches = imported
                 .topology
                 .faces
                 .iter()
-                .filter(|face| face.id.source_topology_id == *selector)
+                .filter(|face| face.id.matches_analysis_selection(selector))
                 .map(|face| face.id.clone())
                 .collect::<Vec<_>>();
             match matches.as_slice() {
@@ -205,10 +192,12 @@ pub(crate) fn same_requested_tolerance(
     requested: &runmat_geometry_core::GeometryTolerancePolicy,
     admitted: &runmat_geometry_core::GeometryTolerancePolicy,
 ) -> bool {
-    requested.absolute_floor_m == admitted.absolute_floor_m
+    requested.absolute_floor_m.canonical_value() == admitted.absolute_floor_m.canonical_value()
         && requested.model_relative_term == admitted.model_relative_term
-        && requested.requested_deviation_m == admitted.requested_deviation_m
-        && requested.maximum_healing_displacement_m == admitted.maximum_healing_displacement_m
+        && requested.requested_deviation_m.canonical_value()
+            == admitted.requested_deviation_m.canonical_value()
+        && requested.maximum_healing_displacement_m.canonical_value()
+            == admitted.maximum_healing_displacement_m.canonical_value()
 }
 
 /// Binds a prepared exact closure to one session authority and persists it atomically.
@@ -335,14 +324,26 @@ mod tests {
 
     #[cfg(feature = "occt-native")]
     #[test]
-    fn source_face_aliases_author_explicit_contact_before_meshing() {
+    fn canonical_face_identities_author_explicit_contact_before_meshing() {
+        let imported = runmat_geometry_io::import_exact_cad(
+            "independent_contact.step",
+            INDEPENDENT_CONTACT,
+            runmat_geometry_io::GeometryFormat::Step,
+            &ExactCadImportOptions::default(),
+            &GeometryImportContext::new(),
+        )
+        .unwrap();
         let prepared = prepare_exact_geometry_admission(
             "independent_contact.step",
             INDEPENDENT_CONTACT,
             &ExactCadImportOptions::default(),
             &[NativeMeshingContactDefinition {
-                side_a_face_selectors: vec!["face_000002".into()],
-                side_b_face_selectors: vec!["face_000007".into()],
+                side_a_face_selectors: vec![imported.source_face_ids[&1]
+                    .analysis_selection_id()
+                    .unwrap()],
+                side_b_face_selectors: vec![imported.source_face_ids[&6]
+                    .analysis_selection_id()
+                    .unwrap()],
             }],
             &GeometryImportContext::new(),
             ObjectInventoryLimits::default(),

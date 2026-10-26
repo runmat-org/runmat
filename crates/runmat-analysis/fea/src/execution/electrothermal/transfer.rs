@@ -20,8 +20,13 @@ pub struct RetainedJouleHeatTransfer {
     producer: StepIdentity,
     mesh_digest: Digest,
     ordered_element_ids: Vec<u64>,
-    density_w_per_m3: Vec<f64>,
-    power_w: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    density_w_per_m3: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::HeatGenerationDensity,
+        Vec<f64>,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    power_w: runmat_types::physical::Power,
 }
 
 impl RetainedJouleHeatTransfer {
@@ -64,7 +69,7 @@ impl RetainedJouleHeatTransfer {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         if self.ordered_element_ids.is_empty()
-            || self.ordered_element_ids.len() != self.density_w_per_m3.len()
+            || self.ordered_element_ids.len() != self.density_w_per_m3.canonical_values().len()
             || self
                 .ordered_element_ids
                 .iter()
@@ -73,10 +78,11 @@ impl RetainedJouleHeatTransfer {
                 != self.ordered_element_ids.len()
             || self
                 .density_w_per_m3
+                .canonical_values()
                 .iter()
                 .any(|value| !value.is_finite() || *value < 0.0)
-            || !self.power_w.is_finite()
-            || self.power_w < 0.0
+            || !self.power_w.canonical_value().is_finite()
+            || self.power_w.canonical_value() < 0.0
         {
             return Err(invalid(
                 "Joule transfer has invalid canonical rows or physical values",
@@ -126,8 +132,8 @@ impl RetainedJouleHeatTransfer {
         Ok(Digest::sha256(self.canonical_bytes()?))
     }
 
-    pub const fn power_w(&self) -> f64 {
-        self.power_w
+    pub fn power_w(&self) -> f64 {
+        self.power_w.canonical_value()
     }
 
     pub(super) fn signal(&self, signal_id: SignalId) -> AnalysisExecutionResult<PhysicalSignal> {
@@ -140,9 +146,10 @@ impl RetainedJouleHeatTransfer {
             },
             frame: Some(CoordinateFrame::Global),
             representation: SignalRepresentation::Constant(SignalValue::Tensor {
-                shape: vec![self.density_w_per_m3.len(), 1],
+                shape: vec![self.density_w_per_m3.canonical_values().len(), 1],
                 values: self
                     .density_w_per_m3
+                    .canonical_values()
                     .iter()
                     .copied()
                     .map(HeatGenerationDensity::new)

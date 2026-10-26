@@ -10,7 +10,7 @@ use super::{AffineConstraintReduction, ConstraintAlgebraError};
 pub struct UnitPhaseRelation {
     pub primary: usize,
     pub secondary: usize,
-    pub phase_radians: f64,
+    pub phase_radians: runmat_types::physical::Angle,
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -66,7 +66,7 @@ pub fn build_phase_reduction(
     for (index, relation) in relations.iter().enumerate() {
         if relation.primary >= node_count
             || relation.secondary >= node_count
-            || !relation.phase_radians.is_finite()
+            || !relation.phase_radians.canonical_value().is_finite()
         {
             return Err(UnitPhaseConstraintError::InvalidRelation { relation: index });
         }
@@ -85,7 +85,7 @@ pub fn build_phase_reduction(
         edge_count
     ];
     for relation in relations {
-        let phase = wrap_phase(relation.phase_radians);
+        let phase = wrap_phase(relation.phase_radians.canonical_value());
         for (source, node, phase) in [
             (relation.primary, relation.secondary, phase),
             (relation.secondary, relation.primary, -phase),

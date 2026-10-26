@@ -38,7 +38,10 @@ fn axial_operator_is_objective_under_infinitesimal_rigid_rotation() {
                     mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
                 },
             layout: &layout,
-            coordinates_m: &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
             node_identities: &[
                 runmat_meshing_core::StableDigest::from_bytes([1; 32]),
                 runmat_meshing_core::StableDigest::from_bytes([2; 32]),
@@ -102,7 +105,7 @@ fn scoped_surface_foundation_preserves_canonical_sparse_accumulation_across_wave
     let connector = AnalysisConnector {
         connector_id: "foundation".into(),
         kind: ConnectorKind::SurfaceNormalFoundation {
-            target: RegionTarget::boundary("face:1"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1")),
             modulus: runmat_analysis_core::FoundationModulus::new(20.0),
         },
     };
@@ -204,7 +207,7 @@ fn scoped_connector_assembly_preserves_plan_provenance_and_mutable_resolution() 
     let connector = AnalysisConnector {
         connector_id: "foundation".into(),
         kind: ConnectorKind::SurfaceNormalFoundation {
-            target: RegionTarget::boundary("face:1"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1")),
             modulus: runmat_analysis_core::FoundationModulus::new(20.0),
         },
     };
@@ -249,7 +252,7 @@ fn scoped_connector_assembly_preserves_plan_provenance_and_mutable_resolution() 
                         mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
                     },
                 layout: &layout,
-                coordinates_m: &coordinates,
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(&coordinates),
                 node_identities: &identities,
             },
             execution,
@@ -321,7 +324,7 @@ fn mixed_point_connector_waves_match_serial_authored_order_and_fail_closed() {
         AnalysisConnector {
             connector_id: "interleaved_foundation".into(),
             kind: ConnectorKind::SurfaceNormalFoundation {
-                target: RegionTarget::boundary("face:1"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1")),
                 modulus: runmat_analysis_core::FoundationModulus::new(12.0),
             },
         },
@@ -345,7 +348,7 @@ fn mixed_point_connector_waves_match_serial_authored_order_and_fail_closed() {
                     mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
                 },
                 layout: &layout,
-                coordinates_m: &coordinates,
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(&coordinates),
                 node_identities: &identities,
             },
             execution,
@@ -445,7 +448,10 @@ fn scoped_point_connector_keeps_authored_error_attribution() {
                     mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
                 },
             layout: &layout,
-            coordinates_m: &[[0.0, 0.0, 0.0]],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(&[[0.0, 0.0, 0.0]]),
             node_identities: &[runmat_meshing_core::StableDigest::from_bytes([1; 32])],
         },
         plan,

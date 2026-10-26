@@ -54,7 +54,7 @@ use runmat_analysis_core::Pressure;
 
 fn duct(end: Option<f64>, end_time: f64, intervals: usize) -> AnalysisModel {
     let mut model = super::super::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
@@ -74,14 +74,14 @@ fn duct(end: Option<f64>, end_time: f64, intervals: usize) -> AnalysisModel {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "drive".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Signal(SignalId("pulse".into())),
             },
         }));
     if let Some(impedance) = end {
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "termination".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticImpedance {
                 impedance: SpecificAcousticImpedance::new(impedance),
             },
@@ -101,7 +101,7 @@ fn line_error(
         .nodes
         .iter()
         .zip(values)
-        .map(|(node, value)| (value - reference(node.coordinates_m[0])).powi(2))
+        .map(|(node, value)| (value - reference(node.coordinates_m.canonical_value()[0])).powi(2))
         .sum::<f64>();
     (squared / values.len() as f64).sqrt()
 }
@@ -130,7 +130,7 @@ fn matched_duct_pulse_travels_at_sound_speed_without_reflection() {
             .projection
             .nodes
             .iter()
-            .position(|node| (node.coordinates_m[0] - 1.0).abs() < 1e-12)
+            .position(|node| (node.coordinates_m.canonical_value()[0] - 1.0).abs() < 1e-12)
             .unwrap();
         let (peak_index, peak) = result
             .pressure_pa
@@ -171,7 +171,7 @@ fn rigid_end_doubles_the_pulse_and_conserves_energy_once_the_drive_stops() {
         .projection
         .nodes
         .iter()
-        .position(|node| (node.coordinates_m[0] - 1.0).abs() < 1e-12)
+        .position(|node| (node.coordinates_m.canonical_value()[0] - 1.0).abs() < 1e-12)
         .unwrap();
     let peak = result
         .pressure_pa

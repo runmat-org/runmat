@@ -15,10 +15,11 @@ pub(in crate::analysis) fn fixture() -> (
         assessment_id: "deflection".into(),
         output_id: "peak".into(),
         rule: AssessmentRule::Maximum {
-            bound: AssessmentQuantity {
-                value_si: 0.001,
-                dimension: runmat_types::PhysicalDimension::LENGTH,
-            },
+            bound: AssessmentQuantity::try_from_descriptor(
+                (runmat_types::PhysicalDimension::LENGTH).into(),
+                0.001,
+            )
+            .expect("checked finite assessment quantity"),
         },
         evidence: AssessmentEvidenceRequirement::AuthoredSamples,
     };
@@ -83,10 +84,11 @@ pub(in crate::analysis) fn fixture() -> (
 fn checked_reassessment_rejects_changed_output_meaning_under_the_same_name() {
     let (compiled, _, mut criterion) = fixture();
     criterion.rule = AssessmentRule::Maximum {
-        bound: AssessmentQuantity {
-            value_si: 0.002,
-            dimension: runmat_types::PhysicalDimension::LENGTH,
-        },
+        bound: AssessmentQuantity::try_from_descriptor(
+            (runmat_types::PhysicalDimension::LENGTH).into(),
+            0.002,
+        )
+        .expect("checked finite assessment quantity"),
     };
     let validate = |outputs: &[AuthoredOutput], id: &str| {
         validate_reassessment_outputs(
@@ -122,10 +124,11 @@ fn checked_reassessment_rejects_changed_output_meaning_under_the_same_name() {
 fn reassessment_retains_new_criteria_and_original_identity_without_inventing_evidence() {
     let (compiled, published, mut criterion) = fixture();
     criterion.rule = AssessmentRule::Maximum {
-        bound: AssessmentQuantity {
-            value_si: 0.002,
-            dimension: runmat_types::PhysicalDimension::LENGTH,
-        },
+        bound: AssessmentQuantity::try_from_descriptor(
+            (runmat_types::PhysicalDimension::LENGTH).into(),
+            0.002,
+        )
+        .expect("checked finite assessment quantity"),
     };
     let reports = reassess_study_results(&compiled, &published, &[criterion.clone()]).unwrap();
     assert_eq!(reports[0].definition, criterion);
@@ -169,10 +172,11 @@ fn reassessment_publication_is_immutable_and_content_addressed() {
     .unwrap();
     let original_bytes = std::fs::read(&first.evidence_artifact_path).unwrap();
     criterion.rule = AssessmentRule::Maximum {
-        bound: AssessmentQuantity {
-            value_si: 0.002,
-            dimension: runmat_types::PhysicalDimension::LENGTH,
-        },
+        bound: AssessmentQuantity::try_from_descriptor(
+            (runmat_types::PhysicalDimension::LENGTH).into(),
+            0.002,
+        )
+        .expect("checked finite assessment quantity"),
     };
     let revised = publish_study_reassessment(
         &compiled,
@@ -223,10 +227,11 @@ fn reassessment_rejects_wrong_dimensions_and_honors_limits_and_cancellation() {
         Err(AssessmentEvaluationError::Cancelled)
     ));
     criterion.rule = AssessmentRule::Maximum {
-        bound: AssessmentQuantity {
-            value_si: 1.0,
-            dimension: runmat_types::PhysicalDimension::MASS,
-        },
+        bound: AssessmentQuantity::try_from_descriptor(
+            (runmat_types::PhysicalDimension::MASS).into(),
+            1.0,
+        )
+        .expect("checked finite assessment quantity"),
     };
     assert!(matches!(
         reassess_study_results_with_limits(

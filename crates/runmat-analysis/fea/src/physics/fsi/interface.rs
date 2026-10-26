@@ -2,30 +2,40 @@ use super::super::{cfd, coupling::dense};
 
 #[derive(Debug, Clone)]
 pub(super) struct PartitionedInterfaceStep {
-    pub interface_pressure: Vec<f64>,
-    pub structural_displacement: Vec<f64>,
-    pub interface_displacement: Vec<f64>,
+    pub interface_pressure:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    pub structural_displacement:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
+    pub interface_displacement:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
     pub iteration_count: usize,
     pub pressure_feedback_residual_ratio: f64,
     pub two_way_interface_residual_ratio: f64,
     pub structural_traction_update_residual_ratio: f64,
     pub pressure_displacement_law_residual_ratio: f64,
     pub structural_solve_residual_ratio: f64,
-    pub interface_work_j_per_m2: f64,
-    pub structural_strain_energy_j_per_m2: f64,
+    pub interface_work_j_per_m2:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::SurfaceEnergyDensity, f64>,
+    pub structural_strain_energy_j_per_m2:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::SurfaceEnergyDensity, f64>,
     pub interface_work_energy_residual_ratio: f64,
     pub structural_coupling_edge_count: usize,
     pub interface_connectivity_coverage_ratio: f64,
     pub mesh_backed_interface_connectivity_ratio: f64,
     pub full_topology_edge_count: usize,
     pub full_topology_element_count: usize,
-    pub interface_stiffness_pa_per_m: f64,
+    pub interface_stiffness_pa_per_m: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::TractionDisplacementStiffness,
+        f64,
+    >,
 }
 
 #[derive(Debug, Clone)]
 struct StructuralInterfaceResponse {
-    displacement_x: Vec<f64>,
-    reaction_pressure: Vec<f64>,
+    displacement_x:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
+    reaction_pressure:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
     residual_ratio: f64,
     coupling_edge_count: usize,
 }
@@ -97,12 +107,17 @@ pub(super) fn solve_partitioned_interface(
         structural_solve_residual_ratio = structural_response.residual_ratio;
         structural_coupling_edge_count =
             structural_coupling_edge_count.max(structural_response.coupling_edge_count);
-        for (face, displacement_x) in structural_response.displacement_x.iter().enumerate() {
+        for (face, displacement_x) in structural_response
+            .displacement_x
+            .canonical_values()
+            .iter()
+            .enumerate()
+        {
             structural_face_displacement[face * 3] = *displacement_x;
             structural_face_displacement[face * 3 + 1] = 0.0;
             structural_face_displacement[face * 3 + 2] = 0.0;
         }
-        let target_structural_traction = structural_response.reaction_pressure;
+        let target_structural_traction = structural_response.reaction_pressure.canonical_values();
         for (traction, target) in structural_traction
             .iter_mut()
             .zip(target_structural_traction.iter())
@@ -161,20 +176,22 @@ pub(super) fn solve_partitioned_interface(
         structural_coupling_edge_count.max(structural_response.coupling_edge_count);
     let pressure_displacement_law_residual_ratio = structural_response
         .reaction_pressure
+        .canonical_values()
         .iter()
         .zip(interface_pressure.iter())
         .map(|(reaction, pressure)| (reaction - pressure).abs() / pressure.abs().max(1.0))
         .fold(0.0_f64, f64::max);
     let interface_work_j_per_m2 = interface_pressure
         .iter()
-        .zip(structural_response.displacement_x.iter())
+        .zip(structural_response.displacement_x.canonical_values().iter())
         .map(|(pressure, displacement)| pressure * displacement)
         .sum::<f64>();
     let structural_strain_energy_j_per_m2 = 0.5
         * structural_response
             .reaction_pressure
+            .canonical_values()
             .iter()
-            .zip(structural_response.displacement_x.iter())
+            .zip(structural_response.displacement_x.canonical_values().iter())
             .map(|(reaction, displacement)| reaction * displacement)
             .sum::<f64>();
     let interface_work_energy_residual_ratio =
@@ -188,15 +205,24 @@ pub(super) fn solve_partitioned_interface(
         .collect::<Vec<_>>();
 
     Ok(PartitionedInterfaceStep {
-        interface_pressure,
-        structural_displacement: vector_field_from_x_profile(
-            &structural_response.displacement_x,
+        interface_pressure: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(interface_pressure),
+        structural_displacement: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Displacement,
+            _,
+        >::new(vector_field_from_x_profile(
+            structural_response.displacement_x.canonical_values(),
             fluid_pressure.len(),
-        ),
-        interface_displacement: vector_field_from_x_profile(
+        )),
+        interface_displacement: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Displacement,
+            _,
+        >::new(vector_field_from_x_profile(
             &interface_face_displacement_x,
             fluid_pressure.len(),
-        ),
+        )),
         iteration_count,
         pressure_feedback_residual_ratio,
         two_way_interface_residual_ratio: pressure_feedback_residual_ratio
@@ -206,15 +232,24 @@ pub(super) fn solve_partitioned_interface(
         structural_traction_update_residual_ratio,
         pressure_displacement_law_residual_ratio,
         structural_solve_residual_ratio,
-        interface_work_j_per_m2,
-        structural_strain_energy_j_per_m2,
+        interface_work_j_per_m2: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::SurfaceEnergyDensity,
+            _,
+        >::new(interface_work_j_per_m2),
+        structural_strain_energy_j_per_m2: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::SurfaceEnergyDensity,
+            _,
+        >::new(structural_strain_energy_j_per_m2),
         interface_work_energy_residual_ratio,
         structural_coupling_edge_count,
         interface_connectivity_coverage_ratio,
         mesh_backed_interface_connectivity_ratio,
         full_topology_edge_count: topology.element_topology_edge_nodes.len(),
         full_topology_element_count: topology.element_topology_element_edges.len(),
-        interface_stiffness_pa_per_m,
+        interface_stiffness_pa_per_m: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::TractionDisplacementStiffness,
+            _,
+        >::new(interface_stiffness_pa_per_m),
     })
 }
 
@@ -226,8 +261,14 @@ fn solve_structural_interface_response(
     let face_count = pressure_load.len();
     if face_count == 0 {
         return Ok(StructuralInterfaceResponse {
-            displacement_x: Vec::new(),
-            reaction_pressure: Vec::new(),
+            displacement_x: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Displacement,
+                _,
+            >::new(Vec::new()),
+            reaction_pressure: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(Vec::new()),
             residual_ratio: 0.0,
             coupling_edge_count: 0,
         });
@@ -262,8 +303,14 @@ fn solve_structural_interface_response(
         / pressure_scale;
 
     Ok(StructuralInterfaceResponse {
-        displacement_x,
-        reaction_pressure,
+        displacement_x: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Displacement,
+            _,
+        >::new(displacement_x),
+        reaction_pressure: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(reaction_pressure),
         residual_ratio,
         coupling_edge_count: coupling_edges.len(),
     })

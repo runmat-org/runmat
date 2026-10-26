@@ -39,14 +39,17 @@ async fn run_intervals(intervals: &[usize]) {
                 .unwrap(),
         ) {
             assert!(
-                (value - (400.0 + (surface - 400.0) * node.coordinates_m[0])).abs() / 400.0 < 1e-8
+                (value - (400.0 + (surface - 400.0) * node.coordinates_m.canonical_value()[0]))
+                    .abs()
+                    / 400.0
+                    < 1e-8
             );
         }
         let balance = done.result.manifest.energy_balances[0];
-        assert!((balance.boundary_loss_w / power - 1.0).abs() < 1e-8);
-        assert!((balance.prescribed_boundary_power_w / power + 1.0).abs() < 1e-8);
-        assert_eq!(balance.applied_power_w, 0.0);
-        assert_eq!(balance.storage_rate_w, 0.0);
+        assert!((balance.boundary_loss_w.canonical_value() / power - 1.0).abs() < 1e-8);
+        assert!((balance.prescribed_boundary_power_w.canonical_value() / power + 1.0).abs() < 1e-8);
+        assert_eq!(balance.applied_power_w, runmat_types::physical::Quantity::new(0.0));
+        assert_eq!(balance.storage_rate_w, runmat_types::physical::Quantity::new(0.0));
         for (index, expected) in [(1, [surface - 400.0, 0.0, 0.0]), (2, [power, 0.0, 0.0])] {
             let field = fields::original(&done, &mesh, 0, index);
             for values in field.storage().as_host_f64().unwrap().chunks_exact(3) {
@@ -83,8 +86,12 @@ async fn cooling(mesh: &SolverMeshArtifact, quadratic: bool, intervals: &[usize]
                 .zip(field.storage().as_host_f64().unwrap())
             {
                 metrics[0] = metrics[0].max(
-                    (value - fixture::reference::cooling_temperature(node.coordinates_m[0], time))
-                        .abs(),
+                    (value
+                        - fixture::reference::cooling_temperature(
+                            node.coordinates_m.canonical_value()[0],
+                            time,
+                        ))
+                    .abs(),
                 );
             }
             if ordinal == 0 {

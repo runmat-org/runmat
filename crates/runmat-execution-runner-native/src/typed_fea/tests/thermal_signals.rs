@@ -315,12 +315,12 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
             .zip(&reference.energy_balances)
         {
             balance.validate().unwrap();
-            assert!((balance.applied_power_w - 2.0).abs() < 1e-10);
-            assert!((balance.storage_rate_w - 2.0).abs() < 1e-8);
-            assert!(balance.boundary_loss_w.abs() < 1e-10);
-            assert!(balance.prescribed_boundary_power_w.abs() < 1e-10);
+            assert!((balance.applied_power_w - runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-10));
+            assert!((balance.storage_rate_w - runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+            assert!(balance.boundary_loss_w.abs() < runmat_types::physical::Quantity::new(1e-10));
+            assert!(balance.prescribed_boundary_power_w.abs() < runmat_types::physical::Quantity::new(1e-10));
             assert!(balance.relative_residual <= 1e-8);
-            assert!((balance.applied_power_w - other.applied_power_w).abs() < 1e-10);
+            assert!((balance.applied_power_w - other.applied_power_w).abs() < runmat_types::physical::Quantity::new(1e-10));
         }
         for field in actual.energy_storage_rate_snapshots.iter().skip(1) {
             assert!(field
@@ -360,10 +360,10 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         assert_eq!(boundary.energy_balances.len(), 2);
         for balance in &boundary.energy_balances {
             balance.validate().unwrap();
-            assert!(balance.applied_power_w.abs() < 1e-10);
-            assert!((balance.storage_rate_w - 2.0).abs() < 1e-8);
-            assert!((balance.prescribed_boundary_power_w + 2.0).abs() < 1e-8);
-            assert!(balance.boundary_loss_w.abs() < 1e-10);
+            assert!(balance.applied_power_w.abs() < runmat_types::physical::Quantity::new(1e-10));
+            assert!((balance.storage_rate_w - runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+            assert!((balance.prescribed_boundary_power_w + runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+            assert!(balance.boundary_loss_w.abs() < runmat_types::physical::Quantity::new(1e-10));
             assert!(balance.relative_residual <= 1e-8);
         }
     }
@@ -390,7 +390,7 @@ fn prescribed_boundary_workload(
             AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: format!("temperature_face_{index}"),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(target.source_topology_id.clone()),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target.source_topology_id.clone()))),
                     value: PrescribedValue::Signal(SignalId("start".into())),
                 },
             })
@@ -421,7 +421,7 @@ fn workload(
                 .unwrap();
             AnalysisBoundary {
                 boundary_id: format!("insulated_face_{index}"),
-                target: RegionTarget::boundary(target.source_topology_id.clone()),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target.source_topology_id.clone()))),
                 operator: BoundaryOperator::ThermalHeatFlux {
                     value: PrescribedValue::Constant(HeatFlux::new(0.0)),
                 },
@@ -429,10 +429,11 @@ fn workload(
         })
         .collect();
     model.signals = signals;
-    model.materials[0].mass_density_kg_per_m3 = Some(2.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(2.0)).map(runmat_types::physical::MassDensity::new);
     let thermal = model.materials[0].thermal.as_mut().unwrap();
-    thermal.specific_heat_j_per_kgk = 3.0;
-    thermal.conductivity_w_per_mk = 1.0;
+    thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(3.0);
+    thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
     model.thermal = Some(ThermalDomain {
         reference_temperature: Temperature::new(293.15),
     });

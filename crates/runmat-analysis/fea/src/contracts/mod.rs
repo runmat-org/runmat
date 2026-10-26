@@ -193,18 +193,23 @@ impl FeaThermoRegionTemperatureDelta {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoMechanicalContext {
-    pub reference_temperature_k: f64,
-    pub applied_temperature_delta_k: f64,
-    pub thermal_expansion_coefficient: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
     pub region_temperature_deltas: Vec<FeaThermoRegionTemperatureDelta>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaElectroThermalContext {
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub applied_voltage_v: f64,
     pub base_electrical_conductivity_s_per_m: f64,
-    pub resistive_heating_coefficient: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

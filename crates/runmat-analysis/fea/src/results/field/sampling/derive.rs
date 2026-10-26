@@ -32,7 +32,7 @@ impl SampledVolumeFieldTopology {
                     let coordinates = element
                         .node_indices
                         .iter()
-                        .map(|&index| projection.nodes[index].coordinates_m)
+                        .map(|&index| projection.nodes[index].coordinates_m.canonical_value())
                         .collect::<Vec<_>>();
                     visit_volume_rule(
                         element.order,

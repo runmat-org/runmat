@@ -25,7 +25,7 @@ pub use sources::{CanonicalElectricalSource, ElectricalChargeSources};
 use thiserror::Error;
 
 /// SI vacuum permittivity (CODATA 2022); uncertainty is irrelevant to numerical convergence.
-pub const VACUUM_PERMITTIVITY_F_PER_M: f64 = 8.854_187_818_8e-12;
+pub use runmat_types::physical::VACUUM_ELECTRIC_PERMITTIVITY as VACUUM_PERMITTIVITY_F_PER_M;
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ElectricalStaticError {

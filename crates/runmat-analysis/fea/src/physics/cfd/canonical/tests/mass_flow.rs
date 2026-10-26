@@ -32,7 +32,7 @@ fn signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields(
                         assert!(norm(sub(*value, exact)) < 1e-15);
                         pieces[i % 3] +=
                             density * geometry_ops::dot(*value, face.owner_area_vector_m2);
-                        area += face.area_m2;
+                        area += face.area_m2.canonical_value();
                     }
                 }
             }
@@ -41,15 +41,16 @@ fn signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields(
             assert!((pieces.iter().sum::<f64>() - outward).abs() < 1e-14);
         }
         let original = p.solve().unwrap();
-        for u in &original.velocity_m_per_s {
+        for u in original.velocity_m_per_s.canonical_values() {
             assert!(norm(sub(*u, exact)) < 1e-8);
         }
         assert!(original
             .pressure_fluctuation_pa
+            .canonical_values()
             .iter()
             .all(|p| p.abs() < 1e-7));
         assert_eq!(
-            original.pressure_reference_pa,
+            original.pressure_reference_pa.canonical_values().as_slice(),
             vec![1e12; p.topology.cells.len()]
         );
         for id in ["mass-inlet", "mass-outlet"] {
@@ -60,13 +61,19 @@ fn signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields(
                 .find(|b| b.authority_id == id)
                 .unwrap();
             let exact = density * speed * if id == "mass-inlet" { -1.0 } else { 1.0 };
-            assert!((balance.mass_flow_rate_kg_per_s - exact).abs() < 1e-14);
+            assert!((balance.mass_flow_rate_kg_per_s.canonical_value() - exact).abs() < 1e-14);
         }
         let cold: CanonicalFluidResult =
             serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
         assert_eq!(p.recover(&cold).unwrap(), original.residual);
         let mut corrupt = cold;
-        corrupt.face_volume_flux_m3_per_s[0] += 1e-4;
+        corrupt.face_volume_flux_m3_per_s = corrupt
+            .face_volume_flux_m3_per_s
+            .try_map_canonical_storage(|mut values| {
+                values[0] += 1e-4;
+                values
+            })
+            .unwrap();
         assert!(p.recover(&corrupt).is_err());
     }
 }
@@ -147,7 +154,7 @@ fn source_authority_conflicts_quantity_and_budget_reject_before_solve() {
                 else {
                     unreachable!()
                 };
-                value.kilograms_per_second *= 2.0;
+                *value = runmat_types::physical::Quantity::new(value.canonical_value() * (2.0));
             }
             _ => unreachable!(),
         }
@@ -190,19 +197,36 @@ fn shared_mass_history_drives_original_transient_and_fluctuation_pressure() {
         .map(|face| geometry_ops::dot([start, 0.0, 0.0], face.owner_area_vector_m2))
         .collect::<Vec<_>>();
     let previous = CanonicalFluidFields {
-        velocity_m_per_s: &u,
-        pressure_fluctuation_pa: &pressure,
-        pressure_reference_pa: &initial.pressure_reference_pa,
-        face_volume_flux_m3_per_s: &q,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(&u),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&pressure),
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(initial.pressure_reference_pa.canonical_values()),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(&q),
     };
     let interval = receiving
         .prepare_backward_euler(0.0, 1.0, previous)
         .unwrap();
     let result = interval.solve().unwrap();
-    for v in &result.velocity_m_per_s {
+    for v in result.velocity_m_per_s.canonical_values() {
         assert!(norm(sub(*v, [start + acceleration, 0.0, 0.0])) < 1e-8);
     }
-    for g in geometry_ops::pressure_gradient(&receiving, &result.pressure_fluctuation_pa).unwrap() {
+    for g in geometry_ops::pressure_gradient(
+        &receiving,
+        result.pressure_fluctuation_pa.canonical_values(),
+    )
+    .unwrap()
+    {
         assert!(norm(geometry_ops::add(g, [density * acceleration, 0.0, 0.0])) < 1e-6);
     }
     let cold: CanonicalFluidResult =
@@ -216,8 +240,28 @@ fn nonuniform_face_areas_use_integral_rates_and_work_is_admitted_before_binding(
     let mut f = uniform(3, 0.002, 4.0, false);
     // Monotone nonuniform y spacing and a 2x3 cross section: analytic total area six.
     for node in &mut f.mesh.topology.nodes {
-        node.coordinates_m[1] = 2.0 * node.coordinates_m[1].powi(2);
-        node.coordinates_m[2] *= 3.0;
+        {
+            let quantity_change = 2.0 * node.coordinates_m.canonical_values()[1].powi(2);
+            let quantity_index = 1;
+            let quantity_slot = &mut node.coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
+        {
+            let quantity_change = 3.0;
+            let quantity_index = 2;
+            let quantity_slot = &mut node.coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] *= quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
     }
     f.mesh.seal_canonical_digest().unwrap();
     f.source = crate::topology::AnalysisProjection::derive(&f.mesh).unwrap();
@@ -232,7 +276,7 @@ fn nonuniform_face_areas_use_integral_rates_and_work_is_admitted_before_binding(
         else {
             unreachable!()
         };
-        value.kilograms_per_second *= 6.0;
+        *value = runmat_types::physical::Quantity::new(value.canonical_value() * (6.0));
     }
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let required = p.reservation();
@@ -247,7 +291,7 @@ fn nonuniform_face_areas_use_integral_rates_and_work_is_admitted_before_binding(
             } = law
             {
                 if *authority_id == id {
-                    areas.push(face.area_m2);
+                    areas.push(face.area_m2.canonical_value());
                     assert!(norm(sub(*value, [0.002, 0.0, 0.0])) < 1e-15);
                     outward += 4.0 * geometry_ops::dot(*value, face.owner_area_vector_m2);
                 }
@@ -289,19 +333,36 @@ fn mass_history_meets_original_native_controls_without_exact_pressure_seed() {
         .map(|face| geometry_ops::dot(u[0], face.owner_area_vector_m2))
         .collect::<Vec<_>>();
     let previous = CanonicalFluidFields {
-        velocity_m_per_s: &u,
-        pressure_fluctuation_pa: &pressure,
-        pressure_reference_pa: &initial.pressure_reference_pa,
-        face_volume_flux_m3_per_s: &q,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(&u),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&pressure),
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(initial.pressure_reference_pa.canonical_values()),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(&q),
     };
     let interval = receiving
         .prepare_backward_euler(0.0, 0.1, previous)
         .unwrap();
     let result = interval.solve().unwrap();
-    for u in &result.velocity_m_per_s {
+    for u in result.velocity_m_per_s.canonical_values() {
         assert!(norm(sub(*u, [0.002, 0.0, 0.0])) < 1e-8);
     }
-    for (cell, p) in f.topology.cells.iter().zip(&result.pressure_fluctuation_pa) {
+    for (cell, p) in f
+        .topology
+        .cells
+        .iter()
+        .zip(result.pressure_fluctuation_pa.canonical_values())
+    {
         assert!((p + 0.01 * (cell.centroid_m[0] - 1.0)).abs() < 2e-7);
     }
 }

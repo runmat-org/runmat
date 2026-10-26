@@ -132,7 +132,7 @@ pub(super) fn compile_node_constraint(
                 }
                 targets.push(resolved);
             }
-            if !equation.right_hand_side.meters.is_finite() {
+            if !equation.right_hand_side.canonical_value().is_finite() {
                 return Err(ConstraintPlanError::NonFiniteValue {
                     constraint_id: constraint.constraint_id.clone(),
                 });
@@ -140,7 +140,7 @@ pub(super) fn compile_node_constraint(
             rows.push(row::new_sparse(
                 &constraint.constraint_id,
                 terms,
-                equation.right_hand_side.meters,
+                equation.right_hand_side.canonical_value(),
             )?);
             Ok(CompiledConstraint::rows(targets, rows))
         }

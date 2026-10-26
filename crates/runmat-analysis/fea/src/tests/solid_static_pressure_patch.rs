@@ -38,7 +38,11 @@ fn connected_tet4_and_tet10_pressure_patch_recovers_hydrostatic_affine_solution(
             .topology
             .nodes
             .iter()
-            .flat_map(|node| node.coordinates_m.map(|coordinate| 0.06 * coordinate))
+            .flat_map(|node| {
+                node.coordinates_m
+                    .canonical_value()
+                    .map(|coordinate| 0.06 * coordinate)
+            })
             .collect::<Vec<_>>();
         let summary = crate::assembly::assemble_structural_system(
             &model,
@@ -60,6 +64,7 @@ fn connected_tet4_and_tet10_pressure_patch_recovers_hydrostatic_affine_solution(
                         .find(|node| node.node_id == *node_id)
                         .unwrap()
                         .coordinates_m
+                        .canonical_value()
                 })
                 .collect::<Vec<_>>();
             let a = std::array::from_fn::<_, 3, _>(|i| corners[1][i] - corners[0][i]);

@@ -123,9 +123,11 @@ impl CooperativeKernelSpec {
                 materials: materials
                     .iter()
                     .map(|&(youngs_modulus_pa, poisson_ratio)| SolidMaterial {
-                        youngs_modulus_pa,
-                        poisson_ratio,
-                        density_kg_per_m3: 1.0,
+                        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                            youngs_modulus_pa,
+                        ),
+                        poisson_ratio: runmat_types::physical::PoissonRatio::new(poisson_ratio),
+                        density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
                     })
                     .collect(),
             }),

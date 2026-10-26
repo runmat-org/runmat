@@ -80,7 +80,12 @@ pub(super) fn tetrahedron_geometry_key(
         topology
             .nodes
             .binary_search_by_key(&identity, |node| node.identity)
-            .map(|index| topology.nodes[index].coordinates_m.map(ordered_float_key))
+            .map(|index| {
+                topology.nodes[index]
+                    .coordinates_m
+                    .canonical_value()
+                    .map(ordered_float_key)
+            })
             .unwrap_or([u64::MAX; 3])
     });
     key.sort_unstable();

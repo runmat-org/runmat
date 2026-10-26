@@ -25,7 +25,7 @@ pub(super) fn integrate(
         SolidRecoveryGeometry::Tetrahedron4 { .. } => true,
         SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } => {
             tetrahedron10_is_affine(Tetrahedron10ElementGeometry {
-                nodes_m: *coordinates_m,
+                nodes_m: coordinates_m.canonical_value(),
             })
         }
     };
@@ -71,16 +71,17 @@ fn integrate_rule(
     };
     let (order, coordinates): (ElementOrder, &[[f64; 3]]) = match &element.geometry {
         SolidRecoveryGeometry::Tetrahedron4 { coordinates_m, .. } => {
-            (ElementOrder::Tet4, coordinates_m)
+            (ElementOrder::Tet4, coordinates_m.canonical_values())
         }
         SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } => {
-            (ElementOrder::Tet10, coordinates_m)
+            (ElementOrder::Tet10, coordinates_m.canonical_values())
         }
     };
     let indices = element.geometry.node_indices();
-    if thermal.nodal_temperature_k.len() != indices.len()
+    if thermal.nodal_temperature_k.canonical_values().len() != indices.len()
         || thermal
             .nodal_temperature_k
+            .canonical_values()
             .iter()
             .any(|x| !x.is_finite() || *x <= 0.0)
     {

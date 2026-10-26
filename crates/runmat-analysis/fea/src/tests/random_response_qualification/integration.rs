@@ -14,7 +14,9 @@ fn physical_mdof_response_matches_dense_dynamic_stiffness_reference() {
     let excitation = constant_spectrum(
         bounds,
         vec![channel("oblique", [0.73, -0.41, 0.29])],
-        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.5e-4]),
+        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+            &runmat_types::physical::Quantity::new([2.5e-4]),
+        ),
     );
     let policy = converged_policy(0.999_999_999);
     let result = solve_modal_random_response(&summary, &basis, &excitation, policy).unwrap();
@@ -94,7 +96,9 @@ fn deliberately_under_resolved_resonance_is_rejected() {
     let excitation = constant_spectrum(
         [frequency * 0.7, frequency * 1.3],
         vec![channel("resonant", [0.73, -0.41, 0.29])],
-        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[1.0]),
+        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+            &runmat_types::physical::Quantity::new([1.0]),
+        ),
     );
     let mut policy = converged_policy(0.0);
     policy.relative_variance_tolerance = 1.0e-14;

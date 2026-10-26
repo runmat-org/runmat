@@ -210,7 +210,7 @@ fn real_nodal_field_of_a_static_family_uses_the_neutral_volume_mesh_authority() 
     let values = projection
         .nodes
         .iter()
-        .map(|node| 300.0 + node.coordinates_m[0])
+        .map(|node| 300.0 + node.coordinates_m.canonical_value()[0])
         .collect();
     let source = source(
         &step,
@@ -245,7 +245,7 @@ fn complex_acoustic_pressure_peak_magnitude_uses_the_same_authority_at_its_frequ
     let values = projection
         .nodes
         .iter()
-        .flat_map(|node| [3.0 * node.coordinates_m[0], 4.0 * node.coordinates_m[0]])
+        .flat_map(|node| [3.0 * node.coordinates_m.canonical_value()[0], 4.0 * node.coordinates_m.canonical_value()[0]])
         .collect();
     let source = source(
         &step,
@@ -285,7 +285,7 @@ fn sound_pressure_level_peak_is_the_rms_level_of_the_largest_pressure_phasor() {
         .nodes
         .iter()
         .flat_map(|node| {
-            let scale = 1.0 + node.coordinates_m[0];
+            let scale = 1.0 + node.coordinates_m.canonical_value()[0];
             [3.0 * scale, 4.0 * scale]
         })
         .collect();

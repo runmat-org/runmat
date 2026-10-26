@@ -90,7 +90,10 @@ pub(super) fn refill_cavity_sides(
         .filter(|(node_id, _)| local_node_ids.contains(&(*node_id as u32)))
         .map(|(node_id, node)| ConstrainedCavityNode {
             node_id: node_id as u32,
-            coordinates_m: node.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
         })
         .collect::<Vec<_>>();
     let mut refills = Vec::with_capacity(cavities.len());
@@ -323,9 +326,9 @@ fn canonical_node_inventory(
         .windows(2)
         .any(|pair| pair[0].identity == pair[1].identity)
         || nodes.iter().enumerate().any(|(index, node)| {
-            nodes[..index]
-                .iter()
-                .any(|existing| existing.coordinates_m == node.coordinates_m)
+            nodes[..index].iter().any(|existing| {
+                existing.coordinates_m.canonical_value() == node.coordinates_m.canonical_value()
+            })
         })
     {
         return None;

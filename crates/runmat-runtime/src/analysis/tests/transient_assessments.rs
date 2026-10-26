@@ -151,10 +151,11 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
         reports.push(assessed);
         criterion.evidence = AssessmentEvidenceRequirement::AuthoredSamples;
         criterion.rule = AssessmentRule::Maximum {
-            bound: AssessmentQuantity {
-                value_si: independent_peak * 0.5,
-                dimension: runmat_types::PhysicalDimension::LENGTH,
-            },
+            bound: AssessmentQuantity::try_from_descriptor(
+                (runmat_types::PhysicalDimension::LENGTH).into(),
+                independent_peak * 0.5,
+            )
+            .expect("checked finite assessment quantity"),
         };
         assert_eq!(
             assessment::reassess_study_results(&compiled, &publication, &[criterion.clone()])

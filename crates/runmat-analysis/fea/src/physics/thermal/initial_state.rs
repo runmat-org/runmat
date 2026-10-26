@@ -13,7 +13,8 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RealizedThermalInitialState {
-    pub temperature_k: Vec<f64>,
+    pub temperature_k:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, Vec<f64>>,
     pub evidence: ThermalInitialStateEvidence,
 }
 
@@ -37,12 +38,13 @@ pub(crate) enum ThermalInitialStateError {
         node_id: u64,
     },
     #[error(
-        "thermal initial temperature {initial_temperature_k} K conflicts with prescribed temperature {prescribed_temperature_k} K at solver node {node_id}"
+        "thermal initial temperature {initial_temperature_k} K conflicts with prescribed temperature {} K at solver node {node_id}", .prescribed_temperature_k.canonical_value()
     )]
     PrescribedTemperatureConflict {
         node_id: u64,
         initial_temperature_k: f64,
-        prescribed_temperature_k: f64,
+        prescribed_temperature_k:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, f64>,
     },
     #[error("thermal initial condition {initial_condition_id} cannot sample its signal: {detail}")]
     SignalSample {
@@ -195,7 +197,10 @@ pub(crate) fn realize(
                 return Err(ThermalInitialStateError::PrescribedTemperatureConflict {
                     node_id: projection.nodes[node_index].node_id,
                     initial_temperature_k: initial,
-                    prescribed_temperature_k: boundary,
+                    prescribed_temperature_k: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Temperature,
+                        _,
+                    >::new(boundary),
                 });
             }
             (Some(initial), Some(_)) => {
@@ -218,16 +223,21 @@ pub(crate) fn realize(
     Ok(RealizedThermalInitialState {
         evidence: ThermalInitialStateEvidence {
             procedure_step_id: step.step_id.0.clone(),
-            reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                reference_temperature_k,
+            ),
             applied_initial_condition_ids: applied_condition_ids,
             authored_node_count,
             prescribed_node_count,
             authored_and_prescribed_node_count,
             reference_node_count,
-            minimum_temperature_k,
-            maximum_temperature_k,
+            minimum_temperature_k: runmat_types::physical::Temperature::new(minimum_temperature_k),
+            maximum_temperature_k: runmat_types::physical::Temperature::new(maximum_temperature_k),
         },
-        temperature_k,
+        temperature_k: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Temperature,
+            _,
+        >::new(temperature_k),
     })
 }
 
@@ -236,7 +246,7 @@ fn realize_value(
     condition: &runmat_analysis_core::InitialConditionValue<runmat_analysis_core::Temperature>,
 ) -> Result<f64, ThermalInitialStateError> {
     match &condition.value {
-        InitialValue::Uniform(value) => Ok(value.kelvin),
+        InitialValue::Uniform(value) => Ok(value.canonical_value()),
         InitialValue::SignalSample {
             signal_id,
             abscissa,
@@ -268,7 +278,7 @@ fn realize_value(
                 initial_condition_id: condition.initial_condition_id.clone(),
                 detail: error.to_string(),
             })?;
-            let value = sample_signal(signal, sample, |value| value.kelvin)
+            let value = sample_signal(signal, sample, |value| value.canonical_value())
                 .and_then(expect_scalar)
                 .map_err(|error| ThermalInitialStateError::SignalSample {
                     initial_condition_id: condition.initial_condition_id.clone(),
@@ -383,7 +393,11 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(state.temperature_k.iter().all(|value| *value == 325.0));
+        assert!(state
+            .temperature_k
+            .canonical_values()
+            .iter()
+            .all(|value| *value == 325.0));
         assert_eq!(state.evidence.authored_node_count, projection.nodes.len());
         assert_eq!(state.evidence.reference_node_count, 0);
         assert_eq!(
@@ -458,7 +472,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(state.temperature_k[0], 310.0);
+        assert_eq!(state.temperature_k.canonical_values()[0], 310.0);
         assert_eq!(state.evidence.authored_node_count, 0);
         assert_eq!(state.evidence.prescribed_node_count, 1);
         assert_eq!(state.evidence.authored_and_prescribed_node_count, 0);

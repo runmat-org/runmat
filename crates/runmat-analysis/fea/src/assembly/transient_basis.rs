@@ -148,6 +148,7 @@ impl<'a> PreparedStructuralTransientBasis<'a> {
             structural_solid_total_mass_kg: self.initial.structural_solid_total_mass_kg,
             structural_solid_recovery: self.initial.structural_solid_recovery.clone(),
             structural_dof_layout: self.initial.structural_dof_layout.clone(),
+            structural_reduced_basis: self.initial.structural_reduced_basis.clone(),
             structural_beam_recovery: self.initial.structural_beam_recovery.clone(),
             structural_shell_recovery: self.initial.structural_shell_recovery.clone(),
             structural_formulations: self.initial.structural_formulations.clone(),

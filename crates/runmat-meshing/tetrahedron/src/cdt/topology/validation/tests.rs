@@ -56,7 +56,11 @@ fn borrowed_validation_matches_independent_reconstruction_and_rejects_tampering(
     type TopologyCorruption = Box<dyn Fn(&mut DelaunayVolumeTopology)>;
     let corruptions: Vec<TopologyCorruption> = vec![
         Box::new(|mesh| mesh.nodes[0].identity = StableDigest::ZERO),
-        Box::new(|mesh| mesh.nodes[0].coordinates_m[0] = f64::NAN),
+        Box::new(|mesh| {
+            let mut coordinates = mesh.nodes[0].coordinates_m.canonical_value();
+            coordinates[0] = f64::NAN;
+            mesh.nodes[0].coordinates_m = runmat_types::physical::Quantity::new(coordinates);
+        }),
         Box::new(|mesh| mesh.nodes[1].identity = mesh.nodes[0].identity),
         Box::new(|mesh| mesh.tetrahedra.swap(0, 1)),
         Box::new(|mesh| mesh.tetrahedra[0].vertex_indices.swap(0, 1)),

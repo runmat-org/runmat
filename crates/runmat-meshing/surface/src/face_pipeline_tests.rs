@@ -208,7 +208,9 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
     let ExactSurfacePassOutcome::Converged { surface } = &mut tampered_pass.outcome else {
         unreachable!()
     };
-    surface.maximum_chordal_deviation_m += 1.0;
+    surface.maximum_chordal_deviation_m = runmat_types::physical::Quantity::new(
+        surface.maximum_chordal_deviation_m.canonical_value() + (1.0),
+    );
     assert!(encode_exact_surface_pass_result(
         &tampered_pass,
         &sheet_topology,
@@ -520,7 +522,7 @@ fn permissive_quality() -> SurfaceQualityTargets {
         minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     }
 }
@@ -528,32 +530,32 @@ fn permissive_quality() -> SurfaceQualityTargets {
 fn curve_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: 0.01,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
             maximum_tangent_change_rad: 0.2,
             minimum_metric_edge_length: 0.01,
             maximum_metric_edge_length: 1.0,
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
-        geometry_absolute_error_m: 1.0e-10,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: 1.0e-10,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
     }
 }
 
 fn spherical_octant_curve_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: 1.0,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0),
             maximum_tangent_change_rad: 2.0,
             minimum_metric_edge_length: 0.001,
             maximum_metric_edge_length: 2.0,
         },
         maximum_nodes_per_edge: 16,
         maximum_subdivision_depth: 4,
-        geometry_absolute_error_m: 1.0e-10,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: 1.0e-10,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
     }
 }
 

@@ -47,13 +47,13 @@ pub(crate) fn task(
         persistence: StatePersistence::Canonical,
     }];
     model.sequence = AnalysisSequence::from_steps("native-maxwell", vec![step]);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 3.0,
-        relative_permittivity: 4.0,
-        relative_permeability: 1.0,
-        resistive_heating_coefficient: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(4.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
         conductivity_frequency_response: Vec::new(),
     });
     for boundary in ["slab_left", "slab_right", "slab_insulated"] {
@@ -62,7 +62,7 @@ pub(crate) fn task(
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(boundary),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                 },
             }));
     }
@@ -191,18 +191,21 @@ fn native_both_orders_preserve_original_complex_fields_power_and_receipt_across_
             }
             identity = Some(result.identity().unwrap());
             let response = result.response();
-            assert!(response.ohmic_power_w > 0.0);
-            assert!(response.electric_energy_j > 0.0 && response.magnetic_energy_j > 0.0);
+            assert!(response.ohmic_power_w > runmat_types::physical::Quantity::new(0.0));
+            assert!(response.electric_energy_j > runmat_types::physical::Quantity::new(0.0)
+                && response.magnetic_energy_j > runmat_types::physical::Quantity::new(0.0));
             assert!(response.relative_physical_residual < 8e-10);
             assert!(response.relative_complex_power_error < 1.6e-9);
             assert!(
-                (response.source_power_va.real - response.ohmic_power_w).abs()
-                    <= 2e-9 * response.ohmic_power_w
+                (response.source_power_va.canonical_value().real
+                    - response.ohmic_power_w.canonical_value())
+                .abs()
+                    <= 2e-9 * response.ohmic_power_w.canonical_value()
             );
             assert!(response
                 .samples
                 .iter()
-                .flat_map(|s| s.electric_field_v_per_m)
+                .flat_map(|s| s.electric_field_v_per_m.canonical_value())
                 .any(|v| v.real != 0.0 && v.imaginary != 0.0));
             let request = result.native_field_request(&w, &mesh).unwrap();
             let fields = result.recover_native_fields_from_result(&request).unwrap();
@@ -215,7 +218,7 @@ fn native_both_orders_preserve_original_complex_fields_power_and_receipt_across_
             let expected = response
                 .samples
                 .iter()
-                .flat_map(|s| s.electric_field_v_per_m)
+                .flat_map(|s| s.electric_field_v_per_m.canonical_value())
                 .flat_map(|v| [v.real, v.imaginary])
                 .collect::<Vec<_>>();
             assert_eq!(

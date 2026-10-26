@@ -339,7 +339,9 @@ fn validate_schedule_points(
             .points
             .iter()
             .zip(time_points_s)
-            .any(|(scheduled, accepted)| scheduled.time_s.to_bits() != accepted.to_bits())
+            .any(|(scheduled, accepted)| {
+                scheduled.time_s.canonical_value().to_bits() != accepted.to_bits()
+            })
     {
         return Err(FeaRunError::Assembly(
             "transient recovered states differ from the canonical accepted schedule".into(),
@@ -359,6 +361,7 @@ fn validate_snapshot_shape(
 ) -> Result<(), FeaRunError> {
     if summary.dof_count != reference.dof_count
         || summary.structural_dof_layout != reference.structural_dof_layout
+        || summary.structural_reduced_basis != reference.structural_reduced_basis
     {
         return Err(FeaRunError::Assembly(format!(
             "transient accepted state {index} changed structural DOF ownership"
@@ -398,7 +401,7 @@ fn validate_snapshot_shape(
                     || current.region_id != first.region_id
                     || current.node_i_index != first.node_i_index
                     || current.node_j_index != first.node_j_index
-                    || current.length_m != first.length_m
+                    || current.length_m.canonical_value() != first.length_m.canonical_value()
                     || current.transform_global_to_local != first.transform_global_to_local
             })
         || summary
@@ -503,19 +506,28 @@ mod tests {
 
     #[test]
     fn recovery_requires_the_exact_accepted_schedule() {
-        let schedule = StructuralTransientSchedule::new(vec![
-            StructuralTransientSchedulePoint {
-                time_s: 0.0,
-                arrival: StructuralTransientScheduleArrival::Initial,
-                continuation: StructuralTransientContinuationApproach::At,
-            },
-            StructuralTransientSchedulePoint {
-                time_s: 1.0,
-                arrival: StructuralTransientScheduleArrival::Continuous,
-                continuation: StructuralTransientContinuationApproach::At,
-            },
-        ])
-        .unwrap();
+        let schedule =
+            StructuralTransientSchedule::new(
+                vec![
+                    StructuralTransientSchedulePoint {
+                        time_s: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Time,
+                            _,
+                        >::new(0.0),
+                        arrival: StructuralTransientScheduleArrival::Initial,
+                        continuation: StructuralTransientContinuationApproach::At,
+                    },
+                    StructuralTransientSchedulePoint {
+                        time_s: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Time,
+                            _,
+                        >::new(1.0),
+                        arrival: StructuralTransientScheduleArrival::Continuous,
+                        continuation: StructuralTransientContinuationApproach::At,
+                    },
+                ],
+            )
+            .unwrap();
         assert!(validate_schedule_points(&schedule, &[0.0, 1.0]).is_ok());
         for wrong in [&[0.0][..], &[0.0, 1.25][..], &[1.0, 0.0][..]] {
             assert!(matches!(

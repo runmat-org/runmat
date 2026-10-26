@@ -119,7 +119,7 @@ pub(in crate::cdt::volume_sliver) fn insertion_candidates(
         if let InsertionStrategy::Cavity { neighbor_index } = choice.strategy {
             if let Some(coordinates_m) = smooth_visibility_cavity_point(
                 input.topology,
-                choice.coordinates_m,
+                choice.coordinates_m.canonical_value(),
                 VisibilityContext {
                     source_vertices,
                     neighbor_index,
@@ -130,7 +130,10 @@ pub(in crate::cdt::volume_sliver) fn insertion_candidates(
                     cancellation,
                 },
             )? {
-                choice.coordinates_m = coordinates_m;
+                choice.coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m);
                 choice.construction = Point3Construction::Explicit;
             }
         }
@@ -140,11 +143,15 @@ pub(in crate::cdt::volume_sliver) fn insertion_candidates(
                 choice.edge_identities,
                 choice.index,
             ),
-            coordinates_m: choice.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(choice.coordinates_m.canonical_value()),
             construction: choice.construction,
         };
         if input.topology.nodes.iter().any(|existing| {
-            existing.identity == node.identity || existing.coordinates_m == node.coordinates_m
+            existing.identity == node.identity
+                || existing.coordinates_m.canonical_value() == node.coordinates_m.canonical_value()
         }) {
             reject(
                 &mut rejection_counts,

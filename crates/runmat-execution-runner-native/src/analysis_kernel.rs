@@ -29,13 +29,13 @@ use runmat_analysis_fea::execution::{
     CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest, FieldRecoverySource,
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
-    ResultPublicationRequest, SemanticStatePublicationRequest, SemanticStatePublicationSource,
+    ResultPublicationRequest, SemanticStatePublicationSource,
     StructuralBucklingNumericalReceipt, StructuralFrequencySolverPlan,
     StructuralFrequencyStateInputs, StructuralFrequencyWorkload,
-    StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
+    StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StructuralModalNumericalReceipt,
     StructuralModalResponseSpectrumNumericalReceipt, StructuralModalResponseSpectrumSolverResult,
-    StructuralModalSolverResult, StructuralRandomResponseNumericalReceipt,
+    StructuralRandomResponseNumericalReceipt,
     StructuralRandomResponseSolverResult, StructuralTransientBlockRequest,
     StructuralTransientCheckpoint, StructuralTransientNumericalReceipt,
     StructuralTransientSolverResult, StructuralTransientWorkload,
@@ -72,8 +72,7 @@ use runmat_analysis_fea::planning::resource::{
     StructuralFrequencyRecoveryResourceInput,
 };
 use runmat_analysis_fea::post::fields::{
-    structural_observable_field_definitions, structural_static_observable_field_definitions,
-    take_structural_observable_fields,
+    structural_observable_field_definitions,     take_structural_observable_fields,
 };
 use runmat_analysis_fea::post::recover_constraint_group_observable_fields;
 use runmat_analysis_fea::results::accuracy::AccuracyArtifact;
@@ -89,8 +88,9 @@ use runmat_analysis_fea::results::observation::{
     StructuralObservationAccelerationInput,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
-use runmat_analysis_fea::{
-    run_linear_static_with_prepared_constraint_plan, LinearStaticSolveOptions,
+#[cfg(test)]
+use runmat_analysis_fea::execution::{
+    SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact,
 };
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -294,16 +294,6 @@ fn execute_result_publication(
         result.identity().digest(),
         result.canonical_bytes()?,
     )])
-}
-
-fn constraint_plan_manifest_identity(
-    invocation: &AnalysisKernelInvocation<'_>,
-) -> AnalysisBridgeResult<runmat_execution::Digest> {
-    Ok(
-        unique_input(invocation, AnalysisNumericalObjectKind::ConstraintPlan)?
-            .manifest
-            .logical_identity,
-    )
 }
 
 /// Runs one kernel's numerical work on the admitted CPU pool sized by its resource plan.

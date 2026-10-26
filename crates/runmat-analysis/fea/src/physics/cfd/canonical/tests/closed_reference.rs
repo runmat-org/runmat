@@ -41,11 +41,12 @@ fn closed_original_uniform_translation_and_mean_trace_survive_cold_recovery() {
             let f = closed(n, velocity, reference);
             let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
             let original = p.solve().unwrap();
-            for u in &original.velocity_m_per_s {
+            for u in original.velocity_m_per_s.canonical_values() {
                 assert!(norm(sub(*u, velocity)) < 1e-8);
             }
             assert!(original
                 .pressure_fluctuation_pa
+                .canonical_values()
                 .iter()
                 .all(|v| v.abs() < 1e-7));
             let cold: CanonicalFluidResult =
@@ -57,14 +58,26 @@ fn closed_original_uniform_translation_and_mean_trace_survive_cold_recovery() {
                 .iter()
                 .all(|b| b.authority_id != "original-pressure-gauge"));
             let mut changed = cold;
-            for (p, absolute) in changed
+            changed.pressure_fluctuation_pa = changed
                 .pressure_fluctuation_pa
-                .iter_mut()
-                .zip(&mut changed.pressure_pa)
-            {
-                *p += 1.0;
-                *absolute = reference + *p;
-            }
+                .try_map_canonical_storage(|values| {
+                    values
+                        .into_iter()
+                        .map(|value| value + 1.0)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap();
+            changed.pressure_pa = changed
+                .pressure_pa
+                .try_map_canonical_storage(|_| {
+                    changed
+                        .pressure_fluctuation_pa
+                        .canonical_values()
+                        .iter()
+                        .map(|value| reference + value)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap();
             assert!(p.recover(&changed).is_err());
         }
     }
@@ -163,7 +176,8 @@ fn closed_rotational_reference_converges_from_original_affine_velocity_data() {
         let result = p.solve().unwrap();
         p.recover(&result).unwrap();
         let gradients =
-            geometry_ops::pressure_gradient(&p, &result.pressure_fluctuation_pa).unwrap();
+            geometry_ops::pressure_gradient(&p, result.pressure_fluctuation_pa.canonical_values())
+                .unwrap();
         let mut ue = 0.0;
         let mut us = 0.0;
         let mut pe = 0.0;
@@ -172,7 +186,7 @@ fn closed_rotational_reference_converges_from_original_affine_velocity_data() {
             .topology
             .cells
             .iter()
-            .zip(&result.velocity_m_per_s)
+            .zip(result.velocity_m_per_s.canonical_values())
             .zip(gradients)
         {
             let exact = [-omega * cell.centroid_m[1], omega * cell.centroid_m[0], 0.0];

@@ -43,7 +43,11 @@ fn magnetic_detached_native_fields_copy_exact_signed_edges_and_fifteen_point_vec
             );
             assert_eq!(
                 fields.entity_counts.oriented_edges,
-                retained.response().edge_circulations_wb.len()
+                retained
+                    .response()
+                    .edge_circulations_wb
+                    .canonical_values()
+                    .len()
             );
             assert_eq!(
                 fields.topology_digest,

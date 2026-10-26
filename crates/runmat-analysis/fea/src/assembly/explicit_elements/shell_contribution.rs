@@ -3,8 +3,7 @@ use runmat_analysis_core::{
 };
 
 use super::{
-    laminate_property, scale_mass_moments, shell_element_dof_indices, shell_section_from_model,
-    structural_node_index,
+    laminate_property, shell_element_dof_indices, shell_section_from_model, structural_node_index,
 };
 use crate::{
     assembly::{
@@ -61,7 +60,7 @@ pub(super) fn compute(
         }
     })?;
     let geometry = ShellElementGeometry {
-        nodes_m: explicit_nodes.map(|node| structural.nodes[node].coordinates_m),
+        nodes_m: explicit_nodes.map(|node| structural.nodes[node].coordinates_m.canonical_value()),
         reference_axis: shell.reference_axis,
     };
     let frame = geometry
@@ -83,7 +82,9 @@ pub(super) fn compute(
             })?;
             let shell_material = ShellMaterial {
                 youngs_modulus_pa: material.youngs_modulus_pa,
-                poisson_ratio: material.poisson_ratio,
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(
+                    material.poisson_ratio.canonical_value(),
+                ),
                 shear_modulus_pa: material.shear_modulus_pa(),
             };
             let constitutive = homogeneous_constitutive(section, shell_material);
@@ -111,7 +112,12 @@ pub(super) fn compute(
             } = material.damping
             {
                 let mass_damping = global_lumped_mass_matrix(
-                    scale_mass_moments(mass_moments, mass_coefficient.per_second),
+                    mass_moments
+                        .proportional_damping(mass_coefficient)
+                        .map_err(|error| StructuralAssemblyError::ShellElement {
+                            element_id: element.element_id.clone(),
+                            error,
+                        })?,
                     frame,
                 )
                 .map_err(|error| StructuralAssemblyError::ShellElement {
@@ -121,7 +127,7 @@ pub(super) fn compute(
                 Some(combined_damping(
                     &mass_damping,
                     &stiffness,
-                    stiffness_coefficient.seconds,
+                    stiffness_coefficient.canonical_value(),
                 ))
             } else {
                 None
@@ -162,7 +168,7 @@ pub(super) fn compute(
                         error,
                     }
                 })?;
-            let has_damping = mass_damping_moments != ShellMassMoments::ZERO
+            let has_damping = mass_damping_moments != ShellMassMoments::<true>::zero()
                 || stiffness_damping
                     .iter()
                     .flatten()

@@ -36,7 +36,9 @@ test("every snapshotted guide exposes complete canonical source sections", () =>
     assert.ok(!/\bformulation\s*=/.test(excerpts[3].content), example.id);
     const geometryFiles = [...source.matchAll(/file\s*=\s*"\.\/([^"]+\.step)"/g)].map(match => match[1]);
     assert.ok(geometryFiles.length > 0, example.id);
-    for (const path of geometryFiles) assert.ok(example.files.includes(path), `${example.id}: ${path}`);
+    for (const path of geometryFiles) {
+      assert.ok(example.files.includes(path), `${example.id}: ${path}`);
+    }
     if (example.model_illustration) {
       assert.ok(example.files.includes(example.model_illustration.path), example.id);
       assert.ok(example.model_illustration.caption.length > 0, example.id);

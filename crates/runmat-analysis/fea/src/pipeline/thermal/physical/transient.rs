@@ -43,7 +43,7 @@ pub(super) fn solve_transient(
         .as_ref()
         .expect("validated thermal domain")
         .reference_temperature
-        .kelvin;
+        .canonical_value();
     let reference_temperature_k = vec![reference; input.initial_temperature_k.len()];
     let mut previous = input
         .initial_temperature_k
@@ -100,11 +100,13 @@ pub(super) fn solve_transient(
                 assembly: &assembly,
                 model: input.model,
                 sample,
-                reference_temperature_k: &reference_temperature_k,
+                reference_temperature: runmat_types::physical::Quantity::new(
+                    reference_temperature_k.as_slice(),
+                ),
                 initial_departure_k: &previous,
                 previous_departure_k: Some(&previous),
                 time_step_s,
-                time_s,
+                time_s: runmat_types::physical::Time::new(time_s),
                 algebra: input.algebra,
                 facts: input.facts,
                 residual_target: input.residual_target,
@@ -121,13 +123,13 @@ pub(super) fn solve_transient(
             nonlinear_evidence.push(accepted.evidence);
             push_recovered_snapshot(
                 &assembly,
-                &accepted.solve.solution,
+                accepted.solve.solution.canonical_values(),
                 Some(&previous),
                 time_step_s,
                 reference,
                 &mut recovered,
             )?;
-            previous = accepted.solve.solution.clone();
+            previous = accepted.solve.solution.canonical_values().clone();
             time_points_s.push(time_s);
             last_solve = Some(accepted.solve);
             continue;
@@ -149,7 +151,7 @@ pub(super) fn solve_transient(
             &operator,
             input.requested_solver_backend,
             input.algebra,
-            Some(&previous),
+            Some(runmat_types::physical::Quantity::new(previous.as_slice())),
             operators,
             input.residual_target,
             Some(&mut preparation),
@@ -176,7 +178,7 @@ pub(super) fn solve_transient(
                 )
                 .map_err(|error| FeaRunError::Assembly(error.to_string()))
         };
-        let mut balance = recover_balance(&solve.solution)?;
+        let mut balance = recover_balance(solve.solution.canonical_values())?;
         if balance.relative_residual > input.residual_target {
             let target = super::energy_refinement_target(
                 &operator,
@@ -204,20 +206,20 @@ pub(super) fn solve_transient(
                 &mut refined.accelerator_evidence,
                 &input.facts.metadata.backend_evidence,
             )?;
-            balance = recover_balance(&refined.solution)?;
+            balance = recover_balance(refined.solution.canonical_values())?;
             solve = refined;
         }
         residual_norms.push(linear_residual(&solve)?);
         energy_balances.push(balance);
         push_recovered_snapshot(
             &assembly,
-            &solve.solution,
+            solve.solution.canonical_values(),
             Some(&previous),
             time_step_s,
             reference,
             &mut recovered,
         )?;
-        previous = solve.solution.clone();
+        previous = solve.solution.canonical_values().clone();
         time_points_s.push(time_s);
         last_solve = Some(solve);
     }
@@ -228,7 +230,9 @@ pub(super) fn solve_transient(
         energy_balances,
         nonlinear_evidence,
         source_evidence,
-        last_solve: last_solve.expect("validated transient controls perform at least one solve"),
+        last_solve: last_solve
+            .expect("validated transient controls perform at least one solve")
+            .map_solution(|_state| ()),
         host_sync_count,
         device_apply_count,
         device_apply_attempt_count,

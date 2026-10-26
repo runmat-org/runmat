@@ -38,7 +38,7 @@ impl ThermalOperatorAssembly {
         // reaction unchanged while every nodal residual stays accounted for.
         let mut reacting = self
             .prescribed_temperature_k
-            .iter()
+            .canonical_values().iter()
             .map(Option::is_some)
             .collect::<Vec<_>>();
         for relation in &self.relations {
@@ -50,10 +50,10 @@ impl ThermalOperatorAssembly {
         for (node, &power) in storage_rate.iter().enumerate() {
             storage.add(power);
             storage_absolute.add(power.abs());
-            applied.add(self.applied_source[node]);
-            applied_absolute.add(self.applied_source[node].abs());
+            applied.add(self.applied_source.canonical_values()[node]);
+            applied_absolute.add(self.applied_source.canonical_values()[node].abs());
             if reacting[node] {
-                nodal_reaction[node] = self.applied_source[node] - power;
+                nodal_reaction[node] = self.applied_source.canonical_values()[node] - power;
             }
         }
 
@@ -73,8 +73,10 @@ impl ThermalOperatorAssembly {
                 .visit_element_quadrature(element, |point| {
                     for (i, &left) in element.node_indices.iter().enumerate() {
                         for (j, &right) in element.node_indices.iter().enumerate().skip(i + 1) {
-                            let left_prescribed = reacting[left];
-                            let right_prescribed = reacting[right];
+                            let left_prescribed =
+                                reacting[left];
+                            let right_prescribed =
+                                reacting[right];
                             if !left_prescribed && !right_prescribed {
                                 continue;
                             }
@@ -83,7 +85,9 @@ impl ThermalOperatorAssembly {
                                 .zip(point.physical_shape_gradients()[j])
                                 .map(|(a, b)| a * b)
                                 .sum::<f64>();
-                            let off_diagonal = self.element_conductivity_w_per_mk[element_index]
+                            let off_diagonal = self
+                                .element_conductivity_w_per_mk
+                                .canonical_values()[element_index]
                                 * gradient_product
                                 * point.volume_weight_m3;
                             let left_reaction =
@@ -127,7 +131,7 @@ impl ThermalOperatorAssembly {
                                 shape * (temperature_k[node] - (ambient - reference_temperature_k))
                             })
                             .sum::<f64>();
-                        let power = coefficient.watts_per_square_meter_kelvin
+                        let power = coefficient.canonical_value()
                             * temperature_difference
                             * point.area_weight_m2;
                         boundary_loss.add(power);
@@ -172,15 +176,15 @@ impl ThermalOperatorAssembly {
             reaction_absolute.add(value.abs());
         }
         Ok(ThermalEnergyBalance::from_power_transfers(
-            storage.total(),
-            boundary_loss.total(),
-            applied.total(),
-            reaction.total(),
+            runmat_types::physical::Power::new(storage.total()),
+            runmat_types::physical::Power::new(boundary_loss.total()),
+            runmat_types::physical::Power::new(applied.total()),
+            runmat_types::physical::Power::new(reaction.total()),
             ThermalPowerScale {
-                storage_w: storage_absolute.total(),
-                boundary_w: boundary_absolute.total(),
-                applied_w: applied_absolute.total(),
-                prescribed_w: reaction_absolute.total(),
+                storage_w: runmat_types::physical::Power::new(storage_absolute.total()),
+                boundary_w: runmat_types::physical::Power::new(boundary_absolute.total()),
+                applied_w: runmat_types::physical::Power::new(applied_absolute.total()),
+                prescribed_w: runmat_types::physical::Power::new(reaction_absolute.total()),
             },
         ))
     }

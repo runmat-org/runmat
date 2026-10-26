@@ -29,7 +29,7 @@ fn fixture(order: ElementOrder) -> (AnalysisModel, SolverMeshArtifact) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.constraints.clear();
     model.boundaries.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let mut action = model.excitations[0].excitation().clone();
     action.target = ExcitationTarget::WholeModel;
     action.direction = None;
@@ -103,11 +103,13 @@ fn element_density_both_orders_conserves_power_and_matches_scalar_shape_integrat
         // Independent unit-cube partition: 48 straight tetrahedra, each volume 1/48 m³.
         let count = mesh.topology.volume_elements.len();
         let expected = (count * (count + 1) / 2) as f64 / count as f64;
-        assert!((actual.applied_source.iter().sum::<f64>() - expected).abs() < 1e-10);
+        assert!(
+            (actual.applied_source.canonical_values().iter().sum::<f64>() - expected).abs() < 1e-10
+        );
         assert!(actual.source_evidence[0].accepted);
         // Each field row must produce exactly the same consistent load as a scalar source
         // on that single canonical region; this catches accidental row reindexing.
-        let mut expected_nodes = vec![0.0; actual.applied_source.len()];
+        let mut expected_nodes = vec![0.0; actual.applied_source.scalar_count()];
         for (row, element) in actual.projection.elements.iter().enumerate() {
             actual
                 .projection
@@ -118,7 +120,12 @@ fn element_density_both_orders_conserves_power_and_matches_scalar_shape_integrat
                 })
                 .unwrap();
         }
-        for (a, b) in actual.applied_source.iter().zip(expected_nodes) {
+        for (a, b) in actual
+            .applied_source
+            .canonical_values()
+            .iter()
+            .zip(expected_nodes)
+        {
             assert!((a - b).abs() < 1e-12);
         }
         // A constant field and the established scalar source must agree node-by-node.
@@ -147,7 +154,10 @@ fn element_density_both_orders_conserves_power_and_matches_scalar_shape_integrat
             &realize_excitations(&model, None, ExcitationSamplePoint::Static).unwrap(),
         )
         .unwrap();
-        assert_eq!(field.applied_source, scalar.applied_source);
+        assert_eq!(
+            field.applied_source.canonical_values(),
+            scalar.applied_source.canonical_values()
+        );
     }
 }
 
@@ -256,10 +266,12 @@ fn selected_region_keeps_full_canonical_rows_and_integrates_only_that_region() {
             unreachable!()
         };
         action.target =
-            ExcitationTarget::Region(runmat_analysis_core::RegionTarget::volume("selected"));
+            ExcitationTarget::Region(runmat_analysis_core::RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("selected")));
         let sources = realize_excitations(&model, None, ExcitationSamplePoint::Static).unwrap();
         let output = run(&model, &mesh, &sources).unwrap();
-        assert!((output.applied_source.iter().sum::<f64>() - expected).abs() < 1e-10);
+        assert!(
+            (output.applied_source.canonical_values().iter().sum::<f64>() - expected).abs() < 1e-10
+        );
         assert!(output.source_evidence[0].accepted);
     }
 }
@@ -296,6 +308,9 @@ fn element_density_complex_selection_is_explicit_and_static_imaginary_is_rejecte
             &sources.component(ComplexComponent::Imaginary),
         )
         .unwrap();
-        assert_eq!(real.applied_source, imaginary.applied_source);
+        assert_eq!(
+            real.applied_source.canonical_values(),
+            imaginary.applied_source.canonical_values()
+        );
     }
 }

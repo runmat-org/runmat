@@ -95,7 +95,7 @@ impl AuthoredInitialCondition {
                     PhysicalQuantityKind::Temperature,
                     signals,
                 )?;
-                if matches!(value, InitialValue::Uniform(value) if value.kelvin < 0.0) {
+                if matches!(value, InitialValue::Uniform(value) if value.canonical_value() < 0.0) {
                     return Err(AuthoredInitialConditionError::BelowAbsoluteZero);
                 }
                 Ok(())

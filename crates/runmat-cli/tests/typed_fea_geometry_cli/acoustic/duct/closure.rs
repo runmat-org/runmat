@@ -63,7 +63,7 @@ pub(super) fn reopen(
     .unwrap();
     assert_eq!(state.identity, reference.identity);
     let acoustic = state.payload.acoustic().unwrap();
-    assert_eq!(acoustic.frequency.hertz, 0.2);
+    assert_eq!(acoustic.frequency.canonical_value(), 0.2);
     assert_eq!(acoustic.fields.fields().len(), 2);
     let root: runmat_execution::value::ValueRef =
         serde_json::from_value(manifest["numerical_evidence"]["root"].clone()).unwrap();

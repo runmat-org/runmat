@@ -199,7 +199,12 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
                 assert_eq!(state.identity, reference.identity);
                 assert_eq!(state.kind, runmat_analysis_core::StateKind::AcousticComplex);
                 assert_eq!(
-                    state.payload.acoustic().unwrap().frequency.hertz,
+                    state
+                        .payload
+                        .acoustic()
+                        .unwrap()
+                        .frequency
+                        .canonical_value(),
                     entry.entry.frequency_hz()
                 );
                 let payload = state.payload.acoustic().unwrap();

@@ -89,8 +89,8 @@ fn time_varying_structural_operator_is_rejected_before_advancing_state() {
         },
         ComputeBackend::Cpu,
         TransientTimeDomain {
-            start_time_s: 0.0,
-            end_time_s: 1.0,
+            start_time_s: runmat_types::physical::Time::new(0.0),
+            end_time_s: runmat_types::physical::Time::new(1.0),
             step_boundaries: &[],
         },
         vec![0.0; summary.dof_count],
@@ -187,8 +187,8 @@ fn discontinuity_refreshes_acceleration_from_the_right_limit_before_continuing()
         },
         ComputeBackend::Cpu,
         TransientTimeDomain {
-            start_time_s: 0.0,
-            end_time_s: 1.0,
+            start_time_s: runmat_types::physical::Time::new(0.0),
+            end_time_s: runmat_types::physical::Time::new(1.0),
             step_boundaries: &boundaries,
         },
         vec![0.0; summary.dof_count],
@@ -274,8 +274,8 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
         ..TransientSolveOptions::default()
     };
     let time_domain = TransientTimeDomain {
-        start_time_s: 0.0,
-        end_time_s: 1.0,
+        start_time_s: runmat_types::physical::Time::new(0.0),
+        end_time_s: runmat_types::physical::Time::new(1.0),
         step_boundaries: &boundaries,
     };
     let assembly = |time_s: f64, approach: SignalSampleApproach| {
@@ -399,7 +399,10 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
     assert_eq!(samples.len() + 1, uninterrupted.time_points_s.len());
     for (sample, index) in samples.iter().zip(1..) {
         assert_eq!(sample.schedule_ordinal as usize, index);
-        assert_eq!(sample.time_s, uninterrupted.time_points_s[index]);
+        assert_eq!(
+            sample.time_s.canonical_value(),
+            uninterrupted.time_points_s[index]
+        );
         assert_eq!(
             sample.state.displacement(),
             uninterrupted.displacement_snapshots[index]
@@ -418,17 +421,20 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
         );
         assert_eq!(sample.reaction, uninterrupted.reaction_snapshots[index]);
         assert_eq!(
-            sample.applied_load_work_j,
-            uninterrupted.external_work_j[index]
-        );
-        assert_eq!(sample.support_work_j, uninterrupted.support_work_j[index]);
-        assert_eq!(
-            sample.damping_dissipation_j,
-            uninterrupted.damping_dissipation_j[index]
+            sample.applied_load_work_j.canonical_value(),
+            uninterrupted.external_work_j.canonical_values()[index]
         );
         assert_eq!(
-            sample.energy_balance_residual_j,
-            uninterrupted.energy_balance_residual_j[index]
+            sample.support_work_j.canonical_value(),
+            uninterrupted.support_work_j.canonical_values()[index]
+        );
+        assert_eq!(
+            sample.damping_dissipation_j.canonical_value(),
+            uninterrupted.damping_dissipation_j.canonical_values()[index]
+        );
+        assert_eq!(
+            sample.energy_balance_residual_j.canonical_value(),
+            uninterrupted.energy_balance_residual_j.canonical_values()[index]
         );
         assert_eq!(
             sample.dynamic_balance,
@@ -628,8 +634,8 @@ fn canonical_block_entrypoint_emits_a_restartable_segment_chain() {
         options,
         ComputeBackend::Cpu,
         TransientTimeDomain {
-            start_time_s: 0.0,
-            end_time_s: 1.0,
+            start_time_s: runmat_types::physical::Time::new(0.0),
+            end_time_s: runmat_types::physical::Time::new(1.0),
             step_boundaries: &boundaries,
         },
         vec![0.0; summary.dof_count],
@@ -656,16 +662,16 @@ fn canonical_block_entrypoint_emits_a_restartable_segment_chain() {
             uninterrupted.acceleration_snapshots[index]
         );
         assert_eq!(
-            sample.physical.applied_load_work_j,
-            uninterrupted.external_work_j[index]
+            sample.physical.applied_load_work_j.canonical_value(),
+            uninterrupted.external_work_j.canonical_values()[index]
         );
         assert_eq!(
-            sample.physical.support_work_j,
-            uninterrupted.support_work_j[index]
+            sample.physical.support_work_j.canonical_value(),
+            uninterrupted.support_work_j.canonical_values()[index]
         );
         assert_eq!(
-            sample.physical.damping_dissipation_j,
-            uninterrupted.damping_dissipation_j[index]
+            sample.physical.damping_dissipation_j.canonical_value(),
+            uninterrupted.damping_dissipation_j.canonical_values()[index]
         );
         assert_eq!(
             sample.physical.dynamic_balance,
@@ -708,8 +714,8 @@ fn endpoint_discontinuity_publishes_the_right_limit_state() {
         },
         ComputeBackend::Cpu,
         TransientTimeDomain {
-            start_time_s: 0.0,
-            end_time_s: 1.0,
+            start_time_s: runmat_types::physical::Time::new(0.0),
+            end_time_s: runmat_types::physical::Time::new(1.0),
             step_boundaries: &boundaries,
         },
         vec![0.0; summary.dof_count],
@@ -771,7 +777,7 @@ fn assembled_free_oscillator_converges_quadratically_in_native_state() {
                 constraint_id: "second_synthetic_anchor".into(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                    target: runmat_analysis_core::RegionTarget::authored("second_anchor"),
+                    target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("second_anchor")),
                 },
             },
         ));
@@ -808,8 +814,8 @@ fn assembled_free_oscillator_converges_quadratically_in_native_state() {
             },
             ComputeBackend::Cpu,
             TransientTimeDomain {
-                start_time_s: 0.0,
-                end_time_s,
+                start_time_s: runmat_types::physical::Time::new(0.0),
+                end_time_s: runmat_types::physical::Time::new(end_time_s),
                 step_boundaries: &[],
             },
             vec![0.0, initial_displacement, 0.0],
@@ -860,4 +866,65 @@ fn normalized_native_state_error(omega: f64, actual: [f64; 3], exact: [f64; 3]) 
     displacement_error
         .hypot(velocity_error)
         .hypot(acceleration_error)
+}
+
+#[test]
+fn equal_sized_reduced_states_cannot_change_their_retained_physical_basis() {
+    use crate::algebra::{AssembledRealSystem, CanonicalRealOperators};
+    use crate::assembly::physical_fields::StructuralReducedBasis;
+    use crate::constraints::AffineConstraintReduction;
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let excitations = realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let full = assemble_structural_system(
+        &model,
+        &excitations,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let mut mask = vec![false; full.dof_count];
+    mask[0] = true;
+    let original = AffineConstraintReduction::from_constrained_dofs(&mask);
+    mask[0] = false;
+    mask[full.dof_count - 1] = true;
+    let foreign = AffineConstraintReduction::from_constrained_dofs(&mask);
+    let operators = full.operator.operators();
+    let reduced = CanonicalRealOperators::try_new(
+        original
+            .reduce_sparse_operator(operators.stiffness())
+            .unwrap(),
+        original.reduce_sparse_operator(operators.mass()).unwrap(),
+        original
+            .reduce_sparse_operator(operators.damping())
+            .unwrap(),
+    )
+    .unwrap();
+    let mut initial = full.clone();
+    initial.dof_count = original.reduced_dof_count;
+    initial.constrained_dof_count = 0;
+    initial.physical_load = original.transpose_apply(&full.physical_load).unwrap();
+    initial.constraint_matrix = None;
+    initial.affine_constraint_reduction = None;
+    initial.operator = AssembledRealSystem::try_new(
+        reduced,
+        vec![false; original.reduced_dof_count],
+        initial.physical_load.clone(),
+    )
+    .unwrap();
+    initial.structural_reduced_basis =
+        Some(StructuralReducedBasis::try_new(&full.structural_dof_layout, original).unwrap());
+    let mut substituted = initial.clone();
+    substituted.structural_reduced_basis =
+        Some(StructuralReducedBasis::try_new(&full.structural_dof_layout, foreign).unwrap());
+    assert!(matches!(
+        require_stable_system::<Infallible>(&initial, &substituted),
+        Err(TransientSolveError::StructuralSystemChanged {
+            component: "DOF layout"
+        })
+    ));
 }

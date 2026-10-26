@@ -83,7 +83,7 @@ fn check_insert_and_rollback(scoped: bool) {
             let point = std::array::from_fn(|axis| {
                 vertices
                     .iter()
-                    .map(|vertex| cells.node(*vertex).coordinates_m[axis])
+                    .map(|vertex| cells.node(*vertex).coordinates_m.canonical_value()[axis])
                     .sum::<f64>()
                     / 4.0
             });

@@ -91,8 +91,9 @@ fn compare_symbolic_nodes(
     right: &DelaunayVolumeNode,
 ) -> std::cmp::Ordering {
     left.coordinates_m
+        .canonical_value()
         .iter()
-        .zip(right.coordinates_m.iter())
+        .zip(right.coordinates_m.canonical_value().iter())
         .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
         .unwrap_or_else(|| left.identity.cmp(&right.identity))
 }

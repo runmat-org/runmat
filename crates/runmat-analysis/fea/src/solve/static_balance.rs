@@ -356,8 +356,9 @@ mod tests {
         assert!(balance.evidence.accepted, "{:?}", balance.evidence);
 
         let beam = &summary.structural_beam_recovery[0];
-        let axial_stiffness =
-            beam.material.youngs_modulus_pa * beam.section.area_m2 / beam.length_m;
+        let axial_stiffness = beam.material.youngs_modulus_pa.canonical_value()
+            * beam.section.area_m2.canonical_value()
+            / beam.length_m.canonical_value();
         let expected_force = axial_stiffness * displacement_m;
         let expected_work = expected_force * displacement_m;
         let tip_row = summary

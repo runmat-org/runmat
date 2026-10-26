@@ -103,11 +103,14 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_on_topology(
                 )
             })?;
             let endpoint = node.identity == first.identity || node.identity == last.identity;
-            let expected_coordinates =
-                interpolate(first.coordinates_m, last.coordinates_m, parameter);
+            let expected_coordinates = interpolate(
+                first.coordinates_m.canonical_value(),
+                last.coordinates_m.canonical_value(),
+                parameter,
+            );
             if !endpoint
                 && !coordinates_share_representable_location(
-                    topology_node.coordinates_m,
+                    topology_node.coordinates_m.canonical_value(),
                     expected_coordinates,
                 )
             {
@@ -180,7 +183,9 @@ fn validate_constraint_nodes(
                 "constraint node is missing from topology",
             )
         })?;
-        if topology_node.coordinates_m != constraint_node.coordinates_m {
+        if topology_node.coordinates_m.canonical_value()
+            != constraint_node.coordinates_m.canonical_value()
+        {
             return Err(error(
                 DelaunaySegmentRecoveryErrorKind::InvalidTopology,
                 None,

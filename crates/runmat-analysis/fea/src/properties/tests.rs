@@ -149,7 +149,7 @@ fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
 
     let mut stale = model;
     stale.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid("absent-region");
+        runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("absent-region"));
     assert!(compile_solid_property_map(&stale, &mesh).is_err());
 }
 
@@ -176,7 +176,8 @@ fn structural_solid_capabilities_fail_before_assembly_without_restricting_generi
     ));
 
     let mut massless = model;
-    massless.materials[0].mass_density_kg_per_m3 = None;
+    massless.materials[0].mass_density_kg_per_m3 =
+        (None).map(runmat_types::physical::MassDensity::new);
     compile_property_map(&massless, Some(&mesh))
         .expect("generic material ownership must not require density");
     assert!(matches!(
@@ -211,7 +212,8 @@ fn thermal_solid_capabilities_fail_before_assembly_without_restricting_generic_p
     ));
 
     let mut massless = model;
-    massless.materials[0].mass_density_kg_per_m3 = None;
+    massless.materials[0].mass_density_kg_per_m3 =
+        (None).map(runmat_types::physical::MassDensity::new);
     assert!(matches!(
         compile_thermal_property_map(&massless, Some(&mesh)),
         Err(PropertyCompilationError::MissingCapability {
@@ -237,7 +239,7 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let mut model = matching_model(&mesh);
-    let mut target = runmat_analysis_core::PropertyRegionTarget::solid("logical-body");
+    let mut target = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("logical-body"));
     target
         .bind_resolved_entities(vec![
             selected,
@@ -253,7 +255,7 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     let compiled = compile_solid_property_map(&model, &mesh).expect("compiled properties");
     assert_eq!(compiled.solid_materials().len(), 1);
 
-    let mut wrong_kind = runmat_analysis_core::PropertyRegionTarget::solid("logical-body");
+    let mut wrong_kind = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("logical-body"));
     assert!(wrong_kind
         .bind_resolved_entities(vec![mesh.topology.boundary_faces[0].provenance[0].clone()])
         .is_err());
@@ -351,8 +353,8 @@ fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_owne
             .map(|ply_id| LaminatePlyModel {
                 ply_id: ply_id.into(),
                 material_id: "mat_steel".into(),
-                thickness_m: 0.001,
-                angle_rad: 0.0,
+                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.001),
+                angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(0.0),
             })
             .to_vec(),
         shear_correction: Some(5.0 / 6.0),
@@ -471,8 +473,7 @@ fn matching_model(
     model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
         mesh.topology.volume_elements[0]
             .region_id
-            .source_topology_id
-            .clone(),
+            .analysis_selection_id().unwrap(),
     );
     model
 }

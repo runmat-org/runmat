@@ -24,12 +24,28 @@ impl BroadcastRoute {
         )
     }
 
+    #[cfg(test)]
     pub fn with_enabled_limit(
         a: &[usize],
         b: &[usize],
         max_rank: usize,
         element_bytes: u64,
         enabled_max_dispatch_groups: u32,
+    ) -> Result<Self> {
+        let launch = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            enabled_max_dispatch_groups,
+        )
+        .ok_or_else(|| anyhow!("broadcast dispatch capacity overflow"))?;
+        Self::with_launch(a, b, max_rank, element_bytes, launch)
+    }
+
+    pub fn with_launch(
+        a: &[usize],
+        b: &[usize],
+        max_rank: usize,
+        element_bytes: u64,
+        launch: crate::backend::wgpu::pipelines::FrozenLinearLaunch,
     ) -> Result<Self> {
         let (shape_a, shape_b, out_shape) = super::super::backend_shared::matlab_broadcast_shapes(
             "binary operation",
@@ -49,12 +65,9 @@ impl BroadcastRoute {
                 ),
             );
         }
-        let chunk_capacity = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-            enabled_max_dispatch_groups,
-        )
-        .and_then(|launch| launch.chunk_capacity())
-        .ok_or_else(|| anyhow!("broadcast dispatch capacity overflow"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("broadcast dispatch capacity overflow"))?;
         let submissions = if len == 0 {
             0
         } else {
@@ -110,6 +123,17 @@ mod tests {
         let power = BroadcastRoute::new(&[2, 3, 4], &[1, 1], BCAST_MAX_RANK, 4).unwrap();
         assert_eq!(power.out_shape, route.out_shape);
         assert_eq!(power.submissions, route.submissions);
+    }
+
+    #[test]
+    fn browser_device_launch_preserves_broadcast_chunk_tails() {
+        let launch = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(256, 1).unwrap();
+        let route =
+            BroadcastRoute::with_launch(&[2, 513], &[2, 1], BCAST_MAX_RANK, 4, launch).unwrap();
+        assert_eq!(route.chunk_capacity, 256);
+        assert_eq!(route.submissions, 5);
+        assert_eq!(route.len, 1026);
+        assert_eq!(route.out_shape, [2, 513]);
     }
 
     #[test]

@@ -49,7 +49,7 @@ fn deferred_domains_are_closed_and_never_numerically_counted() {
         AuthoredSignalFieldLocation::Edge,
     ] {
         let signal = declaration(1, location);
-        validate_signal(&signal).unwrap();
+        validate_signal(&signal, None).unwrap();
         assert_eq!(signal.shape.component_extents(), Some(vec![1]));
         for count in [None, Some(1), Some(17), Some(usize::MAX)] {
             assert_eq!(signal.shape.realized_component_count(count), None);
@@ -57,20 +57,20 @@ fn deferred_domains_are_closed_and_never_numerically_counted() {
         let bytes = serde_json::to_vec(&signal).unwrap();
         let recovered: Signal<Temperature> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(recovered, signal);
-        validate_signal(&recovered).unwrap();
+        validate_signal(&recovered, None).unwrap();
     }
     let mut vector = declaration(3, AuthoredSignalFieldLocation::Node);
-    assert!(validate_signal(&vector).is_err());
+    assert!(validate_signal(&vector, None).is_err());
     vector.frame = Some(CoordinateFrame::Global);
-    validate_signal(&vector).unwrap();
+    validate_signal(&vector, None).unwrap();
     let zero = declaration(0, AuthoredSignalFieldLocation::Node);
-    assert!(validate_signal(&zero).is_err());
+    assert!(validate_signal(&zero, None).is_err());
     assert_eq!(zero.shape.component_extents(), None);
     let huge = declaration(usize::MAX, AuthoredSignalFieldLocation::Node);
     assert_eq!(huge.shape.component_extents(), Some(vec![usize::MAX]));
     assert_eq!(huge.shape.realized_component_count(Some(2)), None);
     vector.precision = SignalPrecision::Complex128;
-    validate_signal(&vector).unwrap();
+    validate_signal(&vector, None).unwrap();
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn deferred_shape_requires_authored_generator_not_concrete_values() {
     let mut signal = original.clone();
     signal.representation =
         SignalRepresentation::Constant(SignalValue::Scalar(Temperature::new(300.0)));
-    assert!(validate_signal(&signal).is_err());
+    assert!(validate_signal(&signal, None).is_err());
     signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
         domain: TabulatedSignalDomain::TimeSeconds,
         knots: vec![SignalKnot::continuous(
@@ -115,18 +115,18 @@ fn deferred_shape_requires_authored_generator_not_concrete_values() {
         interpolation: SignalInterpolation::Linear,
         extrapolation: SignalExtrapolation::Reject,
     });
-    assert!(validate_signal(&signal).is_err());
+    assert!(validate_signal(&signal, None).is_err());
     signal.representation = SignalRepresentation::Waveform(StandardWaveform {
         kind: StandardWaveformKind::Step,
         amplitude: SignalValue::Scalar(Temperature::new(300.0)),
         offset: None,
-        start_seconds: 0.0,
-        duration_seconds: None,
-        frequency_hz: None,
-        phase_radians: 0.0,
+        start_seconds: runmat_types::physical::Time::new(0.0),
+        duration_seconds: (None).map(runmat_types::physical::Time::new),
+        frequency_hz: (None).map(runmat_types::physical::Frequency::new),
+        phase_radians: runmat_types::physical::Angle::new(0.0),
         duty_cycle: None,
     });
-    assert!(validate_signal(&signal).is_err());
+    assert!(validate_signal(&signal, None).is_err());
     signal.representation = SignalRepresentation::Artifact(SignalArtifactRef {
         artifact_id: "sealed".into(),
         content_digest: "digest".into(),
@@ -138,18 +138,18 @@ fn deferred_shape_requires_authored_generator_not_concrete_values() {
         topology_digest: Some("digest".into()),
         sample_count: 2,
     });
-    assert!(validate_signal(&signal).is_err());
+    assert!(validate_signal(&signal, None).is_err());
     signal = original;
     signal.provenance = SignalProvenance::Imported {
         source_digest: "foreign".into(),
     };
-    assert!(validate_signal(&signal).is_err());
+    assert!(validate_signal(&signal, None).is_err());
     signal.provenance = SignalProvenance::Generated(GeneratorProvenance {
         project_revision: "revision".into(),
         callable_id: "callable".into(),
         frozen_input_digest: "digest".into(),
     });
-    assert!(validate_signal(&signal).is_err());
+    assert!(validate_signal(&signal, None).is_err());
 }
 
 #[test]

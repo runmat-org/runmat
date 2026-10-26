@@ -16,7 +16,7 @@ pub(super) fn lower(
     id: &str,
     domain_name: &str,
     body: &[CheckedFeaStatement],
-    quantity_dimension: PhysicalDimension,
+    quantity_kind: runmat_types::physical::QuantityKind,
     wrap: SignalWrapper,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
@@ -40,7 +40,7 @@ pub(super) fn lower(
             declaration,
             samples,
             abscissa_dimension,
-            quantity_dimension,
+            quantity_kind,
             diagnostics,
         )?);
     }
@@ -49,7 +49,7 @@ pub(super) fn lower(
             declaration,
             jumps,
             abscissa_dimension,
-            quantity_dimension,
+            quantity_kind,
             diagnostics,
         )?);
     }
@@ -119,12 +119,18 @@ fn domain(
     name: &str,
     body: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<(TabulatedSignalDomain, PhysicalDimension)> {
+) -> Option<(
+    TabulatedSignalDomain,
+    runmat_types::physical::DynamicDimension,
+)> {
     match name {
-        "time" => Some((TabulatedSignalDomain::TimeSeconds, PhysicalDimension::TIME)),
+        "time" => Some((
+            TabulatedSignalDomain::TimeSeconds,
+            PhysicalDimension::TIME.into(),
+        )),
         "frequency" => Some((
             TabulatedSignalDomain::FrequencyHertz,
-            PhysicalDimension::FREQUENCY,
+            PhysicalDimension::FREQUENCY.into(),
         )),
         "parameter" => {
             let axis = required_assignment(declaration, body, "axis", diagnostics)?;
@@ -156,7 +162,7 @@ fn domain(
                 return None;
             }
             let dimension = match axis.value_type {
-                FeaType::Integer | FeaType::Real => PhysicalDimension::DIMENSIONLESS,
+                FeaType::Integer | FeaType::Real => PhysicalDimension::DIMENSIONLESS.into(),
                 FeaType::Quantity(dimension) => dimension,
                 _ => {
                     invalid(
@@ -171,6 +177,7 @@ fn domain(
             Some((
                 TabulatedSignalDomain::StudyParameter {
                     parameter_id: parameter_id.clone(),
+                    quantity: Some(dimension),
                 },
                 dimension,
             ))
@@ -190,8 +197,8 @@ fn domain(
 fn continuous_knots(
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
-    abscissa_dimension: PhysicalDimension,
-    quantity_dimension: PhysicalDimension,
+    abscissa_dimension: runmat_types::physical::DynamicDimension,
+    quantity_kind: runmat_types::physical::QuantityKind,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Vec<SignalKnot<f64>>> {
     let entries = list(declaration, expression, "samples", diagnostics)?;
@@ -209,7 +216,7 @@ fn continuous_knots(
                 ordinate(
                     declaration,
                     members.get("value")?,
-                    quantity_dimension,
+                    quantity_kind,
                     diagnostics,
                 )?,
             ))
@@ -220,8 +227,8 @@ fn continuous_knots(
 fn jump_knots(
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
-    abscissa_dimension: PhysicalDimension,
-    quantity_dimension: PhysicalDimension,
+    abscissa_dimension: runmat_types::physical::DynamicDimension,
+    quantity_kind: runmat_types::physical::QuantityKind,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Vec<SignalKnot<f64>>> {
     let entries = list(declaration, expression, "jumps", diagnostics)?;
@@ -257,13 +264,13 @@ fn jump_knots(
                 ordinate(
                     declaration,
                     members.get("left")?,
-                    quantity_dimension,
+                    quantity_kind,
                     diagnostics,
                 )?,
                 ordinate(
                     declaration,
                     members.get("right")?,
-                    quantity_dimension,
+                    quantity_kind,
                     diagnostics,
                 )?,
                 continuity,
@@ -275,7 +282,7 @@ fn jump_knots(
 fn ordinate(
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
-    dimension: PhysicalDimension,
+    dimension: runmat_types::physical::QuantityKind,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<SignalOrdinate<f64>> {
     if let CheckedExpressionKind::Record(members) = &expression.kind {
@@ -297,16 +304,16 @@ fn ordinate(
 fn coordinate(
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
-    dimension: PhysicalDimension,
+    dimension: runmat_types::physical::DynamicDimension,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
-    let valid_type = if dimension == PhysicalDimension::DIMENSIONLESS {
-        matches!(
-            expression.value_type,
-            FeaType::Integer | FeaType::Real | FeaType::Quantity(PhysicalDimension::DIMENSIONLESS)
-        )
+    let valid_type = if dimension == PhysicalDimension::DIMENSIONLESS.into() {
+        (matches!(expression.value_type, FeaType::Integer | FeaType::Real)
+            || expression
+                .value_type
+                .is_quantity(PhysicalDimension::DIMENSIONLESS.into()))
     } else {
-        expression.value_type == FeaType::Quantity(dimension)
+        (expression.value_type).is_quantity((dimension).into())
     };
     if !valid_type {
         invalid(

@@ -32,7 +32,7 @@ export function collectExamples(source, output, validate, requirements, snapshot
         // Reject undeclared local geometry/import dependencies before offering a complete package.
         for (const file of files.filter(file => file.path.endsWith(".fea"))) {
             const base = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
-            for (const match of file.content.matchAll(/(?:file\s*=\s*|import\s+)["']([^"']+)["']/g)) {
+            for (const match of file.content.matchAll(/(?:file\s*=\s*|import\s+(?:\w+\s+)*)["']([^"']+)["']/g)) {
                 const target = base + match[1].replace(/^\.\//, "");
                 if (!files.some(file => file.path === target))
                     throw new Error(`Undeclared example dependency: ${target}`);

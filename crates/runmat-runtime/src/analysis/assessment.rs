@@ -287,17 +287,20 @@ pub(in crate::analysis) fn evaluate_with_source(
                             "output has ambiguous scalar evidence".into(),
                         ));
                     }
-                    let dimension = runmat_analysis_core::assessment_output_dimension(
+                    let dimension = runmat_analysis_core::assessment_output_descriptor(
                         output_types.get(&definition.output_id),
                     )
                     .ok_or_else(|| {
                         Error::InvalidCriteria("output has no scalar physical dimension".into())
                     })?;
                     measurement = Some(AssessmentMeasurement {
-                        quantity: AssessmentQuantity {
-                            value_si: candidate.value,
-                            dimension,
-                        },
+                        quantity: AssessmentQuantity::try_from_descriptor(
+                            (dimension).into(),
+                            candidate.value,
+                        )
+                        .map_err(|error| {
+                            Error::InvalidEvidence(format!("invalid assessment quantity: {error}"))
+                        })?,
                         complete: true,
                         numerically_acceptable: step.numerically_acceptable
                             && metadata.numerically_acceptable,

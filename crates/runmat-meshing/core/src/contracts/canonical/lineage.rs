@@ -410,7 +410,12 @@ fn artifact_nodes(artifact: &SolverMeshArtifact) -> BTreeMap<u64, (StableDigest,
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, (node.stable_identity, node.coordinates_m)))
+        .map(|node| {
+            (
+                node.node_id,
+                (node.stable_identity, node.coordinates_m.canonical_value()),
+            )
+        })
         .collect()
 }
 
@@ -419,7 +424,7 @@ fn artifact_coordinates(artifact: &SolverMeshArtifact) -> BTreeMap<StableDigest,
         .topology
         .nodes
         .iter()
-        .map(|node| (node.stable_identity, node.coordinates_m))
+        .map(|node| (node.stable_identity, node.coordinates_m.canonical_value()))
         .collect()
 }
 

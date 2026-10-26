@@ -19,7 +19,11 @@ fn canonical_inventory_order_current_geometry_and_pruning_preserve_original_pair
         let projection =
             AnalysisProjection::derive(&fixtures::canonical_tetrahedron_solver_mesh(order))
                 .unwrap();
-        let coordinates: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let coordinates: Vec<_> = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let face = &projection.boundary_faces[0];
         let n = face.oriented_area_vector_m2;
         let n = n.map(|x| x / norm(n));
@@ -52,7 +56,11 @@ fn ties_unmatched_invalid_inventory_and_budgets_never_return_a_partial_pairing()
         ElementOrder::Tet4,
     ))
     .unwrap();
-    let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+    let positions: Vec<_> = projection
+        .nodes
+        .iter()
+        .map(|n| n.coordinates_m.canonical_value())
+        .collect();
     let index = BoundarySurfaceIndex::derive(&projection, &[0, 1, 2, 3], &positions, 4).unwrap();
     assert!(matches!(
         index.closest_point(positions[0], policy()),
@@ -130,7 +138,11 @@ fn inventory_and_query_requested_storage_and_cancellation_are_bounded() {
         ElementOrder::Tet10,
     ))
     .unwrap();
-    let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+    let positions: Vec<_> = projection
+        .nodes
+        .iter()
+        .map(|n| n.coordinates_m.canonical_value())
+        .collect();
     let (index, retained, peak) = crate::topology::measure_test_allocations(|| {
         BoundarySurfaceIndex::derive(&projection, &[0, 1, 2, 3], &positions, 4).unwrap()
     });
@@ -165,7 +177,11 @@ fn stationary_inventory_projection_preserves_original_identity_and_current_outwa
         let projection =
             AnalysisProjection::derive(&fixtures::canonical_tetrahedron_solver_mesh(order))
                 .unwrap();
-        let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let positions: Vec<_> = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let face = &projection.boundary_faces[0];
         let normal = face
             .oriented_area_vector_m2

@@ -247,7 +247,7 @@ pub struct GeometryInspectionRequest {
     pub referrer: LogicalSourcePath,
     pub logical_path: LogicalSourcePath,
     /// Authored source units used to normalize exact topology identity.
-    pub source_units: runmat_geometry_core::UnitSystem,
+    pub source_units: Option<runmat_geometry_core::LengthUnit>,
     pub expected_content_digest: Option<SourceDigest>,
     /// `interfaces = shared`: touching bodies join so coincident faces become shared interfaces.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -267,6 +267,10 @@ pub enum GeometryInspectionCapability {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryInspection {
+    /// Extents measured from the already imported preview, in canonical metres.
+    /// Advisory planning evidence only; not an exact meshing bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_extent_m: Option<[f64; 3]>,
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,
@@ -274,11 +278,9 @@ pub struct GeometryInspection {
     /// Length unit the geometry was inspected in: the authored `units`, or the
     /// single length unit the file itself declares when `units` is omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved_units: Option<runmat_geometry_core::UnitSystem>,
-    /// The single length unit the file itself declares (STEP), whether or not `units` is
-    /// authored, so a check can report an authored unit that overrides a different declaration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub declared_units: Option<runmat_geometry_core::UnitSystem>,
+    pub resolved_units: Option<runmat_geometry_core::LengthUnit>,
+    #[serde(default)]
+    pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
     /// Authored names in the exact model by region role (`face`, `solid`), so a check can reject
     /// a `select name` that matches nothing. Empty when the source carries no exact names.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

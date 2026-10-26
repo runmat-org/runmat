@@ -69,11 +69,11 @@ impl Serialize for Fields<'_> {
             // Derived vectors (vorticity, face shear) have the width of the retained arrays
             // they come from; the canonical f64 encoding has a fixed width per value.
             let mut values = vec![
-                Values::Velocity(&original.velocity_m_per_s),
-                Values::Scalar(&original.pressure_pa),
-                Values::Scalar(&original.face_volume_flux_m3_per_s),
+                Values::Velocity(original.velocity_m_per_s.canonical_values()),
+                Values::Scalar(original.pressure_pa.canonical_values()),
+                Values::Scalar(original.face_volume_flux_m3_per_s.canonical_values()),
                 Values::Velocity(&original.residual.cell_vorticity_per_s),
-                Values::Velocity(&original.residual.face_forces.viscous_traction_n),
+                Values::Velocity(original.residual.face_forces.viscous_traction_n.canonical_values()),
             ];
             if let Some(extra) = &self.extra {
                 values.push(match extra {
@@ -125,12 +125,12 @@ fn artifact_profile(
             Values::Scalar(v) => v.len() != counts[5],
         })
         || samples.iter().any(|(_, original)| {
-            original.velocity_m_per_s.len() != counts[0]
-                || original.pressure_pa.len() != counts[1]
-                || original.pressure_fluctuation_pa.len() != counts[1]
-                || original.face_volume_flux_m3_per_s.len() != counts[2]
+            original.velocity_m_per_s.canonical_values().len() != counts[0]
+                || original.pressure_pa.canonical_values().len() != counts[1]
+                || original.pressure_fluctuation_pa.canonical_values().len() != counts[1]
+                || original.face_volume_flux_m3_per_s.canonical_values().len() != counts[2]
                 || original.residual.cell_vorticity_per_s.len() != counts[3]
-                || original.residual.face_forces.viscous_traction_n.len() != counts[4]
+                || original.residual.face_forces.viscous_traction_n.canonical_values().len() != counts[4]
         })
     {
         return Err(invalid("fluid native profile original cardinality"));
@@ -328,30 +328,72 @@ mod tests {
         let original = CanonicalFluidResult {
             numerical_input_identity: Digest::from_bytes([1; 32]),
             authored_authority_identity: Digest::from_bytes([2; 32]),
-            velocity_m_per_s: vec![[1.0, -2.0, 3.0]; 2],
-            pressure_fluctuation_pa: vec![4.0; 2],
-            pressure_reference_pa: vec![0.0; 2],
-            pressure_pa: vec![4.0; 2],
-            face_volume_flux_m3_per_s: vec![5.0; 7],
+            velocity_m_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Velocity,
+                _,
+            >::new(vec![[1.0, -2.0, 3.0]; 2]),
+            pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(vec![4.0; 2]),
+            pressure_reference_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(vec![0.0; 2]),
+            pressure_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(vec![4.0; 2]),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::VolumeFlowRate,
+                _,
+            >::new(vec![5.0; 7]),
             outer_iterations: 1,
             linear_iterations: 0,
             residual: CanonicalFluidResidual {
                 cell_vorticity_per_s: vec![[0.0; 3]; 2],
                 boundary_balances: vec![],
                 face_forces: CanonicalFluidFaceForces {
-                    advective_momentum_n: vec![],
-                    viscous_traction_n: vec![[0.5, -0.25, 1.0]; 7],
-                    pressure_traction_n: vec![],
-                    pressure_fluctuation_traction_n: vec![],
+                    advective_momentum_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(vec![]),
+                    viscous_traction_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(vec![[0.5, -0.25, 1.0]; 7]),
+                    pressure_traction_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(vec![]),
+                    pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(vec![]),
                 },
-                cell_momentum_n: vec![],
-                cell_algebraic_momentum_n: vec![],
+                cell_momentum_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new(vec![]),
+                cell_algebraic_momentum_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new(vec![]),
                 cell_momentum_relative: vec![],
-                cell_continuity_m3_per_s: vec![],
+                cell_continuity_m3_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::VolumeFlowRate,
+                    _,
+                >::new(vec![]),
                 cell_continuity_relative: vec![],
-                global_momentum_n: [0.0; 3],
+                global_momentum_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new([0.0; 3]),
                 global_momentum_relative: 0.0,
-                global_boundary_flux_m3_per_s: 0.0,
+                global_boundary_flux_m3_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::VolumeFlowRate,
+                    _,
+                >::new(0.0),
                 momentum_relative: 0.0,
                 continuity_relative: 0.0,
                 flux_constitutive_relative: 0.0,
@@ -373,12 +415,16 @@ mod tests {
         let mut values = [
             original
                 .velocity_m_per_s
+                .canonical_values()
                 .iter()
                 .flatten()
                 .copied()
                 .collect(),
-            original.pressure_pa.clone(),
-            original.face_volume_flux_m3_per_s.clone(),
+            original.pressure_pa.canonical_values().clone(),
+            original
+                .face_volume_flux_m3_per_s
+                .canonical_values()
+                .clone(),
             original
                 .residual
                 .cell_vorticity_per_s
@@ -390,6 +436,7 @@ mod tests {
                 .residual
                 .face_forces
                 .viscous_traction_n
+                .canonical_values()
                 .iter()
                 .flatten()
                 .copied()

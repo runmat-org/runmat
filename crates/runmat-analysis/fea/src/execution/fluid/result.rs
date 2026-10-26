@@ -121,7 +121,7 @@ impl FluidSteadySolverResult {
         let problem = source.problem(workload)?;
         problem.recover(&flow).map_err(invalid)?;
         source
-            .conjugate_heat(workload, &flow.face_volume_flux_m3_per_s)?
+            .conjugate_heat(workload, flow.face_volume_flux_m3_per_s.canonical_values())?
             .recover(&energy)
             .map_err(invalid)?;
         let reservation = problem.reservation();
@@ -236,7 +236,7 @@ impl FluidSteadySolverResult {
             .ok_or_else(|| invalid("transient conjugate study retained no interval"))?
             .time_s;
         source
-            .conjugate_heat_at(workload, &coupled.flow.face_volume_flux_m3_per_s, arrival)?
+            .conjugate_heat_at(workload, coupled.flow.face_volume_flux_m3_per_s.canonical_values(), arrival)?
             .recover_step(
                 &coupled.departure,
                 &coupled.energy,
@@ -429,7 +429,7 @@ impl FluidSteadySolverResult {
             (FluidRetainedOriginal::ConjugateHeat { flow, energy }, false) if conjugate => {
                 problem.recover(flow).map_err(invalid)?;
                 source
-                    .conjugate_heat(workload, &flow.face_volume_flux_m3_per_s)?
+                    .conjugate_heat(workload, flow.face_volume_flux_m3_per_s.canonical_values())?
                     .recover(energy)
                     .map_err(invalid)?;
             }

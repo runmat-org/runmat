@@ -74,7 +74,7 @@ pub fn validate_acoustic_frequency_assembly_entries(
     for result in entries {
         result.validate()?;
         if by_frequency
-            .insert(result.frequency().hertz.to_bits(), result)
+            .insert(result.frequency().canonical_value().to_bits(), result)
             .is_some()
         {
             return Err(invalid("duplicate acoustic assembly entry"));

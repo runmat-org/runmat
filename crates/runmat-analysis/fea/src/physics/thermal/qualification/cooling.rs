@@ -53,7 +53,7 @@ pub fn manufactured(
     );
     input.model.boundaries.push(AnalysisBoundary {
         boundary_id: "manufactured-incoming-flux".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Signal(SignalId("incoming-flux".into())),
         },

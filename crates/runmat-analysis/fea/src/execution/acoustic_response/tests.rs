@@ -9,15 +9,15 @@ fn model(step: ProcedureStep) -> AnalysisModel {
     model.constraints.clear();
     model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
         boundary_id: "closed_end".into(),
-        target: runmat_analysis_core::RegionTarget::boundary("slab_left"),
+        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
     }];
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::Quantity::new(2.0),
+        damping_ratio: runmat_types::physical::Quantity::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(3.0));
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![step];
     model
 }

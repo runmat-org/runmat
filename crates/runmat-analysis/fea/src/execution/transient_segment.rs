@@ -36,17 +36,24 @@ pub struct StructuralTransientPhysicalSample {
     pub identity: StructuralTransientPhysicalSampleIdentity,
     pub scope: StructuralTransientCheckpointScopeIdentity,
     pub schedule_ordinal: u64,
-    pub time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub time_s: runmat_types::physical::Time,
     pub step: StructuralTransientSampleStep,
     pub state: StructuralTransientContinuationState,
     pub projected_residual_norm: f64,
     pub reaction: Vec<f64>,
-    pub strain_energy_j: f64,
-    pub kinetic_energy_j: f64,
-    pub applied_load_work_j: f64,
-    pub support_work_j: f64,
-    pub damping_dissipation_j: f64,
-    pub energy_balance_residual_j: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub strain_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub kinetic_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub applied_load_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub support_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub damping_dissipation_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub energy_balance_residual_j: runmat_types::physical::Energy,
     pub relative_energy_balance_error: f64,
     pub dynamic_balance: StructuralDynamicBalanceSnapshot,
 }
@@ -58,17 +65,24 @@ struct StructuralTransientPhysicalSampleWire {
     identity: StructuralTransientPhysicalSampleIdentity,
     scope: StructuralTransientCheckpointScopeIdentity,
     schedule_ordinal: u64,
-    time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    time_s: runmat_types::physical::Time,
     step: StructuralTransientSampleStep,
     state: StructuralTransientContinuationState,
     projected_residual_norm: f64,
     reaction: Vec<f64>,
-    strain_energy_j: f64,
-    kinetic_energy_j: f64,
-    applied_load_work_j: f64,
-    support_work_j: f64,
-    damping_dissipation_j: f64,
-    energy_balance_residual_j: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    strain_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    kinetic_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    applied_load_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    support_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    damping_dissipation_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    energy_balance_residual_j: runmat_types::physical::Energy,
     relative_energy_balance_error: f64,
     dynamic_balance: StructuralDynamicBalanceSnapshot,
 }
@@ -82,17 +96,29 @@ impl TryFrom<StructuralTransientPhysicalSampleWire> for StructuralTransientPhysi
             identity: wire.identity,
             scope: wire.scope,
             schedule_ordinal: wire.schedule_ordinal,
-            time_s: wire.time_s,
+            time_s: runmat_types::physical::Time::new(wire.time_s.canonical_value()),
             step: wire.step,
             state: wire.state,
             projected_residual_norm: wire.projected_residual_norm,
             reaction: wire.reaction,
-            strain_energy_j: wire.strain_energy_j,
-            kinetic_energy_j: wire.kinetic_energy_j,
-            applied_load_work_j: wire.applied_load_work_j,
-            support_work_j: wire.support_work_j,
-            damping_dissipation_j: wire.damping_dissipation_j,
-            energy_balance_residual_j: wire.energy_balance_residual_j,
+            strain_energy_j: runmat_types::physical::Energy::new(
+                wire.strain_energy_j.canonical_value(),
+            ),
+            kinetic_energy_j: runmat_types::physical::Energy::new(
+                wire.kinetic_energy_j.canonical_value(),
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                wire.applied_load_work_j.canonical_value(),
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                wire.support_work_j.canonical_value(),
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                wire.damping_dissipation_j.canonical_value(),
+            ),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(
+                wire.energy_balance_residual_j.canonical_value(),
+            ),
             relative_energy_balance_error: wire.relative_energy_balance_error,
             dynamic_balance: wire.dynamic_balance,
         };
@@ -104,17 +130,17 @@ impl TryFrom<StructuralTransientPhysicalSampleWire> for StructuralTransientPhysi
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructuralTransientPhysicalSampleInput {
     pub schedule_ordinal: u64,
-    pub time_s: f64,
+    pub time_s: runmat_types::physical::Time,
     pub step: StructuralTransientSampleStep,
     pub state: StructuralTransientContinuationState,
     pub projected_residual_norm: f64,
     pub reaction: Vec<f64>,
-    pub strain_energy_j: f64,
-    pub kinetic_energy_j: f64,
-    pub applied_load_work_j: f64,
-    pub support_work_j: f64,
-    pub damping_dissipation_j: f64,
-    pub energy_balance_residual_j: f64,
+    pub strain_energy_j: runmat_types::physical::Energy,
+    pub kinetic_energy_j: runmat_types::physical::Energy,
+    pub applied_load_work_j: runmat_types::physical::Energy,
+    pub support_work_j: runmat_types::physical::Energy,
+    pub damping_dissipation_j: runmat_types::physical::Energy,
+    pub energy_balance_residual_j: runmat_types::physical::Energy,
     pub relative_energy_balance_error: f64,
     pub dynamic_balance: StructuralDynamicBalanceSnapshot,
 }
@@ -132,17 +158,29 @@ impl StructuralTransientPhysicalSample {
             identity,
             scope: scope_identity,
             schedule_ordinal: input.schedule_ordinal,
-            time_s: input.time_s,
+            time_s: runmat_types::physical::Time::new(input.time_s.canonical_value()),
             step: input.step,
             state: input.state,
             projected_residual_norm: input.projected_residual_norm,
             reaction: input.reaction,
-            strain_energy_j: input.strain_energy_j,
-            kinetic_energy_j: input.kinetic_energy_j,
-            applied_load_work_j: input.applied_load_work_j,
-            support_work_j: input.support_work_j,
-            damping_dissipation_j: input.damping_dissipation_j,
-            energy_balance_residual_j: input.energy_balance_residual_j,
+            strain_energy_j: runmat_types::physical::Energy::new(
+                input.strain_energy_j.canonical_value(),
+            ),
+            kinetic_energy_j: runmat_types::physical::Energy::new(
+                input.kinetic_energy_j.canonical_value(),
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                input.applied_load_work_j.canonical_value(),
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                input.support_work_j.canonical_value(),
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                input.damping_dissipation_j.canonical_value(),
+            ),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(
+                input.energy_balance_residual_j.canonical_value(),
+            ),
             relative_energy_balance_error: input.relative_energy_balance_error,
             dynamic_balance: input.dynamic_balance,
         };
@@ -168,7 +206,8 @@ impl StructuralTransientPhysicalSample {
         })?;
         if self.schema_version != 1
             || self.scope != scope.identity()?
-            || self.time_s.to_bits() != schedule_point.time_s.to_bits()
+            || self.time_s.canonical_value().to_bits()
+                != schedule_point.time_s.canonical_value().to_bits()
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural transient physical sample differs from its exact scope or schedule",
@@ -183,7 +222,10 @@ impl StructuralTransientPhysicalSample {
                 if self.schedule_ordinal > 0 =>
             {
                 let previous = &scope.schedule.points[ordinal - 1];
-                if time_step_s.to_bits() != (schedule_point.time_s - previous.time_s).to_bits() {
+                if time_step_s.to_bits()
+                    != (schedule_point.time_s.canonical_value() - previous.time_s.canonical_value())
+                        .to_bits()
+                {
                     return Err(AnalysisExecutionError::Identity(
                         "structural transient physical sample time step differs from its schedule",
                     ));
@@ -210,12 +252,12 @@ impl StructuralTransientPhysicalSample {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let scalars = [
             self.projected_residual_norm,
-            self.strain_energy_j,
-            self.kinetic_energy_j,
-            self.applied_load_work_j,
-            self.support_work_j,
-            self.damping_dissipation_j,
-            self.energy_balance_residual_j,
+            self.strain_energy_j.canonical_value(),
+            self.kinetic_energy_j.canonical_value(),
+            self.applied_load_work_j.canonical_value(),
+            self.support_work_j.canonical_value(),
+            self.damping_dissipation_j.canonical_value(),
+            self.energy_balance_residual_j.canonical_value(),
             self.relative_energy_balance_error,
         ];
         if self.reaction.is_empty()
@@ -233,17 +275,17 @@ impl StructuralTransientPhysicalSample {
             ));
         }
         if self.projected_residual_norm < 0.0
-            || self.strain_energy_j < 0.0
-            || self.kinetic_energy_j < 0.0
-            || self.damping_dissipation_j < 0.0
+            || self.strain_energy_j.canonical_value() < 0.0
+            || self.kinetic_energy_j.canonical_value() < 0.0
+            || self.damping_dissipation_j.canonical_value() < 0.0
             || self.relative_energy_balance_error < 0.0
         {
             return Err(AnalysisExecutionError::Invalid(format!(
                 "structural transient physical sample has a negative nonnegative quantity: residual={}, strain_energy_j={}, kinetic_energy_j={}, damping_dissipation_j={}, relative_energy_balance_error={}",
                 self.projected_residual_norm,
-                self.strain_energy_j,
-                self.kinetic_energy_j,
-                self.damping_dissipation_j,
+                self.strain_energy_j.canonical_value(),
+                self.kinetic_energy_j.canonical_value(),
+                self.damping_dissipation_j.canonical_value(),
                 self.relative_energy_balance_error,
             )));
         }
@@ -321,17 +363,17 @@ impl TryFrom<StructuralTransientSegmentSampleWire> for StructuralTransientSegmen
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructuralTransientSegmentSampleInput {
     pub schedule_ordinal: u64,
-    pub time_s: f64,
-    pub accepted_time_step_s: f64,
+    pub time_s: runmat_types::physical::Time,
+    pub accepted_time_step_s: runmat_types::physical::Time,
     pub state: StructuralTransientContinuationState,
     pub projected_residual_norm: f64,
     pub reaction: Vec<f64>,
-    pub strain_energy_j: f64,
-    pub kinetic_energy_j: f64,
-    pub applied_load_work_j: f64,
-    pub support_work_j: f64,
-    pub damping_dissipation_j: f64,
-    pub energy_balance_residual_j: f64,
+    pub strain_energy_j: runmat_types::physical::Energy,
+    pub kinetic_energy_j: runmat_types::physical::Energy,
+    pub applied_load_work_j: runmat_types::physical::Energy,
+    pub support_work_j: runmat_types::physical::Energy,
+    pub damping_dissipation_j: runmat_types::physical::Energy,
+    pub energy_balance_residual_j: runmat_types::physical::Energy,
     pub relative_energy_balance_error: f64,
     pub dynamic_balance: StructuralDynamicBalanceSnapshot,
 }
@@ -345,19 +387,31 @@ impl StructuralTransientSegmentSample {
             &request.scope,
             StructuralTransientPhysicalSampleInput {
                 schedule_ordinal: input.schedule_ordinal,
-                time_s: input.time_s,
+                time_s: runmat_types::physical::Time::new(input.time_s.canonical_value()),
                 step: StructuralTransientSampleStep::Accepted {
-                    time_step_s: input.accepted_time_step_s,
+                    time_step_s: input.accepted_time_step_s.canonical_value(),
                 },
                 state: input.state,
                 projected_residual_norm: input.projected_residual_norm,
                 reaction: input.reaction,
-                strain_energy_j: input.strain_energy_j,
-                kinetic_energy_j: input.kinetic_energy_j,
-                applied_load_work_j: input.applied_load_work_j,
-                support_work_j: input.support_work_j,
-                damping_dissipation_j: input.damping_dissipation_j,
-                energy_balance_residual_j: input.energy_balance_residual_j,
+                strain_energy_j: runmat_types::physical::Energy::new(
+                    input.strain_energy_j.canonical_value(),
+                ),
+                kinetic_energy_j: runmat_types::physical::Energy::new(
+                    input.kinetic_energy_j.canonical_value(),
+                ),
+                applied_load_work_j: runmat_types::physical::Energy::new(
+                    input.applied_load_work_j.canonical_value(),
+                ),
+                support_work_j: runmat_types::physical::Energy::new(
+                    input.support_work_j.canonical_value(),
+                ),
+                damping_dissipation_j: runmat_types::physical::Energy::new(
+                    input.damping_dissipation_j.canonical_value(),
+                ),
+                energy_balance_residual_j: runmat_types::physical::Energy::new(
+                    input.energy_balance_residual_j.canonical_value(),
+                ),
                 relative_energy_balance_error: input.relative_energy_balance_error,
                 dynamic_balance: input.dynamic_balance,
             },
@@ -808,12 +862,32 @@ impl StructuralTransientSegment {
             || terminal.physical.state.velocity != checkpoint.state.velocity
             || checkpoint.continuation.approach == StructuralTransientContinuationApproach::At
                 && terminal.physical.state.acceleration != checkpoint.state.acceleration
-            || terminal.physical.applied_load_work_j.to_bits()
-                != checkpoint.balance.applied_load_work_j.to_bits()
-            || terminal.physical.support_work_j.to_bits()
-                != checkpoint.balance.support_work_j.to_bits()
-            || terminal.physical.damping_dissipation_j.to_bits()
-                != checkpoint.balance.damping_dissipation_j.to_bits()
+            || terminal
+                .physical
+                .applied_load_work_j
+                .canonical_value()
+                .to_bits()
+                != checkpoint
+                    .balance
+                    .applied_load_work_j
+                    .canonical_value()
+                    .to_bits()
+            || terminal.physical.support_work_j.canonical_value().to_bits()
+                != checkpoint
+                    .balance
+                    .support_work_j
+                    .canonical_value()
+                    .to_bits()
+            || terminal
+                .physical
+                .damping_dissipation_j
+                .canonical_value()
+                .to_bits()
+                != checkpoint
+                    .balance
+                    .damping_dissipation_j
+                    .canonical_value()
+                    .to_bits()
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural transient segment terminal state differs from its checkpoint",
@@ -855,17 +929,29 @@ fn physical_sample_input_identity(
             schema_version,
             scope,
             schedule_ordinal: input.schedule_ordinal,
-            time_s: input.time_s,
+            time_s: runmat_types::physical::Time::new(input.time_s.canonical_value()),
             step: input.step,
             state: &input.state,
             projected_residual_norm: input.projected_residual_norm,
             reaction: &input.reaction,
-            strain_energy_j: input.strain_energy_j,
-            kinetic_energy_j: input.kinetic_energy_j,
-            applied_load_work_j: input.applied_load_work_j,
-            support_work_j: input.support_work_j,
-            damping_dissipation_j: input.damping_dissipation_j,
-            energy_balance_residual_j: input.energy_balance_residual_j,
+            strain_energy_j: runmat_types::physical::Energy::new(
+                input.strain_energy_j.canonical_value(),
+            ),
+            kinetic_energy_j: runmat_types::physical::Energy::new(
+                input.kinetic_energy_j.canonical_value(),
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                input.applied_load_work_j.canonical_value(),
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                input.support_work_j.canonical_value(),
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                input.damping_dissipation_j.canonical_value(),
+            ),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(
+                input.energy_balance_residual_j.canonical_value(),
+            ),
             relative_energy_balance_error: input.relative_energy_balance_error,
             dynamic_balance: &input.dynamic_balance,
         },
@@ -881,17 +967,29 @@ fn physical_sample_identity(
             schema_version: sample.schema_version,
             scope: sample.scope,
             schedule_ordinal: sample.schedule_ordinal,
-            time_s: sample.time_s,
+            time_s: runmat_types::physical::Time::new(sample.time_s.canonical_value()),
             step: sample.step,
             state: &sample.state,
             projected_residual_norm: sample.projected_residual_norm,
             reaction: &sample.reaction,
-            strain_energy_j: sample.strain_energy_j,
-            kinetic_energy_j: sample.kinetic_energy_j,
-            applied_load_work_j: sample.applied_load_work_j,
-            support_work_j: sample.support_work_j,
-            damping_dissipation_j: sample.damping_dissipation_j,
-            energy_balance_residual_j: sample.energy_balance_residual_j,
+            strain_energy_j: runmat_types::physical::Energy::new(
+                sample.strain_energy_j.canonical_value(),
+            ),
+            kinetic_energy_j: runmat_types::physical::Energy::new(
+                sample.kinetic_energy_j.canonical_value(),
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                sample.applied_load_work_j.canonical_value(),
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                sample.support_work_j.canonical_value(),
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                sample.damping_dissipation_j.canonical_value(),
+            ),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(
+                sample.energy_balance_residual_j.canonical_value(),
+            ),
             relative_energy_balance_error: sample.relative_energy_balance_error,
             dynamic_balance: &sample.dynamic_balance,
         },
@@ -903,17 +1001,24 @@ struct PhysicalSampleIdentityInput<'a> {
     schema_version: u16,
     scope: StructuralTransientCheckpointScopeIdentity,
     schedule_ordinal: u64,
-    time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    time_s: runmat_types::physical::Time,
     step: StructuralTransientSampleStep,
     state: &'a StructuralTransientContinuationState,
     projected_residual_norm: f64,
     reaction: &'a [f64],
-    strain_energy_j: f64,
-    kinetic_energy_j: f64,
-    applied_load_work_j: f64,
-    support_work_j: f64,
-    damping_dissipation_j: f64,
-    energy_balance_residual_j: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    strain_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    kinetic_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    applied_load_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    support_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    damping_dissipation_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    energy_balance_residual_j: runmat_types::physical::Energy,
     relative_energy_balance_error: f64,
     dynamic_balance: &'a StructuralDynamicBalanceSnapshot,
 }
@@ -967,8 +1072,8 @@ mod tests {
             request,
             StructuralTransientSegmentSampleInput {
                 schedule_ordinal: ordinal,
-                time_s: if ordinal == 1 { 0.5 } else { 1.0 },
-                accepted_time_step_s: 0.5,
+                time_s: runmat_types::physical::Time::new(if ordinal == 1 { 0.5 } else { 1.0 }),
+                accepted_time_step_s: runmat_types::physical::Time::new(0.5),
                 state: StructuralTransientContinuationState {
                     displacement: vec![ordinal as f64, 0.0],
                     velocity: vec![0.5, 0.0],
@@ -976,12 +1081,12 @@ mod tests {
                 },
                 projected_residual_norm: 1.0e-12,
                 reaction: vec![2.0, 0.0],
-                strain_energy_j: 0.6,
-                kinetic_energy_j: 0.4,
-                applied_load_work_j: ordinal as f64,
-                support_work_j: -0.25 * ordinal as f64,
-                damping_dissipation_j: 0.1 * ordinal as f64,
-                energy_balance_residual_j: 0.0,
+                strain_energy_j: runmat_types::physical::Energy::new(0.6),
+                kinetic_energy_j: runmat_types::physical::Energy::new(0.4),
+                applied_load_work_j: runmat_types::physical::Energy::new(ordinal as f64),
+                support_work_j: runmat_types::physical::Energy::new(-0.25 * ordinal as f64),
+                damping_dissipation_j: runmat_types::physical::Energy::new(0.1 * ordinal as f64),
+                energy_balance_residual_j: runmat_types::physical::Energy::new(0.0),
                 relative_energy_balance_error: 0.0,
                 dynamic_balance: StructuralDynamicBalanceSnapshot {
                     applied_load: vec![1.0, 0.0],
@@ -1002,7 +1107,7 @@ mod tests {
             scope,
             StructuralTransientPhysicalSampleInput {
                 schedule_ordinal: 0,
-                time_s: 0.0,
+                time_s: runmat_types::physical::Time::new(0.0),
                 step: StructuralTransientSampleStep::Initial,
                 state: StructuralTransientContinuationState {
                     displacement: vec![0.0, 0.0],
@@ -1011,12 +1116,12 @@ mod tests {
                 },
                 projected_residual_norm: 0.0,
                 reaction: vec![0.0, 0.0],
-                strain_energy_j: 0.0,
-                kinetic_energy_j: 0.0,
-                applied_load_work_j: 0.0,
-                support_work_j: 0.0,
-                damping_dissipation_j: 0.0,
-                energy_balance_residual_j: 0.0,
+                strain_energy_j: runmat_types::physical::Energy::new(0.0),
+                kinetic_energy_j: runmat_types::physical::Energy::new(0.0),
+                applied_load_work_j: runmat_types::physical::Energy::new(0.0),
+                support_work_j: runmat_types::physical::Energy::new(0.0),
+                damping_dissipation_j: runmat_types::physical::Energy::new(0.0),
+                energy_balance_residual_j: runmat_types::physical::Energy::new(0.0),
                 relative_energy_balance_error: 0.0,
                 dynamic_balance: StructuralDynamicBalanceSnapshot {
                     applied_load: vec![0.0, 0.0],
@@ -1087,7 +1192,7 @@ mod tests {
         .unwrap();
 
         let mut samples = segment.samples().to_vec();
-        samples[0].physical.time_s = 0.75;
+        samples[0].physical.time_s = runmat_types::physical::Time::new(0.75);
         assert!(StructuralTransientSegment::from_manifest_and_samples(
             segment.manifest().clone(),
             segment.initial_sample().cloned(),

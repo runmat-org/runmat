@@ -44,7 +44,11 @@ fn interface_mesh(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
     for element in &mut mesh.topology.volume_elements {
         let x = element.node_ids[..4]
             .iter()
-            .map(|id| mesh.topology.nodes[*id as usize - 1].coordinates_m[0])
+            .map(|id| {
+                mesh.topology.nodes[*id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[0]
+            })
             .collect::<Vec<_>>();
         element.region_id = if x.iter().all(|value| *value <= 0.5) {
             left_region.clone()
@@ -87,8 +91,8 @@ fn interface_model(
     else {
         panic!("the interface reference requires isotropic materials");
     };
-    left_elasticity.youngs_modulus_pa = 100.0;
-    left_elasticity.poisson_ratio = left_poisson_ratio;
+    left_elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    left_elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(left_poisson_ratio);
     let mut right_material = left_material.clone();
     right_material.material_id = "right_material".into();
     let MaterialElasticityModel::IsotropicLinear(right_elasticity) =
@@ -96,17 +100,17 @@ fn interface_model(
     else {
         unreachable!();
     };
-    right_elasticity.youngs_modulus_pa = 200.0;
-    right_elasticity.poisson_ratio = right_poisson_ratio;
+    right_elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(200.0);
+    right_elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(right_poisson_ratio);
     model.materials = vec![left_material, right_material];
     model.material_assignments = vec![
         MaterialAssignment::to_solid_region(
-            "left_layer",
+            runmat_meshing_core::fixtures::fixture_region("left_layer"),
             "left_material",
             EvidenceConfidence::Verified,
         ),
         MaterialAssignment::to_solid_region(
-            "right_layer",
+            runmat_meshing_core::fixtures::fixture_region("right_layer"),
             "right_material",
             EvidenceConfidence::Verified,
         ),
@@ -167,7 +171,7 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
             .iter()
             .filter(|node| {
                 !boundary_nodes.contains(&node.node_id)
-                    && (node.coordinates_m[0] - 0.5).abs() < 1.0e-12
+                    && (node.coordinates_m.canonical_value()[0] - 0.5).abs() < 1.0e-12
             })
             .count();
         assert!(
@@ -179,7 +183,9 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
         model.constraints = boundary_nodes
             .into_iter()
             .map(|node_id| {
-                let x = mesh.topology.nodes[node_id as usize - 1].coordinates_m[0];
+                let x = mesh.topology.nodes[node_id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[0];
                 AnalysisConstraint::Structural(StructuralConstraint {
                     constraint_id: format!("exact_interface_boundary_{node_id}"),
                     frame: CoordinateFrame::Global,
@@ -236,7 +242,11 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
             .as_host_f64()
             .unwrap();
         for (node, actual) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
-            let expected = [exact_displacement(node.coordinates_m[0]), 0.0, 0.0];
+            let expected = [
+                exact_displacement(node.coordinates_m.canonical_value()[0]),
+                0.0,
+                0.0,
+            ];
             for (&actual, expected) in actual.iter().zip(expected) {
                 assert!(
                     (actual - expected).abs() < 1.0e-8,
@@ -309,7 +319,7 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             constraint_id: "fixed_root".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 translations: [
                     StructuralTranslationDof::Ux,
                     StructuralTranslationDof::Uy,
@@ -349,7 +359,7 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             .as_host_f64()
             .unwrap();
         for (node, actual) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
-            let x = node.coordinates_m[0];
+            let x = node.coordinates_m.canonical_value()[0];
             let expected_x = if x <= 0.5 {
                 TRACTION_PA * x / 100.0
             } else {

@@ -50,7 +50,13 @@ impl FeaSourceCheckResult {
             .find(|value| {
                 value.module_path == module_path.as_str() && value.geometry_id == symbol.name
             })
-            .ok_or(FeaQueryError::NotFound)?;
+            .ok_or_else(|| {
+                if self.source_index.entries.iter().any(|entry| &entry.identity == geometry) {
+                    FeaQueryError::DefinitionUnavailable
+                } else {
+                    FeaQueryError::NotFound
+                }
+            })?;
         for region in &definition.regions {
             if remaining.remove(region.region_id.as_str())
                 && required_role.is_some_and(|role| role != region.role)

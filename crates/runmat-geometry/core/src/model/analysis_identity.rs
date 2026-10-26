@@ -29,23 +29,33 @@ impl std::error::Error for GeometryContractError {}
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryTolerancePolicy {
-    pub source_tolerance_m: f64,
-    pub absolute_floor_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub source_tolerance_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub absolute_floor_m: runmat_types::physical::Length,
     pub model_relative_term: f64,
-    pub requested_deviation_m: f64,
-    pub maximum_healing_displacement_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub requested_deviation_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_healing_displacement_m: runmat_types::physical::Length,
 }
 
 impl GeometryTolerancePolicy {
     pub fn validate(&self) -> Result<(), GeometryContractError> {
         for (field, value) in [
-            ("source_tolerance_m", self.source_tolerance_m),
-            ("absolute_floor_m", self.absolute_floor_m),
+            (
+                "source_tolerance_m",
+                self.source_tolerance_m.canonical_value(),
+            ),
+            ("absolute_floor_m", self.absolute_floor_m.canonical_value()),
             ("model_relative_term", self.model_relative_term),
-            ("requested_deviation_m", self.requested_deviation_m),
+            (
+                "requested_deviation_m",
+                self.requested_deviation_m.canonical_value(),
+            ),
             (
                 "maximum_healing_displacement_m",
-                self.maximum_healing_displacement_m,
+                self.maximum_healing_displacement_m.canonical_value(),
             ),
         ] {
             validate_finite(field, value)?;
@@ -56,7 +66,7 @@ impl GeometryTolerancePolicy {
                 ));
             }
         }
-        if self.requested_deviation_m == 0.0 {
+        if self.requested_deviation_m.canonical_value() == 0.0 {
             return Err(GeometryContractError::invalid(
                 "requested_deviation_m",
                 "must be greater than zero",
@@ -79,7 +89,8 @@ impl GeometryTolerancePolicy {
         }
         Ok(self
             .source_tolerance_m
-            .max(self.absolute_floor_m)
+            .canonical_value()
+            .max(self.absolute_floor_m.canonical_value())
             .max(self.model_relative_term * model_scale_m))
     }
 }
@@ -338,16 +349,22 @@ impl PersistentEntityId {
         Ok(selection)
     }
 
+    /// Validate the sole public string encoding of an exact entity selection.
+    pub fn validate_analysis_selection_id(value: &str) -> Result<(), GeometryContractError> {
+        let valid = value.strip_prefix(PERSISTENT_SELECTION_PREFIX).is_some_and(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        });
+        if valid { Ok(()) } else {
+            Err(GeometryContractError::invalid("persistent selection", "requires the canonical occurrence-qualified ID returned by geometry inspection"))
+        }
+    }
+
     /// Tests an analysis region selector against this exact entity.
     ///
-    /// Canonical persistent selectors are occurrence-qualified. Plain authored selectors retain
-    /// their established source-topology matching semantics.
+    /// Only canonical, occurrence-qualified selectors are admitted. Source topology names and
+    /// display ordinals are metadata, never alternate selection identities.
     pub fn matches_analysis_selection(&self, selection_id: &str) -> bool {
-        if selection_id.starts_with(PERSISTENT_SELECTION_PREFIX) {
-            self.analysis_selection_id().as_deref() == Ok(selection_id)
-        } else {
-            self.source_topology_id == selection_id
-        }
+        self.analysis_selection_id().as_deref() == Ok(selection_id)
     }
 }
 
@@ -407,11 +424,11 @@ mod tests {
     #[test]
     fn tolerance_is_geometry_owned_and_scale_aware() {
         let policy = GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-6,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 1.0e-5,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-5),
         };
         assert_eq!(policy.equivalence_tolerance_m(2.0).unwrap(), 2.0e-6);
         assert!(policy.equivalence_tolerance_m(f64::NAN).is_err());
@@ -458,8 +475,28 @@ mod tests {
         assert_ne!(first_selection, second_selection);
         assert!(first.matches_analysis_selection(&first_selection));
         assert!(!second.matches_analysis_selection(&first_selection));
-        assert!(first.matches_analysis_selection("shared-part-face"));
-        assert!(second.matches_analysis_selection("shared-part-face"));
+        assert!(!first.matches_analysis_selection("shared-part-face"));
+        assert!(!second.matches_analysis_selection("shared-part-face"));
+    }
+}
+
+impl From<runmat_types::physical::UnitError> for GeometryContractError {
+    fn from(error: runmat_types::physical::UnitError) -> Self {
+        Self::invalid("physical quantity", error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod canonical_selection_contract_tests {
+    use super::*;
+    #[test]
+    fn ordinal_aliases_and_unqualified_names_are_never_persistent_ids() {
+        for value in ["face_000001", "solid_000001", "cad_label_0_1_1_1", "occt:face", "persistent-entity:sha256:ABC"] {
+            assert!(PersistentEntityId::validate_analysis_selection_id(value).is_err());
+        }
+        let id = PersistentEntityId::new(PersistentEntityKind::Face, "exact-face".into(), vec!["root".into()]);
+        PersistentEntityId::validate_analysis_selection_id(&id.analysis_selection_id().unwrap()).unwrap();
+        assert!(serde_json::from_str::<crate::GeometryRegionSelector>(r#"{"kind":"source_alias","value":"face_000001"}"#).is_err());
     }
 
     #[test]

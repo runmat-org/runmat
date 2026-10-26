@@ -79,7 +79,15 @@ fn portable_thermal_result_separates_physical_source_from_transport_commitment()
             .thermal
             .as_mut()
             .unwrap()
-            .expansion_coefficient_per_k *= 2.0;
+            .expansion_coefficient_per_k = runmat_types::physical::Quantity::new(
+            foreign_model.materials[0]
+                .thermal
+                .as_mut()
+                .unwrap()
+                .expansion_coefficient_per_k
+                .canonical_value()
+                * (2.0),
+        );
         assert!(retained.validate_model(&foreign_model).is_err());
         let mut foreign_workload = workload.clone();
         foreign_workload.model = foreign_model;

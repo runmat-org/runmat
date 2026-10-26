@@ -71,10 +71,11 @@ pub(super) async fn run() {
                 symbol: callable.qualified_name.clone(),
                 source_digest: *callable.source_digest.bytes(),
             },
-            parameters: vec![AssessmentQuantity {
-                value_si: 0.001,
-                dimension: runmat_types::PhysicalDimension::LENGTH,
-            }],
+            parameters: vec![AssessmentQuantity::try_from_descriptor(
+                (runmat_types::PhysicalDimension::LENGTH).into(),
+                0.001,
+            )
+            .expect("checked finite assessment quantity")],
         },
         evidence: AssessmentEvidenceRequirement::AuthoredSamples,
     };

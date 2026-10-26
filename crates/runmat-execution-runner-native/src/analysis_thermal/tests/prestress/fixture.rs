@@ -24,7 +24,7 @@ pub fn setup(mut setup: ThermalStudyPreparation, buckling: bool) -> ThermalStudy
         .thermal
         .as_mut()
         .unwrap()
-        .expansion_coefficient_per_k = 1.0e-5;
+        .expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(1.0e-5);
     for constraint in &mut model.constraints {
         if let AnalysisConstraint::Thermal(ThermalConstraint {
             kind: ThermalConstraintKind::Prescribed { value, .. },
@@ -36,9 +36,9 @@ pub fn setup(mut setup: ThermalStudyPreparation, buckling: bool) -> ThermalStudy
     }
     // Restrained x expansion creates uniform compression; y/z remain physically free.
     for node in &setup.mesh.topology.nodes {
-        let axes: &[usize] = if node.coordinates_m == [0.0, 0.0, 0.0] {
+        let axes: &[usize] = if node.coordinates_m.canonical_value() == [0.0, 0.0, 0.0] {
             &[0, 1, 2]
-        } else if node.coordinates_m == [0.0, 1.0, 0.0] {
+        } else if node.coordinates_m.canonical_value() == [0.0, 1.0, 0.0] {
             &[0, 2]
         } else {
             &[0]
@@ -156,6 +156,7 @@ pub fn frequency_setup(base: ThermalStudyPreparation) -> ThermalStudyPreparation
             face.node_indices.iter().all(|&index| {
                 (setup.mesh.topology.nodes[index]
                     .coordinates_m
+                    .canonical_value()
                     .iter()
                     .sum::<f64>()
                     - 1.0)

@@ -50,30 +50,64 @@ pub fn parse_type_syntax(source: &str) -> Result<FeaType, TypeSyntaxError> {
         "real" => FeaType::Real,
         "complex" => FeaType::Complex,
         "string" => FeaType::String,
-        "dimensionless" => FeaType::Quantity(PhysicalDimension::DIMENSIONLESS),
-        "length" => FeaType::Quantity(PhysicalDimension::LENGTH),
-        "area" => FeaType::Quantity(PhysicalDimension::AREA),
-        "volume" => FeaType::Quantity(PhysicalDimension::VOLUME),
-        "time" => FeaType::Quantity(PhysicalDimension::TIME),
-        "frequency" => FeaType::Quantity(PhysicalDimension::FREQUENCY),
-        "mass" => FeaType::Quantity(PhysicalDimension::MASS),
-        "mass_density" => FeaType::Quantity(PhysicalDimension::DENSITY),
-        "temperature" => FeaType::Quantity(PhysicalDimension::TEMPERATURE),
-        "velocity" => FeaType::Quantity(PhysicalDimension::VELOCITY),
-        "acceleration" => FeaType::Quantity(PhysicalDimension::ACCELERATION),
-        "force" => FeaType::Quantity(PhysicalDimension::FORCE),
-        "moment" => FeaType::Quantity(PhysicalDimension::MOMENT),
-        "pressure" | "stress" => FeaType::Quantity(PhysicalDimension::PRESSURE),
-        "energy" => FeaType::Quantity(PhysicalDimension::ENERGY),
-        "power" => FeaType::Quantity(PhysicalDimension::POWER),
-        "heat_flux" => FeaType::Quantity(PhysicalDimension::HEAT_FLUX),
-        "thermal_conductivity" => FeaType::Quantity(PhysicalDimension::THERMAL_CONDUCTIVITY),
-        "heat_transfer_coefficient" => {
-            FeaType::Quantity(PhysicalDimension::HEAT_TRANSFER_COEFFICIENT)
+        "dimensionless" => FeaType::Quantity((PhysicalDimension::DIMENSIONLESS).into()),
+        "length" => FeaType::Quantity((PhysicalDimension::LENGTH).into()),
+        "area" => FeaType::Quantity((PhysicalDimension::AREA).into()),
+        "volume" => FeaType::Quantity((PhysicalDimension::VOLUME).into()),
+        "time" => FeaType::Quantity((PhysicalDimension::TIME).into()),
+        "frequency" => FeaType::Quantity((PhysicalDimension::FREQUENCY).into()),
+        "mass" => FeaType::Quantity((PhysicalDimension::MASS).into()),
+        "mass_density" => FeaType::Quantity((PhysicalDimension::DENSITY).into()),
+        "temperature" => known_quantity(runmat_types::physical::QuantityKind::Temperature),
+        "velocity" => FeaType::Quantity((PhysicalDimension::VELOCITY).into()),
+        "acceleration" => FeaType::Quantity((PhysicalDimension::ACCELERATION).into()),
+        "force" => FeaType::Quantity((PhysicalDimension::FORCE).into()),
+        "moment" => known_quantity(runmat_types::physical::QuantityKind::Moment),
+        "pressure" | "stress" => FeaType::Quantity((PhysicalDimension::PRESSURE).into()),
+        "energy" => known_quantity(runmat_types::physical::QuantityKind::Energy),
+        "power" => FeaType::Quantity((PhysicalDimension::POWER).into()),
+        "heat_flux" => FeaType::Quantity((PhysicalDimension::HEAT_FLUX).into()),
+        "thermal_conductivity" => {
+            FeaType::Quantity((PhysicalDimension::THERMAL_CONDUCTIVITY).into())
         }
-        "electric_potential" => FeaType::Quantity(PhysicalDimension::ELECTRIC_POTENTIAL),
-        "electric_current" => FeaType::Quantity(PhysicalDimension::ELECTRIC_CURRENT),
-        "magnetic_flux_density" => FeaType::Quantity(PhysicalDimension::MAGNETIC_FLUX_DENSITY),
+        "heat_transfer_coefficient" => {
+            FeaType::Quantity(PhysicalDimension::HEAT_TRANSFER_COEFFICIENT.into())
+        }
+        "electric_potential" => FeaType::Quantity((PhysicalDimension::ELECTRIC_POTENTIAL).into()),
+        "electric_current" => FeaType::Quantity((PhysicalDimension::ELECTRIC_CURRENT).into()),
+        "magnetic_flux_density" => {
+            FeaType::Quantity((PhysicalDimension::MAGNETIC_FLUX_DENSITY).into())
+        }
+        "angle" => FeaType::Quantity(runmat_types::physical::DynamicDimension::quantity_type(
+            runmat_types::physical::QuantityKind::Angle,
+        )),
+        "displacement" => known_quantity(runmat_types::physical::QuantityKind::Displacement),
+        "rotation" => known_quantity(runmat_types::physical::QuantityKind::Rotation),
+        "angular_velocity" => known_quantity(runmat_types::physical::QuantityKind::AngularVelocity),
+        "angular_acceleration" => {
+            known_quantity(runmat_types::physical::QuantityKind::AngularAcceleration)
+        }
+        "temperature_difference" => {
+            known_quantity(runmat_types::physical::QuantityKind::TemperatureDifference)
+        }
+        "body_force_density" => {
+            known_quantity(runmat_types::physical::QuantityKind::BodyForceDensity)
+        }
+        "heat_generation_density" => {
+            known_quantity(runmat_types::physical::QuantityKind::HeatGenerationDensity)
+        }
+        "electric_charge" => known_quantity(runmat_types::physical::QuantityKind::ElectricCharge),
+        "electric_current_density" => {
+            known_quantity(runmat_types::physical::QuantityKind::ElectricCurrentDensity)
+        }
+        "electric_charge_density" => {
+            known_quantity(runmat_types::physical::QuantityKind::ElectricChargeDensity)
+        }
+        "magnetic_vector_potential" => {
+            known_quantity(runmat_types::physical::QuantityKind::MagneticVectorPotential)
+        }
+        "mass_flow_rate" => known_quantity(runmat_types::physical::QuantityKind::MassFlowRate),
+        "volume_flow_rate" => known_quantity(runmat_types::physical::QuantityKind::VolumeFlowRate),
         "material" => FeaType::Declaration(crate::FeaSymbolKind::Material),
         "geometry" => FeaType::Declaration(crate::FeaSymbolKind::Geometry),
         "mesh" => FeaType::Declaration(crate::FeaSymbolKind::Mesh),
@@ -82,6 +116,13 @@ pub fn parse_type_syntax(source: &str) -> Result<FeaType, TypeSyntaxError> {
         "execution" => FeaType::Declaration(crate::FeaSymbolKind::Execution),
         _ => return Err(TypeSyntaxError::Unknown(compact)),
     })
+}
+
+fn known_quantity(kind: runmat_types::physical::QuantityKind) -> FeaType {
+    FeaType::Quantity(
+        runmat_types::physical::DynamicDimension::try_new(kind.dimension(), Some(kind))
+            .expect("catalog kind"),
+    )
 }
 
 #[cfg(test)]
@@ -96,7 +137,7 @@ mod tests {
         );
         assert_eq!(
             parse_type_syntax("force").unwrap(),
-            FeaType::Quantity(PhysicalDimension::FORCE)
+            FeaType::Quantity((PhysicalDimension::FORCE).into())
         );
     }
 

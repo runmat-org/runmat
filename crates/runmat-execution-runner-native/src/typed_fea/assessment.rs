@@ -33,7 +33,7 @@ impl AssessmentExecutionReceipt for NativeAssessmentReceipt {
         self.0
             .validate_binding(
                 &report.definition,
-                measurement.value_si,
+                measurement.canonical_value(),
                 report.study_definition,
                 assessment_evidence_identity(report)?,
             )
@@ -125,7 +125,7 @@ pub async fn complete_frozen_locally(
         let program = frozen
             .prepare(
                 &report.definition,
-                measured.value_si,
+                measured.canonical_value(),
                 report.study_definition,
                 assessment_evidence_identity(report)?,
             )
@@ -224,7 +224,7 @@ async fn execute_functions<'a, P: AnalysisTaskPool>(
             .ok_or_else(|| "assessment has no admitted measurement".to_owned())?;
         let program = prepare_assessment_program(
             &report.definition,
-            measured.value_si,
+            measured.canonical_value(),
             report.study_definition,
             assessment_evidence_identity(report)?,
             &imported.revision,

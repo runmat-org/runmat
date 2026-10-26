@@ -83,14 +83,18 @@ impl MaxwellHarmonicSolverResult {
             || sampling.sampling_digest() != r.sampling_digest
             || sampling.rule()
                 != crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen
-            || r.angular_frequency_rad_per_s != input.angular_frequency_rad_per_s
-            || !r.angular_frequency_rad_per_s.is_finite()
-            || r.angular_frequency_rad_per_s <= 0.0
+            || r.angular_frequency_rad_per_s.canonical_value()
+                != input.angular_frequency_rad_per_s.canonical_value()
+            || !r.angular_frequency_rad_per_s.canonical_value().is_finite()
+            || r.angular_frequency_rad_per_s.canonical_value() <= 0.0
             || !within(r.relative_physical_residual, 8.0 * t)
             || !within(r.relative_complex_power_error, 16.0 * t)
             || !within(r.relative_charge_continuity_residual, 16.0 * t)
-            || r.edge_circulations_v.len() != r.edge_node_identities.len()
-            || r.edge_circulations_v.iter().any(|v| !v.is_finite())
+            || r.edge_circulations_v.canonical_values().len() != r.edge_node_identities.len()
+            || r.edge_circulations_v
+                .canonical_values()
+                .iter()
+                .any(|v| !v.is_finite())
             || !r
                 .edge_node_identities
                 .iter()
@@ -139,19 +143,19 @@ impl MaxwellHarmonicSolverResult {
                 || s.ordinal != authority.ordinal
                 || s.position_m != authority.position_m
                 || s.volume_weight_m3 != authority.volume_weight_m3
-                || !law.permeability_h_per_m.is_finite()
-                || law.permeability_h_per_m <= 0.0
-                || !law.permittivity_f_per_m.is_finite()
-                || law.permittivity_f_per_m <= 0.0
-                || !law.conductivity_s_per_m.is_finite()
-                || law.conductivity_s_per_m < 0.0
+                || !law.permeability_h_per_m.canonical_value().is_finite()
+                || law.permeability_h_per_m.canonical_value() <= 0.0
+                || !law.permittivity_f_per_m.canonical_value().is_finite()
+                || law.permittivity_f_per_m.canonical_value() <= 0.0
+                || !law.conductivity_s_per_m.canonical_value().is_finite()
+                || law.conductivity_s_per_m.canonical_value() < 0.0
                 || [
-                    s.electric_field_v_per_m,
-                    s.flux_density_t,
-                    s.magnetic_field_a_per_m,
-                    s.electric_displacement_c_per_m2,
-                    s.conduction_current_density_a_per_m2,
-                    j.current_density_a_per_m2,
+                    s.electric_field_v_per_m.canonical_value(),
+                    s.flux_density_t.canonical_value(),
+                    s.magnetic_field_a_per_m.canonical_value(),
+                    s.electric_displacement_c_per_m2.canonical_value(),
+                    s.conduction_current_density_a_per_m2.canonical_value(),
+                    j.current_density_a_per_m2.canonical_value(),
                 ]
                 .into_iter()
                 .flatten()
@@ -162,20 +166,21 @@ impl MaxwellHarmonicSolverResult {
             let mut ee = 0.0;
             let mut hh = 0.0;
             for axis in 0..3 {
-                ee += s.electric_field_v_per_m[axis].norm_squared();
-                hh += s.magnetic_field_a_per_m[axis].norm_squared();
+                ee += s.electric_field_v_per_m.canonical_value()[axis].norm_squared();
+                hh += s.magnetic_field_a_per_m.canonical_value()[axis].norm_squared();
             }
             let weight = s.volume_weight_m3;
-            wm += 0.25 * weight * law.permeability_h_per_m * hh;
-            ohmic += 0.5 * weight * law.conductivity_s_per_m * ee;
+            wm += 0.25 * weight * law.permeability_h_per_m.canonical_value() * hh;
+            ohmic += 0.5 * weight * law.conductivity_s_per_m.canonical_value() * ee;
         }
         // Electric energy, source power and closure are re-derived from the original
         // equations in `validate_for`; the sample summaries checked here are B/H/J/loss.
-        if !close(wm, r.magnetic_energy_j)
-            || !close(ohmic, r.ohmic_power_w)
+        if !close(wm, r.magnetic_energy_j.canonical_value())
+            || !close(ohmic, r.ohmic_power_w.canonical_value())
             || !close(
-                2.0 * r.angular_frequency_rad_per_s * (r.magnetic_energy_j - r.electric_energy_j),
-                r.reactive_power_var,
+                2.0 * r.angular_frequency_rad_per_s.canonical_value()
+                    * (r.magnetic_energy_j.canonical_value() - r.electric_energy_j.canonical_value()),
+                r.reactive_power_var.canonical_value(),
             )
         {
             return Err(invalid("Maxwell retained power/energy summaries disagree"));
@@ -278,11 +283,12 @@ impl MaxwellHarmonicSolverResult {
                 .ok_or_else(|| invalid("foreign retained element"))?;
             let squared: f64 = sample
                 .electric_field_v_per_m
+                .canonical_value()
                 .iter()
                 .map(|v| v.norm_squared())
                 .sum();
             let entry = loss.entry(sample.element_identity).or_default();
-            entry.0 += 0.5 * sigma * squared * sample.volume_weight_m3;
+            entry.0 += 0.5 * sigma.canonical_value() * squared * sample.volume_weight_m3;
             entry.1 += sample.volume_weight_m3;
         }
         mesh.topology

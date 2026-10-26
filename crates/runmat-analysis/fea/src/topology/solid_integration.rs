@@ -296,7 +296,7 @@ pub(super) fn tet10_coordinates(
             .map_err(|_| {
                 SolidIntegrationPlanError::Mesh("solid integration node is absent".into())
             })?;
-        *slot = mesh.topology.nodes[index].coordinates_m;
+        *slot = mesh.topology.nodes[index].coordinates_m.canonical_value();
     }
     Ok(Some(coordinates))
 }

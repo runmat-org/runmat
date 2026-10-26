@@ -55,7 +55,13 @@ fn recovery_rejects_changed_dof_ownership_and_malformed_state_vectors() {
     let mut changed_material = summary.clone();
     changed_material.structural_beam_recovery[0]
         .material
-        .youngs_modulus_pa *= 0.9;
+        .youngs_modulus_pa = runmat_types::physical::Quantity::new(
+        changed_material.structural_beam_recovery[0]
+            .material
+            .youngs_modulus_pa
+            .canonical_value()
+            * (0.9),
+    );
     assert!(validate_snapshot_shape(
         &summary,
         &changed_material,
@@ -175,7 +181,13 @@ fn recovery_rejects_same_count_solid_relabel_or_geometry_but_allows_material_cha
     let mut changed_material = summary.clone();
     changed_material.structural_solid_recovery[0]
         .material
-        .youngs_modulus_pa *= 0.9;
+        .youngs_modulus_pa = runmat_types::physical::Quantity::new(
+        changed_material.structural_solid_recovery[0]
+            .material
+            .youngs_modulus_pa
+            .canonical_value()
+            * (0.9),
+    );
     assert!(validate_snapshot_shape(
         &summary,
         &changed_material,

@@ -11,13 +11,13 @@ fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         0.0,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         2.0,
     );
     ElectricalStaticWorkload {
@@ -66,10 +66,20 @@ fn equation_order_matrix_retains_exact_fields_and_cold_source_bound_identity() {
             assert!(!identities.contains(&identity));
             identities.push(identity);
             let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
-            for (potential, node) in cold.response().potential_v.iter().zip(&projection.nodes) {
-                assert!((potential - 2.0 * node.coordinates_m[0]).abs() < 1e-8);
+            for (potential, node) in cold
+                .response()
+                .potential_v
+                .canonical_values()
+                .iter()
+                .zip(&projection.nodes)
+            {
+                assert!((potential - 2.0 * node.coordinates_m.canonical_value()[0]).abs() < 1e-8);
             }
-            for field in &cold.response().element_electric_field_v_per_m {
+            for field in cold
+                .response()
+                .element_electric_field_v_per_m
+                .canonical_values()
+            {
                 assert!((field[0] + 2.0).abs() < 1e-8);
                 assert!(field[1].abs() < 1e-8 && field[2].abs() < 1e-8);
             }
@@ -176,7 +186,7 @@ fn source_bound_import_rejects_lineage_and_terminal_substitution_without_rerunni
             .iter()
             .position(|node| node == id)
             .unwrap();
-        value["response"]["nodal_outward_flux"][index] = serde_json::json!(f64::MAX);
+        value["response"]["nodal_outward_flux"]["value_si"][index] = serde_json::json!(f64::MAX);
     }
     assert!(serde_json::from_value::<ElectricalStaticSolverResult>(value).is_err());
 }
@@ -224,13 +234,13 @@ fn residual_scale_and_large_zero_field_gauge_do_not_change_acceptance_authority(
                 prescribe(
                     &mut source.model,
                     "left".into(),
-                    RegionTarget::boundary("slab_left"),
+                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                     left,
                 );
                 prescribe(
                     &mut source.model,
                     "right".into(),
-                    RegionTarget::boundary("slab_right"),
+                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                     right,
                 );
                 let result = source.execute(&mesh).unwrap();

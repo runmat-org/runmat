@@ -13,10 +13,12 @@ pub struct FlowTopologyProjection {
     pub face_count: usize,
     pub internal_face_count: usize,
     pub boundary_face_count: usize,
-    pub domain_length_m: f64,
-    pub hydraulic_diameter_m: f64,
+    pub domain_length_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Length, f64>,
+    pub hydraulic_diameter_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Length, f64>,
     pub mean_boundary_face_area_m2: f64,
-    pub dx_m: f64,
+    pub dx_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Length, f64>,
     pub active_dimension_count: usize,
     pub edge_nodes: Vec<[u32; 2]>,
     pub boundary_face_edges: Vec<[u32; 3]>,
@@ -29,7 +31,12 @@ impl FlowTopologyProjection {
             .nodes
             .iter()
             .enumerate()
-            .map(|(index, node)| (node.node_id, (index as u32, node.coordinates_m)))
+            .map(|(index, node)| {
+                (
+                    node.node_id,
+                    (index as u32, node.coordinates_m.canonical_value()),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let mut edge_indices = BTreeMap::<[u32; 2], u32>::new();
         let mut boundary_face_edges = Vec::new();
@@ -89,12 +96,20 @@ impl FlowTopologyProjection {
             face_count: boundary_face_count + internal_face_count,
             internal_face_count,
             boundary_face_count,
-            domain_length_m,
-            hydraulic_diameter_m,
+            domain_length_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(domain_length_m),
+            hydraulic_diameter_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(hydraulic_diameter_m),
             mean_boundary_face_area_m2: (total_boundary_area_m2
                 / boundary_face_count.max(1) as f64)
                 .max(1.0e-12),
-            dx_m: domain_length_m / control_volume_count as f64,
+            dx_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(
+                domain_length_m / control_volume_count as f64,
+            ),
             active_dimension_count,
             edge_nodes,
             boundary_face_edges,
@@ -109,11 +124,16 @@ fn coordinate_spans(mesh: &SolverMeshArtifact) -> [f64; 3] {
         .iter()
         .fold(None::<[[f64; 3]; 2]>, |bounds, node| {
             Some(match bounds {
-                None => [node.coordinates_m, node.coordinates_m],
+                None => [
+                    node.coordinates_m.canonical_value(),
+                    node.coordinates_m.canonical_value(),
+                ],
                 Some(mut bounds) => {
                     for axis in 0..3 {
-                        bounds[0][axis] = bounds[0][axis].min(node.coordinates_m[axis]);
-                        bounds[1][axis] = bounds[1][axis].max(node.coordinates_m[axis]);
+                        bounds[0][axis] =
+                            bounds[0][axis].min(node.coordinates_m.canonical_value()[axis]);
+                        bounds[1][axis] =
+                            bounds[1][axis].max(node.coordinates_m.canonical_value()[axis]);
                     }
                     bounds
                 }
@@ -174,10 +194,10 @@ mod tests {
         assert_eq!(topology.edge_nodes.len(), 6);
         assert_eq!(topology.boundary_face_edges.len(), 4);
         assert_eq!(topology.active_dimension_count, 3);
-        assert!(topology.domain_length_m > 0.0);
-        assert!(topology.hydraulic_diameter_m > 0.0);
+        assert!(topology.domain_length_m.canonical_value() > 0.0);
+        assert!(topology.hydraulic_diameter_m.canonical_value() > 0.0);
         assert!(topology.mean_boundary_face_area_m2 > 0.0);
-        assert!(topology.dx_m > 0.0);
+        assert!(topology.dx_m.canonical_value() > 0.0);
     }
 
     #[test]

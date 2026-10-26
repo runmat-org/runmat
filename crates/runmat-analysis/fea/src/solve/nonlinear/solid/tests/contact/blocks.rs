@@ -207,7 +207,9 @@ fn full_source_composition_rejects_foreign_interfaces_and_mutated_geometry_with_
     )
     .is_err());
     let mut projection = f.surface.projection.clone();
-    projection.boundary_faces[0].area_m2 *= 2.;
+    projection.boundary_faces[0].area_m2 = runmat_types::physical::Quantity::new(
+        projection.boundary_faces[0].area_m2.canonical_value() * (2.),
+    );
     assert_eq!(
         projection.projection_digest,
         f.surface.projection.projection_digest

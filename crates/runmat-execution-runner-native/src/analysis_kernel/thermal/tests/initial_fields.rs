@@ -34,13 +34,13 @@ fn native_thermal_worker_consumes_source_bound_cold_initial_field() {
         source_workload.model.constraints = vec![AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "source-temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(face_id(0)),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_id(0)))),
                 value: PrescribedValue::Constant(Temperature::new(300.0)),
             },
         })];
         source_workload.model.boundaries = vec![AnalysisBoundary {
             boundary_id: "source-flux".into(),
-            target: RegionTarget::boundary(face_id(1)),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_id(1)))),
             operator: BoundaryOperator::ThermalHeatFlux {
                 value: PrescribedValue::Constant(HeatFlux::new(6.0)),
             },

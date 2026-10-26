@@ -212,14 +212,21 @@ fn scale_regular_chart(
                 error.reason,
             )
         })?;
-    let physical_units_per_evaluator_unit =
-        [derivatives.du_m, derivatives.dv_m].map(|derivative| {
-            derivative
-                .into_iter()
-                .map(|value| value * value)
-                .sum::<f64>()
-                .sqrt()
-        });
+    let physical_units_per_evaluator_unit = [
+        derivatives
+            .du_m
+            .with_canonical_storage(|values, _axes| *values),
+        derivatives
+            .dv_m
+            .with_canonical_storage(|values, _axes| *values),
+    ]
+    .map(|derivative| {
+        derivative
+            .into_iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+    });
     if physical_units_per_evaluator_unit
         .iter()
         .any(|value| !value.is_finite() || *value <= 0.0)
@@ -231,7 +238,8 @@ fn scale_regular_chart(
     }
     let evaluator_units_per_chart_unit =
         physical_units_per_evaluator_unit.map(|value| value.recip());
-    let coordinate_quantum = canonical_coordinate_quantum(options.projection_tolerance_m);
+    let coordinate_quantum =
+        canonical_coordinate_quantum(options.projection_tolerance_m.canonical_value());
     let scale = |uv: [f64; 2]| {
         let coordinates = [
             (uv[0] - origins[0]) / evaluator_units_per_chart_unit[0],
@@ -391,12 +399,14 @@ fn is_singular_transition<Evaluator: ExactSurfaceEvaluator + ?Sized>(
     }
     let squared_distance = previous
         .point_m
+        .canonical_values()
         .iter()
-        .zip(current.point_m)
+        .zip(current.point_m.canonical_values())
         .map(|(left, right)| (left - right) * (left - right))
         .sum::<f64>();
     Ok(squared_distance
-        <= context.options.projection_tolerance_m * context.options.projection_tolerance_m)
+        <= context.options.projection_tolerance_m.canonical_value()
+            * context.options.projection_tolerance_m.canonical_value())
 }
 
 fn geometry_failure(
@@ -482,8 +492,8 @@ fn validate_options(
         || options.maximum_periodic_residual <= 0.0
         || options.maximum_period_shifts <= 0
         || options.maximum_charts_per_face == 0
-        || !options.projection_tolerance_m.is_finite()
-        || options.projection_tolerance_m <= 0.0
+        || !options.projection_tolerance_m.canonical_value().is_finite()
+        || options.projection_tolerance_m.canonical_value() <= 0.0
     {
         return Err(ExactFaceChartError::new(
             ExactFaceChartErrorKind::InvalidOptions,

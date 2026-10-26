@@ -135,7 +135,10 @@ impl<'a> Storage<'a> {
         Ok(runmat_meshing_core::SolverMeshNode {
             node_id: value.node_id,
             stable_identity: value.stable_identity,
-            coordinates_m: value.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(value.coordinates_m.canonical_value()),
             provenance: self.entities(value.provenance.iter())?,
             exact_parameters: self.parameters(&value.exact_parameters)?,
         })

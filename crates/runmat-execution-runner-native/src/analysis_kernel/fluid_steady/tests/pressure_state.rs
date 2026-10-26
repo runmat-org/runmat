@@ -36,13 +36,13 @@ fn native_pressure_projection_preserves_original_governing_state() {
         receipt.validate_against(&workload, &result, &mesh).unwrap();
         let original = result.original();
         assert_eq!(
-            original.pressure_pa.len(),
-            original.pressure_fluctuation_pa.len()
+            original.pressure_pa.canonical_values().len(),
+            original.pressure_fluctuation_pa.canonical_values().len()
         );
         for (absolute, fluctuation) in original
             .pressure_pa
-            .iter()
-            .zip(&original.pressure_fluctuation_pa)
+            .canonical_values().iter()
+            .zip(original.pressure_fluctuation_pa.canonical_values())
         {
             assert_eq!(absolute.to_bits(), (reference + fluctuation).to_bits());
         }

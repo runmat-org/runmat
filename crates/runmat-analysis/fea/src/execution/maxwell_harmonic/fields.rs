@@ -36,8 +36,8 @@ pub(in crate::execution) enum NativeMaxwellValues<'a> {
 fn sample_loss(sample: &MaxwellFieldSample) -> f64 {
     0.5 * (0..3)
         .map(|axis| {
-            let e = sample.electric_field_v_per_m[axis];
-            let j = sample.conduction_current_density_a_per_m2[axis];
+            let e = sample.electric_field_v_per_m.canonical_value()[axis];
+            let j = sample.conduction_current_density_a_per_m2.canonical_value()[axis];
             e.real * j.real + e.imaginary * j.imaginary
         })
         .sum::<f64>()
@@ -64,14 +64,14 @@ impl<'a> NativeMaxwellValues<'a> {
         match self {
             Self::Loss(samples) => return Box::new(samples.iter().map(sample_loss)),
             Self::ElementElectric(samples) => {
-                return Box::new(element_average(samples, |s| s.electric_field_v_per_m))
+                return Box::new(element_average(samples, |s| s.electric_field_v_per_m.canonical_value()))
             }
             Self::ElementFlux(samples) => {
-                return Box::new(element_average(samples, |s| s.flux_density_t))
+                return Box::new(element_average(samples, |s| s.flux_density_t.canonical_value()))
             }
             Self::ElementCurrent(samples) => {
                 return Box::new(element_average(samples, |s| {
-                    s.conduction_current_density_a_per_m2
+                    s.conduction_current_density_a_per_m2.canonical_value()
                 }))
             }
             Self::ElementLoss(samples) => {
@@ -109,11 +109,11 @@ impl<'a> NativeMaxwellValues<'a> {
                 .flat_map(move |i| {
                     let values = match self {
                         Self::Circulation(v) => [v[i], ComplexPhasor::ZERO, ComplexPhasor::ZERO],
-                        Self::Electric(v) => v[i].electric_field_v_per_m,
-                        Self::Flux(v) => v[i].flux_density_t,
-                        Self::Intensity(v) => v[i].magnetic_field_a_per_m,
-                        Self::Displacement(v) => v[i].electric_displacement_c_per_m2,
-                        Self::Current(v) => v[i].conduction_current_density_a_per_m2,
+                        Self::Electric(v) => v[i].electric_field_v_per_m.canonical_value(),
+                        Self::Flux(v) => v[i].flux_density_t.canonical_value(),
+                        Self::Intensity(v) => v[i].magnetic_field_a_per_m.canonical_value(),
+                        Self::Displacement(v) => v[i].electric_displacement_c_per_m2.canonical_value(),
+                        Self::Current(v) => v[i].conduction_current_density_a_per_m2.canonical_value(),
                         _ => unreachable!("handled above"),
                     };
                     values.into_iter().take(components)
@@ -140,8 +140,8 @@ pub(in crate::execution) fn native_maxwell_fields(
     [
         NativeMaxwellField {
             field_id: "maxwell.electric_edge_circulation",
-            values: NativeMaxwellValues::Circulation(&r.edge_circulations_v),
-            shape: vec![r.edge_circulations_v.len(), 2],
+            values: NativeMaxwellValues::Circulation(r.edge_circulations_v.canonical_values()),
+            shape: vec![r.edge_circulations_v.canonical_values().len(), 2],
         },
         NativeMaxwellField {
             field_id: "maxwell.electric_field",
@@ -277,9 +277,11 @@ fn native_maxwell_field_plan(
         .into_iter()
         .map(|definition| {
             let count = match definition.entity_domain() {
-                RecoveredFieldEntityDomain::OrientedEdges => {
-                    result.response().edge_circulations_v.len()
-                }
+                RecoveredFieldEntityDomain::OrientedEdges => result
+                    .response()
+                    .edge_circulations_v
+                    .canonical_values()
+                    .len(),
                 RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
                     result.response().samples.len()
                 }

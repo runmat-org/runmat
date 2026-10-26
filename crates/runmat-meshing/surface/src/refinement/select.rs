@@ -327,7 +327,7 @@ fn violation(
         .any(|(length, edge)| {
             length <= quality.minimum_metric_edge_length && protected_edges.contains(edge)
         });
-    if triangle.chordal_deviation_m > quality.maximum_chordal_deviation_m {
+    if triangle.chordal_deviation_m > quality.maximum_chordal_deviation_m.canonical_value() {
         Some(ExactFaceRefinementReason::ChordalDeviation)
     } else if triangle.normal_deviation_rad > maximum_normal {
         Some(ExactFaceRefinementReason::NormalDeviation)

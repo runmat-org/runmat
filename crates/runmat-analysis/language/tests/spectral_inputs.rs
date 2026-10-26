@@ -106,8 +106,8 @@ model launch_environment {
     assert_eq!(excitation.channels.len(), 2);
     let samples = excitation.resolved_spectral_density().unwrap();
     assert_eq!(samples.len(), 2);
-    assert_eq!(samples[0].value(2, 0, 1).imaginary, 2.0);
-    assert_eq!(samples[0].value(2, 1, 0).imaginary, -2.0);
+    assert_eq!(samples[0].canonical_coefficient(2, 0, 1).imaginary, 2.0);
+    assert_eq!(samples[0].canonical_coefficient(2, 1, 0).imaginary, -2.0);
 }
 
 #[test]
@@ -289,7 +289,7 @@ study qualification {
             study: &realized_study,
             geometry_id: "part",
             geometry_revision: 1,
-            units: runmat_geometry_core::UnitSystem::Meter,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
             regions: &Default::default(),
             materials: &resolved.material_catalog,
         },

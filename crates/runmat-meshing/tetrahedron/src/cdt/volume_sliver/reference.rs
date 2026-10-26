@@ -126,7 +126,7 @@ pub(super) fn run(
                     .nodes
                     .binary_search_by_key(&identity, |node| node.identity)
                     .ok()
-                    .map(|index| topology.nodes[index].coordinates_m)
+                    .map(|index| topology.nodes[index].coordinates_m.canonical_value())
             });
             return Err(error(
                 DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization,

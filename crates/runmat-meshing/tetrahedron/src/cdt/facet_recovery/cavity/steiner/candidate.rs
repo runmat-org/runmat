@@ -28,7 +28,8 @@ use crate::{
 };
 
 pub(in crate::cdt::facet_recovery) struct CandidateInsertion {
-    pub(in crate::cdt::facet_recovery) coordinates_m: [f64; 3],
+    pub(in crate::cdt::facet_recovery) coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub(in crate::cdt::facet_recovery) construction: Point3Construction,
     pub(in crate::cdt::facet_recovery) facet: [StableDigest; 3],
     pub(in crate::cdt::facet_recovery) insertion_round: u64,
@@ -103,7 +104,10 @@ pub(in crate::cdt::facet_recovery) fn candidate_node(
             insertion.insertion_round,
             insertion.candidate_rank,
         ),
-        coordinates_m: insertion.coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                insertion.coordinates_m.canonical_value(),
+            ),
         construction: insertion.construction,
     };
     if let Some(existing) = current
@@ -112,7 +116,7 @@ pub(in crate::cdt::facet_recovery) fn candidate_node(
         .iter()
         .find(|existing| existing.identity == node.identity)
     {
-        if existing.coordinates_m != node.coordinates_m {
+        if existing.coordinates_m.canonical_value() != node.coordinates_m.canonical_value() {
             return Err(invalid_topology(
                 constraint_index,
                 "facet cavity Steiner identity collision",
@@ -122,7 +126,10 @@ pub(in crate::cdt::facet_recovery) fn candidate_node(
         return Ok(None);
     }
     if current.topology.nodes.iter().any(|existing| {
-        coordinates_share_representable_location(existing.coordinates_m, node.coordinates_m)
+        coordinates_share_representable_location(
+            existing.coordinates_m.canonical_value(),
+            node.coordinates_m.canonical_value(),
+        )
     }) {
         work.reject("facet cavity Steiner candidate duplicates an existing node position");
         return Ok(None);
@@ -349,7 +356,10 @@ pub(super) fn steiner_candidate_groups(
         .enumerate()
         .map(|(node_id, node)| ConstrainedCavityNode {
             node_id: node_id as u32,
-            coordinates_m: node.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
         })
         .collect::<Vec<_>>();
     let budget = ConstrainedCavitySteinerCandidateBudget {
@@ -445,7 +455,10 @@ fn candidate_refills_cavity_with_options(
         .enumerate()
         .map(|(node_id, node)| ConstrainedCavityNode {
             node_id: node_id as u32,
-            coordinates_m: node.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
         })
         .collect::<Vec<_>>();
     let node_id = u32::try_from(nodes.len()).map_err(|_| {
@@ -456,7 +469,10 @@ fn candidate_refills_cavity_with_options(
     })?;
     nodes.push(ConstrainedCavityNode {
         node_id,
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
     });
     let budget = ConstrainedCavityRefillBudget {
         maximum_nodes: work.options.maximum_cavity_nodes,

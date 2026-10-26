@@ -126,7 +126,8 @@ pub struct ModalResponseSpectrumContribution {
     pub spectrum_id: ResponseSpectrumId,
     pub spectrum_provenance_digest: String,
     pub direction: [f64; 3],
-    pub damping_ratio: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub damping_ratio: runmat_types::physical::DampingRatio,
     pub modal_combination: ModalCombination,
     pub rigid_response_policy: RigidResponsePolicy,
     pub rigid_coefficients: Vec<f64>,

@@ -190,7 +190,7 @@ pub(super) fn validate_artifact(
             || completed.accuracy.producer != summary.producer
             || receipt.producer != summary.producer
             || receipt.topology_digest != Digest::from_bytes(*summary.mesh_digest.bytes())
-            || receipt.frequency_hz != expected.frequency.hertz
+            || receipt.frequency_hz != expected.frequency.canonical_value()
             || receipt.relative_residual != summary.relative_residual
             || receipt.power_relative_error != summary.power_relative_error
             || receipt.solver_relative_tolerance != expected.solver.relative_tolerance

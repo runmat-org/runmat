@@ -18,7 +18,9 @@ pub struct ProtectedBoundaryComplex {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlcNode {
     pub node_id: TopologyEntityId,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

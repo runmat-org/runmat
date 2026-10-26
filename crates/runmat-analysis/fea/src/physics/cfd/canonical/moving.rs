@@ -36,8 +36,8 @@ pub fn swept_face_flux(
             if departure.nodes[i].stable_identity != *identity {
                 return Err(Error::Invalid("moving-mesh node order differs"));
             }
-            old[k] = departure.nodes[i].coordinates_m;
-            new[k] = arrival.nodes[i].coordinates_m;
+            old[k] = departure.nodes[i].coordinates_m.canonical_value();
+            new[k] = arrival.nodes[i].coordinates_m.canonical_value();
         }
         let a0 = sub(old[1], old[0]);
         let b0 = sub(old[2], old[0]);

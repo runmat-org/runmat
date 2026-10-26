@@ -52,7 +52,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "insulated-face".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(insulated_face),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(insulated_face))),
             operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::HeatFlux::new(0.0),
@@ -74,7 +74,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
                 runmat_analysis_core::ThermalConstraint {
                     constraint_id: "equilibrium-temperature".into(),
                     kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                        target: runmat_analysis_core::RegionTarget::boundary(selector),
+                        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                         value: runmat_analysis_core::PrescribedValue::Constant(Temperature::new(
                             293.15,
                         )),

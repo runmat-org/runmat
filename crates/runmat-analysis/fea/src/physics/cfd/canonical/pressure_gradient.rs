@@ -109,7 +109,7 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[f64]) -> Result<
                     let FaceBoundary::PressureOutlet { pressure, .. } = p.boundaries[i] else {
                         return Err(Error::Invalid("pressure outlet stencil authority"));
                     };
-                    pressure - p.pressure_reference_pa[c]
+                    pressure - p.pressure_reference_pa.canonical_values()[c]
                 }
             };
             gradient = add(gradient, scale(*weight, value - values[c]));

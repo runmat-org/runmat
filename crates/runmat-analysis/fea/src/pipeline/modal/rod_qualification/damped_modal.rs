@@ -32,17 +32,25 @@ fn projected_response(
         &reduced,
         k * WAVE_SPEED,
         &ModalHarmonicLoad {
-            real: reduced
-                .project_vector(assembly.real.operator.load())
+            real: (reduced)
+                .load_field(assembly.real.operator.load())
+                .and_then(|field| (reduced).project_load(&field))
                 .unwrap(),
-            imaginary: reduced.project_vector(&assembly.imaginary_load).unwrap(),
+            imaginary: (reduced)
+                .load_field(&assembly.imaginary_load)
+                .and_then(|field| (reduced).project_load(&field))
+                .unwrap(),
         },
     )
     .unwrap();
     (
-        reduced.expand_vector(&solved.displacement_real).unwrap(),
-        reduced
-            .expand_vector(&solved.displacement_imaginary)
+        (reduced)
+            .expand_state(&solved.displacement_real)
+            .map(|field| field.into_canonical_storage())
+            .unwrap(),
+        (reduced)
+            .expand_state(&solved.displacement_imaginary)
+            .map(|field| field.into_canonical_storage())
             .unwrap(),
     )
 }

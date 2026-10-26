@@ -28,7 +28,7 @@ fn fixture() -> (AnalysisModel, SolverMeshArtifact) {
             material.material_id = format!("fluid-{index}");
             let mut assignment = template.clone();
             assignment.target =
-                PropertyRegionTarget::cell(element.region_id.source_topology_id.clone());
+                PropertyRegionTarget::cell(element.region_id.analysis_selection_id().unwrap());
             assignment.expected_material_id = material.material_id.clone();
             assignment.assigned_material_id = material.material_id.clone();
             model.materials.push(material);
@@ -45,12 +45,12 @@ fn exact_cell_inventory_admits_same_coefficients_from_distinct_material_ids() {
     assert_eq!(map.cell_materials().len(), 3);
     assert_eq!(map.solid_materials().len(), 0);
     let domain = derive_canonical_fluid_material(&model, &mesh, &map).unwrap();
-    assert_eq!(domain.dynamic_viscosity.pascal_seconds, 0.001);
+    assert_eq!(domain.dynamic_viscosity.canonical_value(), 0.001);
     assert_eq!(
         domain.density,
-        runmat_analysis_core::MassDensity::new(model.materials[0].require_mass_density().unwrap())
+        model.materials[0].require_mass_density().unwrap()
     );
-    assert_eq!(domain.turbulence_intensity.ratio, 0.0);
+    assert_eq!(domain.turbulence_intensity.canonical_value(), 0.0);
     let wire = serde_json::to_vec(&map).unwrap();
     let restored: CompiledPropertyMap = serde_json::from_slice(&wire).unwrap();
     assert_eq!(restored, map);
@@ -76,7 +76,7 @@ fn cell_coverage_rejects_missing_overlapping_unused_and_solid_owners() {
     ));
     let mut unused = model.clone();
     let mut extra = unused.material_assignments[0].clone();
-    extra.target = PropertyRegionTarget::cell("absent-region");
+    extra.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("absent-region"));
     unused.material_assignments.push(extra);
     assert!(matches!(
         compile_property_map(&unused, Some(&mesh)),

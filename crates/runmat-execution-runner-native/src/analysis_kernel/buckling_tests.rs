@@ -46,7 +46,7 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
     model.constraints.truncate(1);
     model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("tip"));
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")));
     let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
         panic!("structural fixture must carry a force signal");
     };
@@ -90,14 +90,10 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
             ));
         mesh.topology.boundary_faces[face_index].provenance.sort();
     }
-    let volume_region = PersistentEntityId::new(
-        PersistentEntityKind::Region,
-        model.material_assignments[0]
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        vec!["root".into()],
-    );
+    let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     mesh.canonical_digest = StableDigest::ZERO;

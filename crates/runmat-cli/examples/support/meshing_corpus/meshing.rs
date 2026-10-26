@@ -189,8 +189,10 @@ fn run_once(
     layout: super::contract::PartitionLayout,
 ) -> Result<SuccessfulExecution, MeshRunError> {
     let mut settings = MeshingRequestSettings {
-        target_edge_length_m: request.target_size_m,
-        maximum_chordal_deviation_m: request.maximum_deviation_m,
+        target_edge_length_m: runmat_types::physical::Length::new(request.target_size_m),
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            request.maximum_deviation_m,
+        ),
         element_order: match request.element_order {
             ElementOrder::Tet4 => CanonicalElementOrder::Tet4,
             ElementOrder::Tet10 => CanonicalElementOrder::Tet10,
@@ -239,7 +241,7 @@ fn measure_quality(artifact: &SolverMeshArtifact) -> Result<MeshQualityReport, M
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<std::collections::BTreeMap<_, _>>();
     let mut total_volume_m3 = 0.0;
     let mut minimum_scaled_jacobian = f64::INFINITY;
@@ -268,7 +270,7 @@ fn measure_quality(artifact: &SolverMeshArtifact) -> Result<MeshQualityReport, M
         let (_, radius_squared) = tetrahedron_circumsphere(
             points,
             MeshingTolerance {
-                absolute_m: 0.0,
+                absolute_m: runmat_types::physical::Length::new(0.0),
                 relative: 0.0,
             },
         )

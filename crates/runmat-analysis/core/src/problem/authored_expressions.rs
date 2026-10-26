@@ -21,6 +21,13 @@ pub enum AuthoredNumericExpressionKind {
     Literal {
         value: f64,
     },
+    Quantity {
+        value: Box<AuthoredNumericExpression>,
+        unit: runmat_types::physical::UnitDefinition,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        semantic_kind: Option<runmat_types::physical::QuantityKind>,
+        source_unit_symbol: String,
+    },
     ModelInput {
         input: AuthoredModelInputRef,
     },
@@ -55,12 +62,61 @@ impl AuthoredNumericExpression {
         self.validate_with(&inputs)
     }
 
+    /// Explicit scalar projection at a numerical consumer. Physical consumers
+    /// should use evaluate_for_quantity so known semantic kinds are checked too.
     pub fn evaluate(
         &self,
         inputs: &BTreeMap<String, AuthoredInputValue>,
     ) -> Result<f64, AuthoredExpressionError> {
+        Ok(self.evaluate_dimensioned(inputs)?.canonical_value())
+    }
+
+    pub fn evaluate_for_quantity(
+        &self,
+        inputs: &BTreeMap<String, AuthoredInputValue>,
+        expected: runmat_types::physical::QuantityKind,
+    ) -> Result<f64, AuthoredExpressionError> {
+        let value = self.evaluate_dimensioned(inputs)?;
+        value
+            .require_kind(expected)
+            .map_err(|_| AuthoredExpressionError::WrongQuantityKind)?;
+        Ok(value.canonical_value())
+    }
+
+    pub fn evaluate_dimensioned(
+        &self,
+        inputs: &BTreeMap<String, AuthoredInputValue>,
+    ) -> Result<runmat_types::physical::DimensionedScalar, AuthoredExpressionError> {
+        use runmat_types::{
+            physical::{DimensionedScalar, QuantityKind as K},
+            PhysicalDimension as D,
+        };
         let value = match &self.kind {
-            AuthoredNumericExpressionKind::Literal { value } => *value,
+            AuthoredNumericExpressionKind::Literal { value } => {
+                DimensionedScalar::try_from_dimension(D::DIMENSIONLESS, None, *value)
+                    .map_err(|_| AuthoredExpressionError::NonFiniteLiteral)?
+            }
+            AuthoredNumericExpressionKind::Quantity {
+                value,
+                unit,
+                semantic_kind,
+                ..
+            } => {
+                let source = value.evaluate_dimensioned(inputs)?;
+                if source.dimension() != D::DIMENSIONLESS || source.angle_power() != 0 {
+                    return Err(AuthoredExpressionError::ResultTypeMismatch);
+                }
+                let canonical = unit
+                    .to_canonical(source.canonical_value())
+                    .map_err(|_| AuthoredExpressionError::NonFiniteResult)?;
+                DimensionedScalar::try_from_descriptor(
+                    runmat_types::physical::DynamicDimension::from_unit(*unit)
+                        .with_semantic_kind(*semantic_kind)
+                        .map_err(|_| AuthoredExpressionError::WrongQuantityKind)?,
+                    canonical,
+                )
+                .map_err(|_| AuthoredExpressionError::WrongQuantityKind)?
+            }
             AuthoredNumericExpressionKind::ModelInput { input } => {
                 let value = inputs
                     .get(&input.input_id)
@@ -70,33 +126,55 @@ impl AuthoredNumericExpression {
                         input.input_id.clone(),
                     ));
                 }
-                numeric_value(value).ok_or_else(|| {
-                    AuthoredExpressionError::NonNumericInput(input.input_id.clone())
-                })?
+                match value {
+                    AuthoredInputValue::Quantity(value) => *value,
+                    AuthoredInputValue::Integer(value) => {
+                        DimensionedScalar::try_from_dimension(D::DIMENSIONLESS, None, *value as f64)
+                            .map_err(|_| AuthoredExpressionError::NonFiniteResult)?
+                    }
+                    AuthoredInputValue::Real(value) => {
+                        DimensionedScalar::try_from_dimension(D::DIMENSIONLESS, None, *value)
+                            .map_err(|_| AuthoredExpressionError::NonFiniteResult)?
+                    }
+                    _ => {
+                        return Err(AuthoredExpressionError::NonNumericInput(
+                            input.input_id.clone(),
+                        ))
+                    }
+                }
             }
-            AuthoredNumericExpressionKind::Negate { value } => -value.evaluate(inputs)?,
+            AuthoredNumericExpressionKind::Negate { value } => {
+                let value = value.evaluate_dimensioned(inputs)?;
+                if value.semantic_kind() == Some(K::Temperature) {
+                    return Err(AuthoredExpressionError::WrongQuantityKind);
+                }
+                DimensionedScalar::try_from_descriptor(value.descriptor(), -value.canonical_value())
+                    .map_err(|_| AuthoredExpressionError::NonFiniteResult)?
+            }
             AuthoredNumericExpressionKind::Binary {
                 operator,
                 left,
                 right,
-            } => {
-                let left = left.evaluate(inputs)?;
-                let right = right.evaluate(inputs)?;
-                match operator {
-                    AuthoredNumericOperator::Add => left + right,
-                    AuthoredNumericOperator::Subtract => left - right,
-                    AuthoredNumericOperator::Multiply => left * right,
-                    AuthoredNumericOperator::Divide if right != 0.0 => left / right,
-                    AuthoredNumericOperator::Divide => {
-                        return Err(AuthoredExpressionError::DivisionByZero)
-                    }
-                }
-            }
+            } => evaluate_binary_quantity(
+                *operator,
+                left.evaluate_dimensioned(inputs)?,
+                right.evaluate_dimensioned(inputs)?,
+            )?,
         };
-        value
-            .is_finite()
-            .then_some(value)
-            .ok_or(AuthoredExpressionError::NonFiniteResult)
+        let expected = match self.value_type {
+            AuthoredInputType::Quantity(spec) => spec,
+            AuthoredInputType::Integer | AuthoredInputType::Real => D::DIMENSIONLESS.into(),
+            _ => return Err(AuthoredExpressionError::NonNumericType),
+        };
+        if !expected.is_compatible_with(value.descriptor()) {
+            return Err(AuthoredExpressionError::ResultTypeMismatch);
+        }
+        let spec = value
+            .descriptor()
+            .with_semantic_kind(value.semantic_kind().or(expected.kind()))
+            .map_err(|_| AuthoredExpressionError::WrongQuantityKind)?;
+        DimensionedScalar::try_from_descriptor(spec, value.canonical_value())
+            .map_err(|_| AuthoredExpressionError::NonFiniteResult)
     }
 
     fn validate_with(
@@ -107,9 +185,38 @@ impl AuthoredNumericExpression {
             return Err(AuthoredExpressionError::NonNumericType);
         }
         match &self.kind {
-            AuthoredNumericExpressionKind::Literal { value } if value.is_finite() => Ok(()),
+            AuthoredNumericExpressionKind::Literal { value }
+                if value.is_finite()
+                    && !matches!(self.value_type, AuthoredInputType::Quantity(_)) =>
+            {
+                Ok(())
+            }
             AuthoredNumericExpressionKind::Literal { .. } => {
                 Err(AuthoredExpressionError::NonFiniteLiteral)
+            }
+            AuthoredNumericExpressionKind::Quantity {
+                value,
+                unit,
+                semantic_kind,
+                source_unit_symbol,
+            } => {
+                value.validate_with(inputs)?;
+                if !matches!(
+                    value.value_type,
+                    AuthoredInputType::Real | AuthoredInputType::Integer
+                ) || !self.value_type.accepts_type(AuthoredInputType::Quantity(
+                    runmat_types::physical::DynamicDimension::from_unit(*unit),
+                )) || semantic_kind.is_some_and(|kind| {
+                    kind.dimension() != unit.dimension() || kind.angle_power() != unit.angle_power()
+                }) || (unit.offset() != 0.0
+                    && *semantic_kind != Some(runmat_types::physical::QuantityKind::Temperature))
+                    || source_unit_symbol.trim().is_empty()
+                    || source_unit_symbol.len() > 256
+                    || source_unit_symbol.chars().any(char::is_control)
+                {
+                    return Err(AuthoredExpressionError::WrongQuantityKind);
+                }
+                Ok(())
             }
             AuthoredNumericExpressionKind::ModelInput { input } => {
                 if input.input_id.trim().is_empty() || input.value_type != self.value_type {
@@ -182,16 +289,37 @@ fn binary_result_type(
         {
             Ok(Real)
         }
+        AuthoredNumericOperator::Multiply
+            if matches!((left, right), (Quantity(_), Quantity(_))) =>
+        {
+            let (Quantity(left), Quantity(right)) = (left, right) else {
+                unreachable!()
+            };
+            Ok(Quantity(left.multiply(right).ok_or(
+                AuthoredExpressionError::UnsupportedTypeCombination,
+            )?))
+        }
+        AuthoredNumericOperator::Divide if matches!((left, right), (Quantity(_), Quantity(_))) => {
+            let (Quantity(left), Quantity(right)) = (left, right) else {
+                unreachable!()
+            };
+            Ok(Quantity(left.divide(right).ok_or(
+                AuthoredExpressionError::UnsupportedTypeCombination,
+            )?))
+        }
+        AuthoredNumericOperator::Divide if scalar(left) && matches!(right, Quantity(_)) => {
+            let Quantity(right) = right else {
+                unreachable!()
+            };
+            Ok(Quantity(
+                runmat_types::physical::DynamicDimension::from(
+                    runmat_types::PhysicalDimension::DIMENSIONLESS,
+                )
+                .divide(right)
+                .ok_or(AuthoredExpressionError::UnsupportedTypeCombination)?,
+            ))
+        }
         _ => Err(AuthoredExpressionError::UnsupportedTypeCombination),
-    }
-}
-
-fn numeric_value(value: &AuthoredInputValue) -> Option<f64> {
-    match value {
-        AuthoredInputValue::Integer(value) => Some(*value as f64),
-        AuthoredInputValue::Real(value) => Some(*value),
-        AuthoredInputValue::Quantity { value_si, .. } => Some(*value_si),
-        _ => None,
     }
 }
 
@@ -199,6 +327,8 @@ fn numeric_value(value: &AuthoredInputValue) -> Option<f64> {
 pub enum AuthoredExpressionError {
     #[error("authored numeric expression has a non-numeric type")]
     NonNumericType,
+    #[error("authored numeric expression has incompatible semantic quantity kinds")]
+    WrongQuantityKind,
     #[error("authored numeric expression has a non-finite literal")]
     NonFiniteLiteral,
     #[error("authored numeric expression has an invalid model-input reference")]
@@ -224,11 +354,11 @@ pub enum AuthoredExpressionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::QuantityDimension;
+    use runmat_types::PhysicalDimension;
 
     #[test]
     fn typed_force_expression_evaluates_from_an_exact_model_input() {
-        let force = AuthoredInputType::Quantity(QuantityDimension::Force);
+        let force = AuthoredInputType::Quantity((PhysicalDimension::FORCE).into());
         let expression = AuthoredNumericExpression {
             value_type: force,
             kind: AuthoredNumericExpressionKind::Negate {
@@ -253,11 +383,39 @@ mod tests {
         expression.validate(&definitions).unwrap();
         let inputs = BTreeMap::from([(
             "load".into(),
-            AuthoredInputValue::Quantity {
-                dimension: QuantityDimension::Force,
-                value_si: 125.0,
-            },
+            AuthoredInputValue::Quantity(
+                runmat_types::physical::DimensionedScalar::try_from_dimension(
+                    PhysicalDimension::FORCE,
+                    None,
+                    125.0,
+                )
+                .unwrap(),
+            ),
         )]);
         assert_eq!(expression.evaluate(&inputs).unwrap(), -125.0);
     }
+}
+
+/// Source-expression arithmetic retains descriptors until the consuming field supplies a kind.
+fn evaluate_binary_quantity(
+    operator: AuthoredNumericOperator,
+    left: runmat_types::physical::DimensionedScalar,
+    right: runmat_types::physical::DimensionedScalar,
+) -> Result<runmat_types::physical::DimensionedScalar, AuthoredExpressionError> {
+    use runmat_types::physical::{QuantityArithmeticError as E, QuantityBinaryOperator as O};
+    let operator = match operator {
+        AuthoredNumericOperator::Add => O::Add,
+        AuthoredNumericOperator::Subtract => O::Subtract,
+        AuthoredNumericOperator::Multiply => O::Multiply,
+        AuthoredNumericOperator::Divide => O::Divide,
+    };
+    runmat_types::physical::evaluate_quantity_binary(operator, left, right).map_err(|error| {
+        match error {
+            E::ResultTypeMismatch => AuthoredExpressionError::ResultTypeMismatch,
+            E::WrongQuantityKind => AuthoredExpressionError::WrongQuantityKind,
+            E::UnsupportedTypeCombination => AuthoredExpressionError::UnsupportedTypeCombination,
+            E::DivisionByZero => AuthoredExpressionError::DivisionByZero,
+            E::NonFiniteResult => AuthoredExpressionError::NonFiniteResult,
+        }
+    })
 }

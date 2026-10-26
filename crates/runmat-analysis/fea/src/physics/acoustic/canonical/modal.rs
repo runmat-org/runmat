@@ -157,7 +157,11 @@ pub fn solve_canonical_modal(
         .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
     let properties = crate::properties::compile_solid_property_map(model, mesh)
         .map_err(|error| AcousticHarmonicError::Material(error.to_string()))?;
-    let assembly = AcousticAssembly::assemble(projection, &properties, 0.0)?;
+    let assembly = AcousticAssembly::assemble(
+        projection,
+        &properties,
+        runmat_types::physical::AngularFrequency::new(0.0),
+    )?;
     if assembly.lossy {
         return Err(AcousticHarmonicError::Unsupported(
             "material loss in cavity modes (damped modes are complex)".into(),
@@ -179,7 +183,7 @@ pub fn solve_canonical_modal(
             AcousticConstraintKind::PrescribedPressure {
                 target,
                 value: PrescribedValue::Constant(value),
-            } if value.pascals == 0.0 => {
+            } if value.canonical_value() == 0.0 => {
                 let faces = assembly
                     .projection
                     .boundary_faces_for_target(target)
@@ -221,11 +225,11 @@ pub fn solve_canonical_modal(
     let count = requested_count.min(free.len());
     let stiffness = assembly
         .stiffness
-        .principal_submatrix(&free)
+        .with_canonical_storage(|matrix| matrix.principal_submatrix(&free))
         .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
     let mass = assembly
         .mass
-        .principal_submatrix(&free)
+        .with_canonical_storage(|matrix| matrix.principal_submatrix(&free))
         .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
     let pairs = lowest_eigenpairs(&stiffness, &mass, count, policy)?;
     let node_count = assembly.projection.nodes.len();

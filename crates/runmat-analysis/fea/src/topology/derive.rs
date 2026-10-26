@@ -39,7 +39,10 @@ impl AnalysisProjection {
             nodes.push(ProjectedNode {
                 node_id: node.node_id,
                 stable_identity: node.stable_identity,
-                coordinates_m: node.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(node.coordinates_m.canonical_value()),
             });
         }
         let node_by_id = SortedValues::derive(
@@ -77,10 +80,10 @@ impl AnalysisProjection {
                         element_id: element.element_id,
                     })?;
             let coordinates = [
-                nodes[corners[0]].coordinates_m,
-                nodes[corners[1]].coordinates_m,
-                nodes[corners[2]].coordinates_m,
-                nodes[corners[3]].coordinates_m,
+                nodes[corners[0]].coordinates_m.canonical_value(),
+                nodes[corners[1]].coordinates_m.canonical_value(),
+                nodes[corners[2]].coordinates_m.canonical_value(),
+                nodes[corners[3]].coordinates_m.canonical_value(),
             ];
             tetrahedron_geometry(coordinates).ok_or(
                 AnalysisProjectionError::InvalidElementGeometry {
@@ -89,7 +92,7 @@ impl AnalysisProjection {
             )?;
             let mut element_coordinates = [[0.0; 3]; 10];
             for (slot, index) in element_coordinates.iter_mut().zip(&node_indices) {
-                *slot = nodes[*index].coordinates_m;
+                *slot = nodes[*index].coordinates_m.canonical_value();
             }
             let mut signed_volume_m3 = 0.0;
             let mut first_moment_m4 = [0.0; 3];
@@ -156,8 +159,8 @@ impl AnalysisProjection {
                 .iter()
                 .fold([f64::INFINITY, f64::NEG_INFINITY], |[min, max], node| {
                     [
-                        min.min(node.coordinates_m[axis]),
-                        max.max(node.coordinates_m[axis]),
+                        min.min(node.coordinates_m.canonical_value()[axis]),
+                        max.max(node.coordinates_m.canonical_value()[axis]),
                     ]
                 })
         });

@@ -174,7 +174,7 @@ fn complete_summaries_match_for_affine_constraints() {
             y_axis: [-c, c, 0.0],
         }),
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("free_vertex_y_support"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("free_vertex_y_support")),
             translations: vec![TranslationDofValue {
                 dof: StructuralTranslationDof::Ux,
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -212,7 +212,7 @@ fn complete_summaries_match_for_prescribed_motion_constraint_channel() {
         constraint_id: "moving-root-x".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             translations: vec![TranslationDofMotion {
                 dof: StructuralTranslationDof::Ux,
                 history: StructuralKinematicHistory::AccelerationDriven {
@@ -230,7 +230,7 @@ fn complete_summaries_match_for_prescribed_motion_constraint_channel() {
     };
     root.constraint_id = "fixed-root-yz".into();
     root.kind = StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-        target: RegionTarget::boundary("root"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
         translations: [StructuralTranslationDof::Uy, StructuralTranslationDof::Uz]
             .into_iter()
             .map(|dof| TranslationDofValue {
@@ -250,7 +250,17 @@ fn foreign_mesh_material_step_constraints_and_unmapped_sources_do_not_reuse_auth
     let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
     let summary = initial(&model, &mesh);
     let mut foreign_mesh = mesh.clone();
-    foreign_mesh.topology.nodes[0].coordinates_m[0] += 0.01;
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 0;
+        let quantity_slot = &mut foreign_mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     foreign_mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     foreign_mesh.seal_canonical_digest().unwrap();
     assert!(PreparedStructuralTransientBasis::from_admitted(
@@ -261,7 +271,8 @@ fn foreign_mesh_material_step_constraints_and_unmapped_sources_do_not_reuse_auth
     )
     .is_err());
     let mut foreign_material = model.clone();
-    foreign_material.materials[0].mass_density_kg_per_m3 = Some(1234.0);
+    foreign_material.materials[0].mass_density_kg_per_m3 =
+        (Some(1234.0)).map(runmat_types::physical::MassDensity::new);
     assert!(PreparedStructuralTransientBasis::from_admitted(
         &foreign_material,
         &foreign_material.sequence.steps[0],

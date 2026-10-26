@@ -7,7 +7,7 @@ fn profile_composes_original_projection_and_one_normal_buffer() {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let target = super::super::super::target::resolve_nodal_target(
             &mesh,
-            &RegionTarget::boundary("face:0"),
+            &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
             "normal",
         )
         .unwrap();

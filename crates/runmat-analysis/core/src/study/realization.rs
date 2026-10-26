@@ -148,10 +148,12 @@ fn geometry_authoring_value(value: &AuthoredInputValue) -> Option<GeometryAuthor
                 value: *value as f64,
             })
         }
-        AuthoredInputValue::Real(value)
-        | AuthoredInputValue::Quantity {
-            value_si: value, ..
-        } => GeometryAuthoringValue::Scalar(GeometryScalarExpression::Literal { value: *value }),
+        AuthoredInputValue::Real(value) => {
+            GeometryAuthoringValue::Scalar(GeometryScalarExpression::Literal { value: *value })
+        }
+        AuthoredInputValue::Quantity(value) => {
+            GeometryAuthoringValue::Scalar(GeometryScalarExpression::Canonical { value: *value })
+        }
         AuthoredInputValue::String(value) => GeometryAuthoringValue::Text(value.clone()),
         AuthoredInputValue::Complex { .. }
         | AuthoredInputValue::Material(_)
@@ -230,6 +232,16 @@ fn realize_model(
                 detail: error.to_string(),
             }
         })?);
+    }
+    for signal in &mut model.signals {
+        signal
+            .bind_parameter_axis(&model.inputs)
+            .map_err(
+                |detail| AuthoredStudyRealizationError::ParameterizedSignal {
+                    signal_id: signal.signal_id().0.clone(),
+                    detail,
+                },
+            )?;
     }
     model.inputs.clear();
     model

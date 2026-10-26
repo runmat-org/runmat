@@ -33,8 +33,8 @@ fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, Solv
         reference_temperature: Temperature::new(REFERENCE),
     });
     let thermal = model.materials[0].thermal.as_mut().unwrap();
-    thermal.reference_temperature_k = REFERENCE;
-    thermal.expansion_coefficient_per_k = ALPHA;
+    thermal.reference_temperature_k = runmat_types::physical::Temperature::new(REFERENCE);
+    thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(ALPHA);
     let producer = ProcedureStep::thermal_steady("qualification_heat");
     let mut consumer = ProcedureStep::coupled(
         "qualification_expansion",
@@ -72,7 +72,7 @@ fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, Solv
         .find(|face| {
             face.node_indices
                 .iter()
-                .all(|&node| mesh.topology.nodes[node].coordinates_m[0] == 0.0)
+                .all(|&node| mesh.topology.nodes[node].coordinates_m.canonical_value()[0] == 0.0)
         })
         .unwrap();
     model
@@ -87,15 +87,16 @@ fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, Solv
     for node in &mesh.topology.nodes {
         // Exactly six zero components remove rigid modes without constraining dilation:
         // origin xyz, x-axis corner yz, y-axis corner z. All other DOFs are solved.
-        let axes: &[usize] = if restrained || node.coordinates_m == [0.0, 0.0, 0.0] {
-            &[0, 1, 2]
-        } else if node.coordinates_m == [1.0, 0.0, 0.0] {
-            &[1, 2]
-        } else if node.coordinates_m == [0.0, 1.0, 0.0] {
-            &[2]
-        } else {
-            &[]
-        };
+        let axes: &[usize] =
+            if restrained || node.coordinates_m.canonical_value() == [0.0, 0.0, 0.0] {
+                &[0, 1, 2]
+            } else if node.coordinates_m.canonical_value() == [1.0, 0.0, 0.0] {
+                &[1, 2]
+            } else if node.coordinates_m.canonical_value() == [0.0, 1.0, 0.0] {
+                &[2]
+            } else {
+                &[]
+            };
         if axes.is_empty() {
             continue;
         }
@@ -231,7 +232,15 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
             .thermal
             .as_mut()
             .unwrap()
-            .expansion_coefficient_per_k *= 2.0;
+            .expansion_coefficient_per_k = runmat_types::physical::Quantity::new(
+            foreign_workload.model.materials[0]
+                .thermal
+                .as_mut()
+                .unwrap()
+                .expansion_coefficient_per_k
+                .canonical_value()
+                * (2.0),
+        );
         prepared.inputs[invocation_index] = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::SolverInvocation,
             original_invocation.manifest.logical_identity,
@@ -265,7 +274,7 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
                 let expected = if restrained {
                     0.0
                 } else {
-                    ALPHA * DELTA * node.coordinates_m[axis]
+                    ALPHA * DELTA * node.coordinates_m.canonical_value()[axis]
                 };
                 assert!(
                     (u[axis] - expected).abs() < 1.0e-10,
@@ -276,8 +285,8 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
         assert_eq!(state.canonical_bytes().unwrap(), state_bytes);
         if restrained {
             let mechanical = model.materials[0].require_mechanical().unwrap();
-            let pressure = mechanical.youngs_modulus_pa * ALPHA * DELTA
-                / (1.0 - 2.0 * mechanical.poisson_ratio);
+            let pressure = mechanical.youngs_modulus_pa.canonical_value() * ALPHA * DELTA
+                / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
             let stress = imported
                 .result
                 .run

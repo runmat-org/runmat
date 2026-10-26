@@ -111,8 +111,8 @@ fn point_set_bootstrap_closes_the_convex_hull_of_a_torus_point_cloud() {
             identity += 1;
         }
     }
-    let first = points[3].coordinates_m;
-    let last = points[9].coordinates_m;
+    let first = points[3].coordinates_m.canonical_value();
+    let last = points[9].coordinates_m.canonical_value();
     let midpoint = std::array::from_fn(|axis| first[axis] * 0.5 + last[axis] * 0.5);
     let topology = build_delaunay_volume_point_set(
         points,
@@ -150,7 +150,10 @@ fn point_set_bootstrap_rejects_degenerate_and_duplicate_inputs() {
     );
 
     let mut duplicate = point_set();
-    duplicate[1].coordinates_m = [-0.0, 0.0, 0.0];
+    duplicate[1].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([-0.0, 0.0, 0.0]);
     assert_eq!(
         build_delaunay_volume_point_set(
             duplicate,

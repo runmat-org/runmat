@@ -16,7 +16,7 @@ fn cold_bloch_workload_and_result_preserve_full_pressure_and_phase_lineage() {
         };
         let mut authored = workload();
         authored.model.boundaries.clear();
-        let phase = -std::f64::consts::TAU * authored.frequency.hertz / 2.0;
+        let phase = -std::f64::consts::TAU * authored.frequency.canonical_value() / 2.0;
         authored
             .model
             .constraints
@@ -26,8 +26,8 @@ fn cold_bloch_workload_and_result_preserve_full_pressure_and_phase_lineage() {
                     PhaseShiftedPeriodicConstraint {
                         periodic: PeriodicConstraint {
                             pair: PairedConstraint {
-                                primary: RegionTarget::boundary("slab_left"),
-                                secondary: RegionTarget::boundary("slab_right"),
+                                primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                                secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                                 pairing: PairingPolicy::Matching,
                             },
                             transform: PeriodicTransform::Translation(Translation::new([
@@ -50,7 +50,7 @@ fn cold_bloch_workload_and_result_preserve_full_pressure_and_phase_lineage() {
         imported.validate_for(&authored, &mesh).unwrap();
         assert_eq!(result, imported);
         for (node, pressure) in mesh.topology.nodes.iter().zip(imported.pressure_pa()) {
-            let argument = phase * node.coordinates_m[0];
+            let argument = phase * node.coordinates_m.canonical_value()[0];
             assert!(
                 (pressure.real - argument.cos()).hypot(pressure.imaginary - argument.sin()) < 0.002
             );
@@ -66,7 +66,7 @@ fn cold_bloch_workload_and_result_preserve_full_pressure_and_phase_lineage() {
         let AcousticConstraintKind::PhaseShiftedPeriodic(bloch) = &mut constraint.kind else {
             panic!()
         };
-        bloch.phase.radians += 0.1;
+        bloch.phase = runmat_types::physical::Quantity::new(bloch.phase.canonical_value() + (0.1));
         assert_ne!(
             authored.identity().unwrap(),
             wrong_phase.identity().unwrap()

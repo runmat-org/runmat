@@ -32,7 +32,9 @@ impl FeaThermalRunResult {
             nonlinear_evidence: &self.nonlinear_evidence,
             residual_target: self.residual_target,
             energy_balances: &self.energy_balances,
-            reference_temperature_k: self.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                self.reference_temperature_k.canonical_value(),
+            ),
             topology_digest: self.topology_digest,
             producer: self.producer,
             ordered_node_ids: &self.ordered_node_ids,
@@ -168,7 +170,7 @@ pub(super) struct ThermalResultMetadata<'a> {
     pub nonlinear_evidence: &'a [crate::contracts::ThermalNonlinearSampleEvidence],
     pub residual_target: f64,
     pub energy_balances: &'a [crate::contracts::ThermalEnergyBalance],
-    pub reference_temperature_k: f64,
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub topology_digest: Digest,
     pub producer: super::StepIdentity,
     pub ordered_node_ids: &'a [u64],
@@ -200,19 +202,21 @@ impl ThermalResultMetadata<'_> {
         if self.run.identity.family() != PhysicsFamily::Thermal
             || !unique_nonempty(self.ordered_node_ids)?
             || !unique_nonempty(self.ordered_element_ids)?
-            || !self.reference_temperature_k.is_finite()
-            || self.reference_temperature_k <= 0.0
-            || self.initial_state.reference_temperature_k != self.reference_temperature_k
+            || !self.reference_temperature_k.canonical_value().is_finite()
+            || self.reference_temperature_k.canonical_value() <= 0.0
+            || self.initial_state.reference_temperature_k.canonical_value()
+                != self.reference_temperature_k.canonical_value()
             || self.initial_state.procedure_step_id.trim().is_empty()
             || initial_nodes != Some(self.ordered_node_ids.len())
             || initial.authored_and_prescribed_node_count
                 > initial
                     .authored_node_count
                     .min(initial.prescribed_node_count)
-            || !initial.minimum_temperature_k.is_finite()
-            || initial.minimum_temperature_k <= 0.0
-            || !initial.maximum_temperature_k.is_finite()
-            || initial.maximum_temperature_k < initial.minimum_temperature_k
+            || !initial.minimum_temperature_k.canonical_value().is_finite()
+            || initial.minimum_temperature_k.canonical_value() <= 0.0
+            || !initial.maximum_temperature_k.canonical_value().is_finite()
+            || initial.maximum_temperature_k.canonical_value()
+                < initial.minimum_temperature_k.canonical_value()
             || self
                 .time_points_s
                 .iter()
@@ -259,7 +263,9 @@ impl ThermalResultMetadata<'_> {
                 .iter()
                 .zip(&self.time_points_s[first..])
             {
-                if evidence.time_s != *time || !evidence.satisfies(self.residual_target) {
+                if evidence.time_s.canonical_value() != *time
+                    || !evidence.satisfies(self.residual_target)
+                {
                     return Err(invalid());
                 }
             }
@@ -273,12 +279,12 @@ impl ThermalResultMetadata<'_> {
                     "thermal energy residual {} exceeds retained acceptance target {}; residual={} W, storage={} W, boundary loss={} W, applied={} W, prescribed={} W, physical scale={} W",
                     balance.relative_residual,
                     self.residual_target,
-                    balance.residual_w,
-                    balance.storage_rate_w,
-                    balance.boundary_loss_w,
-                    balance.applied_power_w,
-                    balance.prescribed_boundary_power_w,
-                    balance.scale.maximum(),
+                    balance.residual_w.canonical_value(),
+                    balance.storage_rate_w.canonical_value(),
+                    balance.boundary_loss_w.canonical_value(),
+                    balance.applied_power_w.canonical_value(),
+                    balance.prescribed_boundary_power_w.canonical_value(),
+                    balance.scale.maximum().canonical_value(),
                 )));
             }
         }

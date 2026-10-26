@@ -4,7 +4,7 @@ use runmat_analysis_core::{
 };
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
-    GeometrySourceFormat, ImportedGeometryDefinition, UnitSystem,
+    GeometrySourceFormat, ImportedGeometryDefinition, LengthUnit,
 };
 use runmat_meshing_core::{fixtures, ElementOrder};
 
@@ -213,10 +213,11 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
                 module_path: "project/main.fea".into(),
                 geometry_id: "part".into(),
             },
-            source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+            source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+                unit_evidence: document.source.unit_evidence.clone(),
                 logical_path: "project/part.brep".into(),
                 format: document.source.format,
-                units: document.source.source_units,
+                authored_units: document.source.unit_evidence.uniform_unit(),
                 content_digest: document.source.content_digest,
                 topology_digest: GeometryDigest::from_bytes([1; 32]),
                 capabilities: GeometryAuthoringCapabilities {
@@ -302,11 +303,13 @@ fn imported_source_digest_format_and_units_must_match_the_document() {
     let GeometryDefinitionSource::Imported(imported) = &mut wrong_units.geometry.source else {
         unreachable!()
     };
-    imported.units = if document.source.source_units == UnitSystem::Meter {
-        UnitSystem::Millimeter
-    } else {
-        UnitSystem::Meter
-    };
+    imported.authored_units = Some(
+        if document.source.unit_evidence.uniform_unit() == Some(LengthUnit::Meter) {
+            LengthUnit::Millimeter
+        } else {
+            LengthUnit::Meter
+        },
+    );
     assert!(matches!(
         validate_realized_geometry_source(&wrong_units, &document),
         Err(AnalysisStudyCompilationError::ImportedGeometrySourceMismatch)

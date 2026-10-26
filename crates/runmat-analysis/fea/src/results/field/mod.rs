@@ -6,6 +6,8 @@ mod entity;
 mod finite_volume;
 mod partition;
 mod partition_set;
+mod physical_storage;
+pub use physical_storage::RecoveredQuantityLayout;
 mod sampling;
 mod source_plan;
 pub use source_plan::{OriginalFieldSourceEntry, OriginalFieldSourcePlan};

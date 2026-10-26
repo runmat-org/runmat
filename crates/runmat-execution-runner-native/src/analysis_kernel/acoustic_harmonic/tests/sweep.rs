@@ -87,7 +87,7 @@ fn native_acoustic_frequency_entries_fan_in_after_cold_reopen_for_both_orders() 
                 reopened
                     .results()
                     .iter()
-                    .map(|r| r.frequency().hertz)
+                    .map(|r| r.frequency().canonical_value())
                     .collect::<Vec<_>>(),
                 vec![0.1, 0.2, 0.3]
             );

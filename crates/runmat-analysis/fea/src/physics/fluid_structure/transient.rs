@@ -23,10 +23,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FluidStructureFlowState {
-    pub velocity_m_per_s: Vec<[f64; 3]>,
-    pub pressure_reference_pa: Vec<f64>,
-    pub pressure_fluctuation_pa: Vec<f64>,
-    pub face_volume_flux_m3_per_s: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, Vec<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub pressure_reference_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub pressure_fluctuation_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub face_volume_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, Vec<f64>>,
 }
 
 impl FluidStructureFlowState {
@@ -40,10 +48,10 @@ impl FluidStructureFlowState {
     }
     fn fields(&self) -> CanonicalFluidFields<'_> {
         CanonicalFluidFields {
-            velocity_m_per_s: &self.velocity_m_per_s,
-            pressure_reference_pa: &self.pressure_reference_pa,
-            pressure_fluctuation_pa: &self.pressure_fluctuation_pa,
-            face_volume_flux_m3_per_s: &self.face_volume_flux_m3_per_s,
+            velocity_m_per_s: self.velocity_m_per_s.as_quantity_slice(),
+            pressure_reference_pa: self.pressure_reference_pa.as_quantity_slice(),
+            pressure_fluctuation_pa: self.pressure_fluctuation_pa.as_quantity_slice(),
+            face_volume_flux_m3_per_s: self.face_volume_flux_m3_per_s.as_quantity_slice(),
         }
     }
 }
@@ -176,10 +184,10 @@ impl FluidStructureProblem<'_> {
         let mut departure = self.configure(&structure.displacement)?;
         let cells = departure.topology.cells.len();
         let mut flow = FluidStructureFlowState {
-            velocity_m_per_s: vec![[0.0; 3]; cells],
-            pressure_reference_pa: Vec::new(),
-            pressure_fluctuation_pa: vec![0.0; cells],
-            face_volume_flux_m3_per_s: vec![0.0; departure.topology.faces.len()],
+            velocity_m_per_s: runmat_types::physical::Quantity::new(vec![[0.0; 3]; cells]),
+            pressure_reference_pa: runmat_types::physical::Quantity::new(Vec::new()),
+            pressure_fluctuation_pa: runmat_types::physical::Quantity::new(vec![0.0; cells]),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(vec![0.0; departure.topology.faces.len()]),
         };
         let mut load = vec![0.0; dofs];
         let mut steps = Vec::new();
@@ -217,8 +225,8 @@ impl FluidStructureProblem<'_> {
                 let walls =
                     self.wall_velocities(&arrival.topology, &kinematics.velocity, &mesh_flux)?;
                 let problem = self.interval(&arrival, t1, &walls)?;
-                if flow.pressure_reference_pa.is_empty() {
-                    flow.pressure_reference_pa = problem.pressure_reference().to_vec();
+                if flow.pressure_reference_pa.canonical_values().is_empty() {
+                    flow.pressure_reference_pa = runmat_types::physical::Quantity::new(problem.pressure_reference().to_vec());
                 }
                 let previous_volume = departure
                     .topology

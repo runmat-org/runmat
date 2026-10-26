@@ -27,7 +27,7 @@ fn prescribed(
         constraint_id: id.into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::authored("root"),
+            target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
             translations,
             rotations,
         }),
@@ -155,7 +155,7 @@ fn discontinuous_normal_displacement_is_rejected() {
             constraint_id: "jumping-normal-support".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::NormalDisplacement {
-                target: RegionTarget::authored("root"),
+                target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
                 value: PrescribedValue::Signal(signal_id),
             },
         }));

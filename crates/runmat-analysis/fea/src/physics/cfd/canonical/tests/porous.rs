@@ -29,9 +29,9 @@ fn uniform_flow_through_a_porous_zone_has_the_darcy_forchheimer_gradient() {
     }];
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let r = p.solve().unwrap();
-    let mu = f.material.dynamic_viscosity.pascal_seconds;
+    let mu = f.material.dynamic_viscosity.canonical_value();
     let gradient = mu * speed / permeability + 0.5 * density * inertial * speed * speed;
-    for u in &r.velocity_m_per_s {
+    for u in r.velocity_m_per_s.canonical_values() {
         assert!(norm(sub(*u, [speed, 0.0, 0.0])) < 1e-6 * speed, "{u:?}");
     }
     // p(x) − p(x') = G (x' − x) between any two cells.
@@ -39,7 +39,7 @@ fn uniform_flow_through_a_porous_zone_has_the_darcy_forchheimer_gradient() {
         .topology
         .cells
         .iter()
-        .zip(&r.pressure_fluctuation_pa)
+        .zip(r.pressure_fluctuation_pa.canonical_values())
         .fold(None::<((f64, f64), (f64, f64))>, |acc, (cell, value)| {
             let point = (cell.centroid_m[0], *value);
             Some(match acc {

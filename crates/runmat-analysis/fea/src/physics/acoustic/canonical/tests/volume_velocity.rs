@@ -21,16 +21,29 @@ fn duct(
         slab_mesh(cells)
     };
     for node in &mut mesh.topology.nodes {
-        node.coordinates_m[1] *= area;
+        {
+            let quantity_change = area;
+            let quantity_index = 1;
+            let quantity_slot = &mut node.coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] *= quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         if area != 1.0 {
-            let [x, y, z] = node.coordinates_m;
+            let [x, y, z] = node.coordinates_m.canonical_value();
             let a = std::f64::consts::FRAC_1_SQRT_2;
-            node.coordinates_m = [a * (x - y), a * (x + y), z];
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([a * (x - y), a * (x + y), z]);
         }
     }
     mesh.seal_canonical_digest().unwrap();
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     // Positive physical incoming flow is negative outward-normal flow.
     let q = if phase {
         [0.4 / 6.0, -1.0 / 6.0]
@@ -49,7 +62,7 @@ fn duct(
         .push(ExcitationAction::VolumeVelocity(action));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "matched".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -116,13 +129,13 @@ fn total_volume_flow_area_phase_rotation_and_power_refine_against_continuum() {
                         .projection
                         .nodes
                         .iter()
-                        .zip(&result.pressure_pa)
+                        .zip(result.pressure_pa.canonical_values())
                         .map(|(node, p)| {
-                            let exact = reference(node.coordinates_m);
+                            let exact = reference(node.coordinates_m.canonical_value());
                             (p.real - exact[0]).powi(2) + (p.imaginary - exact[1]).powi(2)
                         })
                         .sum::<f64>()
-                        / result.pressure_pa.len() as f64)
+                        / result.pressure_pa.canonical_values().len() as f64)
                         .sqrt();
                     errors.push(error);
                     assert!(result.relative_residual < 1e-10 && result.power_relative_error < 1e-8);
@@ -134,17 +147,24 @@ fn total_volume_flow_area_phase_rotation_and_power_refine_against_continuum() {
                     assert!(result.source_evidence[0].accepted);
                     if cells == 8 {
                         assert!(error < 0.004 * 1.16_f64.sqrt() / area, "{errors:?}");
-                        assert!((result.mean_input_power_w - power).abs() < 0.005 / area);
-                        assert!((result.mean_impedance_loss_w - power).abs() < 0.005 / area);
+                        assert!(
+                            (result.mean_input_power_w.canonical_value() - power).abs()
+                                < 0.005 / area
+                        );
+                        assert!(
+                            (result.mean_impedance_loss_w.canonical_value() - power).abs()
+                                < 0.005 / area
+                        );
                         let velocity_error = (result
                             .projection
                             .elements
                             .iter()
-                            .zip(&result.element_velocity_m_per_s)
+                            .zip(result.element_velocity_m_per_s.canonical_values())
                             .map(|(element, v)| {
                                 let xs = std::array::from_fn(|i| {
                                     result.projection.nodes[element.node_indices[i]]
                                         .coordinates_m
+                                        .canonical_value()
                                         .into_iter()
                                         .zip(direction)
                                         .map(|(x, d)| x * d)
@@ -165,7 +185,7 @@ fn total_volume_flow_area_phase_rotation_and_power_refine_against_continuum() {
                             .sqrt();
                         assert!(velocity_error < 0.01 / area, "v={velocity_error:e}");
                     }
-                    eprintln!("volume q={quadratic} area={area} phase={phase} cells={cells} p={error:e} power={:e}", result.mean_input_power_w);
+                    eprintln!("volume q={quadratic} area={area} phase={phase} cells={cells} p={error:e} power={:e}", result.mean_input_power_w.canonical_value());
                 }
                 assert!(
                     errors
@@ -195,10 +215,20 @@ fn total_volume_flow_and_normal_velocity_agree_without_duplicating_patch_resulta
                 .excitations
                 .push(ExcitationAction::NormalVelocity(action));
             let velocity = solve(&model, &mesh);
-            for (a, b) in flow.pressure_pa.iter().zip(&velocity.pressure_pa) {
+            for (a, b) in flow
+                .pressure_pa
+                .canonical_values()
+                .iter()
+                .zip(velocity.pressure_pa.canonical_values())
+            {
                 assert!((a.real - b.real).abs() < 1e-9 && (a.imaginary - b.imaginary).abs() < 1e-9);
             }
-            assert!((flow.mean_input_power_w - velocity.mean_input_power_w).abs() < 1e-10);
+            assert!(
+                (flow.mean_input_power_w.canonical_value()
+                    - velocity.mean_input_power_w.canonical_value())
+                .abs()
+                    < 1e-10
+            );
         }
     }
 }
@@ -268,7 +298,7 @@ fn total_volume_flow_rejects_overlapping_sources_in_both_action_orders() {
         let (mut model, mesh) = duct(2, false, 1.0, false);
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "conflict".into(),
-            target: RegionTarget::boundary("slab_left"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
             operator,
         });
         let result = solve_canonical_harmonic(
@@ -295,7 +325,7 @@ fn total_volume_flow_rejects_prescribed_pressure_on_its_patch() {
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: "prescribed_source_patch".into(),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary("slab_left"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                     value: PrescribedValue::Constant(Pressure::new(0.0)),
                 },
             }));
@@ -327,11 +357,11 @@ fn total_volume_flow_rejects_periodic_and_bloch_primary_or_secondary_patches() {
                 let ExcitationAction::VolumeVelocity(action) = &mut model.excitations[0] else {
                     unreachable!()
                 };
-                action.target = ExcitationTarget::Region(RegionTarget::boundary(source_side));
+                action.target = ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(source_side))));
                 let periodic = PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary("slab_left"),
-                        secondary: RegionTarget::boundary("slab_right"),
+                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),

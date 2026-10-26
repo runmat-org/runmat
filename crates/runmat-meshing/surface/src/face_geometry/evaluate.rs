@@ -134,10 +134,12 @@ pub fn evaluate_exact_face_geometry_in_parameterization(
             .iter()
             .map(|triangle| triangle.physical_aspect_ratio)
             .fold(0.0, f64::max),
-        maximum_chordal_deviation_m: triangles
-            .iter()
-            .map(|triangle| triangle.chordal_deviation_m)
-            .fold(0.0, f64::max),
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            triangles
+                .iter()
+                .map(|triangle| triangle.chordal_deviation_m)
+                .fold(0.0, f64::max),
+        ),
         maximum_normal_deviation_rad: triangles
             .iter()
             .map(|triangle| triangle.normal_deviation_rad)
@@ -386,7 +388,7 @@ fn ensure_summary_is_finite(geometry: &ExactFaceGeometry) -> Result<(), ExactFac
         geometry.maximum_metric_edge_length,
         geometry.minimum_metric_angle_rad,
         geometry.maximum_physical_aspect_ratio,
-        geometry.maximum_chordal_deviation_m,
+        geometry.maximum_chordal_deviation_m.canonical_value(),
         geometry.maximum_normal_deviation_rad,
     ]
     .iter()

@@ -233,7 +233,7 @@ fn assert_affine_displacement(result: &FeaRunResult, mesh: &SolverMeshArtifact, 
         .unwrap();
     for (actual, node) in displacement.chunks_exact(3).zip(&mesh.topology.nodes) {
         for axis in 0..3 {
-            let expected = [0.1, 0.2, 0.3][axis] * node.coordinates_m[axis];
+            let expected = [0.1, 0.2, 0.3][axis] * node.coordinates_m.canonical_value()[axis];
             assert!(
                 (actual[axis] - expected).abs() <= tolerance,
                 "node {} axis {axis}: {} != {expected}",

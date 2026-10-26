@@ -6,8 +6,8 @@ use crate::physics::thermal::qualification::{mesh, workload};
 fn periodic(jump_k: Option<f64>) -> ThermalConstraint {
     let periodic = PeriodicConstraint {
         pair: PairedConstraint {
-            primary: RegionTarget::boundary("slab_left"),
-            secondary: RegionTarget::boundary("slab_right"),
+            primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             pairing: PairingPolicy::GeometricTolerance(Length::new(1e-9)),
         },
         transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),
@@ -28,7 +28,7 @@ fn convective_left(input: &mut crate::execution::ThermalWorkload, ambient_k: f64
     input.model.boundaries.retain(|b| b.boundary_id == "insulated-sides");
     input.model.boundaries.push(AnalysisBoundary {
         boundary_id: "left-film".into(),
-        target: RegionTarget::boundary("slab_left"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient_k)),
             coefficient: HeatTransferCoefficient::new(25.0),
@@ -58,11 +58,11 @@ fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
             .iter()
             .zip(result.temperature_snapshots[0].as_host_f64().unwrap())
         {
-            let expected = 300.0 + 20.0 * node.coordinates_m[0];
+            let expected = 300.0 + 20.0 * node.coordinates_m.canonical_value()[0];
             assert!(
                 (temperature - expected).abs() < 1e-8 * 300.0,
                 "quadratic={quadratic} x={} actual={temperature} expected={expected}",
-                node.coordinates_m[0]
+                node.coordinates_m.canonical_value()[0]
             );
         }
         for balance in &result.energy_balances {
@@ -116,7 +116,7 @@ fn radiating_periodic_cell_balances_film_and_radiation_through_the_jump() {
         let mut input = workload();
         input.model.boundaries.push(AnalysisBoundary {
             boundary_id: "left-film".into(),
-            target: RegionTarget::boundary("slab_left"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
             operator: BoundaryOperator::ThermalConvection {
                 ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
                 coefficient: HeatTransferCoefficient::new(h),
@@ -130,11 +130,11 @@ fn radiating_periodic_cell_balances_film_and_radiation_through_the_jump() {
             .iter()
             .zip(result.temperature_snapshots[0].as_host_f64().unwrap())
         {
-            let expected = left + 20.0 * node.coordinates_m[0];
+            let expected = left + 20.0 * node.coordinates_m.canonical_value()[0];
             assert!(
                 (temperature - expected).abs() < 1e-7 * 300.0,
                 "quadratic={quadratic} x={} actual={temperature} expected={expected}",
-                node.coordinates_m[0]
+                node.coordinates_m.canonical_value()[0]
             );
         }
         assert_eq!(result.nonlinear_evidence.len(), 1);

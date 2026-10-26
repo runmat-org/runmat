@@ -47,7 +47,7 @@ fn candidate_provenance_bounds_original_deduplicated_selection_for_both_orders()
         for face in &mut mesh.topology.boundary_faces {
             face.provenance.push(entity.clone());
         }
-        let target = RegionTarget::boundary("common");
+        let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("common"));
         let profile =
             super::super::profile::constraint_target_workspace_profile(&mesh, &target).unwrap();
         let resolved = super::super::resolve_nodal_target(&mesh, &target, "fixed").unwrap();

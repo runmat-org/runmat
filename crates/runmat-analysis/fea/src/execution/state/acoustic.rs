@@ -85,9 +85,9 @@ impl CanonicalAcousticStatePayload {
                 && !ids.contains(&0)
                 && ids.iter().collect::<std::collections::BTreeSet<_>>().len() == ids.len()
         };
-        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency.hertz);
-        if !self.frequency.hertz.is_finite()
-            || self.frequency.hertz <= 0.0
+        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency.canonical_value());
+        if !self.frequency.canonical_value().is_finite()
+            || self.frequency.canonical_value() <= 0.0
             || self.phasor_convention != AcousticPhasorConvention::PositiveAngularFrequency
             || !unique_nonzero(&self.ordered_node_ids)
             || !unique_nonzero(&self.ordered_element_ids)

@@ -62,7 +62,42 @@ pub async fn study_parameter_domain(parameter_id: String) -> BuiltinResult<Value
     }
     domain_object(
         "fea.SignalDomain.studyParameter",
-        GeneratorDomain::StudyParameter { parameter_id },
+        GeneratorDomain::StudyParameter {
+            parameter_id,
+            quantity: None,
+        },
+    )
+}
+
+#[runtime_builtin(
+    name = "fea.SignalDomain.studyParameterWithUnits",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::generator_policies"
+)]
+pub async fn study_parameter_domain_with_units(
+    parameter_id: String,
+    canonical_units: String,
+) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.SignalDomain.studyParameterWithUnits";
+    if parameter_id.trim().is_empty() {
+        return Err(builtin_error(
+            NAME,
+            &ERROR_INPUT,
+            "study parameter id must not be empty",
+        ));
+    }
+    let unit = runmat_types::physical::parse_unit_expression(&canonical_units)
+        .map_err(|e| builtin_error(NAME, &ERROR_INPUT, e.to_string()))?;
+    if unit.scale() != 1.0 || unit.offset() != 0.0 {
+        return Err(builtin_error(NAME, &ERROR_INPUT,
+            "sampling numbers are canonical; specify canonical units such as m, rad or K and convert the source values first"));
+    }
+    domain_object(
+        NAME,
+        GeneratorDomain::StudyParameter {
+            parameter_id,
+            quantity: Some(runmat_types::physical::DynamicDimension::from_unit(unit)),
+        },
     )
 }
 
@@ -237,6 +272,10 @@ pub(super) fn ensure_generator_policy_classes_registered() {
                 ("time", "fea.SignalDomain.time"),
                 ("frequency", "fea.SignalDomain.frequency"),
                 ("studyParameter", "fea.SignalDomain.studyParameter"),
+                (
+                    "studyParameterWithUnits",
+                    "fea.SignalDomain.studyParameterWithUnits",
+                ),
             ]),
         );
         register_value_class(
@@ -269,7 +308,8 @@ mod tests {
         assert_eq!(
             domain_from_value("test", &domain).unwrap(),
             GeneratorDomain::StudyParameter {
-                parameter_id: "load_scale".into()
+                parameter_id: "load_scale".into(),
+                quantity: None,
             }
         );
         let sampling = block_on(uniform_sampling(

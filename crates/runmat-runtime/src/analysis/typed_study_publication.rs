@@ -131,7 +131,7 @@ pub fn prepare_structural_study_publication(
     let mut intent = PreparedStructuralStudyIntent {
         study_id: compiled.study_id.clone(),
         geometry_source_digest: Digest::from_bytes(*result.mesh().geometry.source_digest.bytes()),
-        geometry_units: compiled.model.units,
+        geometry_unit_evidence: result.mesh().geometry.source_unit_evidence.clone(),
         meshing_request: Some(result.mesh().resolved_request.clone()),
         meshing_contacts: super::meshing::meshing_contact_definitions_for_model(&compiled.model)
             .collect(),

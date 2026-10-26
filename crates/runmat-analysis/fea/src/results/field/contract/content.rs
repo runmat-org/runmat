@@ -119,6 +119,11 @@ impl RecoveredFieldDefinition {
         if expected != actual || storage.shape != self.storage_shape(entity_count)? {
             return Err(RecoveredFieldError::StorageShapeMismatch);
         }
+        let layout = self.physical_layout(entity_count)?;
+        if let AnalysisFieldValues::HostF64(values) = &storage.values {
+            runmat_types::physical::QuantityField::try_new(layout, values.as_slice())
+                .map_err(|_| RecoveredFieldError::InvalidPhysicalStorage)?;
+        }
         Ok(())
     }
 }

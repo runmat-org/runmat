@@ -12,7 +12,8 @@ use thiserror::Error;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct StructuralKinematicSample {
     pub(crate) displacement_m: f64,
-    pub(crate) velocity_m_per_s: f64,
+    pub(crate) velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, f64>,
     pub(crate) acceleration_m_per_s2: f64,
 }
 
@@ -29,12 +30,12 @@ struct AccelerationTrajectory {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct IntegratedKnot {
-    time_s: f64,
+    time_s: runmat_types::physical::Time,
     acceleration_left_m_per_s2: f64,
     acceleration_at_m_per_s2: f64,
     acceleration_right_m_per_s2: f64,
     displacement_m: f64,
-    velocity_m_per_s: f64,
+    velocity_m_per_s: runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, f64>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -55,12 +56,12 @@ pub(crate) enum StructuralMotionError {
     )]
     InvalidSignal { constraint_id: String },
     #[error(
-        "prescribed support motion `{constraint_id}` must cover exactly [{start_time_s}, {end_time_s}] s"
+        "prescribed support motion `{constraint_id}` must cover exactly [{start_time_s}, {end_time_s}] s", start_time_s = .start_time_s.canonical_value(), end_time_s = .end_time_s.canonical_value()
     )]
     IncompleteCoverage {
         constraint_id: String,
-        start_time_s: f64,
-        end_time_s: f64,
+        start_time_s: runmat_types::physical::Time,
+        end_time_s: runmat_types::physical::Time,
     },
     #[error("prescribed support motion `{constraint_id}` contains invalid initial kinematics")]
     InvalidInitialKinematics { constraint_id: String },
@@ -118,12 +119,12 @@ impl StructuralMotionSet {
                     translation.dof,
                     start_time_s,
                     end_time_s,
-                    initial_displacement.meters,
-                    initial_velocity.meters_per_second,
+                    initial_displacement.canonical_value(),
+                    initial_velocity.canonical_value(),
                     &constraint.constraint_id,
                 )?;
                 for knot in &trajectory.knots {
-                    let Some(time) = OrderedTime::new(knot.time_s) else {
+                    let Some(time) = OrderedTime::new(knot.time_s.canonical_value()) else {
                         return Err(invalid_signal(&constraint.constraint_id));
                     };
                     breakpoints.insert(time);
@@ -204,8 +205,8 @@ impl AccelerationTrajectory {
         {
             return Err(StructuralMotionError::IncompleteCoverage {
                 constraint_id: constraint_id.into(),
-                start_time_s,
-                end_time_s,
+                start_time_s: runmat_types::physical::Time::new(start_time_s),
+                end_time_s: runmat_types::physical::Time::new(end_time_s),
             });
         }
         let mut knots: Vec<IntegratedKnot> = Vec::with_capacity(table.knots.len());
@@ -215,7 +216,7 @@ impl AccelerationTrajectory {
             let (left, at, right) = acceleration_values(knot, dof, constraint_id)?;
             if index > 0 {
                 let previous = knots[index - 1];
-                let dt = knot.abscissa - previous.time_s;
+                let dt = knot.abscissa - previous.time_s.canonical_value();
                 if !dt.is_finite() || dt <= 0.0 {
                     return Err(invalid_signal(constraint_id));
                 }
@@ -232,12 +233,15 @@ impl AccelerationTrajectory {
                 return Err(invalid_signal(constraint_id));
             }
             knots.push(IntegratedKnot {
-                time_s: knot.abscissa,
+                time_s: runmat_types::physical::Time::new(knot.abscissa),
                 acceleration_left_m_per_s2: left,
                 acceleration_at_m_per_s2: at,
                 acceleration_right_m_per_s2: right,
                 displacement_m: displacement,
-                velocity_m_per_s: velocity,
+                velocity_m_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(velocity),
             });
         }
         Ok(Self { knots })
@@ -251,7 +255,11 @@ impl AccelerationTrajectory {
         if !time_s.is_finite() {
             return Err(StructuralMotionError::SampleOutsideDomain);
         }
-        if let Some(knot) = self.knots.iter().find(|knot| knot.time_s == time_s) {
+        if let Some(knot) = self
+            .knots
+            .iter()
+            .find(|knot| knot.time_s.canonical_value() == time_s)
+        {
             let acceleration = match approach {
                 SignalSampleApproach::At => knot.acceleration_at_m_per_s2,
                 SignalSampleApproach::LeftLimit => knot.acceleration_left_m_per_s2,
@@ -259,29 +267,35 @@ impl AccelerationTrajectory {
             };
             return Ok(StructuralKinematicSample {
                 displacement_m: knot.displacement_m,
-                velocity_m_per_s: knot.velocity_m_per_s,
+                velocity_m_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(knot.velocity_m_per_s.canonical_value()),
                 acceleration_m_per_s2: acceleration,
             });
         }
-        let Some(pair) = self
-            .knots
-            .windows(2)
-            .find(|pair| pair[0].time_s < time_s && time_s < pair[1].time_s)
-        else {
+        let Some(pair) = self.knots.windows(2).find(|pair| {
+            pair[0].time_s.canonical_value() < time_s && time_s < pair[1].time_s.canonical_value()
+        }) else {
             return Err(StructuralMotionError::SampleOutsideDomain);
         };
-        let dt = time_s - pair[0].time_s;
-        let span = pair[1].time_s - pair[0].time_s;
+        let dt = time_s - pair[0].time_s.canonical_value();
+        let span = pair[1].time_s.canonical_value() - pair[0].time_s.canonical_value();
         let jerk =
             (pair[1].acceleration_left_m_per_s2 - pair[0].acceleration_right_m_per_s2) / span;
         Ok(StructuralKinematicSample {
             displacement_m: pair[0].displacement_m
-                + pair[0].velocity_m_per_s * dt
+                + pair[0].velocity_m_per_s.canonical_value() * dt
                 + 0.5 * pair[0].acceleration_right_m_per_s2 * dt * dt
                 + jerk * dt * dt * dt / 6.0,
-            velocity_m_per_s: pair[0].velocity_m_per_s
-                + pair[0].acceleration_right_m_per_s2 * dt
-                + 0.5 * jerk * dt * dt,
+            velocity_m_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Velocity,
+                _,
+            >::new(
+                pair[0].velocity_m_per_s.canonical_value()
+                    + pair[0].acceleration_right_m_per_s2 * dt
+                    + 0.5 * jerk * dt * dt,
+            ),
             acceleration_m_per_s2: pair[0].acceleration_right_m_per_s2 + jerk * dt,
         })
     }
@@ -326,7 +340,7 @@ fn acceleration_ordinate(
         StructuralTranslationDof::Uy => 1,
         StructuralTranslationDof::Uz => 2,
     };
-    Ok(values[index].meters_per_second_squared)
+    Ok(values[index].canonical_value())
 }
 
 fn invalid_signal(constraint_id: &str) -> StructuralMotionError {
@@ -415,10 +429,10 @@ mod tests {
         .unwrap();
         let midpoint = trajectory.sample(1.0, SignalSampleApproach::At).unwrap();
         assert!((midpoint.acceleration_m_per_s2 - 2.0).abs() <= 1.0e-14);
-        assert!((midpoint.velocity_m_per_s - 6.5).abs() <= 1.0e-14);
+        assert!((midpoint.velocity_m_per_s.canonical_value() - 6.5).abs() <= 1.0e-14);
         assert!((midpoint.displacement_m - (4.0 + 5.0 + 0.5 + 1.0 / 6.0)).abs() <= 1.0e-14);
         let end = trajectory.sample(2.0, SignalSampleApproach::At).unwrap();
-        assert!((end.velocity_m_per_s - 9.0).abs() <= 1.0e-14);
+        assert!((end.velocity_m_per_s.canonical_value() - 9.0).abs() <= 1.0e-14);
         assert!((end.displacement_m - (4.0 + 10.0 + 2.0 + 4.0 / 3.0)).abs() <= 1.0e-14);
     }
 
@@ -447,9 +461,15 @@ mod tests {
             .sample(1.0, SignalSampleApproach::RightLimit)
             .unwrap();
         assert_eq!(left.displacement_m, at.displacement_m);
-        assert_eq!(left.velocity_m_per_s, at.velocity_m_per_s);
+        assert_eq!(
+            left.velocity_m_per_s.canonical_value(),
+            at.velocity_m_per_s.canonical_value()
+        );
         assert_eq!(right.displacement_m, at.displacement_m);
-        assert_eq!(right.velocity_m_per_s, at.velocity_m_per_s);
+        assert_eq!(
+            right.velocity_m_per_s.canonical_value(),
+            at.velocity_m_per_s.canonical_value()
+        );
         assert_eq!(left.acceleration_m_per_s2, 1.0);
         assert_eq!(at.acceleration_m_per_s2, 1.0);
         assert_eq!(right.acceleration_m_per_s2, 3.0);

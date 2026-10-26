@@ -4,7 +4,7 @@ use crate::execution::{NumericalReceiptIdentity, SolverResultIdentity};
 use crate::physics::electrical::ElectricalConstitutiveResponse;
 use runmat_meshing_core::ElementOrder;
 
-const PREFIX: &[u8] = b"runmat-electrical-numerical-receipt/v1\0";
+const PREFIX: &[u8] = b"runmat-electrical-numerical-receipt/v2\0";
 pub const ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const LIMITS: CanonicalLimits = CanonicalLimits::new(
     ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES as usize,
@@ -31,9 +31,9 @@ pub struct ElectricalNumericalReceipt {
     pub closure_relative_tolerance: f64,
     /// Physical electrostatic stored energy (J) or conduction Joule power (W),
     /// disambiguated by equation; not an integral of the averaged E squared.
-    pub total_constitutive_integral: f64,
+    pub total_constitutive_integral: runmat_types::physical::DimensionedScalar,
     /// Sum of original weak nodal outward flux: C or A, not a local flux density.
-    pub net_outward_flux: f64,
+    pub net_outward_flux: runmat_types::physical::DimensionedScalar,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ReceiptWire")]
@@ -77,12 +77,12 @@ impl ElectricalNumericalReceiptArtifact {
         let r = result.response();
         let total_constitutive_integral = match &r.constitutive {
             ElectricalConstitutiveResponse::Electrostatics { total_energy_j, .. } => {
-                *total_energy_j
+                total_energy_j.canonical_value()
             }
             ElectricalConstitutiveResponse::SteadyConduction {
                 total_joule_power_w,
                 ..
-            } => *total_joule_power_w,
+            } => total_joule_power_w.canonical_value(),
         };
         let receipt = ElectricalNumericalReceipt {
             producer: result.producer(),
@@ -100,13 +100,22 @@ impl ElectricalNumericalReceiptArtifact {
             closure_relative_tolerance: crate::physics::electrical::closure_target(
                 workload.relative_residual_target,
             ),
-            total_constitutive_integral,
-            net_outward_flux: r.nodal_outward_flux.iter().sum(),
+            total_constitutive_integral: runmat_types::physical::Quantity::try_from_dimension(
+                r.equation.work_kind().dimension(),
+                Some(r.equation.work_kind()),
+                total_constitutive_integral,
+            )
+            .map_err(invalid)?,
+            net_outward_flux: runmat_types::physical::Quantity::try_from_descriptor(
+                r.nodal_outward_flux.descriptor(),
+                r.nodal_outward_flux.canonical_values().iter().sum(),
+            )
+            .map_err(invalid)?,
         };
         let source_workload = workload.identity()?;
         let source_result = result.source_result_identity()?;
         let value = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: receipt_identity(source_workload, source_result, &receipt)?,
             source_workload,
             source_result,
@@ -129,8 +138,14 @@ impl ElectricalNumericalReceiptArtifact {
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let r = self.receipt;
+        r.net_outward_flux
+            .require_kind(r.equation.conjugate_flux_kind())
+            .map_err(invalid)?;
+        r.total_constitutive_integral
+            .require_kind(r.equation.work_kind())
+            .map_err(invalid)?;
         let within = |value: f64, bound: f64| value.is_finite() && value >= 0.0 && value <= bound;
-        if self.schema_version != 1
+        if self.schema_version != 2
             || r.nodes == 0
             || r.elements == 0
             || !matches!(r.element_order, ElementOrder::Tet4 | ElementOrder::Tet10)
@@ -146,8 +161,8 @@ impl ElectricalNumericalReceiptArtifact {
                 r.relative_energy_identity_error,
                 r.closure_relative_tolerance,
             )
-            || !within(r.total_constitutive_integral, f64::MAX)
-            || !r.net_outward_flux.is_finite()
+            || !within(r.total_constitutive_integral.canonical_value(), f64::MAX)
+            || !r.net_outward_flux.canonical_value().is_finite()
             || self.identity != receipt_identity(self.source_workload, self.source_result, &r)?
         {
             return Err(invalid(

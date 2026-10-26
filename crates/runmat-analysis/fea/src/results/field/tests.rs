@@ -504,3 +504,36 @@ fn integration_point_tensor_storage_pages_and_reconstructs_exactly() {
         field
     );
 }
+
+#[test]
+fn physical_storage_admission_retains_quantity_and_rejects_nonfinite_values() {
+    let definition = temperature_definition("temperature.physical");
+    let field = RecoveredField::new(
+        definition.clone(),
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(definition.field_id(), vec![2], vec![273.15, 300.0]),
+    )
+    .unwrap();
+    let physical = field.physical_host_field().unwrap();
+    assert_eq!(
+        physical.component(0).unwrap().semantic_kind(),
+        Some(runmat_types::physical::QuantityKind::Temperature)
+    );
+    assert!(RecoveredField::new(
+        definition.clone(),
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(definition.field_id(), vec![1], vec![f64::NAN])
+    )
+    .is_err());
+    // A diagnostic name alone does not define physical units: modal eigenvalues
+    // and buckling factors, for example, cannot share an invented Ratio header.
+    assert!(RecoveredFieldDefinition::new(
+        "eigenvalue",
+        ObservationQuantity::Eigenvalue,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real
+    )
+    .is_err());
+}

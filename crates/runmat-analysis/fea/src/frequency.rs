@@ -83,7 +83,7 @@ impl FrequencyResponsePlanEntry {
             identity: FrequencyResponsePlanEntryIdentity(Digest::sha256([])),
             plan_identity,
             ordinal,
-            frequency_hz,
+            frequency_hz: frequency_hz,
         };
         entry.identity = entry.derive_identity()?;
         entry.validate()?;

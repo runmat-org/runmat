@@ -306,7 +306,8 @@ mod tests {
         ));
 
         let mut massless = model;
-        massless.materials[0].mass_density_kg_per_m3 = None;
+        massless.materials[0].mass_density_kg_per_m3 =
+            (None).map(runmat_types::physical::MassDensity::new);
         let error = prepare_static_preassembly(
             &massless,
             &massless.sequence.steps[0],

@@ -55,21 +55,21 @@ pub(crate) fn recover_physical_static_thermo_mechanical_fields(
                 element.element_id
             )
         })?;
-        if !temperature_k.is_finite() || temperature_k <= 0.0 {
+        if !temperature_k.is_finite() || temperature_k.canonical_value() <= 0.0 {
             return Err(format!(
                 "physical thermoelastic element {} has invalid prescribed temperature",
                 element.element_id
             ));
         }
-        element_temperatures_k.push(temperature_k);
+        element_temperatures_k.push(temperature_k.canonical_value());
         let eigenstrain = element.thermal_eigenstrain.ok_or_else(|| {
             format!(
                 "physical thermoelastic element {} lacks thermal eigenstrain",
                 element.element_id
             )
         })?;
-        let stress = element.material.youngs_modulus_pa * eigenstrain
-            / (1.0 - 2.0 * element.material.poisson_ratio);
+        let stress = element.material.youngs_modulus_pa.canonical_value() * eigenstrain
+            / (1.0 - 2.0 * element.material.poisson_ratio.canonical_value());
         if !stress.is_finite() {
             return Err(format!(
                 "physical thermoelastic element {} has invalid thermal eigenstress",
@@ -190,14 +190,15 @@ pub(crate) fn recover_thermo_mechanical_snapshots(
             let base = element * TENSOR_COMPONENT_COUNT;
             let temperature_delta =
                 thermo_mechanical_element_temperature_delta(&temperature, summary, element);
-            let strain_value = summary.thermal_expansion_coefficient * temperature_delta;
+            let strain_value =
+                summary.thermal_expansion_coefficient.canonical_value() * temperature_delta;
             for component in 0..3 {
                 thermal_strain[base + component] = strain_value;
                 thermal_stress[base + component] =
                     strain_value * summary.effective_modulus_scale * 1.0e9;
                 temperature_field.observe_strain_temperature_pair(
                     strain_value,
-                    summary.thermal_expansion_coefficient,
+                    summary.thermal_expansion_coefficient.canonical_value(),
                     temperature_delta,
                 );
                 consistency.observe(
@@ -279,7 +280,7 @@ fn thermo_mechanical_temperature_profile(
 ) -> Vec<f64> {
     let node_count = node_count.max(1);
     let progress = progress_factor.clamp(0.0, 1.0);
-    let mean_delta = summary.applied_temperature_delta_k * progress;
+    let mean_delta = summary.applied_temperature_delta_k.canonical_value() * progress;
     let gradient_strength = summary
         .spatial_gradient_index
         .max(if summary.region_delta_count > 0 {
@@ -295,7 +296,7 @@ fn thermo_mechanical_temperature_profile(
             } else {
                 node as f64 / (node_count - 1) as f64 - 0.5
             };
-            summary.reference_temperature_k
+            summary.reference_temperature_k.canonical_value()
                 + mean_delta * (1.0 + 2.0 * gradient_strength * centered_position)
         })
         .collect()
@@ -316,7 +317,7 @@ fn thermo_mechanical_element_temperature_delta(
     } else {
         element_index
     };
-    temperature[node_index] - summary.reference_temperature_k
+    temperature[node_index] - summary.reference_temperature_k.canonical_value()
 }
 
 struct ThermoMechanicalTemperatureFieldAccumulator {

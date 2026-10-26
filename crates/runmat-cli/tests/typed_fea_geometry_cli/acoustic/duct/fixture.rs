@@ -22,9 +22,9 @@ pub(super) fn prepare(
         .execute(
             "unit-box",
             &ResolvedGeometryFeatureOperation::Box {
-                width_m: 1.0,
-                depth_m: 1.0,
-                height_m: 1.0,
+                width_m: runmat_types::physical::Length::new(1.0),
+                depth_m: runmat_types::physical::Length::new(1.0),
+                height_m: runmat_types::physical::Length::new(1.0),
             },
             &GeometryFeatureProviderSelection::None,
             &[],
@@ -73,6 +73,8 @@ pub(super) fn prepare(
         .replace("QUANTITY", quantity)
         .replace("ACTION", action)
         .replace("SOURCE", if generated { GENERATED } else { explicit });
+    let source = source.replace("FIRST_FACE_ID", &imported.source_face_ids[&0].analysis_selection_id().unwrap())
+        .replace("SECOND_FACE_ID", &imported.source_face_ids[&1].analysis_selection_id().unwrap());
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     [
         imported.source_face_ids[&0].clone(),
@@ -93,7 +95,9 @@ pub(super) fn verify_faces(mesh: &SolverMeshArtifact, identities: &[PersistentEn
             }
             count += 1;
             for index in &face.node_indices {
-                assert!((projection.nodes[*index].coordinates_m[0] - x).abs() < 1e-12);
+                assert!(
+                    (projection.nodes[*index].coordinates_m.canonical_value()[0] - x).abs() < 1e-12
+                );
             }
             assert!(normal * face.oriented_area_vector_m2[0] > 0.0);
             area += face.oriented_area_vector_m2[0].abs();
@@ -117,10 +121,16 @@ pub(super) fn verify_medium(
     for element in &mesh.topology.volume_elements {
         let owner = properties.solid_material(element.stable_identity).unwrap();
         assert_eq!(owner.element_id, element.element_id);
-        assert_eq!(owner.material.mass_density_kg_per_m3, Some(3.0));
+        assert_eq!(
+            owner
+                .material
+                .mass_density_kg_per_m3
+                .map(|quantity| quantity.canonical_value()),
+            Some(3.0)
+        );
         let acoustic = owner.material.acoustic.as_ref().unwrap();
-        assert_eq!(acoustic.speed_of_sound_m_per_s, 2.0);
-        assert_eq!(acoustic.damping_ratio, 0.0);
+        assert_eq!(acoustic.speed_of_sound_m_per_s.canonical_value(), 2.0);
+        assert_eq!(acoustic.damping_ratio.canonical_value(), 0.0);
     }
     assert_eq!(model.boundaries.len(), 1);
     let runmat_analysis_core::BoundaryOperator::AcousticImpedance { impedance } =
@@ -128,7 +138,7 @@ pub(super) fn verify_medium(
     else {
         panic!("expected matched impedance, not radiation");
     };
-    assert_eq!(impedance.pascal_seconds_per_meter, 6.0);
+    assert_eq!(impedance.canonical_value(), 6.0);
 }
 
 pub(super) fn verify_drive(
@@ -214,11 +224,11 @@ geometry part {
         expect exactly_one
     }
     region inlet : face {
-        select id "face_000001"
+        select id "FIRST_FACE_ID"
         expect exactly_one
     }
     region outlet : face {
-        select id "face_000002"
+        select id "SECOND_FACE_ID"
         expect exactly_one
     }
 }

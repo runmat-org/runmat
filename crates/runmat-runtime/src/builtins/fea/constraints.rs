@@ -490,9 +490,9 @@ mod tests {
         assert!(matches!(
             bound.constraint.kind,
             ThermalConstraintKind::Prescribed {
-                value: PrescribedValue::Constant(Temperature { kelvin }),
+                value: PrescribedValue::Constant(kelvin),
                 ..
-            } if kelvin == 293.15
+            } if kelvin.canonical_value() == 293.15
         ));
 
         let displacement = block_on(crate::builtins::fea::values::displacement_meters_builtin(
@@ -575,11 +575,9 @@ mod tests {
         assert!(matches!(
             periodic.constraint.kind,
             StructuralConstraintKind::Periodic(PeriodicConstraint {
-                transform: PeriodicTransform::Translation(Translation {
-                    meters: [0.01, 0.0, 0.0]
-                }),
+                transform: PeriodicTransform::Translation(translation),
                 ..
-            })
+            }) if *translation.canonical_values() == [0.01, 0.0, 0.0]
         ));
 
         let jump = block_on(
@@ -604,11 +602,9 @@ mod tests {
         assert!(matches!(
             affine.constraint.kind,
             ThermalConstraintKind::AffineJump {
-                temperature_jump: PrescribedValue::Constant(TemperatureDifference {
-                    kelvin: -15.0
-                }),
+                temperature_jump: PrescribedValue::Constant(jump),
                 ..
-            }
+            } if jump.canonical_value() == -15.0
         ));
         let absolute_temperature = block_on(
             crate::builtins::fea::values::temperature_celsius_builtin(Value::Num(15.0)),
@@ -876,14 +872,14 @@ mod tests {
             values.translations[0]
                 .value
                 .study_constant(&[])
-                .map(|value| value.meters),
+                .map(|value| value.canonical_value()),
             Some(0.0025)
         );
         assert_eq!(
             values.rotations[0]
                 .value
                 .study_constant(&[])
-                .map(|value| value.radians),
+                .map(|value| value.canonical_value()),
             Some(std::f64::consts::FRAC_PI_2)
         );
 
@@ -927,7 +923,7 @@ mod tests {
             StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
                 reference_point: runmat_analysis_core::ReferencePoint { position, .. },
                 ..
-            }) if position.meters == [0.1, 0.0, 0.025]
+            }) if position.canonical_value() == [0.1, 0.0, 0.025]
         ));
 
         let conditions = crate::make_cell_with_shape(vec![prescribed, coupling], vec![1, 2])
@@ -1023,8 +1019,8 @@ mod tests {
                 initial_velocity,
                 reconstruction: StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
             } if id == "support-acceleration"
-                && initial_displacement.meters == 0.25
-                && initial_velocity.meters_per_second == -0.5
+                && initial_displacement.canonical_value() == 0.25
+                && initial_velocity.canonical_value() == -0.5
         ));
         let duplicate = crate::make_cell_with_shape(vec![motion.clone(), motion], vec![1, 2])
             .expect("motion cell");

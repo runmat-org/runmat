@@ -20,7 +20,7 @@ const VISCOSITY: f64 = 1.0;
 const POISSON: f64 = 0.3;
 
 fn target(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
-    let mut target = RegionTarget::boundary(name);
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
     let entities = mesh
         .topology
         .boundary_faces
@@ -67,11 +67,11 @@ pub(super) fn case(youngs_modulus: f64) -> Case {
     let mut solid = model.materials[0].clone();
     solid.material_id = "elastomer".into();
     solid.name = "elastomer".into();
-    solid.mass_density_kg_per_m3 = Some(1000.0);
+    solid.mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(1000.0));
     solid.elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
-            youngs_modulus_pa: youngs_modulus,
-            poisson_ratio: POISSON,
+            youngs_modulus_pa: runmat_types::physical::Quantity::new(youngs_modulus),
+            poisson_ratio: runmat_types::physical::Quantity::new(POISSON),
         },
     ));
     let mut fluid = solid.clone();
@@ -84,11 +84,11 @@ pub(super) fn case(youngs_modulus: f64) -> Case {
     });
     model.materials = vec![solid, fluid];
     let mut plate = model.material_assignments[0].clone();
-    plate.target = PropertyRegionTarget::solid("plate");
+    plate.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("plate"));
     plate.expected_material_id = "elastomer".into();
     plate.assigned_material_id = "elastomer".into();
     let mut channel = plate.clone();
-    channel.target = PropertyRegionTarget::cell("channel");
+    channel.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("channel"));
     channel.expected_material_id = "oil".into();
     channel.assigned_material_id = "oil".into();
     model.material_assignments = vec![plate, channel];
@@ -262,9 +262,9 @@ fn run(c: &Case) -> (FluidStructureResult, f64, f64) {
     let mut inflow = 0.0;
     for (i, face) in problem.reference_fluid().faces.iter().enumerate() {
         if face.neighbor.is_none() && face.centroid_m[0] < 1e-12 {
-            sum += result.flow.pressure_pa[face.owner];
+            sum += result.flow.pressure_pa.canonical_values()[face.owner];
             count += 1.0;
-            inflow -= result.flow.face_volume_flux_m3_per_s[i];
+            inflow -= result.flow.face_volume_flux_m3_per_s.canonical_values()[i];
         }
     }
     let mut tampered = result.clone();

@@ -8,7 +8,7 @@ use runmat_analysis_core::{
 
 fn cavity_model(count: usize) -> AnalysisModel {
     let mut model = super::super::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
@@ -28,7 +28,7 @@ fn release(model: &mut AnalysisModel, face: &str) {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: format!("release_{face}"),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(face),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                 value: PrescribedValue::Constant(Pressure::new(0.0)),
             },
         }));
@@ -118,7 +118,7 @@ fn pressure_release_ends_remove_the_rigid_mode_and_match_open_open_duct() {
     let projection = &result.projection;
     for mode in &result.mode_pressures {
         for (node, value) in projection.nodes.iter().zip(mode) {
-            let x = node.coordinates_m[0];
+            let x = node.coordinates_m.canonical_value()[0];
             if x.abs() < 1e-12 || (x - 1.0).abs() < 1e-12 {
                 assert_eq!(*value, 0.0);
             }
@@ -153,7 +153,7 @@ fn lossy_boundaries_and_sources_are_rejected() {
     let mut model = cavity_model(2);
     model.boundaries.push(runmat_analysis_core::AnalysisBoundary {
         boundary_id: "absorber".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticRadiation,
     });
     let error = solve_canonical_modal(

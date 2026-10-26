@@ -85,7 +85,7 @@ fn native_original_electrical_fields_receipts_and_cold_lineage_match_analytic_sl
                 )
                 .unwrap();
                 receipt.validate_against(&workload, &result, &mesh).unwrap();
-                for field in &result.response().element_electric_field_v_per_m {
+                for field in result.response().element_electric_field_v_per_m.canonical_values() {
                     assert!(
                         (field[0] + 2.).abs() < 1e-8
                             && field[1].abs() < 1e-8
@@ -94,12 +94,15 @@ fn native_original_electrical_fields_receipts_and_cold_lineage_match_analytic_sl
                 }
                 let (total, exact) = match &result.response().constitutive {
                     ElectricalConstitutiveResponse::Electrostatics { total_energy_j, .. } => {
-                        (*total_energy_j, 2. * VACUUM_PERMITTIVITY_F_PER_M)
+                        (
+                            total_energy_j.canonical_value(),
+                            2. * VACUUM_PERMITTIVITY_F_PER_M.canonical_value(),
+                        )
                     }
                     ElectricalConstitutiveResponse::SteadyConduction {
                         total_joule_power_w,
                         ..
-                    } => (*total_joule_power_w, 12.),
+                    } => (total_joule_power_w.canonical_value(), 12.),
                 };
                 assert!((total - exact).abs() <= 1e-8 * exact);
                 let current = result.source_result_identity().unwrap();

@@ -256,7 +256,7 @@ fn node_coordinate_map(
         .filter_map(|node| {
             node_index
                 .get(&node.node_id)
-                .map(|index| (*index, node.coordinates_m))
+                .map(|index| (*index, node.coordinates_m.canonical_value()))
         })
         .collect()
 }

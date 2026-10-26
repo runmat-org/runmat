@@ -48,18 +48,18 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
         let flux = assemble_model(&model);
         for node in 0..projection.nodes.len() {
             assert_eq!(
-                flux.prescribed_temperature_k[node],
+                flux.prescribed_temperature_k.canonical_values()[node],
                 selected.node_indices.contains(&node).then_some(310.0)
             );
         }
-        let expected_power = 240.0 * selected.area_m2;
+        let expected_power = 240.0 * selected.area_m2.canonical_value();
         assert!(
-            (flux.applied_source.iter().sum::<f64>() - expected_power).abs()
+            (flux.applied_source.canonical_values().iter().sum::<f64>() - expected_power).abs()
                 <= expected_power * 1.0e-12
         );
         for &node in &other.node_indices {
             if !selected.node_indices.contains(&node) {
-                assert_eq!(flux.applied_source[node], 0.0);
+                assert_eq!(flux.applied_source.canonical_values()[node], 0.0);
             }
         }
         model.boundaries[0].operator = BoundaryOperator::ThermalConvection {
@@ -71,7 +71,7 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
         let convection_source = convection
             .relative_source(&model, ExcitationSamplePoint::Static, &reference)
             .unwrap();
-        let expected_power = 18.0 * 305.0 * selected.area_m2;
+        let expected_power = 18.0 * 305.0 * selected.area_m2.canonical_value();
         assert!(
             (convection_source.iter().sum::<f64>() - expected_power).abs()
                 <= expected_power * 1.0e-12
@@ -96,8 +96,8 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
             convection_source
         );
         assert_eq!(
-            direct.prescribed_temperature_k,
-            convection.prescribed_temperature_k
+            direct.prescribed_temperature_k.canonical_values(),
+            convection.prescribed_temperature_k.canonical_values()
         );
         assert_eq!(direct.conductivity, convection.conductivity);
     }

@@ -72,14 +72,10 @@ pub(super) fn execute() -> SolvedPipeline {
         face.provenance.sort();
     }
     if let Some(assignment) = solve.model.material_assignments.first() {
-        let region = PersistentEntityId::new(
-            PersistentEntityKind::Region,
-            assignment
-                .selected_region_id()
-                .expect("fixture uses selected material region")
-                .to_owned(),
-            vec!["root".into()],
-        );
+        let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
         mesh.topology.volume_elements[0].region_id = region.clone();
         mesh.topology.regions[0].region_id = region;
     }

@@ -151,8 +151,11 @@ fn try_recover_facet_cavity_once_with_cap(
                 "intersected tetrahedra have no manifold cavity repair that preserves the facet cap boundary",
             )
             .to_owned();
-        let footprint_coordinates =
-            facet_nodes.map(|node| recovery.topology.nodes[node as usize].coordinates_m);
+        let footprint_coordinates = facet_nodes.map(|node| {
+            recovery.topology.nodes[node as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         work.reject(format!(
             "{detail}; facet footprint is {footprint_coordinates:?}"
         ));
@@ -193,7 +196,14 @@ fn try_recover_facet_cavity_once_with_cap(
         .into_iter()
         .map(|node_id| ConstrainedCavityNode {
             node_id,
-            coordinates_m: recovery.topology.nodes[node_id as usize].coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(
+                recovery.topology.nodes[node_id as usize]
+                    .coordinates_m
+                    .canonical_value(),
+            ),
         })
         .collect::<Vec<_>>();
     let mut refills = Vec::with_capacity(cavities.len());
@@ -442,7 +452,7 @@ pub(in crate::cdt::facet_recovery) fn facet_recovery_refill_options(
         max_aspect_ratio: f64::MAX,
         min_scaled_jacobian: 0.0,
         classification_tolerance: runmat_meshing_core::quality::tolerance::MeshingTolerance {
-            absolute_m: 0.0,
+            absolute_m: runmat_types::physical::Length::new(0.0),
             relative: 0.0,
         },
         ..ConstrainedCavityRefillOptions::default()
@@ -506,10 +516,16 @@ fn plane_signs(
         work.search_step(constraint_index)?;
         signs.push(
             orient3d([
-                topology.nodes[facet[0] as usize].coordinates_m,
-                topology.nodes[facet[1] as usize].coordinates_m,
-                topology.nodes[facet[2] as usize].coordinates_m,
-                node.coordinates_m,
+                topology.nodes[facet[0] as usize]
+                    .coordinates_m
+                    .canonical_value(),
+                topology.nodes[facet[1] as usize]
+                    .coordinates_m
+                    .canonical_value(),
+                topology.nodes[facet[2] as usize]
+                    .coordinates_m
+                    .canonical_value(),
+                node.coordinates_m.canonical_value(),
             ])
             .map_err(|failure| {
                 invalid_topology(
@@ -715,7 +731,11 @@ fn regularize_nonmanifold_edge_stars(
             }
         }
         {
-            let coordinates = edge.map(|node| topology.nodes[node as usize].coordinates_m);
+            let coordinates = edge.map(|node| {
+                topology.nodes[node as usize]
+                    .coordinates_m
+                    .canonical_value()
+            });
             let signs = edge.map(|node| plane_signs[node as usize]);
             let selected = incident
                 .intersection(removed)

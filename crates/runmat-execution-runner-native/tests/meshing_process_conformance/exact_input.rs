@@ -89,13 +89,13 @@ fn execute_native_dag(
     let mut request = request();
     request.tolerance = document.tolerance;
     request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
-    request.quality.curve.maximum_chordal_deviation_m = 0.1;
+    request.quality.curve.maximum_chordal_deviation_m = runmat_types::physical::Length::new(0.1);
     request.quality.curve.maximum_tangent_change_degrees = 180.0;
     request.quality.curve.minimum_metric_edge_length = 0.01;
     request.quality.curve.maximum_metric_edge_length = 10.0;
     request.quality.surface.minimum_metric_angle_degrees = 0.1;
     request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
-    request.quality.surface.maximum_chordal_deviation_m = 0.1;
+    request.quality.surface.maximum_chordal_deviation_m = runmat_types::physical::Length::new(0.1);
     request.quality.surface.maximum_normal_deviation_degrees = 180.0;
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
@@ -168,6 +168,11 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> E
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageKind::SurfaceMesh,
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
             geometry_revision: document.revision.revision,
             persistent_mapping_version: document.revision.persistent_mapping_version,

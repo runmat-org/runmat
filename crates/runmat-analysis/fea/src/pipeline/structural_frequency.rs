@@ -438,20 +438,24 @@ fn execute_prepared_entry(
                 let reduced = ModalReducedSystem::project(&assembly.real, basis)
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
                 let load = ModalHarmonicLoad {
-                    real: reduced
-                        .project_vector(assembly.real.operator.load())
+                    real: (reduced)
+                        .load_field(assembly.real.operator.load())
+                        .and_then(|field| (reduced).project_load(&field))
                         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
-                    imaginary: reduced
-                        .project_vector(&assembly.imaginary_load)
+                    imaginary: (reduced)
+                        .load_field(&assembly.imaginary_load)
+                        .and_then(|field| (reduced).project_load(&field))
                         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
                 };
                 let response = solve_modal_harmonic(&reduced, omega, &load)
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-                let real = reduced
-                    .expand_vector(&response.displacement_real)
+                let real = (reduced)
+                    .expand_state(&response.displacement_real)
+                    .map(|field| field.into_canonical_storage())
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-                let imaginary = reduced
-                    .expand_vector(&response.displacement_imaginary)
+                let imaginary = (reduced)
+                    .expand_state(&response.displacement_imaginary)
+                    .map(|field| field.into_canonical_storage())
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
                 (
                     real,

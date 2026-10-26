@@ -46,7 +46,9 @@ impl FacetedSolid {
 #[serde(deny_unknown_fields)]
 pub struct FacetedVertex {
     pub id: PersistentEntityId,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

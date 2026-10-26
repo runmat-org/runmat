@@ -56,11 +56,19 @@ fn build_occt_backend() {
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")
         .define("_USE_MATH_DEFINES", None);
-    if uses_bundled_occt {
+    if uses_bundled_occt || (link_mode == "static" && is_occt_78(&occt_include)) {
         // OCCT 7.8's process-lifetime RTTI registry can be destroyed before STEP/IGES type
         // descriptors when statically linked. This source overrides that one TKernel object with
         // the upstream lifetime-safe ownership model used by later OCCT releases.
         build.file("src/occt/occt_type_lifetime.cc");
+    }
+
+    if target.contains("emscripten") && is_occt_78(&occt_include) {
+        // Override the two affected SDK archive members using upstream OCCT
+        // implementation without native signal-to-longjmp conversion. The
+        // bridge archive precedes OCCT, as for the RTTI lifetime adapter above.
+        build.file("src/occt/wasm_shape_upgrade_shape_divide.cc");
+        build.file("src/occt/wasm_shape_custom_bspline_restriction.cc");
     }
 
     if is_windows_gnu {
@@ -123,6 +131,20 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_surface_bounds.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_surface_evaluator.cc");
+    println!("cargo:rerun-if-changed=src/occt/wasm_shape_upgrade_shape_divide.cc");
+    println!("cargo:rerun-if-changed=src/occt/wasm_shape_custom_bspline_restriction.cc");
+}
+
+#[cfg(feature = "occt-native")]
+fn is_occt_78(include: &std::path::Path) -> bool {
+    let version_header = include.join("Standard_Version.hxx");
+    println!("cargo:rerun-if-changed={}", version_header.display());
+    let Ok(header) = std::fs::read_to_string(version_header) else { return false; };
+    let macro_value = |name: &str| header.lines().find_map(|line| {
+        let mut words = line.split_whitespace();
+        (words.next() == Some("#define") && words.next() == Some(name)).then(|| words.next()).flatten()
+    });
+    macro_value("OCC_VERSION_MAJOR") == Some("7") && macro_value("OCC_VERSION_MINOR") == Some("8")
 }
 
 #[cfg(not(feature = "occt-native"))]

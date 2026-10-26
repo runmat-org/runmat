@@ -37,14 +37,20 @@ pub struct ChtCouplingResult {
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct ChtInterfaceClosure {
     pub interface_face_count: usize,
-    pub max_temperature_jump_k: f64,
+    pub max_temperature_jump_k:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::TemperatureDifference, f64>,
     pub max_energy_residual: f64,
     pub heat_flux_balance_ratio: f64,
-    pub mean_interface_heat_flux_w_per_m2: f64,
+    pub mean_interface_heat_flux_w_per_m2:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::HeatFlux, f64>,
     pub max_thermal_transport_residual_ratio: f64,
     pub interface_temperature_continuity_ratio: f64,
-    pub max_advection_temperature_shift_k: f64,
-    pub interface_conductance_w_per_m2k: f64,
+    pub max_advection_temperature_shift_k:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::TemperatureDifference, f64>,
+    pub interface_conductance_w_per_m2k: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::HeatTransferCoefficient,
+        f64,
+    >,
     pub max_flux_temperature_law_residual_ratio: f64,
     pub max_heat_flux_realization_residual_ratio: f64,
     pub max_coupled_interface_iteration_count: usize,
@@ -71,8 +77,8 @@ pub fn couple_thermal_flow(
         options.procedure,
         options.sample_count,
     )?;
-    let nominal_time_step_s = schedule.nominal_time_step_s;
-    let nominal_velocity_m_per_s = schedule.nominal_velocity_m_per_s;
+    let nominal_time_step_s = schedule.nominal_time_step_s.canonical_value();
+    let nominal_velocity_m_per_s = schedule.nominal_velocity_m_per_s.canonical_value();
     let profile_scales = schedule.profile_scales;
     let field_step = options.sample_count.saturating_sub(1);
     let (fluid_velocity, fluid_pressure) = recover_velocity_pressure(
@@ -113,7 +119,9 @@ pub fn couple_thermal_flow(
         let base_temperature = temperature
             .as_host_f64()
             .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| vec![thermal_run.reference_temperature_k; fallback_len]);
+            .unwrap_or_else(|| {
+                vec![thermal_run.reference_temperature_k.canonical_value(); fallback_len]
+            });
         let mut heat_flux = thermal_run
             .heat_flux_snapshots
             .get(step_index)
@@ -138,7 +146,7 @@ pub fn couple_thermal_flow(
             domain,
             inlet_velocity_m_per_s,
             &base_temperature,
-            thermal_run.reference_temperature_k,
+            thermal_run.reference_temperature_k.canonical_value(),
         );
         let solution = interface::solve_conjugate_interface(
             &base_temperature,
@@ -146,29 +154,29 @@ pub fn couple_thermal_flow(
             topology,
             conductance,
             advection_shift_k,
-            thermal_run.reference_temperature_k,
+            thermal_run.reference_temperature_k.canonical_value(),
         )?;
-        let interface_count = solution.coupled_heat_flux.len();
+        let interface_count = solution.coupled_heat_flux.canonical_values().len();
         accumulate_closure(
             &mut closure,
             &solution,
             &base_temperature,
-            thermal_run.reference_temperature_k,
+            thermal_run.reference_temperature_k.canonical_value(),
             conductance,
             advection_shift_k,
         );
         fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
             vec![base_temperature.len().max(1)],
-            solution.fluid_temperature,
+            solution.fluid_temperature.into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
             fea_cht_solid_temperature_field_id(step_index),
             vec![base_temperature.len().max(1)],
-            solution.solid_temperature,
+            solution.solid_temperature.into_canonical_values(),
         ));
 
-        let heat_balance_ratio = heat_balance_ratio(&solution.coupled_heat_flux);
+        let heat_balance_ratio = heat_balance_ratio(solution.coupled_heat_flux.canonical_values());
         let energy_residual = heat_balance_ratio
             .max(solution.flux_temperature_law_residual_ratio)
             .max(solution.heat_flux_realization_residual_ratio)
@@ -176,12 +184,12 @@ pub fn couple_thermal_flow(
         fields.push(AnalysisField::host_f64(
             fea_cht_interface_heat_flux_field_id(step_index),
             vec![interface_count],
-            solution.coupled_heat_flux,
+            solution.coupled_heat_flux.into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
             fea_cht_interface_temperature_jump_field_id(step_index),
             vec![interface_count],
-            solution.temperature_jump,
+            solution.temperature_jump.into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
             fea_cht_energy_residual_field_id(step_index),
@@ -200,17 +208,28 @@ pub fn couple_thermal_flow(
         .iter()
         .filter_map(AnalysisField::as_host_f64)
         .flatten()
-        .map(|temperature| (temperature - thermal_run.reference_temperature_k).abs())
+        .map(|temperature| {
+            (temperature - thermal_run.reference_temperature_k.canonical_value()).abs()
+        })
         .fold(0.0_f64, f64::max);
     let mut result_diagnostics = cfd::coupling_diagnostics(
         domain,
         topology,
         cfd::CfdCouplingEvidence {
-            inlet_velocity_m_per_s,
+            inlet_velocity_m_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Velocity,
+                _,
+            >::new(inlet_velocity_m_per_s),
             executed_sample_count: profile_scales.len(),
-            nominal_time_step_s,
+            nominal_time_step_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Time,
+                _,
+            >::new(nominal_time_step_s),
             transient: options.procedure == AnalysisProcedure::TransientResponse,
-            pressure_drop_pa,
+            pressure_drop_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(pressure_drop_pa),
             mass_balance_residual: max_cfd_continuity_residual,
             max_momentum_residual: max_cfd_momentum_residual,
             max_continuity_residual: max_cfd_continuity_residual,
@@ -220,10 +239,20 @@ pub fn couple_thermal_flow(
     result_diagnostics.extend(diagnostics::coupling_diagnostics(
         diagnostics::ChtDiagnosticInputs {
             authored_interface_count: model.interfaces.len(),
-            reference_temperature_k: thermal_run.reference_temperature_k,
-            applied_temperature_delta_k,
-            inlet_velocity_m_per_s,
-            nominal_time_step_s,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                thermal_run.reference_temperature_k.canonical_value(),
+            ),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(
+                applied_temperature_delta_k,
+            ),
+            inlet_velocity_m_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Velocity,
+                _,
+            >::new(inlet_velocity_m_per_s),
+            nominal_time_step_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Time,
+                _,
+            >::new(nominal_time_step_s),
             options,
             domain,
             closure: &closure,
@@ -246,9 +275,10 @@ fn accumulate_closure(
     conductance: f64,
     advection_shift_k: f64,
 ) {
-    let heat_balance_ratio = heat_balance_ratio(&solution.coupled_heat_flux);
+    let heat_balance_ratio = heat_balance_ratio(solution.coupled_heat_flux.canonical_values());
     let max_jump = solution
         .temperature_jump
+        .canonical_values()
         .iter()
         .copied()
         .map(f64::abs)
@@ -266,18 +296,29 @@ fn accumulate_closure(
         .max(solution.thermal_network_residual_ratio);
     closure.interface_face_count = closure
         .interface_face_count
-        .max(solution.coupled_heat_flux.len());
-    closure.max_temperature_jump_k = closure.max_temperature_jump_k.max(max_jump);
+        .max(solution.coupled_heat_flux.canonical_values().len());
+    closure.max_temperature_jump_k = runmat_types::physical::Quantity::new(
+        closure
+            .max_temperature_jump_k
+            .canonical_value()
+            .max(max_jump),
+    );
     closure.max_energy_residual = closure.max_energy_residual.max(transport_residual);
     closure.heat_flux_balance_ratio = closure.heat_flux_balance_ratio.max(heat_balance_ratio);
-    closure.mean_interface_heat_flux_w_per_m2 = closure.mean_interface_heat_flux_w_per_m2.max(
-        solution
-            .coupled_heat_flux
-            .iter()
-            .copied()
-            .sum::<f64>()
-            .abs()
-            / solution.coupled_heat_flux.len().max(1) as f64,
+    closure.mean_interface_heat_flux_w_per_m2 = runmat_types::physical::Quantity::new(
+        closure
+            .mean_interface_heat_flux_w_per_m2
+            .canonical_value()
+            .max(
+                solution
+                    .coupled_heat_flux
+                    .canonical_values()
+                    .iter()
+                    .copied()
+                    .sum::<f64>()
+                    .abs()
+                    / solution.coupled_heat_flux.canonical_values().len().max(1) as f64,
+            ),
     );
     closure.max_thermal_transport_residual_ratio = closure
         .max_thermal_transport_residual_ratio
@@ -285,11 +326,18 @@ fn accumulate_closure(
     closure.interface_temperature_continuity_ratio = closure
         .interface_temperature_continuity_ratio
         .max((1.0 - max_jump / thermal_scale_k).clamp(0.0, 1.0));
-    closure.max_advection_temperature_shift_k = closure
-        .max_advection_temperature_shift_k
-        .max(advection_shift_k.abs());
-    closure.interface_conductance_w_per_m2k =
-        closure.interface_conductance_w_per_m2k.max(conductance);
+    closure.max_advection_temperature_shift_k = runmat_types::physical::Quantity::new(
+        closure
+            .max_advection_temperature_shift_k
+            .canonical_value()
+            .max(advection_shift_k.abs()),
+    );
+    closure.interface_conductance_w_per_m2k = runmat_types::physical::Quantity::new(
+        closure
+            .interface_conductance_w_per_m2k
+            .canonical_value()
+            .max(conductance),
+    );
     closure.max_flux_temperature_law_residual_ratio = closure
         .max_flux_temperature_law_residual_ratio
         .max(solution.flux_temperature_law_residual_ratio);
@@ -366,7 +414,13 @@ fn advection_shift(
     let reynolds_ratio = (cfd::reynolds_number_for_velocity(domain, mean_axial_velocity_m_per_s)
         / 1.0e5)
         .clamp(0.0, 5.0);
-    thermal_span_k * reynolds_ratio * domain.turbulence_intensity.ratio.clamp(0.0, 1.0) * 2.0e-3
+    thermal_span_k
+        * reynolds_ratio
+        * domain
+            .turbulence_intensity
+            .canonical_value()
+            .clamp(0.0, 1.0)
+        * 2.0e-3
 }
 
 fn interface_conductance(model: &AnalysisModel) -> Option<f64> {
@@ -380,10 +434,10 @@ fn interface_conductance(model: &AnalysisModel) -> Option<f64> {
         .and_then(|interface| match interface.transfer {
             ThermalInterfaceTransfer::Perfect => None,
             ThermalInterfaceTransfer::Conductance(conductance) => {
-                Some(conductance.watts_per_square_meter_kelvin)
+                Some(conductance.canonical_value())
             }
             ThermalInterfaceTransfer::Resistance(resistance) => {
-                Some(1.0 / resistance.square_meter_kelvin_per_watt)
+                Some(1.0 / resistance.canonical_value())
             }
         })
 }

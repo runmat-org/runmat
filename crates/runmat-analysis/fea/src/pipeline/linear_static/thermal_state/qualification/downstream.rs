@@ -104,7 +104,14 @@ fn configure_probe(model: &mut AnalysisModel, mesh: &SolverMeshArtifact) {
         .iter()
         .find(|face| {
             face.node_indices.iter().all(|&index| {
-                (mesh.topology.nodes[index].coordinates_m.iter().sum::<f64>() - 1.0).abs() < 1.0e-12
+                (mesh.topology.nodes[index]
+                    .coordinates_m
+                    .canonical_value()
+                    .iter()
+                    .sum::<f64>()
+                    - 1.0)
+                    .abs()
+                    < 1.0e-12
             })
         })
         .unwrap();

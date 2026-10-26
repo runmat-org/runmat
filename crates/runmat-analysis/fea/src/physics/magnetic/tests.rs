@@ -23,8 +23,11 @@ fn problem(
         .iter()
         .map(|element| MagneticVolumeData {
             element_identity: element.stable_identity,
-            permeability_h_per_m: mu,
-            current_density_a_per_m2: [0.0, 0.0, current],
+            permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(mu),
+            current_density_a_per_m2: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ElectricCurrentDensity,
+                _,
+            >::new([0.0, 0.0, current]),
         })
         .collect();
     (projection, data)
@@ -102,15 +105,15 @@ fn square_uniform_current_converges(order: ElementOrder) {
             let (a, b) = reference(x, y, 1.0, 1023);
             for axis in 0..3 {
                 potential_error += sample.volume_weight_m3
-                    * (sample.vector_potential_wb_per_m[axis] - a[axis]).powi(2);
-                field_error +=
-                    sample.volume_weight_m3 * (sample.flux_density_t[axis] - b[axis]).powi(2);
+                    * (sample.vector_potential_wb_per_m.canonical_value()[axis] - a[axis]).powi(2);
+                field_error += sample.volume_weight_m3
+                    * (sample.flux_density_t.canonical_value()[axis] - b[axis]).powi(2);
             }
         }
         let error = (
             potential_error.sqrt(),
             field_error.sqrt(),
-            (result.magnetic_energy_j - exact_energy).abs() / exact_energy,
+            (result.magnetic_energy_j.canonical_value() - exact_energy).abs() / exact_energy,
         );
         eprintln!(
             "magnetic {order:?} cells={cells} errors={error:?} iterations={}",
@@ -147,39 +150,46 @@ fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
         for (sample, expected) in result.samples.iter().zip(&base.samples) {
             for axis in 0..3 {
                 assert!(
-                    (sample.flux_density_t[axis] / (mu * j) - expected.flux_density_t[axis]).abs()
-                        < 1e-8
-                );
-                assert!(
-                    (sample.vector_potential_wb_per_m[axis] / (mu * j)
-                        - expected.vector_potential_wb_per_m[axis])
+                    (sample.flux_density_t.canonical_value()[axis] / (mu * j)
+                        - expected.flux_density_t.canonical_value()[axis])
                         .abs()
                         < 1e-8
                 );
                 assert!(
-                    (sample.magnetic_field_a_per_m[axis] / j
-                        - expected.magnetic_field_a_per_m[axis])
+                    (sample.vector_potential_wb_per_m.canonical_value()[axis] / (mu * j)
+                        - expected.vector_potential_wb_per_m.canonical_value()[axis])
+                        .abs()
+                        < 1e-8
+                );
+                assert!(
+                    (sample.magnetic_field_a_per_m.canonical_value()[axis] / j
+                        - expected.magnetic_field_a_per_m.canonical_value()[axis])
                         .abs()
                         < 1e-8
                 );
             }
         }
-        assert!((result.magnetic_energy_j / (mu * j * j) - base.magnetic_energy_j).abs() < 1e-9);
+        assert!(
+            (result.magnetic_energy_j.canonical_value() / (mu * j * j)
+                - base.magnetic_energy_j.canonical_value())
+            .abs()
+                < 1e-9
+        );
     }
 }
 
 #[test]
 fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed() {
     let (projection, mut data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
-    data[0].permeability_h_per_m = 0.0;
+    data[0].permeability_h_per_m = runmat_types::physical::MagneticPermeability::new(0.0);
     assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).is_err());
-    data[0].permeability_h_per_m = 1.0;
+    data[0].permeability_h_per_m = runmat_types::physical::MagneticPermeability::new(1.0);
     assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data[..data.len() - 1], 1e-10).is_err());
     data.push(data[0]);
     assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).is_err());
     data.pop();
     for element in &mut data {
-        element.current_density_a_per_m2 = [0.0; 3];
+        element.current_density_a_per_m2 = runmat_types::physical::Quantity::new([0.0; 3]);
     }
     // Interior element-owned discontinuous current with a nonzero weak divergence.
     let interior = projection
@@ -189,19 +199,24 @@ fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed(
             element
                 .node_indices
                 .iter()
-                .any(|&node| projection.nodes[node].coordinates_m == [0.5; 3])
+                .any(|&node| projection.nodes[node].coordinates_m.canonical_value() == [0.5; 3])
         })
         .unwrap();
-    data[interior].current_density_a_per_m2 = [1.0, 2.0, 3.0];
+    data[interior].current_density_a_per_m2 =
+        runmat_types::physical::Quantity::new([1.0, 2.0, 3.0]);
     assert!(matches!(
         solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10),
         Err(MagnetostaticError::IncompatibleCurrent(_))
     ));
-    data[interior].current_density_a_per_m2 = [0.0; 3];
+    data[interior].current_density_a_per_m2 = runmat_types::physical::Quantity::new([0.0; 3]);
     let zero = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
-    assert_eq!(zero.magnetic_energy_j, 0.0);
-    assert_eq!(zero.source_work_j, 0.0);
-    assert!(zero.edge_circulations_wb.iter().all(|&value| value == 0.0));
+    assert_eq!(zero.magnetic_energy_j.canonical_value(), 0.0);
+    assert_eq!(zero.source_work_j.canonical_value(), 0.0);
+    assert!(zero
+        .edge_circulations_wb
+        .canonical_values()
+        .iter()
+        .all(|&value| value == 0.0));
 }
 
 // witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4|tet10/numerical_kernel;
@@ -217,16 +232,28 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
         };
         let input = authored_model(-2.0);
         let result = solve_canonical_static(&input, &mesh, "potential", 1e-10).unwrap();
-        assert!(result.magnetic_energy_j > 0.0);
+        assert!(result.magnetic_energy_j.canonical_value() > 0.0);
         assert!(result.relative_energy_work_error < 1.6e-9);
-        let (projection, data) = problem(order, 2, VACUUM_PERMEABILITY_H_PER_M, -2.0);
+        let (projection, data) = problem(
+            order,
+            2,
+            VACUUM_PERMEABILITY_H_PER_M.canonical_value(),
+            -2.0,
+        );
         let reference = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
-        assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
+        assert!(
+            (result.magnetic_energy_j.canonical_value()
+                / reference.magnetic_energy_j.canonical_value()
+                - 1.0)
+                .abs()
+                < 1e-8
+        );
         assert_eq!(result.edge_node_identities, reference.edge_node_identities);
         for (a, b) in result
             .edge_circulations_wb
+            .canonical_values()
             .iter()
-            .zip(&reference.edge_circulations_wb)
+            .zip(reference.edge_circulations_wb.canonical_values())
         {
             assert!((a - b).abs() < 1e-14);
         }
@@ -255,7 +282,7 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
         .electrical
         .as_mut()
         .unwrap()
-        .conductivity_s_per_m = 0.0;
+        .conductivity_s_per_m = runmat_types::physical::ElectricalConductivity::new(0.0);
     let PhysicalSignal::ElectricCurrentDensity(mut signal) = summed.signals[0].clone() else {
         unreachable!()
     };
@@ -269,7 +296,7 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
     let mut action = summed.excitations[0].excitation().clone();
     action.excitation_id = ExcitationId("minus".into());
     action.signal_id = SignalId("minus".into());
-    action.target = ExcitationTarget::Region(RegionTarget::volume("slab"));
+    action.target = ExcitationTarget::Region(RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("slab")));
     summed
         .excitations
         .push(ExcitationAction::MagneticVolumeCurrentDensity(action));
@@ -277,11 +304,18 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
         .action_ids
         .push(ExcitationId("minus".into()));
     let result = solve_canonical_static(&summed, &mesh, "potential", 1e-10).unwrap();
-    assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
+    assert!(
+        (result.magnetic_energy_j.canonical_value()
+            / reference.magnetic_energy_j.canonical_value()
+            - 1.0)
+            .abs()
+            < 1e-8
+    );
     for (a, b) in result
         .edge_circulations_wb
+        .canonical_values()
         .iter()
-        .zip(reference.edge_circulations_wb)
+        .zip(reference.edge_circulations_wb.canonical_values())
     {
         assert!((a - b).abs() < 1e-14);
     }
@@ -292,7 +326,17 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
     assert!(solve_canonical_static(&summed, &mesh, "potential", 1e-10).is_err());
     let (mut projection, data) = problem(ElementOrder::Tet10, 2, 1.0, 1.0);
     let midside = projection.elements[0].node_indices[4];
-    projection.nodes[midside].coordinates_m[0] += 0.01;
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 0;
+        let quantity_slot = &mut projection.nodes[midside].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10),
         Err(MagnetostaticError::Unsupported(_))
@@ -315,7 +359,12 @@ fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure
     let field: std::collections::BTreeMap<_, _> = response
         .samples
         .iter()
-        .map(|sample| (sample.element_identity, sample.flux_density_t))
+        .map(|sample| {
+            (
+                sample.element_identity,
+                sample.flux_density_t.canonical_value(),
+            )
+        })
         .collect();
     let mut faces = std::collections::BTreeMap::<[usize; 3], Vec<[f64; 3]>>::new();
     for element in &projection.elements {
@@ -329,9 +378,9 @@ fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure
         }
     }
     for (nodes, fluxes) in faces.iter().filter(|(_, fields)| fields.len() == 2) {
-        let a = projection.nodes[nodes[0]].coordinates_m;
-        let b = projection.nodes[nodes[1]].coordinates_m;
-        let c = projection.nodes[nodes[2]].coordinates_m;
+        let a = projection.nodes[nodes[0]].coordinates_m.canonical_value();
+        let b = projection.nodes[nodes[1]].coordinates_m.canonical_value();
+        let c = projection.nodes[nodes[2]].coordinates_m.canonical_value();
         let u: [f64; 3] = std::array::from_fn(|axis| b[axis] - a[axis]);
         let v: [f64; 3] = std::array::from_fn(|axis| c[axis] - a[axis]);
         let normal = [
@@ -371,7 +420,7 @@ fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
     let mut model = authored_model(1.0);
     model.constraints.retain(|c| c.constraint_id() != "slab_left");
     let partial = solve_canonical_static(&model, &mesh, "potential", 1e-10).unwrap();
-    assert!(partial.magnetic_energy_j.is_finite() && partial.magnetic_energy_j > 0.0);
+    assert!(partial.magnetic_energy_j.is_finite() && partial.magnetic_energy_j > runmat_types::physical::Quantity::new(0.0));
     // Insulation removes constraints, so the stored energy for the same current can only rise.
     assert!(partial.magnetic_energy_j >= full.magnetic_energy_j * (1.0 - 1e-9));
     // Current may not leave through an insulated face: insulating the sides the current
@@ -430,7 +479,7 @@ fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground_{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                 },
             }));
     }
@@ -454,7 +503,7 @@ fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
         .excitations
         .push(ExcitationAction::MagneticVectorPotential(AnalysisExcitation {
             excitation_id: ExcitationId("imposed".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary("x_high")),
+            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("x_high"))),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,
@@ -474,7 +523,7 @@ fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
     let response = solve_canonical_static(&model, &mesh, "potential", 1e-10).unwrap();
     for sample in &response.samples {
         let b = sample.flux_density_t;
-        assert!((b[2] - a / l).abs() <= 1e-9 * a / l, "{b:?}");
-        assert!(b[0].abs() <= 1e-9 * a / l && b[1].abs() <= 1e-9 * a / l, "{b:?}");
+        assert!((b.canonical_value()[2] - a / l).abs() <= 1e-9 * a / l, "{b:?}");
+        assert!(b.canonical_value()[0].abs() <= 1e-9 * a / l && b.canonical_value()[1].abs() <= 1e-9 * a / l, "{b:?}");
     }
 }

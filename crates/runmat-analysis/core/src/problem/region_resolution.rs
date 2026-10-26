@@ -166,7 +166,7 @@ mod tests {
         SignConvention, SignalId, SignalPrecision, SpatialReduction, StructuralConstraint,
         StructuralConstraintKind,
     };
-    use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind, UnitSystem};
+    use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
     fn face(id: &str) -> PersistentEntityId {
         PersistentEntityId::new(PersistentEntityKind::Face, id.into(), vec!["root".into()])
@@ -226,7 +226,7 @@ mod tests {
             model_id: AnalysisModelId("model".into()),
             geometry_id: "geometry".into(),
             geometry_revision: 1,
-            units: UnitSystem::Meter,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
             frame: CoordinateFrame::Global,
             materials: Vec::new(),
             material_assignments: Vec::new(),

@@ -12,7 +12,7 @@ fn plane_poiseuille(y: f64) -> f64 {
 }
 
 fn target(id: &str, entities: Vec<runmat_meshing_core::PersistentEntityId>) -> RegionTarget {
-    let mut target = RegionTarget::boundary(id);
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)));
     target.bind_resolved_entities(entities).unwrap();
     target
 }
@@ -80,7 +80,7 @@ fn error(f: &fixture::Fixture, r: &CanonicalFluidResult) -> (f64, f64) {
     let mut numerator = 0.0;
     let mut denominator = 0.0;
     let mut spanwise = 0.0f64;
-    for (c, u) in f.topology.cells.iter().zip(&r.velocity_m_per_s) {
+    for (c, u) in f.topology.cells.iter().zip(r.velocity_m_per_s.canonical_values()) {
         let exact = [plane_poiseuille(c.centroid_m[1]), 0.0, 0.0];
         numerator += c.volume_m3 * norm(sub(*u, exact)).powi(2);
         denominator += c.volume_m3 * norm(exact).powi(2);
@@ -111,9 +111,9 @@ fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
         spanwise_history.push(spanwise);
         for (i, face) in f.topology.faces.iter().enumerate() {
             if matches!(p.boundaries[i], boundary::FaceBoundary::Symmetry { .. }) {
-                assert_eq!(r.face_volume_flux_m3_per_s[i], 0.0);
-                let shear = r.residual.face_forces.viscous_traction_n[i];
-                let normal = geometry_ops::scale(face.owner_area_vector_m2, 1.0 / face.area_m2);
+                assert_eq!(r.face_volume_flux_m3_per_s.canonical_values()[i], 0.0);
+                let shear = r.residual.face_forces.viscous_traction_n.canonical_values()[i];
+                let normal = geometry_ops::scale(face.owner_area_vector_m2, 1.0 / face.area_m2.canonical_value());
                 let tangential = sub(
                     shear,
                     geometry_ops::scale(normal, geometry_ops::dot(shear, normal)),
@@ -127,7 +127,7 @@ fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
             .iter()
             .find(|b| b.authority_id == "spanwise")
             .unwrap();
-        assert_eq!(balance.volume_flow_rate_m3_per_s, 0.0);
+        assert_eq!(balance.volume_flow_rate_m3_per_s, runmat_types::physical::Quantity::new(0.0));
         previous = relative;
     }
     assert!(
@@ -162,7 +162,9 @@ fn retained_symmetry_flux_substitution_is_rejected() {
         .iter()
         .position(|b| matches!(b, boundary::FaceBoundary::Symmetry { .. }))
         .unwrap();
-    r.face_volume_flux_m3_per_s[face] = 1e-9;
+    let mut q = r.face_volume_flux_m3_per_s.canonical_values().clone();
+    q[face] = 1e-9;
+    r.face_volume_flux_m3_per_s = runmat_types::physical::Quantity::new(q);
     assert!(p.recover(&r).is_err());
 }
 
@@ -236,7 +238,7 @@ fn closed_component_with_symmetry_planes_reproduces_couette_flow() {
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let r = p.solve().unwrap();
     let mut worst = 0.0f64;
-    for (c, u) in f.topology.cells.iter().zip(&r.velocity_m_per_s) {
+    for (c, u) in f.topology.cells.iter().zip(r.velocity_m_per_s.canonical_values()) {
         worst = worst.max(norm(sub(*u, [c.centroid_m[1], 0.0, 0.0])));
     }
     assert!(worst < 0.05, "Couette error {worst}");

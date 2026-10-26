@@ -97,10 +97,13 @@ pub(crate) fn homogeneous_constitutive(
     section: ShellSection,
     material: ShellMaterial,
 ) -> ShellConstitutive {
-    let plane_stress = isotropic_plane_stress(material.youngs_modulus_pa, material.poisson_ratio);
-    let thickness = section.thickness_m;
-    let bottom = -0.5 * thickness - section.reference_offset_m;
-    let top = 0.5 * thickness - section.reference_offset_m;
+    let plane_stress = isotropic_plane_stress(
+        material.youngs_modulus_pa.canonical_value(),
+        material.poisson_ratio.canonical_value(),
+    );
+    let thickness = section.thickness_m.canonical_value();
+    let bottom = -0.5 * thickness - section.reference_offset_m.canonical_value();
+    let top = 0.5 * thickness - section.reference_offset_m.canonical_value();
     ShellConstitutive {
         matrices: ShellConstitutiveMatrices {
             extensional: scale3(plane_stress, thickness),
@@ -117,7 +120,7 @@ pub(crate) fn homogeneous_constitutive(
                 ],
             ],
             drilling_stiffness_per_area: FORMULATION_DRILLING_SCALE
-                * material.youngs_modulus_pa
+                * material.youngs_modulus_pa.canonical_value()
                 * thickness,
         },
         recovery_layers: vec![ShellRecoveryLayer {

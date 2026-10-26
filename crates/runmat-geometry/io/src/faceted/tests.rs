@@ -102,14 +102,20 @@ fn faceted_import_is_canonical_across_facet_order_and_units() {
     let meter = import_faceted_solid(
         "tetra.stl",
         TETRAHEDRON_STL.as_bytes(),
-        &FacetedSolidImportOptions::default(),
+        &FacetedSolidImportOptions {
+            source_units: Some(LengthUnit::Meter),
+            ..Default::default()
+        },
         &context,
     )
     .unwrap();
     let reordered = import_faceted_solid(
         "reordered.stl",
         REORDERED_TETRAHEDRON_STL.as_bytes(),
-        &FacetedSolidImportOptions::default(),
+        &FacetedSolidImportOptions {
+            source_units: Some(LengthUnit::Meter),
+            ..Default::default()
+        },
         &context,
     )
     .unwrap();
@@ -117,8 +123,11 @@ fn faceted_import_is_canonical_across_facet_order_and_units() {
         "millimeter.stl",
         MILLIMETER_TETRAHEDRON_STL.as_bytes(),
         &FacetedSolidImportOptions {
-            source_units: UnitSystem::Millimeter,
-            ..FacetedSolidImportOptions::default()
+            source_units: Some(LengthUnit::Millimeter),
+            ..FacetedSolidImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                ..Default::default()
+            }
         },
         &context,
     )
@@ -145,7 +154,10 @@ fn faceted_import_rejects_open_or_exact_sources() {
         import_faceted_solid(
             "open.stl",
             open.as_bytes(),
-            &FacetedSolidImportOptions::default(),
+            &FacetedSolidImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                ..Default::default()
+            },
             &context,
         ),
         Err(GeometryImportError::InvalidGeometry(_))
@@ -154,7 +166,10 @@ fn faceted_import_rejects_open_or_exact_sources() {
         import_faceted_solid(
             "part.step",
             b"ISO-10303-21;\nHEADER;\nENDSEC;",
-            &FacetedSolidImportOptions::default(),
+            &FacetedSolidImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                ..Default::default()
+            },
             &context,
         ),
         Err(GeometryImportError::UnsupportedFormat)
@@ -167,8 +182,11 @@ fn faceted_import_validates_options_before_source_parsing() {
         "tetra.stl",
         TETRAHEDRON_STL.as_bytes(),
         &FacetedSolidImportOptions {
-            source_units: UnitSystem::Unspecified,
-            ..FacetedSolidImportOptions::default()
+            max_triangles: 0,
+            ..FacetedSolidImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                ..Default::default()
+            }
         },
         &GeometryImportContext::new(),
     )
@@ -180,7 +198,10 @@ fn faceted_import_validates_options_before_source_parsing() {
         TETRAHEDRON_STL.as_bytes(),
         &FacetedSolidImportOptions {
             max_triangles: u32::MAX as u64,
-            ..FacetedSolidImportOptions::default()
+            ..FacetedSolidImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                ..Default::default()
+            }
         },
         &GeometryImportContext::new(),
     )

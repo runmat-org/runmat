@@ -255,6 +255,8 @@ pub fn build_structural_modal_resource_plan_from_compilation(
         modal_output_values,
         maximum_subspace_dimension,
         residual_vector_count,
+        full_dimension,
+        facts.topology.nodes.0,
     )?;
     let result_payload_bytes = expected_result_output.encoded_payload_bytes_upper_bound.0;
     let receipt_payload_bytes = structural_modal_receipt_payload_bytes_upper_bound();

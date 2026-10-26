@@ -389,7 +389,10 @@ fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
         let mut mesh = canonical_tetrahedron_solver_mesh(order);
         // Canonical connectivity remains valid, but physical projection must reject zero volume.
         for node in &mut mesh.topology.nodes {
-            node.coordinates_m = [0.0; 3];
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0; 3]);
         }
         mesh.seal_canonical_digest().unwrap();
         mesh.validate_canonical().unwrap();
