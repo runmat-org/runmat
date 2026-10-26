@@ -87,10 +87,11 @@ pub struct ObjectDispatchContext<'a> {
 
 pub(super) use suspend::{dispatch_object, Request};
 
-fn frame_access(
+pub(super) fn frame_access(
     bytecode: &crate::bytecode::Bytecode,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::object::protocol::ObjectAccessContext, RuntimeError> {
+    let _scope = runtime.enter();
     match bytecode.active_function {
         Some(_)
             if runtime.selected_object_class().is_some()
@@ -252,7 +253,7 @@ pub(super) async fn materialize_ordered_selector_arguments<'a>(
             .as_slice()
             .iter()
             .filter_map(|component| match component {
-                ObjectIndexComponent::Colon => None,
+                ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
                 ObjectIndexComponent::Value(value) => Some(value),
             }),
         runtime,

@@ -176,7 +176,7 @@ fn tensor_rows(value: &SignalValue<HeatGenerationDensity>) -> Result<u64, Resour
         || *rows != values.len()
         || values
             .iter()
-            .any(|value| !value.watts_per_cubic_meter.is_finite())
+            .any(|value| !value.canonical_value().is_finite())
     {
         return Err(invalid(
             "thermal scalar field requires exact positive finite tensor data",

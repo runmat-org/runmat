@@ -39,7 +39,7 @@ pub(in crate::pipeline::transient) fn solve_prescribed_motion_block(
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, FeaRunError>,
 ) -> Result<StructuralTransientSegment, TransientSolveError<FeaRunError>> {
     let schedule = &input.request.scope.schedule;
-    let initial_time_s = schedule.points[0].time_s;
+    let initial_time_s = schedule.points[0].time_s.canonical_value();
     let initial = StructuralMotionSnapshot::reduce(
         input.summary.clone(),
         input.motions,
@@ -132,7 +132,7 @@ pub(in crate::pipeline::transient) fn solve_prescribed_motion_block(
             Ok((snapshot.full_summary, physical_state))
         };
     let mut reduce_checkpoint_state = |checkpoint: &StructuralTransientCheckpoint| {
-        let time_s = checkpoint.continuation.time_s;
+        let time_s = checkpoint.continuation.time_s.canonical_value();
         let approach = match checkpoint.continuation.approach {
             StructuralTransientContinuationApproach::At => SignalSampleApproach::At,
             StructuralTransientContinuationApproach::RightLimit => SignalSampleApproach::RightLimit,

@@ -1,12 +1,20 @@
-mod diagnostic;
-mod format;
-mod parser;
-pub mod syntax;
+//! Public FEA syntax entrypoint, shared with frontend-free FEA consumers.
 
-pub use diagnostic::*;
-pub use format::*;
-pub use parser::*;
-pub use syntax::*;
+pub use runmat_fea_syntax::*;
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use std::any::TypeId;
+
+    #[test]
+    fn public_fea_entrypoints_share_the_canonical_syntax_types() {
+        assert_eq!(
+            TypeId::of::<super::FeaSyntaxModule>(),
+            TypeId::of::<runmat_fea_syntax::FeaSyntaxModule>()
+        );
+        assert_eq!(
+            TypeId::of::<runmat_lexer::fea::FeaTokenStream>(),
+            TypeId::of::<runmat_fea_syntax::lexical::FeaTokenStream>()
+        );
+    }
+}

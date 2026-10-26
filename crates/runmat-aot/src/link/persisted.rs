@@ -153,6 +153,7 @@ impl LinkedProgram {
         selected: &SelectedNativeProduct<'_>,
         admission: &ExternalNativeLinkAdmission,
         expected_inputs: &NativeProgramLinkIdentity,
+        binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
         commitment: CompletedImageCommitment,
     ) -> AotResult<Self> {
         persisted.validate()?;
@@ -170,8 +171,12 @@ impl LinkedProgram {
                 "persisted image differs from verified reopening authority",
             ));
         }
-        let expected_plan =
-            super::canonical::selected_link_plan(selected, admission, expected_inputs.clone())?;
+        let expected_plan = super::canonical::selected_link_plan(
+            selected,
+            admission,
+            expected_inputs.clone(),
+            binding_mode,
+        )?;
         if persisted.canonical_plan != expected_plan {
             return Err(invalid(
                 "persisted canonical plan differs from verified reopening inputs",

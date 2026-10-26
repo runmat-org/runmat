@@ -37,10 +37,10 @@ pub fn workload() -> ThermalWorkload {
     model.signals.clear();
     model.initial_conditions.clear();
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(1.0));
     let thermal = model.materials[0].thermal.as_mut().unwrap();
-    thermal.conductivity_w_per_mk = K;
-    thermal.specific_heat_j_per_kgk = 1.0;
+    thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(K);
+    thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(1.0);
     model.thermal = Some(ThermalDomain {
         reference_temperature: Temperature::new(400.0),
     });

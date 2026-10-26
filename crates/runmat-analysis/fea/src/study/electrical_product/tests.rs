@@ -14,7 +14,7 @@ fn compiled(
             .electrical
             .as_mut()
             .unwrap()
-            .resistive_heating_coefficient = 0.1;
+            .resistive_heating_coefficient = runmat_types::physical::InverseTemperature::new(0.1);
     }
     let mesh = mesh(order, 2);
     let properties = crate::properties::compile_property_map(&model, Some(&mesh)).unwrap();

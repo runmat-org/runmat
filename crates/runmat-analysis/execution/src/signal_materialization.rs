@@ -73,9 +73,9 @@ pub fn plan_signal_generator_chunks(
         })?;
     plan_generator_chunks(
         &generator.invocation,
-        &admitted.captures,
+        admitted.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
-        &admitted.sample_points,
+        admitted.sample_points.canonical_values(),
         component_count,
         maximum_inline_result_bytes,
         resolve_artifact,
@@ -210,7 +210,7 @@ pub fn canonicalize_signal_generator_outputs(
             .checked_add(sample_count)
             .ok_or_else(|| AnalysisBridgeError::Invalid("signal sample count overflows".into()))?;
     }
-    if expected_first_sample != admitted.sample_points.len() {
+    if expected_first_sample != admitted.sample_points.scalar_count() {
         return Err(AnalysisBridgeError::Identity(
             "signal chunks do not cover every admitted sample",
         ));
@@ -229,6 +229,7 @@ pub fn canonicalize_signal_generator_outputs(
             domain: generator.domain.clone(),
             knots: admitted
                 .sample_points
+                .canonical_values()
                 .iter()
                 .copied()
                 .map(CanonicalSignalKnot::continuous)
@@ -241,7 +242,7 @@ pub fn canonicalize_signal_generator_outputs(
                 max_absolute_error: None,
                 max_relative_error: None,
                 derivative_max_absolute_error: None,
-                sample_count: admitted.sample_points.len(),
+                sample_count: admitted.sample_points.scalar_count(),
             },
             provenance: admitted.provenance.clone(),
             input_admissions: input_admissions.to_vec(),
@@ -258,9 +259,9 @@ pub fn validate_signal_generator_chunks(
     let generator = matching_generator(signal, admitted)?;
     validate_generator_chunks(
         &generator.invocation,
-        &admitted.captures,
+        admitted.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
-        &admitted.sample_points,
+        admitted.sample_points.canonical_values(),
         chunks,
     )
 }
@@ -343,6 +344,15 @@ fn matching_generator<'a>(
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
+    let descriptor = generator
+        .domain
+        .axis_descriptor(None)
+        .map_err(AnalysisBridgeError::Invalid)?;
+    if admitted.schema_version != 2 || admitted.sample_points.descriptor() != descriptor {
+        return Err(AnalysisBridgeError::Identity(
+            "signal admission axis descriptor differs from its source",
+        ));
+    }
     if generator.invocation.callable.display_name() != admitted.callable.qualified_name {
         return Err(AnalysisBridgeError::Identity(
             "signal generator differs from its admitted callable",

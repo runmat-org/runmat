@@ -19,10 +19,13 @@ impl CallableDescriptorRoots {
     fn new(descriptor: &CallableDescriptor) -> Result<Self, RuntimeError> {
         let callable = match &descriptor.target {
             CallableTarget::FevalForward(value) => Some(value),
-            CallableTarget::RetainedFevalForward(value) => Some(value.value()),
+            CallableTarget::RetainedFevalForward(value)
+            | CallableTarget::RetainedBuiltin(value) => Some(value.value()),
             CallableTarget::BoundLexical { closure, .. }
             | CallableTarget::CapturedResolved { closure, .. } => Some(closure.as_value()),
-            CallableTarget::Bound(_) | CallableTarget::Resolved { .. } => None,
+            CallableTarget::Bound(_)
+            | CallableTarget::Resolved { .. }
+            | CallableTarget::Scoped(_) => None,
         };
         let callable = callable
             .map(runmat_runtime::execution::RootedValueLease::for_traced)

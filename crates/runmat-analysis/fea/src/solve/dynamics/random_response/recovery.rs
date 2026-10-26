@@ -41,7 +41,7 @@ pub(super) struct FrequencyResponse<'a> {
     modes: &'a [ModalBasisMode],
     spectrum: &'a RandomExcitationSpectrum,
     participation_by_mode_channel: &'a [Vec<f64>],
-    damping_ratio: f64,
+    damping_ratio: runmat_types::physical::DampingRatio,
     modal_fields: Vec<ModalFieldInventory>,
     layout: ResponseLayout,
 }
@@ -91,7 +91,7 @@ impl<'a> FrequencyResponse<'a> {
             modes,
             spectrum,
             participation_by_mode_channel,
-            damping_ratio,
+            damping_ratio: runmat_types::physical::DampingRatio::new(damping_ratio),
             modal_fields,
             layout: ResponseLayout {
                 dof_count: summary.dof_count,
@@ -156,7 +156,9 @@ impl<'a> FrequencyResponse<'a> {
                 let denominator = Complex::new(
                     natural_angular_frequency * natural_angular_frequency
                         - angular_frequency * angular_frequency,
-                    2.0 * self.damping_ratio * natural_angular_frequency * angular_frequency,
+                    2.0 * self.damping_ratio.canonical_value()
+                        * natural_angular_frequency
+                        * angular_frequency,
                 );
                 let reciprocal = denominator.reciprocal().ok_or_else(|| {
                     FeaRunError::Solve(format!(

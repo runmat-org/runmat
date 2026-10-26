@@ -45,11 +45,6 @@ Create `bracket.fea` beside a `geometry` directory containing `bracket.step`:
 geometry bracket {
     file = "./geometry/bracket.step"
     units = mm
-
-    region body : solid {
-        select id "solid_000001"
-        expect exactly_one
-    }
 }
 
 mesh bracket on geometry.bracket {
@@ -98,8 +93,8 @@ selected geometry, mesh, model, execution policy, and logical work. `run` materi
 geometry, generates or resolves the canonical solver mesh, compiles the model, and executes the
 admitted analysis graph.
 
-For a linear mesh, change only `order = linear`. Omit `maximum_grading_ratio` or
-`deterministic_seed` when their defaults are acceptable; the geometry, mesh, and model bindings
+For a linear mesh, change only `order = linear`. Omit mesh settings when their
+canonical defaults are acceptable; the geometry, mesh, and model bindings
 remain required. The direct CLI and programmatic API expose a maximum-element admission cap; the
 current `.fea` mesh declaration does not.
 
@@ -132,8 +127,11 @@ identities and implementation choices are recorded as evidence; they are not use
 backends. `maximum_grading_ratio` limits how quickly the requested size may change through adjacent
 regions. Lower values produce smoother transitions and can require more elements.
 
-`order`, `target_size`, and `maximum_deviation` are required. `maximum_grading_ratio` and
-`deterministic_seed` have canonical defaults. The language does not currently expose region-local
+The `tetrahedra` block and its settings are optional. Omitted settings use linear tetrahedra
+(Tet4), a target size of 10 mm, a maximum deviation of 0.1 mm, a maximum grading ratio of
+1.3, and a deterministic seed of 0. Explicit settings override those defaults and must
+still satisfy their type, unit, and range checks. These initial settings do not establish
+mesh convergence for a particular study. The language does not currently expose region-local
 refinement, boundary layers, hybrid element families, or user-selectable meshing algorithms.
 
 ## Practical guidance
@@ -661,10 +659,9 @@ source identity when it constructs solver coefficients. Material declarations ne
 imply coverage: every active material-bearing element must be covered by exactly one compatible
 typed assignment, even when the source declares only one material. Use explicit solid, shell,
 beam, and cell region targets for heterogeneous and mixed-dimensional models. Gaps, overlaps, stale
-selectors, and formulation mismatches fail before operator assembly. The meshing result carries one
-typed topology-alias inventory: `edge_######`, `face_######`, and `solid_######` retain the
-importer's source order and persistent occurrence-qualified identity on local and remote paths.
-Thus `solid_000002` can select the second imported solid without depending on final element order,
-while `face_000001` resolves the exact face used by a load or boundary condition rather than a
-nearest triangle or centroid. A face becomes a material-bearing target only when it is deliberately
+selectors, and formulation mismatches fail before operator assembly. Inspection and authored persistent selectors use occurrence-qualified `PersistentEntityId` keys.
+Exact topology supplies the face or volume entity, and meshing projects that identity onto solver
+elements. Neither import traversal order nor final element order is an authored selector. A load
+or boundary condition retains its selected exact face rather than choosing a nearest triangle or
+centroid. A face becomes a material-bearing target only when it is deliberately
 used as a shell domain.

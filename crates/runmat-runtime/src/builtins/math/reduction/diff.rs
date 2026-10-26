@@ -24,7 +24,9 @@ use crate::builtins::math::symbolic::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod arguments;
+mod geometry;
 use arguments::*;
+pub(in crate::builtins::math) use geometry::{difference_geometry, DifferenceGeometry};
 mod provider;
 use provider::*;
 mod host;

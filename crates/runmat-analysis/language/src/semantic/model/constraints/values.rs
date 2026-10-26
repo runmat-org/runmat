@@ -42,9 +42,9 @@ pub(super) fn quantity(
 ) -> Option<f64> {
     let type_matches = if dimension == PhysicalDimension::DIMENSIONLESS {
         matches!(value.value_type, FeaType::Integer | FeaType::Real)
-            || value.value_type == FeaType::Quantity(dimension)
+            || (value.value_type).is_quantity((dimension).into())
     } else {
-        value.value_type == FeaType::Quantity(dimension)
+        (value.value_type).is_quantity((dimension).into())
     };
     if !type_matches {
         invalid(
@@ -78,6 +78,16 @@ pub(super) fn prescribed_value<Q: PrescribedQuantity>(
         expected.1,
         signals,
         |value, diagnostics| {
+            if value.validate_quantity_kind(expected.1).is_err() {
+                invalid(
+                    declaration,
+                    value,
+                    name,
+                    "the required absolute or difference quantity",
+                    diagnostics,
+                );
+                return None;
+            }
             quantity(declaration, value, name, expected.0, diagnostics).map(constant)
         },
         diagnostics,

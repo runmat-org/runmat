@@ -19,7 +19,17 @@ fn connected_tet10_patch_preserves_affine_fields_with_curved_interior_elements()
         .expect("a connected refined patch has an interior midside node");
     assert!(bowed.exact_parameters.is_empty());
     let bowed_id = bowed.node_id;
-    bowed.coordinates_m[2] += 0.01;
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 2;
+        let quantity_slot = &mut bowed.coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(
         mesh.topology
             .volume_elements

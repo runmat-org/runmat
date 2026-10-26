@@ -32,8 +32,8 @@ pub fn solve_reduced_harmonic(
     let system = domain::helmholtz_operator(
         topology,
         drive_frequency_hz,
-        material.speed_of_sound_m_per_s,
-        material.damping_ratio,
+        material.speed_of_sound_m_per_s.canonical_value(),
+        material.damping_ratio.canonical_value(),
         &boundary,
     );
     let (pressure_real, pressure_imag) =
@@ -63,7 +63,7 @@ pub fn solve_reduced_harmonic(
         &pressure_real,
         topology,
         drive_frequency_hz,
-        material.density_kg_per_m3,
+        material.density_kg_per_m3.canonical_value(),
     );
     let peak_pressure_pa = pressure_magnitude.iter().copied().fold(0.0_f64, f64::max);
     let sweep_frequencies_hz = domain::sweep_frequencies_hz(drive_frequency_hz);
@@ -76,8 +76,8 @@ pub fn solve_reduced_harmonic(
         let sweep_system = domain::helmholtz_operator(
             topology,
             *frequency_hz,
-            material.speed_of_sound_m_per_s,
-            material.damping_ratio,
+            material.speed_of_sound_m_per_s.canonical_value(),
+            material.damping_ratio.canonical_value(),
             &boundary,
         );
         let (sweep_real, sweep_imag) = linear::solve_complex_graph_operator(
@@ -119,7 +119,7 @@ pub fn solve_reduced_harmonic(
         topology,
         &pressure_magnitude,
         drive_frequency_hz,
-        material.speed_of_sound_m_per_s,
+        material.speed_of_sound_m_per_s.canonical_value(),
     );
     let mut fields = vec![
         AnalysisField::host_f64(
@@ -262,9 +262,9 @@ fn diagnostics(input: DiagnosticInputs<'_>) -> Vec<FeaDiagnostic> {
             message: format!(
                 "drive_frequency_hz={} speed_of_sound_m_per_s={} density_kg_per_m3={} damping_ratio={} acoustic_node_count={} acoustic_field_count={} peak_pressure_pa={} acoustic_material_count={} acoustic_material_coverage_ratio={}",
                 input.drive_frequency_hz,
-                input.material.speed_of_sound_m_per_s,
-                input.material.density_kg_per_m3,
-                input.material.damping_ratio,
+                input.material.speed_of_sound_m_per_s.canonical_value(),
+                input.material.density_kg_per_m3.canonical_value(),
+                input.material.damping_ratio.canonical_value(),
                 input.topology.node_count,
                 input.acoustic_field_count,
                 input.peak_pressure_pa,

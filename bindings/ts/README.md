@@ -55,6 +55,23 @@ await session.executeRequest({
 
 GPU initialization is opportunistic in browser contexts. If WebGPU is unavailable, RunMat logs a warning and continues on CPU.
 
+### Building the exact CAD browser host
+
+The browser CAD module uses the same Rust/C++ OCCT importer as desktop for preview
+and validated exact topology. Build it with Rust 1.93.0, its
+`wasm32-unknown-emscripten` target, and an activated Emscripten 4.0.23 SDK:
+
+```bash
+rustup target add wasm32-unknown-emscripten --toolchain 1.93.0
+npm run build:occt
+npm run test:exact-cad:wasm
+```
+
+`npm run build` includes this module. Its JavaScript, Wasm, and OCCT license files
+are packaged under `dist/occt`. The qualification test uses the compiled module
+with the browser runtime, including invalid-input recovery. Keep the module and
+runtime from the same package build. CAD import runs in the runtime worker.
+
 ## Execution Results
 
 `executeRequest` resolves to an `ExecuteResult` with structured data for UI hosts:
@@ -218,6 +235,16 @@ await session.setInputHandler(async (request) => {
 ```
 
 `session.cancelExecution()` requests cooperative cancellation for a running request.
+
+## Browser Worker Execution
+
+An embedding host supplies isolated browser workers through `initRunMat({ executionHost })`. The host transports requests and responses; the Rust runtime owns task scheduling, callable selection, resource admission, and result validation. Without a worker host, a session does not advertise isolated worker execution.
+
+For selected-program execution, the host provides `workerInventory`, `launchProgram`, and `cancelProgram`, and sets `capabilities.selectedProgramWork` to `true`. Obtain the inventory from the actual initialized worker with `workerProgramInventory()`, using the same pinned SDK and WASM assets as the coordinating session. Create each worker invocation with `createWorkerProgramInvocation(request.program)`. Its assignment identifies the exact task, attempt, worker, and resource leases; cancellation must carry that same assignment.
+
+An invocation's `run()` returns a `RunMatProgramTaskTerminal`. Preserve that terminal, including originating runtime errors and its retirement state. A fulfilled or rejected transport Promise, a cancellation request, and `Worker.terminate()` are not evidence of Runtime retirement. Reuse a worker slot only after its invocation has retired; retain or quarantine unresolved work instead of replacing it with another task. The stock CPU worker admits only the host and device services its factory actually provides. It does not inherit the coordinating session's filesystem, network, foreign runtimes, or GPU resources.
+
+`session.cancelExecution()` also requests cancellation of the session's child-task scope. Caller cancellation can complete before a worker's retirement response arrives, so the execution host must remain available to receive that response. Interpreted browser loops and supported numerical kernels yield through the adapter's cooperative task-turn checkpoints, allowing worker cancellation messages to be delivered. Cancellation does not preempt an arbitrary synchronous foreign call or device kernel.
 
 ## Diagnostics
 

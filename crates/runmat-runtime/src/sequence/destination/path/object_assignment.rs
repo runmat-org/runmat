@@ -5,7 +5,7 @@ use crate::execution::RootedValue;
 use runmat_value::Value;
 
 use super::{AssignmentStepSpec, PreparedAssignmentStep};
-use crate::object::dispatch::resolve_object_index_protocol;
+use crate::object::dispatch::resolve_object_index_protocol_with_access;
 use crate::object::indexing::{ObjectIndexOp, ObjectSubscriptPath};
 use crate::object::resolve::{ContextualMemberScope, MemberStoreScope, OrdinaryMemberScope};
 use crate::runtime_error::semantic_error;
@@ -22,6 +22,7 @@ pub(super) fn assign_object_path<'a>(
     cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
     values: runmat_value::ValueSequence,
     caller: Option<&'a str>,
+    access: Option<&'a crate::object::protocol::ObjectAccessContext>,
     mut roots: crate::execution::RootedValueLease,
 ) -> RuntimeContinuationFuture<'a, RootedValue> {
     super::super::control::admit_future(context, move || async move {
@@ -37,6 +38,7 @@ pub(super) fn assign_object_path<'a>(
                 cardinality,
                 values,
                 caller,
+                access,
                 roots,
             )
             .await;
@@ -45,7 +47,8 @@ pub(super) fn assign_object_path<'a>(
         for step in prefix {
             ancestors.check(context)?;
             let child =
-                super::structural::read_step(context, current.clone(), &step, caller).await?;
+                super::structural::read_step(context, current.clone(), &step, caller, access)
+                    .await?;
             ancestors.push(context, current, step, roots)?;
             (current, roots) = child.into_value_and_lease();
             // This is the next recursive node's original pre-effect check.
@@ -61,10 +64,11 @@ pub(super) fn assign_object_path<'a>(
             cardinality,
             values,
             caller,
+            access,
             roots,
         )
         .await?;
-        ancestors.finish(context, updated, caller).await
+        ancestors.finish(context, updated, caller, access).await
     })
 }
 
@@ -78,6 +82,7 @@ async fn assign_object_leaf(
     cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
     values: runmat_value::ValueSequence,
     caller: Option<&str>,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
     roots: crate::execution::RootedValueLease,
 ) -> Result<RootedValue, crate::RuntimeError> {
     let actual = crate::object::indexing::class_name_from_base(&current).ok_or_else(|| {
@@ -95,7 +100,12 @@ async fn assign_object_leaf(
             ),
         ));
     }
-    match resolve_object_index_protocol(&current, ObjectIndexOp::Subsasgn, caller)? {
+    match resolve_object_index_protocol_with_access(
+        &current,
+        ObjectIndexOp::Subsasgn,
+        caller,
+        access,
+    )? {
         Some(method) => {
             let result = match context {
                 Some(context) => {
@@ -123,6 +133,7 @@ async fn assign_object_leaf(
                 cardinality,
                 values,
                 caller,
+                access,
                 roots,
             )
             .await
@@ -137,6 +148,7 @@ fn assign_unprepared_path<'a>(
     cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
     values: runmat_value::ValueSequence,
     caller: Option<&'a str>,
+    access: Option<&'a crate::object::protocol::ObjectAccessContext>,
     roots: crate::execution::RootedValueLease,
 ) -> RuntimeContinuationFuture<'a, RootedValue> {
     match context {
@@ -148,6 +160,7 @@ fn assign_unprepared_path<'a>(
             cardinality,
             values,
             caller,
+            access,
             roots,
         ),
         None => assign_unprepared_path_with_scope(
@@ -158,6 +171,7 @@ fn assign_unprepared_path<'a>(
             cardinality,
             values,
             caller,
+            access,
             roots,
         ),
     }
@@ -171,6 +185,7 @@ fn assign_unprepared_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
     cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
     values: runmat_value::ValueSequence,
     caller: Option<&'a str>,
+    access: Option<&'a crate::object::protocol::ObjectAccessContext>,
     mut roots: crate::execution::RootedValueLease,
 ) -> RuntimeContinuationFuture<'a, RootedValue> {
     let context = scope.runtime();
@@ -182,10 +197,11 @@ fn assign_unprepared_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
                 &current,
                 endpoint,
                 Some(cardinality),
+                access,
             )
             .await?;
             let result = prepared
-                .assign_sequence_with_scope(scope, current, values, caller)
+                .assign_sequence_with_scope(scope, current, values, caller, access)
                 .await;
             drop(roots);
             return result;
@@ -202,7 +218,8 @@ fn assign_unprepared_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
             )
             .await?;
             let child =
-                super::structural::read_step(context, current.clone(), &step, caller).await?;
+                super::structural::read_step(context, current.clone(), &step, caller, access)
+                    .await?;
             ancestors.push(context, current, step, roots)?;
             (current, roots) = child.into_value_and_lease();
             check_cardinality(&cardinality)?;
@@ -212,13 +229,14 @@ fn assign_unprepared_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
             &current,
             endpoint,
             Some(cardinality),
+            access,
         )
         .await?;
         let updated = prepared
-            .assign_sequence_with_scope(scope, current, values, caller)
+            .assign_sequence_with_scope(scope, current, values, caller, access)
             .await?;
         drop(roots);
-        ancestors.finish(context, updated, caller).await
+        ancestors.finish(context, updated, caller, access).await
     })
 }
 

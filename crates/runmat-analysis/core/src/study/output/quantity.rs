@@ -145,6 +145,60 @@ impl ObservationQuantity {
         }
     }
 
+    /// Physical descriptor for a concrete recovered field. Generic diagnostics
+    /// require producer/basis metadata and cannot be declared dimensionless here.
+    pub fn quantity_descriptor(self) -> Option<runmat_types::physical::DynamicDimension> {
+        use runmat_types::physical::{DynamicDimension as D, QuantityKind as K};
+        let known = match self {
+            Self::Displacement | Self::ContactGap => Some(K::Displacement),
+            Self::Rotation => Some(K::Rotation),
+            Self::Velocity | Self::AcousticParticleVelocity | Self::FluidVelocity => {
+                Some(K::Velocity)
+            }
+            Self::Acceleration => Some(K::Acceleration),
+            Self::Stress
+            | Self::VonMisesStress
+            | Self::BeamBendingStress
+            | Self::BeamTorsionStress
+            | Self::AcousticPressure
+            | Self::FluidPressure
+            | Self::WallShearStress
+            | Self::ContactPressure => Some(K::Pressure),
+            Self::ReactionForce | Self::BeamAxialForce | Self::BeamShearForce => Some(K::Force),
+            Self::ReactionMoment | Self::BeamTorsionMoment | Self::BeamBendingMoment => {
+                Some(K::Moment)
+            }
+            Self::StrainEnergy => Some(K::Energy),
+            Self::Temperature => Some(K::Temperature),
+            Self::HeatFlux => Some(K::HeatFlux),
+            Self::HeatRate => Some(K::Power),
+            Self::ThermalEnergyStorageRateDensity | Self::JoulePowerDensity => {
+                Some(K::HeatGenerationDensity)
+            }
+            Self::ElectricPotential | Self::ElectricEdgeCirculation => Some(K::ElectricPotential),
+            Self::ElectricField => Some(K::ElectricField),
+            Self::ElectricCurrent => Some(K::ElectricCurrent),
+            Self::ElectricCurrentDensity => Some(K::ElectricCurrentDensity),
+            Self::ElectricCharge => Some(K::ElectricCharge),
+            Self::MagneticVectorPotential => Some(K::MagneticVectorPotential),
+            Self::MagneticFluxDensity => Some(K::MagneticFluxDensity),
+            Self::Vorticity => Some(K::AngularVelocity),
+            Self::ModalFrequency => Some(K::Frequency),
+            Self::MassFlowRate => Some(K::MassFlowRate),
+            Self::VolumeFlowRate => Some(K::VolumeFlowRate),
+            Self::ModalParticipation
+            | Self::Eigenvalue
+            | Self::Residual
+            | Self::Balance
+            | Self::ConstraintViolation => return None,
+            _ => None,
+        };
+        Some(match known {
+            Some(kind) => D::quantity_type(kind).with_semantic_kind(Some(kind)).ok()?,
+            None => self.physical_dimension().into(),
+        })
+    }
+
     /// Resolve the stable source-language spelling of an observation quantity.
     ///
     /// Keeping this closed mapping beside the canonical enum prevents frontends from growing

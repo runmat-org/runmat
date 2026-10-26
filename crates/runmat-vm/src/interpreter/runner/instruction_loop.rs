@@ -243,10 +243,23 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
     };
     #[cfg(all(feature = "native-accel", not(feature = "wgpu")))]
     let mut original_image_span: Option<runmat_accelerate::InstrSpan> = None;
+    // A browser adapter must regain its event loop even when every opcode
+    // completes synchronously. Native NeverYield keeps no task-turn owner.
+    let mut cpu_turn = match context.runtime.execution().cpu_cooperation_policy() {
+        runmat_runtime::execution::CpuCooperationPolicy::NeverYield => None,
+        runmat_runtime::execution::CpuCooperationPolicy::WorkQuantum(_) => {
+            Some(context.runtime.cpu_cooperation())
+        }
+    };
     while *pc < bytecode.instructions.len() {
         #[cfg(feature = "wgpu")]
         if let Some(route) = fusion_observations.take_completed_original() {
             route.complete().await;
+        }
+        if let Some(turn) = &mut cpu_turn {
+            turn.checkpoint(1)
+                .await
+                .map_err(|error| error.into_runtime_error_in_context(Some(&context.runtime)))?;
         }
         crate::runtime::workspace::reconcile_workspace_vars(&mut *vars);
         if let (Some(scope), Some(exception)) = (catch_entries.get(&*pc), last_exception.as_ref()) {

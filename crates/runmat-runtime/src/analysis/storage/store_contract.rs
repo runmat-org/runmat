@@ -1,5 +1,6 @@
 use super::*;
 pub trait AnalysisArtifactStore: Send + Sync {
+    fn filesystem_scope(&self) -> Option<(PathBuf, Arc<dyn runmat_filesystem::FsProvider>)> { None }
     /// Export one authenticated original field under the caller's cumulative read ceiling.
     fn export_initial_field(
         &self,

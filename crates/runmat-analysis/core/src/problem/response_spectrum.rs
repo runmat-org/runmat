@@ -42,11 +42,7 @@ impl ResponseSpectrum {
         if self.spectrum_id.0.trim().is_empty() {
             return Err("response-spectrum id must not be empty".to_string());
         }
-        let axis = match &self.abscissa {
-            SpectrumAbscissa::FrequencyHertz(values) | SpectrumAbscissa::PeriodSeconds(values) => {
-                values
-            }
-        };
+        let axis = self.abscissa.canonical_points();
         if (matches!(&self.abscissa, SpectrumAbscissa::FrequencyHertz(_))
             && self.interpolation == SpectrumInterpolation::LinearPeriod)
             || (matches!(&self.abscissa, SpectrumAbscissa::PeriodSeconds(_))
@@ -192,8 +188,24 @@ impl ResponseSpectrum {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpectrumAbscissa {
-    FrequencyHertz(Vec<f64>),
-    PeriodSeconds(Vec<f64>),
+    FrequencyHertz(
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Frequency, Vec<f64>>,
+    ),
+    PeriodSeconds(
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Time, Vec<f64>>,
+    ),
+}
+
+impl SpectrumAbscissa {
+    /// Borrow numerical stencil coordinates while retaining their axis owner.
+    pub fn canonical_points(&self) -> &[f64] {
+        match self {
+            Self::FrequencyHertz(values) => values.canonical_values(),
+            Self::PeriodSeconds(values) => values.canonical_values(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -321,7 +333,10 @@ mod tests {
     fn spectrum() -> ResponseSpectrum {
         ResponseSpectrum {
             spectrum_id: ResponseSpectrumId("design".into()),
-            abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
+            abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Frequency,
+                _,
+            >::new(vec![1.0, 10.0])),
             ordinates: NumericalDataSource::authored(vec![2.0, 1.0], "sha256:design"),
             damping: SpectrumDamping::Ratio(0.05),
             response: SpectrumResponse::AbsoluteAcceleration,

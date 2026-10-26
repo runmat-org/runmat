@@ -66,9 +66,7 @@ fn cancellation_scopes_restore_parent_and_retire_without_resetting_invocations()
         RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), parent.token());
     let outer = CancellationSource::new();
     let scope = context.scoped_cancellation_token(outer.token());
-    let retained = context
-        .clone()
-        .with_cancellation_token(context.cancellation());
+    let retained = context.clone().with_pinned_cancellation();
     let inner = CancellationSource::new();
     let nested = context.scoped_cancellation_token(inner.token());
     inner.cancel(CancellationReason::Deadline);

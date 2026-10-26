@@ -24,7 +24,8 @@ use crate::{
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ConstraintNodeState {
-    pub coordinates_m: [f64; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub dof_indices: [Option<usize>; 6],
 }
 
@@ -82,7 +83,10 @@ pub(super) fn resolve_model_state(
             (
                 node.identity,
                 ConstraintNodeState {
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                     dof_indices,
                 },
             )

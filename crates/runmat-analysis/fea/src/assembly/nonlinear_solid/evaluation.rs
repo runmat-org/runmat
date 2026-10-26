@@ -48,8 +48,8 @@ impl CanonicalNonlinearSolidBasis {
                 volume_m3: 0.0,
                 mean_total_engineering_strain: [0.0; 6],
                 mean_stress_pa: [0.0; 6],
-                elastic_energy_j: 0.0,
-                hardening_energy_j: 0.0,
+                elastic_energy_j: runmat_types::physical::Energy::new(0.0),
+                hardening_energy_j: runmat_types::physical::Energy::new(0.0),
                 plastic_dissipation_increment_j: 0.0,
             };
             // The admitted Tet4/Tet10 envelope has at most 30 translation columns.
@@ -138,9 +138,12 @@ impl CanonicalNonlinearSolidBasis {
                     evidence.mean_total_engineering_strain[i] += point.weight_m3 * value;
                     evidence.mean_stress_pa[i] += point.weight_m3 * response.stress_pa[i];
                 }
-                evidence.elastic_energy_j += point.weight_m3 * response.elastic_energy_density_pa;
-                evidence.hardening_energy_j +=
-                    point.weight_m3 * response.hardening_energy_density_pa;
+                evidence.elastic_energy_j += runmat_types::physical::Energy::new(
+                    point.weight_m3 * response.elastic_energy_density_pa,
+                );
+                evidence.hardening_energy_j += runmat_types::physical::Energy::new(
+                    point.weight_m3 * response.hardening_energy_density_pa,
+                );
                 evidence.plastic_dissipation_increment_j +=
                     point.weight_m3 * response.plastic_dissipation_increment_pa;
                 point_evidence.push(NonlinearSolidPointEvidence {

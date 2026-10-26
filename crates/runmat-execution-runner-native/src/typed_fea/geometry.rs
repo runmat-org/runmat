@@ -11,10 +11,8 @@ use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{CancellationReason, Digest, ProgramRevision};
-use runmat_execution_artifact::cache::{CacheExport, CacheImport};
-use runmat_execution_artifact::{
-    ArtifactAccess, ArtifactResult, LogicalObject, ProgramExecutionResponse,
-};
+
+use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionResponse};
 use runmat_geometry_core::{
     GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource,
 };
@@ -272,7 +270,7 @@ async fn execute_generator(
             scope_id: session.scope_id(),
             pool_id: session.pool_id(),
             host: crate::program_host::program_host(
-                &chunk.request,
+                chunk.direct_request().map_err(|error| error.to_string())?,
                 crate::program_host::local_trust(),
             )
             .map_err(|error| error.to_string())?,
@@ -284,7 +282,13 @@ async fn execute_generator(
     )
     .map_err(|error| error.to_string())?;
     let task = session
-        .submit(chunk.request.clone(), submission)
+        .submit(
+            chunk
+                .direct_request()
+                .map_err(|error| error.to_string())?
+                .clone(),
+            submission,
+        )
         .map_err(|error| error.to_string())?;
     let started = Instant::now();
     loop {
@@ -368,8 +372,7 @@ fn materialize_dependency(
         .iter()
         .map(|reference| {
             store
-                .objects
-                .get(&reference.logical_digest)
+                .logical_object(reference.logical_digest)
                 .cloned()
                 .ok_or_else(|| {
                     "derived geometry closure contains an unavailable object".to_string()
@@ -400,60 +403,5 @@ fn physical_source_path(
         .map_err(|error| error.to_string())
 }
 
-#[derive(Default)]
-struct CapturedObjectStore {
-    objects: BTreeMap<Digest, LogicalObject>,
-}
-
-impl CacheImport for CapturedObjectStore {
-    fn read_verified_bounded_with_admission(
-        &self,
-        digest: Digest,
-        maximum_bytes: u64,
-        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
-    ) -> ArtifactResult<Option<Vec<u8>>> {
-        runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
-            digest,
-            self.objects
-                .get(&digest)
-                .map(|object| object.bytes.as_slice()),
-            maximum_bytes,
-            admit,
-        )
-    }
-    fn read_verified_bounded(
-        &self,
-        digest: Digest,
-        maximum_bytes: u64,
-    ) -> ArtifactResult<Option<Vec<u8>>> {
-        crate::bounded_object_read::copy_verified(
-            digest,
-            self.objects
-                .get(&digest)
-                .map(|object| object.bytes.as_slice()),
-            maximum_bytes,
-        )
-    }
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        Ok(self.objects.get(&digest).map(|object| object.bytes.clone()))
-    }
-}
-
-impl CacheExport for CapturedObjectStore {
-    fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
-        object.validate()?;
-        match self.objects.get(&object.descriptor.digest) {
-            Some(existing) if existing != object => {
-                Err(runmat_execution_artifact::ArtifactError::Identity(
-                    "geometry object digest was reused for different content".into(),
-                ))
-            }
-            Some(_) => Ok(()),
-            None => {
-                self.objects
-                    .insert(object.descriptor.digest, object.clone());
-                Ok(())
-            }
-        }
-    }
-}
+// The in-process and sidecar hosts share the same bounded artifact store.
+use runmat_execution_artifact::cache::MemoryObjectStore as CapturedObjectStore;

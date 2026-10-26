@@ -29,11 +29,11 @@ pub(super) fn request() -> MeshingRequest {
             validation: "validation/v2".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
@@ -43,7 +43,7 @@ pub(super) fn request() -> MeshingRequest {
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.5,
@@ -52,7 +52,7 @@ pub(super) fn request() -> MeshingRequest {
                 minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -93,7 +93,10 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     .map(|(index, coordinates_m)| SolverMeshNode {
         node_id: index as u64 + 1,
         stable_identity: digest(index as u8 + 1),
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         provenance: vec![solid.clone()],
         exact_parameters: Vec::new(),
     })
@@ -138,6 +141,11 @@ pub(super) fn artifact() -> SolverMeshArtifact {
         canonical_digest: digest(1),
         root_stage_manifest_digest: digest(2),
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: digest(3),
             geometry_revision: 4,
             persistent_mapping_version: 2,
@@ -643,7 +651,10 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
                 TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
                     .map(|corner| quadratic.topology.nodes[corner].stable_identity),
             ),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             provenance,
             exact_parameters,
         });

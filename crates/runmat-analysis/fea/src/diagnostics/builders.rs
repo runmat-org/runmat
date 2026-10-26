@@ -114,9 +114,9 @@ pub(crate) fn thermo_mechanical_diagnostic(
         message: format!(
             "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} spatial_gradient_index={} spatial_coverage_ratio={} region_delta_count={} coupling_fingerprint={}",
             summary.enabled,
-            summary.reference_temperature_k,
-            summary.applied_temperature_delta_k,
-            summary.thermal_expansion_coefficient,
+            summary.reference_temperature_k.canonical_value(),
+            summary.applied_temperature_delta_k.canonical_value(),
+            summary.thermal_expansion_coefficient.canonical_value(),
             summary.thermal_strain_scale,
             summary.thermal_load_scale,
             summary.constitutive_temperature_factor,
@@ -137,7 +137,10 @@ pub(crate) fn electro_thermal_diagnostic(
 ) -> FeaDiagnostic {
     let electrical_power_in_w = summary.applied_voltage_v.powi(2)
         * summary.base_electrical_conductivity_s_per_m.max(1.0e-9)
-        * summary.resistive_heating_coefficient.max(0.0)
+        * summary
+            .resistive_heating_coefficient
+            .canonical_value()
+            .max(0.0)
         / 1.0e6;
     let integrated_joule_heat_w = summary.joule_heating_scale;
     let power_balance_ratio = if electrical_power_in_w > 1.0e-12 {
@@ -156,10 +159,10 @@ pub(crate) fn electro_thermal_diagnostic(
         message: format!(
             "enabled={} reference_temperature_k={} applied_voltage_v={} base_electrical_conductivity_s_per_m={} resistive_heating_coefficient={} joule_heating_scale={} conductivity_spread_ratio={} region_scale_count={} coupling_fingerprint={} electrical_power_in_w={} integrated_joule_heat_w={} power_balance_ratio={} conservation_residual={}",
             summary.enabled,
-            summary.reference_temperature_k,
+            summary.reference_temperature_k.canonical_value(),
             summary.applied_voltage_v,
             summary.base_electrical_conductivity_s_per_m,
-            summary.resistive_heating_coefficient,
+            summary.resistive_heating_coefficient.canonical_value(),
             summary.joule_heating_scale,
             summary.conductivity_spread_ratio,
             summary.region_scale_count,

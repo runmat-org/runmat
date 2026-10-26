@@ -9,7 +9,9 @@ use runmat_analysis_execution::{
 };
 use runmat_execution::value::ValueRef;
 use runmat_execution::ProgramRevision;
-use runmat_execution_artifact::{ProgramExecutionDescriptor, ProgramExecutionRequest};
+use runmat_execution_artifact::{
+    ProgramExecutionDescriptor, ProgramExecutionRequest, WorkerProgramRequest,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -60,6 +62,8 @@ pub(crate) struct SignalMaterializationRequest {
     admitted: runmat_analysis_execution::AdmittedSignalGenerator,
     topology_binding: Option<runmat_analysis_execution::SignalTopologyBinding>,
     descriptor: ProgramExecutionDescriptor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invocations: Option<Vec<WorkerProgramRequest>>,
     chunks: Vec<runmat_analysis_execution::GeneratorChunk>,
     input_references: Vec<ValueRef>,
     input_admissions: Vec<runmat_analysis_execution::SignalInputAdmission>,
@@ -73,6 +77,7 @@ impl SignalMaterializationRequest {
             admitted: prepared.admitted.clone(),
             topology_binding: prepared.topology_binding.clone(),
             descriptor: prepared.program.descriptor.clone(),
+            invocations: retained_graph_invocations(&prepared.program),
             chunks: prepared
                 .program
                 .chunks
@@ -89,7 +94,12 @@ impl SignalMaterializationRequest {
             authored: self.authored.clone(),
             admitted: self.admitted.clone(),
             topology_binding: self.topology_binding.clone(),
-            program: prepared_program(&self.descriptor, &self.chunks, &self.input_references),
+            program: prepared_program(
+                &self.descriptor,
+                &self.chunks,
+                &self.input_references,
+                self.invocations.as_deref(),
+            )?,
             input_objects: Vec::new(),
             input_admissions: self.input_admissions.clone(),
         };
@@ -104,6 +114,8 @@ pub(crate) struct NumericalMaterializationRequest {
     authored: runmat_analysis_execution::NumericalGeneratorSource,
     admitted: runmat_analysis_execution::AdmittedNumericalGenerator,
     descriptor: ProgramExecutionDescriptor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invocations: Option<Vec<WorkerProgramRequest>>,
     chunks: Vec<runmat_analysis_execution::GeneratorChunk>,
     input_references: Vec<ValueRef>,
     input_admissions: Vec<runmat_analysis_execution::SignalInputAdmission>,
@@ -116,6 +128,7 @@ impl NumericalMaterializationRequest {
             authored: prepared.authored.clone(),
             admitted: prepared.admitted.clone(),
             descriptor: prepared.program.descriptor.clone(),
+            invocations: retained_graph_invocations(&prepared.program),
             chunks: prepared
                 .program
                 .chunks
@@ -131,7 +144,12 @@ impl NumericalMaterializationRequest {
         let prepared = PreparedNumericalMaterialization {
             authored: self.authored.clone(),
             admitted: self.admitted.clone(),
-            program: prepared_program(&self.descriptor, &self.chunks, &self.input_references),
+            program: prepared_program(
+                &self.descriptor,
+                &self.chunks,
+                &self.input_references,
+                self.invocations.as_deref(),
+            )?,
             input_objects: Vec::new(),
             input_admissions: self.input_admissions.clone(),
         };
@@ -140,36 +158,72 @@ impl NumericalMaterializationRequest {
     }
 }
 
+fn retained_graph_invocations(
+    program: &PreparedGeneratorProgram,
+) -> Option<Vec<WorkerProgramRequest>> {
+    program
+        .chunks
+        .iter()
+        .any(|chunk| matches!(&chunk.request, WorkerProgramRequest::Graph(_)))
+        .then(|| {
+            program
+                .chunks
+                .iter()
+                .map(|chunk| chunk.request.clone())
+                .collect()
+        })
+}
+
 fn prepared_program(
     descriptor: &ProgramExecutionDescriptor,
     chunks: &[runmat_analysis_execution::GeneratorChunk],
     input_references: &[ValueRef],
-) -> PreparedGeneratorProgram {
-    PreparedGeneratorProgram {
+    invocations: Option<&[WorkerProgramRequest]>,
+) -> NativeExecutionResult<PreparedGeneratorProgram> {
+    // The producer retains an invocation inventory only for homogeneous Graph
+    // mode. Direct requests are reconstructed from the original descriptor;
+    // an optional field must not become a second Direct invocation authority.
+    if invocations.is_some_and(|requests| {
+        requests.is_empty()
+            || requests.len() != chunks.len()
+            || requests
+                .iter()
+                .any(|request| !matches!(request, WorkerProgramRequest::Graph(_)))
+    }) {
+        return Err(protocol(
+            "retained generator invocations must be a complete nonempty Graph inventory",
+        ));
+    }
+    Ok(PreparedGeneratorProgram {
         descriptor: descriptor.clone(),
         chunks: chunks
             .iter()
             .cloned()
-            .map(|plan| PreparedGeneratorChunk {
-                request: ProgramExecutionRequest {
-                    console: descriptor.console,
-                    environment: descriptor.environment.clone(),
-                    schema_version:
-                        runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-                    recipe: descriptor.recipe.clone(),
-                    artifact: descriptor.artifact.clone(),
-                    callable: descriptor.callable.clone(),
-                    context: runmat_execution::ProgramInvocationContext::Direct,
-                    assignment: None,
-                    job_id: None,
-                    arguments: plan.arguments.clone(),
-                    requested_outputs: descriptor.requested_outputs,
-                },
+            .enumerate()
+            .map(|(index, plan)| PreparedGeneratorChunk {
+                request: invocations
+                    .map(|requests| requests[index].clone())
+                    .unwrap_or_else(|| {
+                        WorkerProgramRequest::Direct(ProgramExecutionRequest {
+                            console: descriptor.console,
+                            environment: descriptor.environment.clone(),
+                            schema_version:
+                                runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                            recipe: descriptor.recipe.clone(),
+                            artifact: descriptor.artifact.clone(),
+                            callable: descriptor.callable.clone(),
+                            context: runmat_execution::ProgramInvocationContext::Direct,
+                            assignment: None,
+                            job_id: None,
+                            arguments: plan.arguments.clone(),
+                            requested_outputs: descriptor.requested_outputs,
+                        })
+                    }),
                 plan,
             })
             .collect(),
         input_references: input_references.to_vec(),
-    }
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

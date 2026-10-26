@@ -69,7 +69,7 @@ fn local_collapse_plan_matches_complete_reference_across_unrelated_inventory() {
                 .nodes
                 .iter()
                 .enumerate()
-                .filter(|(_, node)| node.coordinates_m[0].abs() == 0.95)
+                .filter(|(_, node)| node.coordinates_m.canonical_value()[0].abs() == 0.95)
                 .map(|(index, _)| index)
                 .collect::<Vec<_>>();
             let options = DelaunayVolumeSliverOptions::default();

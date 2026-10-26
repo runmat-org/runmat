@@ -38,7 +38,11 @@ fn original_normal_residual_has_closed_force_energy_and_moment_balance_on_both_o
         let projection =
             AnalysisProjection::derive(&fixtures::canonical_tetrahedron_solver_mesh(order))
                 .unwrap();
-        let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let positions: Vec<_> = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let surface = projection.boundary_surface_snapshot(0, &positions).unwrap();
         let point = surface.evaluate([1. / 3.; 3]).unwrap();
         let n = point.unit_normal;
@@ -47,7 +51,7 @@ fn original_normal_residual_has_closed_force_energy_and_moment_balance_on_both_o
             NormalContactPoint::derive(surface, q, [1. / 3.; 3], 0.2, policy(), &law()).unwrap();
         let response = operator.contribution();
         near(response.nominal_pressure_pa, 100., 1e-10);
-        near(response.elastic_energy_j, 0.1, 1e-12);
+        near(response.elastic_energy_j.canonical_value(), 0.1, 1e-12);
         for k in 0..3 {
             near(response.query_internal_force_n[k], -20. * n[k], 1e-10);
             near(
@@ -96,7 +100,11 @@ fn complete_normal_geometric_tangent_matches_residual_changes_and_is_symmetric()
         let projection =
             AnalysisProjection::derive(&fixtures::canonical_tetrahedron_solver_mesh(order))
                 .unwrap();
-        let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let positions: Vec<_> = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let face = &projection.boundary_faces[0];
         let surface = projection.boundary_surface_snapshot(0, &positions).unwrap();
         let point = surface.evaluate([1. / 3.; 3]).unwrap();
@@ -196,7 +204,11 @@ fn normal_operator_and_tangent_rotate_objectively_and_use_no_trial_heap() {
         let projection =
             AnalysisProjection::derive(&fixtures::canonical_tetrahedron_solver_mesh(order))
                 .unwrap();
-        let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let positions: Vec<_> = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let surface = projection.boundary_surface_snapshot(0, &positions).unwrap();
         let point = surface.evaluate([1.0 / 3.0; 3]).unwrap();
         let query = std::array::from_fn(|k| point.position_m[k] - 0.03 * point.unit_normal[k]);
@@ -221,8 +233,8 @@ fn normal_operator_and_tangent_rotate_objectively_and_use_no_trial_heap() {
         )
         .unwrap();
         near(
-            original.contribution().elastic_energy_j,
-            rotated.contribution().elastic_energy_j,
+            original.contribution().elastic_energy_j.canonical_value(),
+            rotated.contribution().elastic_energy_j.canonical_value(),
             1e-12,
         );
         for (a, b) in rotate(original.contribution().query_internal_force_n)

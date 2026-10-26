@@ -95,8 +95,8 @@ pub(crate) struct NonlinearSolidElementEvidence {
     pub volume_m3: f64,
     pub mean_total_engineering_strain: [f64; 6],
     pub mean_stress_pa: [f64; 6],
-    pub elastic_energy_j: f64,
-    pub hardening_energy_j: f64,
+    pub elastic_energy_j: runmat_types::physical::Energy,
+    pub hardening_energy_j: runmat_types::physical::Energy,
     pub plastic_dissipation_increment_j: f64,
 }
 
@@ -119,7 +119,8 @@ struct PreparedPoint {
 
 struct PreparedBodyNode {
     identity: StableDigest,
-    coordinates_m: [f64; 3],
+    coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     rows: [usize; 3],
 }
 

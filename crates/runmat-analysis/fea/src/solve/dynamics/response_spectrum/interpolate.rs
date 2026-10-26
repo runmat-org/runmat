@@ -17,11 +17,7 @@ pub(super) fn interpolate_spectrum(
         SpectrumAbscissa::FrequencyHertz(_) => frequency_hz,
         SpectrumAbscissa::PeriodSeconds(_) => 1.0 / frequency_hz,
     };
-    let axis = match &spectrum.abscissa {
-        SpectrumAbscissa::FrequencyHertz(values) | SpectrumAbscissa::PeriodSeconds(values) => {
-            values
-        }
-    };
+    let axis = spectrum.abscissa.canonical_points();
     let ordinates = spectrum.resolved_ordinates().map_err(FeaRunError::Solve)?;
     let index = match axis.binary_search_by(|value| value.total_cmp(&query)) {
         Ok(index) => return Ok(ordinates[index]),

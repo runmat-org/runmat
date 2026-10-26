@@ -6,6 +6,8 @@ use runmat_types::{
 use serde::{Deserialize, Serialize};
 
 mod fixed_preparation;
+mod assignment_index_context;
+pub use assignment_index_context::{MirAssignmentIndexContextError, MirAssignmentIndexRole};
 pub use fixed_preparation::{
     MirFixedPreparation, MirFixedPreparationPhase, MirFixedPreparationState,
     MirFixedSelectorDestination,
@@ -338,6 +340,8 @@ impl MirPreparedAssignment {
 
     fn validate_contract(&self, phased: bool) -> Result<(), String> {
         use runmat_types::{IndexKind, PlaceMutationKind};
+        self.validate_index_contexts()
+            .map_err(|error| error.to_string())?;
         let place = &self.mutation.place;
         if !place.requires_prepared_assignment() {
             return Err(

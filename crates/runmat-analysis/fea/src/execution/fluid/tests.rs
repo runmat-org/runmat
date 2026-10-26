@@ -28,7 +28,8 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.response_spectra.clear();
     model.random_excitations.clear();
     model.frame = CoordinateFrame::Global;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
@@ -137,13 +138,20 @@ fn original_zero_flow_cold_fields_and_traction_evidence_roundtrip_without_resolv
     assert!(result
         .original()
         .velocity_m_per_s
+        .canonical_values()
         .iter()
         .flatten()
         .all(|&v| v == 0.0));
-    assert!(result.original().pressure_pa.iter().all(|&v| v == 0.0));
+    assert!(result
+        .original()
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .all(|&v| v == 0.0));
     assert!(result
         .original()
         .face_volume_flux_m3_per_s
+        .canonical_values()
         .iter()
         .all(|&v| v == 0.0));
     let bytes = result.canonical_bytes().unwrap();
@@ -250,7 +258,7 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     // every original owner-oriented face has volume flux S_x. Moving side
     // walls are tangential; no fabricated spatial profile or solver RHS.
     let result = workload.execute(&mesh).unwrap();
-    for u in &result.original().velocity_m_per_s {
+    for u in result.original().velocity_m_per_s.canonical_values() {
         assert!((u[0] - 1.0).abs() < 1e-6 && u[1].abs() < 1e-6 && u[2].abs() < 1e-6);
     }
     let source = workload.prepare(&mesh).unwrap();
@@ -262,12 +270,17 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
         result
             .original()
             .velocity_m_per_s
+            .canonical_values()
             .iter()
             .flatten()
             .copied()
             .collect::<Vec<_>>(),
-        result.original().pressure_pa.clone(),
-        result.original().face_volume_flux_m3_per_s.clone(),
+        result.original().pressure_pa.canonical_values().clone(),
+        result
+            .original()
+            .face_volume_flux_m3_per_s
+            .canonical_values()
+            .clone(),
     ]) {
         assert_eq!(
             field.storage().values,
@@ -277,6 +290,7 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     for (q, face) in result
         .original()
         .face_volume_flux_m3_per_s
+        .canonical_values()
         .iter()
         .zip(&source.topology.faces)
     {

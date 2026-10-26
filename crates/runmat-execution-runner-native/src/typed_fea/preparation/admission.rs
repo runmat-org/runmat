@@ -87,7 +87,7 @@ pub(super) fn select_family(
         if frequencies.len() != 1
             || !frequencies[0].is_finite()
             || frequencies[0] <= 0.0
-            || frequencies[0] != reference_frequency.hertz
+            || frequencies[0] != reference_frequency.canonical_value()
         {
             return Err(unsupported());
         }

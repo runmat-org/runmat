@@ -349,7 +349,7 @@ pub fn prepare_assessment_descriptor(
         || function.module_path.trim().is_empty()
         || parameters
             .iter()
-            .any(|parameter| !parameter.value_si.is_finite())
+            .any(|parameter| !parameter.canonical_value().is_finite())
     {
         return Err(AnalysisBridgeError::Identity(
             "assessment callable differs from its checked source",
@@ -440,7 +440,11 @@ pub fn assessment_inputs(
         ));
     };
     std::iter::once(measured_si)
-        .chain(parameters.iter().map(|parameter| parameter.value_si))
+        .chain(
+            parameters
+                .iter()
+                .map(|parameter| parameter.canonical_value()),
+        )
         .map(|value| {
             if value.is_finite() {
                 Ok(ValuePayload::Inline(Box::new(InlineValue::F64Bits(

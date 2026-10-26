@@ -171,7 +171,8 @@ fn structural_solid_capabilities_fail_before_assembly_without_restricting_generi
     ));
 
     let mut massless = model;
-    massless.materials[0].mass_density_kg_per_m3 = None;
+    massless.materials[0].mass_density_kg_per_m3 =
+        (None).map(runmat_types::physical::MassDensity::new);
     compile_property_map(&massless, Some(&mesh))
         .expect("generic material ownership must not require density");
     assert!(matches!(
@@ -206,7 +207,8 @@ fn thermal_solid_capabilities_fail_before_assembly_without_restricting_generic_p
     ));
 
     let mut massless = model;
-    massless.materials[0].mass_density_kg_per_m3 = None;
+    massless.materials[0].mass_density_kg_per_m3 =
+        (None).map(runmat_types::physical::MassDensity::new);
     assert!(matches!(
         compile_thermal_property_map(&massless, Some(&mesh)),
         Err(PropertyCompilationError::MissingCapability {
@@ -336,8 +338,8 @@ fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_owne
             .map(|ply_id| LaminatePlyModel {
                 ply_id: ply_id.into(),
                 material_id: "mat_steel".into(),
-                thickness_m: 0.001,
-                angle_rad: 0.0,
+                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.001),
+                angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(0.0),
             })
             .to_vec(),
         shear_correction: Some(5.0 / 6.0),

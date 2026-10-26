@@ -125,8 +125,8 @@ fn validate_coordinate_range(nodes: &[DelaunayVolumeNode]) -> Result<(), Delauna
     let mut maximum = [f64::NEG_INFINITY; 3];
     for node in nodes {
         for axis in 0..3 {
-            minimum[axis] = minimum[axis].min(node.coordinates_m[axis]);
-            maximum[axis] = maximum[axis].max(node.coordinates_m[axis]);
+            minimum[axis] = minimum[axis].min(node.coordinates_m.canonical_value()[axis]);
+            maximum[axis] = maximum[axis].max(node.coordinates_m.canonical_value()[axis]);
         }
     }
     if (0..3).any(|axis| !(maximum[axis] - minimum[axis]).is_finite()) {
@@ -165,9 +165,13 @@ fn validate_and_order_nodes(
             return Err(error(DelaunayPointSetErrorKind::Cancelled, "cancelled"));
         }
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || index > 0 && nodes[index - 1].identity == node.identity
-            || !positions.insert(node.coordinates_m.map(coordinate_bits))
+            || !positions.insert(node.coordinates_m.canonical_value().map(coordinate_bits))
         {
             return Err(error(
                 DelaunayPointSetErrorKind::InvalidNode,
@@ -183,8 +187,9 @@ fn compare_geometric_nodes(
     right: &DelaunayVolumeNode,
 ) -> std::cmp::Ordering {
     left.coordinates_m
+        .canonical_value()
         .iter()
-        .zip(right.coordinates_m.iter())
+        .zip(right.coordinates_m.canonical_value().iter())
         .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
         .unwrap_or_else(|| left.identity.cmp(&right.identity))
 }
@@ -235,9 +240,9 @@ fn insertion_error_at_node(
         "{} while inserting canonical node {index} ({:?}, [{}, {}, {}])",
         mapped.reason,
         node.identity,
-        node.coordinates_m[0],
-        node.coordinates_m[1],
-        node.coordinates_m[2]
+        node.coordinates_m.canonical_value()[0],
+        node.coordinates_m.canonical_value()[1],
+        node.coordinates_m.canonical_value()[2]
     );
     mapped
 }

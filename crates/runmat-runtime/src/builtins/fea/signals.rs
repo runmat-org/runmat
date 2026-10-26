@@ -557,7 +557,7 @@ pub(super) fn physical_signal_from_value(
     let payload: SignalObject = super::object_payload_omitting(
         builtin,
         value,
-        signal_class_name(expected_quantity),
+        signal_class_name(expected_quantity).ok_or_else(|| builtin_error(builtin, &ERROR_INPUT, "unsupported signal quantity"))?,
         &[FROZEN_GENERATOR_PROPERTY],
     )?;
     if payload.signal.quantity() != expected_quantity {
@@ -650,9 +650,9 @@ fn frozen_generator_from_value(
     })
 }
 
-fn signal_class_name(quantity: runmat_analysis_core::PhysicalQuantityKind) -> &'static str {
+fn signal_class_name(quantity: runmat_analysis_core::PhysicalQuantityKind) -> Option<&'static str> {
     use runmat_analysis_core::PhysicalQuantityKind::*;
-    match quantity {
+    Some(match quantity {
         Displacement => DISPLACEMENT_SIGNAL_CLASS,
         Rotation => ROTATION_SIGNAL_CLASS,
         Velocity => VELOCITY_SIGNAL_CLASS,
@@ -676,7 +676,8 @@ fn signal_class_name(quantity: runmat_analysis_core::PhysicalQuantityKind) -> &'
         MagneticVectorPotential => MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS,
         MassFlowRate => MASS_FLOW_SIGNAL_CLASS,
         VolumeFlowRate => VOLUME_FLOW_SIGNAL_CLASS,
-    }
+        _ => return None,
+    })
 }
 
 fn signal_class_quantity(class_name: &str) -> Option<runmat_analysis_core::PhysicalQuantityKind> {
@@ -1141,7 +1142,7 @@ mod tests {
                 left_limit: SignalOrdinate::Real(SignalValue::Scalar(left)),
                 right_limit: SignalOrdinate::Real(SignalValue::Scalar(right)),
                 continuity: runmat_analysis_core::SignalPointContinuity::Right,
-            } if left.kelvin == 273.0 && right.kelvin == 373.0
+            } if left.canonical_value() == 273.0 && right.canonical_value() == 373.0
         ));
     }
 

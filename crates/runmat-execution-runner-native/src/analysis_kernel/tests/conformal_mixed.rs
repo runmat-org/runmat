@@ -11,7 +11,7 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
 
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0].provenance.push(PersistentEntityId {
         kind: PersistentEntityKind::Vertex,
         source_topology_id: "beam_root".into(),

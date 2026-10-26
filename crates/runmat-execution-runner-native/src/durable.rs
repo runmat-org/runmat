@@ -19,7 +19,8 @@ enum Command {
         response: mpsc::Sender<Result<JobHandle, ExecutionServiceError>>,
     },
     SubmitGraph {
-        submission: Box<GraphBatchSubmission>,
+        program: Box<runmat_execution_artifact::GraphExecutionRequest>,
+        options: runmat_runtime::execution::DurableJobOptions,
         response: mpsc::Sender<Result<SubmittedGraphJob, ExecutionServiceError>>,
     },
     /// One non-blocking inspection. No bridge command waits for task lifetime,
@@ -79,10 +80,12 @@ impl DurableJobBridge {
 
     pub(crate) fn submit_graph(
         &self,
-        submission: GraphBatchSubmission,
+        program: runmat_execution_artifact::GraphExecutionRequest,
+        options: runmat_runtime::execution::DurableJobOptions,
     ) -> Result<SubmittedGraphJob, ExecutionServiceError> {
         self.request(|response| Command::SubmitGraph {
-            submission: Box::new(submission),
+            program: Box::new(program),
+            options,
             response,
         })
     }
@@ -213,11 +216,12 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                 let _ = response.send(result);
             }
             Command::SubmitGraph {
-                submission,
+                program,
+                options,
                 response,
             } => {
                 let result = runtime
-                    .block_on(client.submit_graph(*submission))
+                    .block_on(submit_original_graph(&client, *program, options))
                     .map(|(record, created_new)| SubmittedGraphJob {
                         handle: record.handle,
                         retain_until_unix_millis: record.retain_until_unix_millis,
@@ -359,6 +363,59 @@ fn service_error(error: crate::NativeExecutionError) -> ExecutionServiceError {
 
 /// Admit the original program into the supervisor's scope; the bridge thread
 /// owns the async client, so placement identity is resolved here.
+async fn submit_original_graph(
+    client: &LocalSupervisorClient,
+    program: runmat_execution_artifact::GraphExecutionRequest,
+    options: runmat_runtime::execution::DurableJobOptions,
+) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, bool)> {
+    use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+    let context = client
+        .execution_context(options.idempotency_key.as_deref())
+        .await?;
+    let host = program
+        .execution_host_requirement(std::collections::BTreeSet::from([
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        ]))
+        .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))?;
+    let callable = program
+        .scheduler_callable()
+        .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))?;
+    let task = runmat_execution_runner::TaskSubmission {
+        request: TaskRequest {
+            id: runmat_execution::TaskId::derive(&[
+                context.scope_id.bytes(),
+                program.artifact.id.0.bytes(),
+            ]),
+            scope_id: context.scope_id,
+            pool_id: context.pool_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                crate::graph_submission::primary_artifact(&program),
+            ),
+            callable: Callable::for_program("runmat.runtime", &callable),
+            host,
+            invocation_context: program.context.clone(),
+            inputs: Vec::new(),
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
+            outputs: program.recipe.outputs.clone(),
+            resources: options.resources,
+            retry: RetryPolicy::Never,
+            deadline_unix_millis: None,
+        },
+        dependencies: Default::default(),
+        priority: 0,
+    };
+    client
+        .submit_graph(GraphBatchSubmission {
+            request: program,
+            task: Some(task),
+            idempotency_key: options.idempotency_key,
+            retention_millis: options.retention_millis,
+        })
+        .await
+}
+
 async fn submit_original(
     client: &LocalSupervisorClient,
     program: runmat_execution_artifact::ProgramExecutionRequest,

@@ -5,13 +5,15 @@ separate allows one admitted CAD revision and mesh to support several material o
 
 ## Imported geometry and regions
 
+Keep the CAD declaration and readable region names in the study. Geometry selection tools maintain their exact persistent bindings in CAD-asset metadata.
+
 ```fea
 geometry bracket {
     file = "../examples/geometry/box.brep"
     units = m
 
     region body : solid {
-        select id "solid_000001"
+        select name "body"
         expect exactly_one
     }
     region mounting_faces : face {

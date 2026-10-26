@@ -85,7 +85,6 @@ impl GeneratedGeometryProduct {
                 }
                 GeometryRegionSelector::Name(_)
                 | GeometryRegionSelector::Tag(_)
-                | GeometryRegionSelector::SourceAlias(_)
                 | GeometryRegionSelector::PersistentId(_)
                 | GeometryRegionSelector::GeneratedOutput(_) => {
                     return Err(GeometryContractError::invalid(
@@ -305,7 +304,6 @@ impl super::GeometryFeatureRegionSelection {
                 ));
             }
             GeometryRegionSelector::Result
-            | GeometryRegionSelector::SourceAlias(_)
             | GeometryRegionSelector::PersistentId(_) => {}
             GeometryRegionSelector::Name(_)
             | GeometryRegionSelector::Tag(_)

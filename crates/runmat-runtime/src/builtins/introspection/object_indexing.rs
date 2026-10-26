@@ -241,6 +241,7 @@ async fn num_arguments_from_subscript_with_context(
 mod cardinality;
 mod context;
 mod selectors;
+pub(crate) use cardinality::object_path_assignment_cardinality_with_access;
 use cardinality::*;
 pub use cardinality::{
     brace_assignment_cardinality, member_assignment_cardinality,

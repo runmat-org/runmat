@@ -142,7 +142,7 @@ fn generated_face_force_matches_explicit_tet4_static_balance_and_analytic_shear(
         for axis in 0..3 {
             reaction_force[axis] += force[axis];
         }
-        let [x, y, z] = node.coordinates_m;
+        let [x, y, z] = node.coordinates_m.canonical_value();
         reaction_moment[0] += y * force[2] - z * force[1];
         reaction_moment[1] += z * force[0] - x * force[2];
         reaction_moment[2] += x * force[1] - y * force[0];

@@ -7,6 +7,8 @@ use crate::assembly::elements::{
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum StructuralFieldRecoveryError {
+    #[error("structural field physical layout is invalid: {reason}")]
+    InvalidPhysicalLayout { reason: String },
     #[error("structural recovery state has {actual} DOFs; expected {expected}")]
     DisplacementShapeMismatch { expected: usize, actual: usize },
     #[error("solid recovery has {actual} element values; expected {expected}")]

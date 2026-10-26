@@ -1,51 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::{finite, invalid, token};
+use super::{invalid, token};
 use crate::GeometryContractError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Ap242PhysicalDimension {
-    Dimensionless,
-    Length,
-    PlaneAngle,
-    Area,
-    Volume,
-    Time,
-    Mass,
-    MassDensity,
-    Temperature,
-    Pressure,
-    Force,
-    Energy,
-    Power,
-    ThermalConductivity,
-    SpecificHeat,
-    InverseTemperature,
-    ElectricalConductivity,
-    AcousticImpedance,
-    DynamicViscosity,
-    ElectricPotential,
-    ElectricCurrent,
-    MagneticFluxDensity,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Ap242Measure {
-    pub dimension: Ap242PhysicalDimension,
-    pub value_si: f64,
-    pub source_value: f64,
-    pub source_unit: String,
-}
-
-impl Ap242Measure {
-    pub(super) fn validate(&self) -> Result<(), GeometryContractError> {
-        finite("AP242 SI value", self.value_si)?;
-        finite("AP242 source value", self.source_value)?;
-        token("AP242 source unit", &self.source_unit)
-    }
-}
+pub use runmat_types::physical::QuantityKind;
+pub type Ap242Measure = runmat_types::physical::SourceQuantity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,7 +47,7 @@ impl Ap242Parameter {
         self.value.validate()?;
         for bound in [&self.minimum, &self.maximum].into_iter().flatten() {
             bound.validate()?;
-            if bound.dimension != self.value.dimension {
+            if bound.kind() != self.value.kind() {
                 return Err(invalid(
                     "AP242 parameter bounds",
                     "bounds must have the parameter dimension",
@@ -96,7 +55,7 @@ impl Ap242Parameter {
             }
         }
         if let (Some(minimum), Some(maximum)) = (&self.minimum, &self.maximum) {
-            if minimum.value_si > maximum.value_si {
+            if minimum.canonical_value() > maximum.canonical_value() {
                 return Err(invalid(
                     "AP242 parameter bounds",
                     "minimum must not exceed maximum",

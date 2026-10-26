@@ -10,7 +10,7 @@ use crate::import::{
 };
 use runmat_geometry_core::{
     BodyMassProperties, ExactMassPropertiesEvaluator, ExactMassPropertiesImplementation,
-    GeometryDigest, GeometrySourceFormat, UnitSystem,
+    GeometryDigest, GeometrySourceFormat, LengthUnit,
 };
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -63,11 +63,8 @@ pub(crate) fn import_exact_cad_shape(
     // Exchange readers resolve file-declared units into a stable millimetre
     // kernel representation. Keep kernel tolerances independent of the caller's
     // fallback units; BREP has no declared units and uses that explicit fallback.
-    let fallback_unit_m = meters_per_unit(options.source_units)?;
-    let meters_per_source_unit = match format {
-        OcctCadFormat::Step | OcctCadFormat::Iges => 0.001,
-        OcctCadFormat::Brep => fallback_unit_m,
-    };
+    let (evidence, kernel_units) = crate::exact::exact_import_units(path, bytes, format, options)?;
+    let meters_per_source_unit = kernel_units.meters_per_unit();
     let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_probe());
     let payload = ffi::bridge::import_exact_cad_bytes(
@@ -116,28 +113,40 @@ pub(crate) fn import_exact_cad_shape(
             "OCCT exact shape produced invalid mass-property evidence".into(),
         ));
     }
-    let mass_properties = payload.has_volume_properties.then(|| {
-        let length2 = meters_per_source_unit * meters_per_source_unit;
-        let length3 = length2 * meters_per_source_unit;
-        let length5 = length3 * length2;
-        BodyMassProperties {
-            volume_m3: payload.volume * length3,
-            surface_area_m2: payload.surface_area * length2,
-            centroid_m: [
-                payload.centroid_x * meters_per_source_unit,
-                payload.centroid_y * meters_per_source_unit,
-                payload.centroid_z * meters_per_source_unit,
-            ],
-            inertia_about_centroid_m5: [
-                payload.inertia_xx * length5,
-                payload.inertia_yy * length5,
-                payload.inertia_zz * length5,
-                payload.inertia_xy * length5,
-                payload.inertia_xz * length5,
-                payload.inertia_yz * length5,
-            ],
-        }
-    });
+    let mass_properties = payload
+        .has_volume_properties
+        .then(|| {
+            let length2 = meters_per_source_unit * meters_per_source_unit;
+            let length3 = length2 * meters_per_source_unit;
+            let length5 = length3 * length2;
+            let properties = BodyMassProperties {
+                volume_m3: runmat_geometry_core::physical::Volume::new(payload.volume * length3),
+                surface_area_m2: runmat_geometry_core::physical::Area::new(
+                    payload.surface_area * length2,
+                ),
+                centroid_m: runmat_geometry_core::physical::Position::new([
+                    payload.centroid_x * meters_per_source_unit,
+                    payload.centroid_y * meters_per_source_unit,
+                    payload.centroid_z * meters_per_source_unit,
+                ]),
+                inertia_about_centroid_m5: runmat_geometry_core::physical::Quantity::<
+                    runmat_geometry_core::physical::kind::GeometricVolumeSecondMoment,
+                    _,
+                >::new([
+                    payload.inertia_xx * length5,
+                    payload.inertia_yy * length5,
+                    payload.inertia_zz * length5,
+                    payload.inertia_xy * length5,
+                    payload.inertia_xz * length5,
+                    payload.inertia_yz * length5,
+                ]),
+            };
+            properties
+                .validate()
+                .map_err(|error| GeometryImportError::InvalidGeometry(error.to_string()))?;
+            Ok::<_, GeometryImportError>(properties)
+        })
+        .transpose()?;
     let projection = exact_projection::project_exact_contracts(
         &payload,
         meters_per_source_unit,
@@ -176,9 +185,9 @@ pub(crate) fn import_exact_cad_shape(
             OcctCadFormat::Iges => GeometrySourceFormat::Iges,
             OcctCadFormat::Brep => GeometrySourceFormat::Brep,
         },
-        source_units: options.source_units,
+        source_unit_evidence: evidence,
         kernel_version: payload.kernel_version,
-        meters_per_source_unit,
+        kernel_units,
         representation: payload.representation,
         topology: projection.topology,
         evaluators: projection.evaluators,
@@ -193,7 +202,7 @@ pub(crate) fn import_exact_cad_shape(
         .topology
         .vertices
         .iter()
-        .map(|vertex| vertex.tolerance_m)
+        .map(|vertex| vertex.tolerance_m.canonical_value())
         .fold(0.0_f64, f64::max)
         .max(f64::EPSILON);
     let evaluator = super::evaluator::OcctExactEvaluator::new(&imported)
@@ -272,15 +281,8 @@ pub(crate) fn import_exact_cad_shape(
     Ok(imported)
 }
 
-fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
-    match units {
-        UnitSystem::Meter => Ok(1.0),
-        UnitSystem::Millimeter => Ok(0.001),
-        UnitSystem::Inch => Ok(0.0254),
-        UnitSystem::Unspecified => Err(GeometryImportError::InvalidOptions(
-            "exact CAD import requires explicit source units".into(),
-        )),
-    }
+fn meters_per_unit(units: LengthUnit) -> Result<f64, GeometryImportError> {
+    Ok(units.meters_per_unit())
 }
 
 fn materialize_iges_input(
@@ -516,9 +518,10 @@ fn payload_to_topology(
                     face_id: item.face_id,
                     u: item.u,
                     v: item.v,
-                    point_m: [item.point_x, item.point_y, item.point_z],
+                    point_m: [item.point_x, item.point_y, item.point_z]
+                        .map(|coordinate| coordinate * options.units.meters_per_unit()),
                     unit_normal: [item.normal_x, item.normal_y, item.normal_z],
-                    projection_error_m: item.projection_error,
+                    projection_error_m: item.projection_error * options.units.meters_per_unit(),
                 })
                 .collect(),
             assembly_nodes: payload
@@ -554,6 +557,11 @@ fn ffi_import_options(
         .unwrap_or(DEFAULT_ANGULAR_DEFLECTION);
     Ok(ffi::bridge::OcctImportOptions {
         step_coordinate_unit_m: meters_per_unit(options.units)?,
+        require_declared_step_units: false,
+        unitless_source_unit_m: options
+            .source_units
+            .unwrap_or(options.units)
+            .meters_per_unit(),
         linear_deflection,
         angular_deflection,
         relative_deflection: options.relative_deflection,
@@ -579,6 +587,8 @@ pub(super) fn ffi_exact_import_options(
 ) -> ffi::bridge::OcctImportOptions {
     ffi::bridge::OcctImportOptions {
         step_coordinate_unit_m: meters_per_source_unit,
+        require_declared_step_units: true,
+        unitless_source_unit_m: meters_per_source_unit,
         linear_deflection: DEFAULT_LINEAR_DEFLECTION,
         angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
         relative_deflection: false,
@@ -595,7 +605,10 @@ pub(super) fn ffi_exact_import_options(
             .analysis
             .healing
             .simplify_short_edges_and_sliver_faces,
-        maximum_healing_displacement: options.analysis.maximum_healing_displacement_m
+        maximum_healing_displacement: options
+            .analysis
+            .maximum_healing_displacement_m
+            .canonical_value()
             / meters_per_source_unit,
         cancel_token_id,
     }

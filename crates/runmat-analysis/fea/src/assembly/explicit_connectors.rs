@@ -54,7 +54,8 @@ pub(super) struct ConnectorAssemblyContext<'a> {
     pub topology_identity:
         crate::physics::structural::topology::CanonicalStructuralTopologyIdentity,
     pub layout: &'a StructuralDofLayout,
-    pub coordinates_m: &'a [[f64; 3]],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, &'a [[f64; 3]]>,
     pub node_identities: &'a [runmat_meshing_core::StableDigest],
 }
 
@@ -107,7 +108,7 @@ pub(super) fn assemble_explicit_connectors(
     let coordinates_m = topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let node_identities = topology
         .nodes
@@ -119,7 +120,10 @@ pub(super) fn assemble_explicit_connectors(
         ConnectorAssemblyContext {
             topology_identity: topology.identity,
             layout,
-            coordinates_m: &coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(&coordinates_m),
             node_identities: &node_identities,
         },
         local_execution,
@@ -160,14 +164,18 @@ fn compile_connectors_with_resolver<'a>(
             } => {
                 let endpoints =
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
-                let axis = axial_axis(context.coordinates_m, endpoints, connector)?;
+                let axis = axial_axis(
+                    context.coordinates_m.canonical_value(),
+                    endpoints,
+                    connector,
+                )?;
                 let point = PreparedPointConnector {
                     connector,
                     source_digest,
                     operator: PointConnectorOperator::AxialSpring {
                         endpoints,
                         axis,
-                        coefficient: value.newtons_per_meter,
+                        coefficient: value.canonical_value(),
                     },
                 };
                 entries.push(scoped::canonical_point_entry(
@@ -183,14 +191,18 @@ fn compile_connectors_with_resolver<'a>(
             } => {
                 let endpoints =
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
-                let axis = axial_axis(context.coordinates_m, endpoints, connector)?;
+                let axis = axial_axis(
+                    context.coordinates_m.canonical_value(),
+                    endpoints,
+                    connector,
+                )?;
                 let point = PreparedPointConnector {
                     connector,
                     source_digest,
                     operator: PointConnectorOperator::AxialDashpot {
                         endpoints,
                         axis,
-                        coefficient: value.newton_seconds_per_meter,
+                        coefficient: value.canonical_value(),
                     },
                 };
                 entries.push(scoped::canonical_point_entry(
@@ -210,7 +222,7 @@ fn compile_connectors_with_resolver<'a>(
                     source_digest,
                     operator: PointConnectorOperator::GroundSpring {
                         node,
-                        coefficient: value.newtons_per_meter,
+                        coefficient: value.canonical_value(),
                     },
                 };
                 entries.push(scoped::canonical_point_entry(
@@ -231,7 +243,7 @@ fn compile_connectors_with_resolver<'a>(
                 entries.push(CanonicalConnectorEntry::SurfaceNormalFoundation {
                     connector_id: connector.connector_id.clone(),
                     source_digest,
-                    modulus_newtons_per_cubic_meter: modulus.newtons_per_cubic_meter,
+                    modulus_newtons_per_cubic_meter: modulus.canonical_value(),
                     quadrature: resolved
                         .surface_samples
                         .iter()
@@ -254,14 +266,14 @@ fn compile_connectors_with_resolver<'a>(
                 work.push(PreparedConnector::Surface {
                     connector,
                     samples: resolved.surface_samples,
-                    modulus: modulus.newtons_per_cubic_meter,
+                    modulus: modulus.canonical_value(),
                 });
             }
         }
     }
     let plan = CanonicalStructuralConnectorPlan::new(
         context.topology_identity,
-        context.coordinates_m.len(),
+        context.coordinates_m.canonical_value().len(),
         authored_connectors_digest(connectors).map_err(|_| {
             StructuralAssemblyError::InvalidExplicitConnector {
                 connector_id: "connector-plan".into(),
@@ -498,7 +510,7 @@ pub(super) fn resolve_explicit_surface(
                 node_indices: node_indices.clone(),
                 shape_values: shape_values.to_vec(),
                 unit_normal: normal,
-                area_weight_m2: triangle.area_m2 / 3.0,
+                area_weight_m2: triangle.area_m2.canonical_value() / 3.0,
             });
         }
     }

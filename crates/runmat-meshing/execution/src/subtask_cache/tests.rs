@@ -103,16 +103,16 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
         &control,
         SharedCurveDiscretizationOptions {
             resolution: CurveResolutionPolicy {
-                maximum_chordal_deviation_m: 0.01,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
                 maximum_tangent_change_rad: 0.2,
                 minimum_metric_edge_length: 0.01,
                 maximum_metric_edge_length: 1.0,
             },
             maximum_nodes_per_edge: 1024,
             maximum_subdivision_depth: 20,
-            geometry_absolute_error_m: 1e-10,
+            geometry_absolute_error_m: runmat_types::physical::Length::new(1e-10),
             pcurve_absolute_error: 1e-10,
-            arc_length_absolute_error_m: 1e-10,
+            arc_length_absolute_error_m: runmat_types::physical::Length::new(1e-10),
         },
     )
     .unwrap();
@@ -121,7 +121,7 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
     request.quality.surface.minimum_metric_edge_length = 0.001;
     request.quality.surface.minimum_metric_angle_degrees = 0.01;
     request.quality.surface.maximum_physical_aspect_ratio = 1e9;
-    request.quality.surface.maximum_chordal_deviation_m = 1e9;
+    request.quality.surface.maximum_chordal_deviation_m = runmat_types::physical::Length::new(1e9);
     request.quality.surface.maximum_normal_deviation_degrees = 180.0;
     let store = Arc::new(Store::default());
     let mut first = SurfaceFaceReuse::new(
@@ -265,7 +265,18 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
     for edge in &mut changed.edges {
         for node in &mut edge.nodes {
             if node.node_id == id {
-                node.coordinates_m[0] = f64::from_bits(node.coordinates_m[0].to_bits() + 1);
+                {
+                    let quantity_change =
+                        f64::from_bits(node.coordinates_m.canonical_value()[0].to_bits() + 1);
+                    let quantity_index = 0;
+                    let quantity_slot = &mut node.coordinates_m;
+                    let mut quantity_coordinates = quantity_slot.canonical_value();
+                    quantity_coordinates[quantity_index] = quantity_change;
+                    *quantity_slot = runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(quantity_coordinates);
+                };
             }
         }
     }
@@ -288,12 +299,15 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
         .find(|node| !local_nodes.contains(&node.node_id))
         .unwrap();
     let other_id = other.node_id;
-    let mut point = other.coordinates_m;
+    let mut point = other.coordinates_m.canonical_value();
     point[0] += 1e-8;
     for edge in &mut unrelated.edges {
         for node in &mut edge.nodes {
             if node.node_id == other_id {
-                node.coordinates_m = point;
+                node.coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(point);
             }
         }
     }

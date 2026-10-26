@@ -36,13 +36,15 @@ pub enum SelectedExecutableAttachmentError {
 
 #[path = "selected_executable_product/code.rs"]
 mod code;
+#[path = "selected_executable_product/graph.rs"]
+mod graph;
 pub use code::SelectedExecutableCode;
 
 #[derive(Debug)]
 pub struct SelectedExecutableProduct {
     code: Rc<SelectedExecutableCode>,
     source_owner: SelectedProgramSourceOwner,
-    foreign_basis: Option<Digest>,
+    foreign_basis: graph::SelectedForeignBasis,
     interop_receipt: Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>,
     /// Original invocation's finite dynamic-source authority. This local
     /// port is never serialized; a Graph worker needs a separately checked
@@ -451,7 +453,10 @@ impl SelectedExecutableProduct {
     }
 
     pub fn foreign_basis(&self) -> Option<Digest> {
-        self.foreign_basis
+        match self.foreign_basis {
+            graph::SelectedForeignBasis::Local(basis) => basis,
+            graph::SelectedForeignBasis::ArchiveAdmitted => None,
+        }
     }
 
     pub fn interop_receipt(&self) -> Option<&std::rc::Rc<crate::SelectedUnitInteropReceipt>> {
@@ -579,7 +584,7 @@ impl SelectedExecutableProduct {
         Ok(Rc::new(Self {
             code,
             source_owner,
-            foreign_basis,
+            foreign_basis: graph::SelectedForeignBasis::Local(foreign_basis),
             interop_receipt,
             dynamic_admission,
         }))
@@ -620,7 +625,7 @@ fn validate_product_source_and_prior(
                 || !existing
                     .source_owner()
                     .same_issuance(product.source_owner())
-                || existing.foreign_basis() != product.foreign_basis()
+                || existing.foreign_basis != product.foreign_basis
                 || match (existing.interop_receipt(), product.interop_receipt()) {
                     (None, None) => false,
                     (Some(left), Some(right)) => !left.same_selected_admission(right),

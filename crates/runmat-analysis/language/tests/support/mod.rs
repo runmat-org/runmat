@@ -21,6 +21,9 @@ impl TestHost {
         self = self.with_geometry_inspection(
             path,
             GeometryInspection {
+                preview_extent_m: None,
+                named_selections: None,
+                unit_evidence: Default::default(),
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
                 capabilities: vec![

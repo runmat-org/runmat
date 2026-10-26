@@ -37,7 +37,7 @@ impl F32RealFloatingPipelines {
                     uniform_entry(3),
                 ],
                 BINARY_SHADER_F32,
-            ),
+            ).with_binary_launch(linear_launch),
             binary_broadcast: create_pipeline(
                 access,
                 "runmat-f32-real-binary-broadcast-layout",
@@ -50,7 +50,7 @@ impl F32RealFloatingPipelines {
                     uniform_entry(3),
                 ],
                 BINARY_BROADCAST_SHADER_F32,
-            ),
+            ).with_binary_launch(linear_launch),
             binary_max: create_pipeline(
                 access,
                 "runmat-f32-real-binary-max-layout",
@@ -67,7 +67,7 @@ impl F32RealFloatingPipelines {
                     false,
                     crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
                 ),
-            ),
+            ).with_binary_launch(linear_launch),
             binary_broadcast_max: create_pipeline(
                 access,
                 "runmat-f32-real-binary-max-broadcast-layout",
@@ -84,7 +84,7 @@ impl F32RealFloatingPipelines {
                     true,
                     crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
                 ),
-            ),
+            ).with_binary_launch(linear_launch),
             scalar: create_pipeline(
                 access,
                 "runmat-f32-real-scalar-layout",

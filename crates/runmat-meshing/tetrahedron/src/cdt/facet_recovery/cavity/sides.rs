@@ -237,7 +237,11 @@ fn oriented_external_face(
     constraint_index: u32,
 ) -> Result<ConstrainedCavityBoundaryFace, DelaunayFacetRecoveryError> {
     let mut nodes = face.nodes;
-    let coordinates = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let coordinates = |node: u32| {
+        topology.nodes[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     match orient3d([
         coordinates(nodes[0]),
         coordinates(nodes[1]),
@@ -284,6 +288,7 @@ fn closed_surface_volume(
         .fold([0.0; 3], |mut sum, node| {
             for (axis, value) in topology.nodes[node as usize]
                 .coordinates_m
+                .canonical_value()
                 .iter()
                 .enumerate()
             {
@@ -297,7 +302,9 @@ fn closed_surface_volume(
         .iter()
         .map(|face| {
             let points = face.node_ids.map(|node| {
-                let point = topology.nodes[node as usize].coordinates_m;
+                let point = topology.nodes[node as usize]
+                    .coordinates_m
+                    .canonical_value();
                 std::array::from_fn(|axis| point[axis] - reference[axis])
             });
             dot(points[0], cross(points[1], points[2])) / 6.0

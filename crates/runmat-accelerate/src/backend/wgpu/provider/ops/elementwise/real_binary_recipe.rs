@@ -101,7 +101,12 @@ fn native_input(input: &ProviderRealBinaryInput) -> Option<NumericPrecision> {
 
 impl WgpuProvider {
     pub(super) fn binary_linear_launch(&self) -> Result<FrozenLinearLaunch> {
-        let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+        let launch = self
+            .pipelines
+            .binary
+            .linear_launch()
+            .ok_or_else(|| anyhow!("selected real binary launch is not frozen"))?;
+        let workgroup = launch.workgroup();
         ensure!(
             workgroup <= self.adapter_limits.max_compute_workgroup_size_x
                 && workgroup <= self.adapter_limits.max_compute_invocations_per_workgroup,
@@ -187,12 +192,12 @@ impl WgpuProvider {
                 (lhs, elements)
             }
             ProviderRealBinaryRoute::Broadcast => {
-                let Ok(plan) = broadcast_plan::BroadcastRoute::with_enabled_limit(
+                let Ok(plan) = broadcast_plan::BroadcastRoute::with_launch(
                     &lhs,
                     &rhs,
                     crate::backend::wgpu::params::BCAST_MAX_RANK,
                     element_bytes,
-                    self.adapter_limits.max_compute_workgroups_per_dimension,
+                    launch,
                 ) else {
                     return Ok(None);
                 };

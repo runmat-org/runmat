@@ -88,14 +88,17 @@ pub(crate) async fn execute_locally(
     for (materialization_index, prepared) in materializations.iter().enumerate() {
         prepared.validate().map_err(protocol)?;
         for (chunk_index, chunk) in prepared.program().chunks.iter().enumerate() {
+            let mut chunk_resources = resources.clone();
+            chunk_resources
+                .required_capabilities
+                .extend(chunk.graph_capability().map_err(protocol)?);
             let context = GeneratorExecutionContext {
                 scope_id: session.scope_id(),
                 pool_id: session.pool_id(),
-                host: crate::program_host::program_host(
-                    &chunk.request,
-                    crate::program_host::local_trust(),
-                )?,
-                resources: resources.clone(),
+                host: chunk
+                    .execution_host_requirement(crate::program_host::local_trust())
+                    .map_err(protocol)?,
+                resources: chunk_resources,
                 retry: RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },
                 deadline_unix_millis: None,
                 priority: 0,
@@ -123,7 +126,7 @@ pub(crate) async fn execute_locally(
             task_locations.push((materialization_index, chunk_index, chunk.plan.identity));
         }
     }
-    let task_handles = session.submit_graph(tasks)?;
+    let task_handles = session.submit_workers(tasks)?;
     if task_handles.len() != task_locations.len() {
         return Err(protocol(
             "generated solver input task inventory differs from its chunk plans",
@@ -152,16 +155,15 @@ pub(crate) async fn execute_locally(
                     return Err(protocol(error));
                 }
             };
-            let Some(([value], [])) = success.values() else {
+            let output = runmat_analysis_execution::generator_chunk_output_from_success(
+                *chunk_identity,
+                success,
+            )
+            .map_err(|error| {
                 session.cancel(CancellationReason::ParentScope);
-                return Err(protocol(
-                    "generated solver input returned a non-scalar output list",
-                ));
-            };
-            outputs[*materialization_index][*chunk_index] = Some(GeneratorChunkOutput {
-                chunk_identity: *chunk_identity,
-                value: value.clone(),
-            });
+                protocol(error)
+            })?;
+            outputs[*materialization_index][*chunk_index] = Some(output);
             remaining -= 1;
         }
         if remaining == 0 {

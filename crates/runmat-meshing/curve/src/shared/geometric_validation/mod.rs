@@ -111,7 +111,7 @@ fn validate_curve(
             context.curves,
             context.control,
             transform,
-            options.geometry_absolute_error_m,
+            options.geometry_absolute_error_m.canonical_value(),
         )?;
         return Ok(0);
     }
@@ -136,11 +136,13 @@ fn validate_curve(
     }
     let requested = curve.requested;
     if maximum_chordal_deviation_m
-        > requested.maximum_chordal_deviation_m + options.geometry_absolute_error_m
+        > requested.maximum_chordal_deviation_m.canonical_value()
+            + options.geometry_absolute_error_m.canonical_value()
         || maximum_tangent_change_rad > requested.maximum_tangent_change_rad + 1.0e-12
         || minimum_metric_edge_length + 1.0e-12 < requested.minimum_metric_edge_length
         || maximum_metric_edge_length > requested.maximum_metric_edge_length + 1.0e-12
-        || curve.achieved.maximum_chordal_deviation_m + options.geometry_absolute_error_m
+        || curve.achieved.maximum_chordal_deviation_m.canonical_value()
+            + options.geometry_absolute_error_m.canonical_value()
             < maximum_chordal_deviation_m
         || curve.achieved.maximum_tangent_change_rad + 1.0e-12 < maximum_tangent_change_rad
         || curve.achieved.minimum_metric_edge_length > minimum_metric_edge_length + 1.0e-12
@@ -165,12 +167,13 @@ fn validate_nodes(
     transform: GeometryTransform,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<(), SharedCurveError> {
-    let segment_error = options.arc_length_absolute_error_m / (curve.nodes.len() - 1) as f64;
+    let segment_error =
+        options.arc_length_absolute_error_m.canonical_value() / (curve.nodes.len() - 1) as f64;
     let mut arc_length_m = 0.0;
     for (index, node) in curve.nodes.iter().enumerate() {
         let point_m = curves
             .point(&edge.curve_evaluator_id, node.parameter, control)
-            .map(|point| transform.transform_point(point))
+            .map(|point| transform.transform_point(point.canonical_value()))
             .map_err(|error| geometry_error(edge, error))?;
         let coordinate_tolerance_m = node
             .source_vertex_id
@@ -180,11 +183,11 @@ fn validate_nodes(
                     .vertices
                     .binary_search_by(|vertex| vertex.id.cmp(vertex_id))
                     .ok()
-                    .map(|index| topology.vertices[index].tolerance_m)
+                    .map(|index| topology.vertices[index].tolerance_m.canonical_value())
             })
             .unwrap_or(0.0)
-            .max(options.geometry_absolute_error_m);
-        if length(sub(point_m, node.coordinates_m)) > coordinate_tolerance_m {
+            .max(options.geometry_absolute_error_m.canonical_value());
+        if length(sub(point_m, node.coordinates_m.canonical_value())) > coordinate_tolerance_m {
             return Err(mismatch(
                 edge,
                 "curve node coordinates",
@@ -205,7 +208,9 @@ fn validate_nodes(
                 options.maximum_subdivision_depth,
             )?;
         }
-        if (arc_length_m - node.arc_length_m).abs() > options.arc_length_absolute_error_m {
+        if (arc_length_m - node.arc_length_m.canonical_value()).abs()
+            > options.arc_length_absolute_error_m.canonical_value()
+        {
             return Err(mismatch(
                 edge,
                 "curve node arc length",
@@ -244,6 +249,9 @@ fn validate_pcurves(
         for (node, stored_uv) in curve.nodes.iter().zip(&face_use.node_uv) {
             let exact_uv = pcurves
                 .point(&coedge.pcurve_evaluator_id, node.parameter, control)
+                .map(|uv| {
+                    uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value))
+                })
                 .map_err(|error| geometry_error(edge, error))?;
             if ((exact_uv[0] - stored_uv[0]).powi(2) + (exact_uv[1] - stored_uv[1]).powi(2)).sqrt()
                 > options.pcurve_absolute_error

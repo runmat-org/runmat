@@ -201,19 +201,32 @@ pub async fn execute_prepared_graph_request(
         Ok(values) => values,
         Err(response) => return response,
     };
+    enum TransferFailure {
+        Codec(runmat_runtime::execution::value_codec::ValueCodecError),
+        Selection(String),
+    }
     let response = result.with_owned_sequence(|sequence| {
         let preliminary = &selected.issuer;
         let prepared = runmat_runtime::execution::value_codec::prepare_payload_graph(
             sequence.as_slice(),
             preliminary,
             ValueLimits::default(),
+            Some(
+                &runmat_runtime::execution::value_codec::ValidationWorkspaceOwner::capture(
+                    &selected_runtime,
+                ),
+            ),
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(TransferFailure::Codec)?;
         let mut node_units = std::collections::HashMap::new();
         for (node, origin, authority) in prepared.bound_authorities() {
-            let selected_owner = selected.owner_for_authority(*origin, authority)?;
+            let selected_owner = selected
+                .owner_for_authority(*origin, authority)
+                .map_err(TransferFailure::Selection)?;
             if node_units.insert(*node, selected_owner.unit).is_some() {
-                return Err("one result node repeats its selected authority".to_string());
+                return Err(TransferFailure::Selection(
+                    "one result node repeats its selected authority".to_string(),
+                ));
             }
         }
         let graph = prepared
@@ -224,12 +237,29 @@ pub async fn execute_prepared_graph_request(
                 &selected.proofs,
                 &node_units,
             )
-            .map_err(|error| error.to_string())?;
-        Ok::<_, String>(ProgramExecutionResponse::GraphSuccess { graph })
+            .map_err(TransferFailure::Codec)?;
+        Ok::<_, TransferFailure>(ProgramExecutionResponse::GraphSuccess { graph })
     });
     let response = match response {
         Ok(response) => response,
-        Err(error) => return failure(format!("worker could not transfer graph result: {error}")),
+        Err(TransferFailure::Codec(
+            runmat_runtime::execution::value_codec::ValueCodecError::Allocation { source, .. },
+        )) => {
+            let mut error = runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+                Some(&selected_runtime),
+                "RunMat:Execution:GraphTransfer",
+                "worker graph validation allocation failed",
+                source,
+            );
+            error.gpu_gather_retry = runmat_runtime::GpuGatherRetry::Never;
+            return graph_runtime_failure_response(error, &selected_runtime, &selected);
+        }
+        Err(TransferFailure::Codec(error)) => {
+            return failure(format!("worker could not transfer graph result: {error}"))
+        }
+        Err(TransferFailure::Selection(error)) => {
+            return failure(format!("worker could not transfer graph result: {error}"))
+        }
     };
     if let Err(error) = admitted.validate_response(&response) {
         return failure(format!(

@@ -8,7 +8,14 @@ mod region_sources;
 mod request;
 mod reservation;
 mod target;
+mod task_terminal;
 mod transport;
+mod worker_inventory;
+pub use task_terminal::{
+    ProgramTaskCancellation, ProgramTaskRetirement, ProgramTaskTerminal,
+    PROGRAM_TASK_CONTROL_SCHEMA_VERSION, PROGRAM_TASK_TERMINAL_SCHEMA_VERSION,
+};
+pub use worker_inventory::{ProgramWorkerInventory, PROGRAM_WORKER_INVENTORY_SCHEMA_VERSION};
 
 pub use artifact::{ExecutableForm, ProgramArtifact, PROGRAM_ARTIFACT_SCHEMA_VERSION};
 pub use identity::{ProgramArtifactId, ProgramRecipeId};
@@ -20,10 +27,11 @@ pub use recipe::{
 pub use region_sources::InterpreterRegionSourcesV1;
 pub use request::{
     admit_program_execution_request_bytes, admit_remote_program_object_bytes,
-    admit_worker_program_request_bytes, AdmittedGraphUnitBundle,
-    ArchiveAdmittedGraphExecutionRequest, BorrowedProgramExecutionRequest, GraphExecutionRequest,
-    GraphInvocationRoots, GraphResponseAuthority, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, ProgramExecutionRequest, ProgramExecutionResponse, RemoteProgramObject,
+    admit_worker_program_request_bytes, AdmittedGraphUnitBundle, ArchiveAdmittedCapturedGraphCode,
+    ArchiveAdmittedGraphExecutionRequest, BorrowedProgramExecutionRequest, CapturedGraphCode,
+    GraphExecutionRequest, GraphInvocationRoots, GraphResponseAuthority,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionRequest,
+    ProgramExecutionResponse, RemoteProgramObject, ValidatedCapturedGraphCode,
     ValidatedGraphExecutionRequest, WorkerProgramRequest, GRAPH_EXECUTION_REQUEST_SCHEMA_V10,
     GRAPH_EXECUTION_REQUEST_SCHEMA_V11, GRAPH_EXECUTION_REQUEST_SCHEMA_V12,
     MAX_PROGRAM_EXECUTION_ARGUMENTS, MAX_PROGRAM_EXECUTION_RESULT_OBJECTS,

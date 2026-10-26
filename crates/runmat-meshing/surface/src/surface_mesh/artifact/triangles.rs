@@ -83,7 +83,7 @@ pub(super) fn validate(
         return Err(invalid("published surface triangle is invalid"));
     }
     if covered.iter().any(|covered| !covered)
-        || mesh.maximum_chordal_deviation_m != maximum_chordal
+        || mesh.maximum_chordal_deviation_m.canonical_value() != maximum_chordal
         || mesh.maximum_normal_deviation_rad != maximum_normal
     {
         return Err(invalid(

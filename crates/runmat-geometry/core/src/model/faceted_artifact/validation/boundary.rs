@@ -119,12 +119,16 @@ fn validate_shell_orientation(
 ) -> Result<(), GeometryContractError> {
     let shell = &solid.shells[shell_index];
     let anchor_triangle = &solid.triangles[shell.triangle_indices[0] as usize];
-    let origin = solid.vertices[anchor_triangle.vertex_indices[0] as usize].coordinates_m;
+    let origin = solid.vertices[anchor_triangle.vertex_indices[0] as usize]
+        .coordinates_m
+        .canonical_value();
     let mut signed_six_volume = 0.0;
     for &triangle_index in &shell.triangle_indices {
         let indices = solid.triangles[triangle_index as usize].vertex_indices;
         let [a, b, c] = indices.map(|index| {
-            let point = solid.vertices[index as usize].coordinates_m;
+            let point = solid.vertices[index as usize]
+                .coordinates_m
+                .canonical_value();
             [
                 point[0] - origin[0],
                 point[1] - origin[1],

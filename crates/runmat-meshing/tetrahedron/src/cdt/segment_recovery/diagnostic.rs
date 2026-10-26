@@ -31,8 +31,9 @@ pub(super) fn trace_unrecovered_interval(
         return;
     }
     let endpoints = [left.identity, right.identity];
-    let coordinates =
-        endpoints.map(|identity| find_node(topology, identity).map(|node| node.coordinates_m));
+    let coordinates = endpoints.map(|identity| {
+        find_node(topology, identity).map(|node| node.coordinates_m.canonical_value())
+    });
     let mut samples = [None; 16];
     let mut count = 0;
     let mut incident_counts = [0; 2];
@@ -47,9 +48,11 @@ pub(super) fn trace_unrecovered_interval(
                 if let Some(tetrahedron) = topology.tetrahedron(tetrahedron_index) {
                     samples[count] = Some((
                         tetrahedron_index,
-                        tetrahedron
-                            .vertex_indices
-                            .map(|node| topology.nodes()[node as usize].coordinates_m),
+                        tetrahedron.vertex_indices.map(|node| {
+                            topology.nodes()[node as usize]
+                                .coordinates_m
+                                .canonical_value()
+                        }),
                     ));
                     count += 1;
                 }
@@ -75,7 +78,7 @@ pub(super) fn split_limit_failure(
     witness: Option<(StableDigest, [f64; 3])>,
 ) -> DelaunaySegmentRecoveryError {
     let nodes = [left.identity, right.identity].map(|identity| find_node(topology, identity));
-    let coordinates = nodes.map(|node| node.map(|node| node.coordinates_m));
+    let coordinates = nodes.map(|node| node.map(|node| node.coordinates_m.canonical_value()));
     let constructions = nodes.map(|node| node.map(|node| node.construction));
     let incident_tetrahedra = [left.identity, right.identity].map(|identity| {
         node_index(topology, identity).map(|index| topology.vertex_star(index as u32).len())
@@ -94,7 +97,11 @@ pub(super) fn split_limit_failure(
     let shared_neighbors = neighbors[0]
         .intersection(&neighbors[1])
         .take(8)
-        .map(|index| topology.nodes()[*index as usize].coordinates_m)
+        .map(|index| {
+            topology.nodes()[*index as usize]
+                .coordinates_m
+                .canonical_value()
+        })
         .collect::<Vec<_>>();
     error(
         DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,

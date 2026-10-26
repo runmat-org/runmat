@@ -7,7 +7,7 @@ fn neighborhoods(count: usize) -> TopologyMutation {
     for copy in 0..count {
         let offset = nodes.len() as u32;
         for (index, node) in original.nodes.iter().enumerate() {
-            let mut coordinates = node.coordinates_m;
+            let mut coordinates = node.coordinates_m.canonical_value();
             coordinates[0] += copy as f64 * 10.;
             let mut identity = [0; 32];
             identity[..8]
@@ -73,8 +73,8 @@ fn corridor_candidates_retain_every_exhaustive_crossing_and_prune_distant_hulls(
             }
         }
         let segment = [
-            topology.nodes()[1].coordinates_m,
-            topology.nodes()[5].coordinates_m,
+            topology.nodes()[1].coordinates_m.canonical_value(),
+            topology.nodes()[5].coordinates_m.canonical_value(),
         ];
         let mut crossings = 0;
         for (edge, mut uses) in exhaustive {
@@ -82,7 +82,11 @@ fn corridor_candidates_retain_every_exhaustive_crossing_and_prune_distant_hulls(
             if edge.contains(&1) || edge.contains(&5) {
                 continue;
             }
-            let endpoints = edge.map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
+            let endpoints = edge.map(|vertex| {
+                topology.nodes()[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            });
             if orient_volume_nodes([
                 topology.nodes()[1],
                 topology.nodes()[5],

@@ -20,11 +20,14 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     topology.faces[0].periodic_u = true;
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Cylinder {
-            origin_m: [0.0; 3],
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             axis_m_per_v: [0.0, 0.0, 1.0],
-            radius_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 range(-std::f64::consts::PI, std::f64::consts::PI),
                 range(-2.0, 2.0),
@@ -217,7 +220,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     };
     let refinement_context = crate::ExactFaceRefinementContext::new(
@@ -854,11 +857,14 @@ fn singular_spherical_wedge_uses_an_exact_bounded_polar_chart() {
     topology.faces[0].has_singularity = true;
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Sphere {
-            center_m: [0.0; 3],
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             z_axis: [0.0, 0.0, 1.0],
-            radius_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 range(0.0, std::f64::consts::TAU),
                 range(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
@@ -991,7 +997,7 @@ fn singular_spherical_wedge_uses_an_exact_bounded_polar_chart() {
         minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.001,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     };
     let refinement_context = crate::ExactFaceRefinementContext::new(

@@ -23,7 +23,7 @@ pub(super) fn reintegrate(
         let coordinates = element
             .node_indices
             .iter()
-            .map(|&i| projection.nodes[i].coordinates_m)
+            .map(|&i| projection.nodes[i].coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         let rows = element
             .node_indices

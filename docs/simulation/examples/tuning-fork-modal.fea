@@ -1,8 +1,11 @@
+geometry selection.
+// Engineering physics belongs in the importing study.
+
 geometry fork {
     file = "./geometry/tuning-fork.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
-    region fixed_end : face { select id "face_000001"; expect exactly_one }
+    region body : solid { select name "body"; expect exactly_one }
+    region fixed_end : face { select name "fixed_end"; expect exactly_one }
 }
 
 mesh fork on geometry.fork {

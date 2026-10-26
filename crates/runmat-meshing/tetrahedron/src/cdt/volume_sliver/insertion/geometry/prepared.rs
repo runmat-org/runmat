@@ -27,7 +27,7 @@ impl PreparedEdgeStar {
             for endpoint in edge {
                 let face = [endpoint, first, second];
                 children.push(Child {
-                    face: face.map(|vertex| topology.node(vertex).coordinates_m),
+                    face: face.map(|vertex| topology.node(vertex).coordinates_m.canonical_value()),
                     metric: PreparedJacobian::new(metrics(face)?),
                 });
             }

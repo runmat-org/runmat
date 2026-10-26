@@ -302,7 +302,11 @@ fn validate_mutation_lineage(
         .collect::<BTreeMap<_, _>>();
     for node in &refinement.insertions {
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || nodes.insert(node.identity, *node).is_some()
         {
             return Err(invalid_lineage());

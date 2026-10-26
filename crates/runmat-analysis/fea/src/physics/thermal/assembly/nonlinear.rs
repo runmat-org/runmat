@@ -5,9 +5,10 @@ use crate::algebra::NullspaceEliminationEvidence;
 mod radiation;
 
 pub(crate) struct ThermalNonlinearResidual {
-    pub(crate) residual_w: Vec<f64>,
+    pub(crate) residual_w:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Power, Vec<f64>>,
     /// Largest original absolute physical transfer sum, without a numerical floor.
-    pub(crate) physical_power_scale_w: f64,
+    pub(crate) physical_power_scale_w: runmat_types::physical::Power,
 }
 
 impl ThermalOperatorAssembly {
@@ -87,22 +88,22 @@ impl ThermalOperatorAssembly {
                                 shape * (departure[node] + (reference[node] - ambient))
                             })
                             .sum::<f64>();
-                        boundary_scale += (coefficient.watts_per_square_meter_kelvin
-                            * difference
-                            * point.area_weight_m2)
-                            .abs();
+                        boundary_scale +=
+                            (coefficient.canonical_value() * difference * point.area_weight_m2)
+                                .abs();
                     })
                     .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
             }
         }
         let prescribed_scale = residual
             .iter()
-            .zip(&self.prescribed_temperature_k)
+            .zip(self.prescribed_temperature_k.canonical_values())
             .filter(|(_, prescribed)| prescribed.is_some())
             .map(|(power, _)| power.abs())
             .sum::<f64>();
         let applied_scale = self
             .applied_source
+            .canonical_values()
             .iter()
             .map(|power| power.abs())
             .sum::<f64>();
@@ -116,8 +117,8 @@ impl ThermalOperatorAssembly {
             ));
         }
         Ok(ThermalNonlinearResidual {
-            residual_w: residual,
-            physical_power_scale_w: scale,
+            residual_w: runmat_types::physical::Quantity::new(residual),
+            physical_power_scale_w: runmat_types::physical::Power::new(scale),
         })
     }
 
@@ -129,7 +130,10 @@ impl ThermalOperatorAssembly {
         departure: &[f64],
         previous: Option<&[f64]>,
         dt: f64,
-    ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+    ) -> Result<
+        crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>,
+        ThermalAssemblyError,
+    > {
         let physical =
             self.nonlinear_residual(model, sample, reference, departure, previous, dt)?;
         let support = self
@@ -157,7 +161,7 @@ impl ThermalOperatorAssembly {
             domain: ContributionDomain::Thermal,
             contribution_id: ContributionId("physical_radiation_exact_newton_tangent".into()),
         });
-        let mut anchors = self.positive_robin_weight.clone();
+        let mut anchors = self.positive_robin_weight.canonical_values().clone();
         self.visit_radiation(model, sample, reference, departure, |face, form| {
             for (i, &row) in face.node_indices.iter().enumerate() {
                 anchors[row] += form.tangent_w_per_k[i][i];
@@ -171,15 +175,22 @@ impl ThermalOperatorAssembly {
             .map_err(|e| ThermalAssemblyError::SparseOperator(e.to_string()))?;
         let mut rhs = physical
             .residual_w
-            .into_iter()
+            .canonical_values()
+            .iter()
             .map(|power| -power)
             .collect::<Vec<_>>();
         let constrained = self
             .prescribed_temperature_k
+            .canonical_values()
             .iter()
             .map(Option::is_some)
             .collect::<Vec<_>>();
-        for (node, prescribed) in self.prescribed_temperature_k.iter().enumerate() {
+        for (node, prescribed) in self
+            .prescribed_temperature_k
+            .canonical_values()
+            .iter()
+            .enumerate()
+        {
             if let Some(temperature) = prescribed {
                 rhs[node] = (temperature - reference[node]) - departure[node];
             }
@@ -208,6 +219,17 @@ impl ThermalOperatorAssembly {
         };
         AssembledRealSystem::try_new_with_nullspace_evidence(operators, constrained, rhs, evidence)
             .map_err(|e| ThermalAssemblyError::SparseOperator(e.to_string()))
+            .and_then(|numerical| {
+                crate::algebra::PhysicalScalarSystem::try_new(
+                    numerical,
+                    runmat_types::physical::DynamicDimension::quantity_type(
+                        runmat_types::physical::QuantityKind::Power,
+                    )
+                    .with_semantic_kind(Some(runmat_types::physical::QuantityKind::Power))
+                    .expect("thermal equation"),
+                )
+                .map_err(|error| ThermalAssemblyError::SparseOperator(error.into()))
+            })
     }
 
     fn validate_nonlinear_state(

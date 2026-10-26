@@ -86,9 +86,11 @@ pub fn validate_delaunay_volume_quality(
                 "quality cannot describe an unassigned tetrahedron",
             )
         })?;
-        let points = tetrahedron
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+        let points = tetrahedron.vertex_indices.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         let identities = tetrahedron
             .vertex_indices
             .map(|vertex| topology.nodes[vertex as usize].identity);

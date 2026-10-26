@@ -81,6 +81,7 @@ impl VertexUvContext<'_> {
                 if at_start { range.start } else { range.end },
                 control,
             )
+            .map(|uv| uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)))
             .map_err(|error| geometry_error(edge, error))?;
         let difference = (uv[0] - original[0]).hypot(uv[1] - original[1]);
         if !difference.is_finite() || difference > maximum_error {

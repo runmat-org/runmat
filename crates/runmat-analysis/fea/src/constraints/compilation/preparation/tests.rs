@@ -14,7 +14,7 @@ fn preparation_composes_shared_inventories_and_preserves_original_dispatch() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = crate::constraints::compilation_tests::mesh(order);
         let solid = fixture_model(FixtureId::CantileverLinearStatic);
-        let mixed = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+        let mixed = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m.canonical_value());
         let explicit = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         for (model, mesh) in [
             (&solid, Some(&mesh)),

@@ -110,7 +110,7 @@ pub(super) fn load_driver_invocation(
                     "durable program request no longer matches its identity".into(),
                 ));
             }
-            let attempt = super::program_store::load_assignment(job_dir, &submission)?;
+            let attempt = super::program_store::load_assignment(job_dir, &submission.task)?;
             let lease = super::DurableAttemptLease::acquire(job_dir, &attempt.request)?;
             Ok(BatchDriverInvocation::Program {
                 job_directory: job_dir.to_path_buf(),
@@ -126,6 +126,16 @@ pub(super) fn load_driver_invocation(
                 return Err(NativeExecutionError::Protocol(
                     "durable graph request no longer matches its identity".into(),
                 ));
+            }
+            if let Some(task) = &submission.task {
+                let attempt = super::program_store::load_assignment(job_dir, task)?;
+                let lease = super::DurableAttemptLease::acquire(job_dir, &attempt.request)?;
+                return Ok(BatchDriverInvocation::GraphTask {
+                    job_directory: job_dir.to_path_buf(),
+                    attempt: Box::new(attempt),
+                    submission,
+                    lease: Box::new(lease),
+                });
             }
             Ok(BatchDriverInvocation::Graph {
                 job_directory: job_dir.to_path_buf(),

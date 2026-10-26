@@ -6,7 +6,7 @@ use std::future::Future;
 
 use super::super::ExecutionServiceError;
 
-pub(super) async fn run<F: Future>(
+pub(in crate::execution) async fn run<F: Future>(
     cancellation: &CancellationToken,
     future: F,
 ) -> Result<F::Output, ExecutionServiceError> {

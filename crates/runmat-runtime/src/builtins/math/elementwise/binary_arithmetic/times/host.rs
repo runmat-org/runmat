@@ -334,10 +334,7 @@ fn classify_operand(value: Value) -> BuiltinResult<TimesOperand> {
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars
-        .to_column_major()
-        .iter()
-        .map(|&ch| f64::from(ch.raw()))
-        .collect();
-    Tensor::new(data, chars.shape.clone()).map_err(|e| builtin_error(format!("times: {e}")))
+    let runtime = crate::context::legacy::active().map(RuntimeContext::with_pinned_cancellation);
+    tensor::character_numeric::to_double(runtime.as_ref(), chars)
+        .map_err(|error| error.into_runtime_error(builtin_error))
 }

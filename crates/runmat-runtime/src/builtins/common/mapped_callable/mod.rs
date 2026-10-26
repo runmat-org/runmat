@@ -13,6 +13,7 @@ pub(crate) enum MappedCallable {
     DynamicName { name: String },
     ExternalName { name: String },
     Closure(crate::call::descriptor::RetainedClosureValue),
+    Scoped(runmat_value::ScopedFunctionHandle),
 }
 
 #[derive(Debug)]
@@ -41,7 +42,10 @@ impl MappedCallable {
     pub(crate) fn builtin_identity(&self) -> Option<BuiltinCatalogIdentity> {
         match self {
             Self::Builtin { identity } => Some(*identity),
-            Self::DynamicName { .. } | Self::ExternalName { .. } | Self::Closure(_) => None,
+            Self::DynamicName { .. }
+            | Self::ExternalName { .. }
+            | Self::Closure(_)
+            | Self::Scoped(_) => None,
         }
     }
 }

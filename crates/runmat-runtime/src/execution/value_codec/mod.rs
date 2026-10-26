@@ -4,6 +4,9 @@ mod encode;
 mod error;
 mod graph;
 mod immutable_class;
+pub(crate) mod selected_json;
+mod validation_workspace;
+pub use validation_workspace::ValidationWorkspaceOwner;
 mod object_output;
 mod outputs;
 mod owned_prepare;
@@ -28,13 +31,14 @@ pub use error::ValueCodecError;
 pub use graph::{
     decode_payload_graph_in_context, decode_payload_graph_with_selected_classes_in_context,
     decode_payload_graph_with_source_issuer_in_context, deferred_invocation_requires_graph,
-    encode_payload_graph_in_context, encode_payload_graph_with_issuer,
+    encode_payload_graph_in_context, encode_payload_graph_with_issuer, prepare_callable_targets,
     prepare_deferred_invocation_graph, prepare_payload_graph, GraphFrameSourceRequirement,
     GraphSourceIssuer, GraphSourceUnitFacts, PreparedPayloadGraph,
 };
 pub use graph::{GraphCallableProof, GraphCaptureProof, GraphNestedZeroCopy};
 pub use immutable_class::{
-    register_immutable_value_class, ImmutableValueClassSchema, ImmutableValueClassValidator,
+    register_immutable_value_class, register_immutable_value_class_with_scratch,
+    ImmutableValueClassSchema, ImmutableValueClassScratch, ImmutableValueClassValidator,
 };
 pub use outputs::{
     decode_inline_outputs, encode_inline_outputs, encode_inline_sequence, validate_output_arity,

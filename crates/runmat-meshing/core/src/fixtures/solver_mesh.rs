@@ -32,7 +32,10 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
     .map(|(index, coordinates_m)| SolverMeshNode {
         node_id: index as u64 + 1,
         stable_identity: digest(index as u8 + 1),
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         provenance: vec![solid.clone()],
         exact_parameters: Vec::new(),
     })
@@ -66,7 +69,10 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
                     runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
                         .map(|corner| nodes[corner].stable_identity),
                 ),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 provenance,
                 exact_parameters,
             });
@@ -134,6 +140,11 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
         canonical_digest: StableDigest::ZERO,
         root_stage_manifest_digest: digest(2),
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: digest(3),
             geometry_revision: 1,
             persistent_mapping_version: 1,
@@ -223,7 +234,17 @@ pub fn three_region_tetrahedron_solver_mesh_with_order(order: ElementOrder) -> S
                         .map(|corner| mesh.topology.nodes[node_start + corner].stable_identity),
                 )
             };
-            node.coordinates_m[0] += copy as f64 * 2.0;
+            {
+                let quantity_change = copy as f64 * 2.0;
+                let quantity_index = 0;
+                let quantity_slot = &mut node.coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
             mesh.topology.nodes.push(node);
         }
 
@@ -421,11 +442,11 @@ fn request() -> MeshingRequest {
             validation: "validation/1".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
@@ -435,7 +456,7 @@ fn request() -> MeshingRequest {
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.5,
@@ -444,7 +465,7 @@ fn request() -> MeshingRequest {
                 minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {

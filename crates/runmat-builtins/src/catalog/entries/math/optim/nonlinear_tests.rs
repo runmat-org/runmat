@@ -151,6 +151,39 @@ fn least_squares_forms_preserve_distinct_bound_and_problem_contracts() {
     assert!(infer_catalog_call(&LSQNONLIN_CATALOG_ENTRY, &nonlin)
         .diagnostics
         .is_empty());
+    let mut configurable = request(&LSQNONLIN_CATALOG_ENTRY, initial.clone(), 7);
+    let controls = [
+        (
+            "SpecifyObjectiveGradient".into(),
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+        ),
+        (
+            "MaxFunctionEvaluations".into(),
+            numeric(NumericClass::Double, ShapeFact::Scalar, StorageFact::Scalar),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    configurable.arguments.extend([
+        empty.clone(),
+        empty.clone(),
+        ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(controls, true))),
+    ]);
+    let products = infer_catalog_call(&LSQNONLIN_CATALOG_ENTRY, &configurable);
+    assert!(products.diagnostics.is_empty());
+    assert_eq!(
+        products.outputs[2].shape,
+        ShapeFact::Unknown,
+        "an unevaluated residual has no proven callback shape"
+    );
+    assert!(
+        matches!(products.outputs[6].kind, ValueKindFact::Unknown),
+        "supplied J can retain native single or double and dense or CSC storage"
+    );
+    let ValueKindFact::Struct(info) = &products.outputs[4].kind else {
+        panic!("information");
+    };
+    assert!(!info.fields_complete, "not-started adds requestedalgorithm");
     let mut curve = request(&LSQCURVEFIT_CATALOG_ENTRY, initial, 7);
     curve.arguments.extend([bound, empty.clone()]);
     assert!(!infer_catalog_call(&LSQCURVEFIT_CATALOG_ENTRY, &curve)

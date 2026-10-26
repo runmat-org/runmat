@@ -42,6 +42,23 @@ pub struct AttemptTerminal {
     pub diagnostic: Option<String>,
 }
 
+/// An original provider report, not a cessation proof or measured final total.
+/// Kept on the same attempt while its admitted allocation remains reserved.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttemptRetirementUnverified {
+    pub observed_at_driver_millis: u64,
+    pub diagnostic: String,
+    pub failure: Option<Box<runmat_execution::ProgramRuntimeFailure>>,
+    pub failure_kind: Option<AttemptFailureKind>,
+    pub resources: Option<Box<AttemptResourceAccounting>>,
+    pub execution: Option<Box<super::AttemptExecutionObservation>>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
+    pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    /// Set only by the later exact fenced backend retirement certificate.
+    pub retired_at_driver_millis: Option<u64>,
+}
+
 impl AttemptTerminal {
     pub(crate) fn validate_against(&self, attempt: &AttemptRecord) -> Result<(), String> {
         if let Some(console) = &self.console {
@@ -88,6 +105,48 @@ impl AttemptTerminal {
 
 impl AttemptRecord {
     pub(crate) fn validate_terminal(&self, now_millis: u64) -> Result<(), String> {
+        if let Some(uncertainty) = &self.unverified_retirement {
+            if let Some(failure) = &uncertainty.failure {
+                failure.validate().map_err(|error| error.to_string())?;
+            }
+            if uncertainty.diagnostic.is_empty()
+                || uncertainty.observed_at_driver_millis < self.assigned_at_millis
+                || uncertainty.observed_at_driver_millis > now_millis
+                || uncertainty
+                    .retired_at_driver_millis
+                    .is_some_and(|at| at < uncertainty.observed_at_driver_millis || at > now_millis)
+                || uncertainty.retired_at_driver_millis.is_some() != self.terminal.is_some()
+                || uncertainty.retired_at_driver_millis.is_some_and(|at| {
+                    self.terminal
+                        .as_ref()
+                        .is_none_or(|terminal| terminal.closed_at_driver_millis != at)
+                })
+            {
+                return Err("attempt retirement uncertainty contradicts original history".into());
+            }
+            if let Some(resources) = &uncertainty.resources {
+                resources.validate_against(&self.request)?;
+            }
+            if let Some(execution) = &uncertainty.execution {
+                execution.validate_against(&self.request)?;
+                if uncertainty.resources.as_ref().is_some_and(|resources| {
+                    resources.resources.usage.wall_millis != execution.wall_millis
+                }) {
+                    return Err("uncertain retirement accounting differs from observation".into());
+                }
+            }
+            if let Some(console) = &uncertainty.console {
+                console.validate().map_err(|error| error.to_string())?;
+                if Some(console.limits()) != self.request.task.console {
+                    return Err(
+                        "uncertain retirement console differs from original controls".into(),
+                    );
+                }
+            }
+        }
+        if self.state == AttemptState::Lost && self.unverified_retirement.is_none() {
+            return Err("lost attempt lacks its original uncertainty and retirement proof".into());
+        }
         if self.assigned_at_millis > now_millis
             || self
                 .cancellation_requested_at

@@ -35,7 +35,11 @@ impl Fixture {
         let projection =
             AnalysisProjection::derive(&fixtures::canonical_tetrahedron_solver_mesh(order))
                 .unwrap();
-        let positions: Vec<_> = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let positions: Vec<_> = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let mut selected = None;
         for primary in 0..projection.boundary_faces.len() {
             for secondary in 0..projection.boundary_faces.len() {

@@ -13,7 +13,8 @@ pub(super) struct ElectricalAssembly {
     pub projection: AnalysisProjection,
     pub stiffness: RealSparseMatrix,
     pub local_energy: Option<crate::algebra::anchored_energy::AnchoredEnergySource>,
-    pub coefficients: Vec<f64>,
+    pub coefficients:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
     pub prescribed: Vec<Option<f64>>,
     pub terminal_nodes: Vec<(String, Vec<usize>)>,
     pub charge_sources: Option<super::ElectricalChargeSources>,
@@ -65,7 +66,7 @@ impl ElectricalAssembly {
                 ElectricalStaticError::Material("missing electrical constitutive model".into())
             })?;
             if !electrical.conductivity_frequency_response.is_empty()
-                || electrical.resistive_heating_coefficient != 0.0
+                || electrical.resistive_heating_coefficient.canonical_value() != 0.0
             {
                 return Err(ElectricalStaticError::Unsupported(
                     "dispersive or temperature-dependent electrical law".into(),
@@ -73,9 +74,12 @@ impl ElectricalAssembly {
             }
             let coefficient = match equation {
                 StaticElectricalEquation::Electrostatics => {
-                    VACUUM_PERMITTIVITY_F_PER_M * electrical.relative_permittivity
+                    VACUUM_PERMITTIVITY_F_PER_M.canonical_value()
+                        * electrical.relative_permittivity.canonical_value()
                 }
-                StaticElectricalEquation::SteadyConduction => electrical.conductivity_s_per_m,
+                StaticElectricalEquation::SteadyConduction => {
+                    electrical.conductivity_s_per_m.canonical_value()
+                }
             };
             if !coefficient.is_finite() || coefficient <= 0.0 {
                 return Err(ElectricalStaticError::Material(
@@ -109,7 +113,15 @@ impl ElectricalAssembly {
             stiffness: stiffness
                 .finish()
                 .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
-            coefficients,
+            coefficients: runmat_types::physical::Quantity::try_from_descriptor(
+                runmat_types::physical::DynamicDimension::quantity_type(
+                    equation.constitutive_coefficient_kind(),
+                )
+                .with_semantic_kind(Some(equation.constitutive_coefficient_kind()))
+                .expect("electrical coefficient"),
+                coefficients,
+            )
+            .map_err(|error| ElectricalStaticError::Material(error.to_string()))?,
             local_energy: Some(local_energy),
             prescribed: vec![None; count],
             terminal_nodes: Vec::new(),

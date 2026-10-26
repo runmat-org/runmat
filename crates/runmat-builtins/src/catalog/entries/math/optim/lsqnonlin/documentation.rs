@@ -9,7 +9,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 
     summary: "Solve bounded and unbounded nonlinear least-squares residual problems.",
 
-    description: "`lsqnonlin` minimizes the squared 2-norm of a vector-valued residual callback `fun(x)` using RunMat's shared finite-difference Levenberg-Marquardt least-squares solver. Scalar, vector, and matrix `x0` inputs are supported and the returned solution preserves the shape of `x0`.",
+    description: "`lsqnonlin` minimizes the squared 2-norm of a vector-valued residual callback `fun(x)` using a bound-reflective Gauss-Newton trust-region controller or Levenberg-Marquardt. Scalar, vector, and matrix `x0` inputs are supported and the returned solution preserves the shape of `x0`.",
 
     keywords: &["lsqnonlin",
 "least squares",
@@ -24,10 +24,50 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 
     sections: &[BuiltinDocumentationSection {
  heading: "Behavior and supported forms",
- paragraphs: &["The residual callback is evaluated as `fun(x)` and must return a finite real numeric scalar, vector, or array. The residual output preserves the callback's initial shape.",
+ paragraphs: &["FiniteDifferenceStepSize (legacy FinDiffRelStep) accepts a finite strictly positive real floating scalar or vector; a scalar factor expands to every variable. TypicalX must be a finite strictly positive real floating vector with one element per original variable (a scalar for a scalar problem).",
+concat!(
+"Omitted or empty controls resolve to sqrt(eps) for forward differences, eps^(1/3) for existing central-difference routes, and unit TypicalX. ",
+"Forward offsets use sign(x), with sign(0)=1, times the factor and max(abs(x),TypicalX); central offsets omit that sign. Actual representable ",
+"bound-feasible offsets own the denominators. Nominal underflow uses adjacent representable feasible points; unusable actual offsets or an ",
+"overflowing central span refuse before probe callbacks. These controls do not add objective calls or bypass existing evaluation budgets. ",
+"Fully supplied derivative paths leave these operands dormant, without validating or gathering them. This least-squares implementation ",
+"remains forward-difference only; FiniteDifferenceType='central' remains rejected, not accepted and ignored."
+),
+"The residual callback is evaluated as `fun(x)` and must return a finite real numeric scalar, vector, or array. The residual output preserves the callback's initial shape.",
 "Lower and upper bounds may be empty or contain up to `numel(x0)` elements. Supplied bounds apply to the leading variables; omitted trailing entries are unbounded, matching MATLAB's partial-bound convention.",
-"`optimset` and `optimoptions` structs are accepted, and `[]` option placeholders are treated as defaults. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm` are recognized.",
-"RunMat accepts `Algorithm` values `trust-region-reflective` and `levenberg-marquardt` for compatibility metadata, but both execute through the shared finite-difference Levenberg-Marquardt host solver.",
+"`optimset` and `optimoptions` structs are accepted, and `[]` option placeholders are treated as defaults. `StepTolerance` (`TolX`), `FunctionTolerance`, `OptimalityTolerance`, `MaxIterations` (`MaxIter`), `MaxFunctionEvaluations` (`MaxFunEvals`), `Display`, and `Algorithm` are recognized. The legacy `TolFun` control supplies function and optimality defaults; conflicting explicit legacy and modern controls are rejected.",
+concat!(
+"Algorithm='trust-region-reflective' selects a bound-reflective Gauss-Newton trust region. The local residual Jacobian and Coleman-Li ",
+"distance scaling define its model; the factorization step uses rectangular QR/COD with diagonal regularization and a secular trust-radius ",
+"solve, without constructing normal equations. A reflected feasible proposal is evaluated against the original residual, and its ",
+"actual/predicted reduction controls acceptance and radius changes. Algorithm='levenberg-marquardt' selects the separate damping controller."
+),
+"Reflective requires at least as many residual entries as variables. Otherwise the actual method is Levenberg-Marquardt, with a warning, and the already evaluated starting residual is reused without enlarging the selected evaluation budget. output.algorithm reports the method actually used. Requested reflective starts on nonfixed bounds move to an adjacent representable interior point before the first callback. Fixed coordinates remain fixed and do not consume derivative probes.",
+concat!(
+"Display='iter' and 'final' write iteration or final summaries through the original console/diary services; off and none are silent. The ",
+"effective default evaluation limit resolves from the variable count (100 times the number of variables for reflective, 200 for ",
+"Levenberg-Marquardt), and zero iterations are honored. Iteration and function limits are nonnegative integers; step, function and optimality ",
+"tolerances are nonnegative finite scalars. Reflective optimality uses OptimalityTolerance; Levenberg-Marquardt uses an internal optimality ",
+"tolerance of 1e-4 times FunctionTolerance and leaves OptimalityTolerance dormant."
+),
+concat!(
+"Reflective SubproblemAlgorithm='factorization' uses rectangular QR/COD and a secular trust-radius solve. SubproblemAlgorithm='cg' uses ",
+"matrix-free Steihaug CG over the original rectangular Jacobian. PrecondBandWidth selects the retained preconditioner band (zero is ",
+"diagonal); Inf selects factorization. MaxPCGIter defaults to max(1,floor(numel(x0)/2)) and TolPCG defaults to 0.1; both must be positive. ",
+"Only the effective reflective method inspects these controls; the underdetermined Levenberg-Marquardt fallback leaves them dormant. ",
+"Multiply-only Jacobians, JacobPattern, central differences, output/plot callbacks and parallel derivatives are not admitted by this profile. ",
+"Model and callback errors, including nonfinite numerical residual values, propagate; they are not caught and replayed as another method."
+),
+concat!(
+"With SpecifyObjectiveGradient=true (legacy Jacobian='on'), fun returns [F,J] in one callback invocation. J is a finite real single or double ",
+"m-by-n dense or sparse matrix. The accepted derivative remains paired with its original point; rejected trials cannot replace it. Reflective ",
+"products borrow this backing directly. Levenberg-Marquardt materializes its required dense numerical work, while the returned supplied ",
+"Jacobian preserves its original dense/sparse storage and numeric class. No finite-difference callbacks or finite-difference control gathers ",
+"occur on this supplied path."
+),
+"MaxFunctionEvaluations=0 stops before any residual callback. RunMat returns the bound-projected supplied point with its original shape, flag 0, and zero iterations and function count. Residual, Jacobian and multipliers are empty; resnorm and firstorderopt are NaN. output.algorithm is not-started and output.requestedalgorithm records the requested selector. This RunMat stopped-before-evaluation convention does not assert feasibility, a root or stationarity.",
+"Reflective firstorderopt is the bound-distance-scaled free-coordinate measure. Derivatives in fixed coordinates cannot be estimated without leaving the domain: their final Jacobian entries are NaN, and bound multiplier arrays are empty when derivative evidence is incomplete for either method. This projected stopping measure does not assert a known full gradient.",
+"Finite host-memory policies are refused before compiler, Jacobian or factorization workspace allocation. The solver does not claim provider-native or distributed nonlinear least-squares execution.",
 "Linear and nonlinear constraints require MATLAB's newer interior-point constrained least-squares path. RunMat accepts empty placeholders in those argument positions but rejects non-empty constraints with a deterministic error.",
 "Problem structs are supported when they provide `solver`, `objective` or `fun`, `x0`, optional `lb`, optional `ub`, and optional `options`. Constraint fields including `A`, `b`, `Aineq`, `bineq`, `Aeq`, `beq`, and `nonlcon` must be absent or empty.",
 "The `output` struct includes `iterations`, `funcCount`, `firstorderopt`, `stepsize`, `cgiterations`, `lssteplength`, `algorithm`, and `message`.",
@@ -47,7 +87,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 
 BuiltinDocumentationSection {
  heading: "Execution and residency",
- paragraphs: &["`lsqnonlin` gathers residuals and bounds to the host for iterative solving. Callback bodies can still use GPU-aware builtins; provider-native nonlinear least-squares is deferred to the GPU fast-path audit.",
+ paragraphs: &["`lsqnonlin` gathers automatically resident residuals, bounds and supplied Jacobians through the original context's canonical host boundary. Explicit gpuArray inputs require the existing separately admitted intent extension; this profile does not grant one. Callback bodies can still use GPU-aware builtins; provider-native nonlinear least-squares is deferred to the GPU fast-path audit.",
 "The solver state uses host binary64; there is no provider-native solver kernel or numeric fusion producer. Callback computations retain their own capabilities, effects and acceleration policies. Native and browser routes use the same algorithm and the owning execution context's cooperative CPU budget.",
 "Cancellation is checked between bounded input/result scans and solver steps. Native dense linear algebra calls, where used, run to completion between checks rather than being hard-preempted."] }
 ,
@@ -88,15 +128,15 @@ BuiltinExample {
 
 BuiltinExample {
  id: "example-3",
- title: "Request diagnostics",
- program: "opts = optimoptions(\"lsqnonlin\", \"Algorithm\", \"levenberg-marquardt\", \"Display\", \"off\");\n[x, resnorm, residual, exitflag, output, lambda, jacobian] = lsqnonlin(@(x) [x(1)-1, 2*x(2)-4], [0 0], [], [], opts)",
+ title: "Supply a Jacobian and select CG",
+ program: "opts = optimoptions(\"lsqnonlin\", \"SpecifyObjectiveGradient\", true, \"SubproblemAlgorithm\", \"cg\", \"PrecondBandWidth\", 0, \"MaxPCGIter\", 20, \"Display\", \"off\");\nr = @(x) deal([x(1)-1; 2*x(2)-4], single([1 0; 0 2]));\n[x, resnorm, residual, exitflag, output, lambda, jacobian] = lsqnonlin(r, [0; 0], [], [], opts)",
  display_output: None,
  compatibility: BuiltinExampleCompatibility::Matlab,
  harness: BuiltinExampleHarness::Portable,
  fixture: BuiltinExampleFixture::None,
  requirements: BuiltinExampleRequirements::NONE,
  verification: BuiltinExampleVerification::Assertions {
- source: "assert(norm(x-[1 2])<1e-4); assert(resnorm<1e-8); assert(isequal(size(jacobian),[2 2])); assert(isstruct(lambda)); assert(isstruct(output));" }
+ source: "assert(norm(x-[1;2])<1e-4); assert(resnorm<1e-8); assert(isequal(size(jacobian),[2 2])); assert(isa(jacobian,\"single\")); assert(output.cgiterations>0); assert(isstruct(lambda));" }
  }
 ],
 
@@ -104,12 +144,12 @@ BuiltinExample {
 
     faqs: &[BuiltinDocumentationFaq {
  question: "Does lsqnonlin support linear or nonlinear constraints?",
- answer: "Not yet. Empty A, b, Aineq, bineq, Aeq, beq, and nonlcon placeholders are accepted so common option-forwarding scripts run, but non-empty constraints are rejected because RunMat does not yet have the interior-point constrained least-squares infrastructure." }
+ answer: "Only unconstrained and bound-constrained residual problems are supported. Empty A, b, Aineq, bineq, Aeq, beq and nonlcon placeholders are accepted; nonempty constraints are rejected." }
 ,
 
 BuiltinDocumentationFaq {
  question: "Does lsqnonlin run on the GPU?",
- answer: "The solver is host iterative work. Callback code may call GPU-aware builtins, but residuals and bounds are gathered for the solver. Provider-native nonlinear least-squares execution belongs to the queued GPU fast-path audit rather than this compatibility slice." }
+ answer: "The solver is host iterative work. Callback code may call GPU-aware builtins, but residuals and bounds are gathered for the solver. Provider-native nonlinear least-squares execution is unavailable." }
 ],
 
     links: &[BuiltinDocumentationLink {

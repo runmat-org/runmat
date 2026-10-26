@@ -55,7 +55,13 @@ pub async fn generate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let settings = parse_settings(options)?;
     let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
         source_path: PathBuf::from(&asset.source.path),
-        source_units: asset.units,
+        source_units: match &asset.source.unit_evidence {
+            runmat_geometry_core::physical::LengthUnitEvidence::ExplicitFallback {
+                declaration,
+                ..
+            } => Some(declaration.unit),
+            _ => None,
+        },
         expected_source_sha256: crate::meshing::parse_source_sha256(&asset.source.sha256)
             .map_err(|message| error(GENERATE_NAME, message))?,
         settings,

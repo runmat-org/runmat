@@ -11,8 +11,11 @@ fn analytic_curved_geometry_moments_and_affine_axial_recovery_are_exact() {
         let mut volume = 0.0;
         let mut first = [0.0; 3];
         for element in &projection.elements {
-            let coordinates =
-                std::array::from_fn(|i| projection.nodes[element.node_indices[i]].coordinates_m);
+            let coordinates = std::array::from_fn(|i| {
+                projection.nodes[element.node_indices[i]]
+                    .coordinates_m
+                    .canonical_value()
+            });
             let geometry = Tetrahedron10ElementGeometry {
                 nodes_m: coordinates,
             };
@@ -51,9 +54,9 @@ fn analytic_curved_geometry_moments_and_affine_axial_recovery_are_exact() {
                     assert!(value.abs() < 1e-12);
                 }
                 let material = crate::assembly::elements::solid::SolidMaterial {
-                    youngs_modulus_pa: YOUNGS,
-                    poisson_ratio: 0.0,
-                    density_kg_per_m3: 1.0,
+                    youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(YOUNGS),
+                    poisson_ratio: runmat_types::physical::PoissonRatio::new(0.0),
+                    density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
                 };
                 let response = crate::assembly::elements::solid::response::response_from_strain(
                     material,
@@ -74,11 +77,14 @@ fn analytic_curved_geometry_moments_and_affine_axial_recovery_are_exact() {
         }
         for end in ["slab_left", "slab_right"] {
             let faces = projection.boundary_faces_matching(end).collect::<Vec<_>>();
-            let area: f64 = faces.iter().map(|face| face.area_m2).sum();
+            let area: f64 = faces
+                .iter()
+                .map(|face| face.area_m2.canonical_value())
+                .sum();
             let centroid: [f64; 3] = std::array::from_fn(|axis| {
                 faces
                     .iter()
-                    .map(|face| face.area_m2 * face.centroid_m[axis])
+                    .map(|face| face.area_m2.canonical_value() * face.centroid_m[axis])
                     .sum::<f64>()
                     / area
             });
@@ -105,7 +111,7 @@ fn analytic_curved_geometry_moments_and_affine_axial_recovery_are_exact() {
         let surface_area: f64 = projection
             .boundary_faces
             .iter()
-            .map(|face| face.area_m2)
+            .map(|face| face.area_m2.canonical_value())
             .sum();
         assert!((surface_area - (4.0 + 2.0 * curved_side_area)).abs() < 1e-9);
     }

@@ -33,6 +33,71 @@ pub struct NativeProgramSession {
 }
 
 impl NativeProgramSession {
+    /// Admit either existing worker route with the caller's original grant.
+    /// Graph staging remains private to LocalDriver; task history is not
+    /// rewritten into a streamed-artifact-derived synthetic submission.
+    pub fn submit_worker(
+        &self,
+        request: runmat_execution_artifact::WorkerProgramRequest,
+        submission: TaskSubmission,
+    ) -> NativeExecutionResult<NativeProgramTask> {
+        self.submit_workers(vec![(request, submission)])?
+            .pop()
+            .ok_or_else(|| protocol("native worker admission returned no handle"))
+    }
+
+    /// Stage every original Direct/Graph request before one atomic admission.
+    pub fn submit_workers(
+        &self,
+        mut tasks: Vec<(
+            runmat_execution_artifact::WorkerProgramRequest,
+            TaskSubmission,
+        )>,
+    ) -> NativeExecutionResult<Vec<NativeProgramTask>> {
+        use runmat_execution_artifact::WorkerProgramRequest;
+        if tasks.is_empty() {
+            return Err(protocol("native worker graph must not be empty"));
+        }
+        let registered = if tasks
+            .iter()
+            .any(|(request, _)| matches!(request, WorkerProgramRequest::Direct(_)))
+        {
+            let values = self.values.lock().expect("local value registry poisoned");
+            values
+                .iter()
+                .map(|(id, (_, value))| (*id, value.clone()))
+                .collect::<HashMap<_, _>>()
+        } else {
+            HashMap::new()
+        };
+        for (request, submission) in &mut tasks {
+            if let WorkerProgramRequest::Direct(program) = request {
+                validate_direct(program, submission, &registered)?;
+            }
+        }
+        let completions = if tasks
+            .iter()
+            .all(|(request, _)| matches!(request, WorkerProgramRequest::Direct(_)))
+        {
+            self.driver.submit_tasks(
+                tasks
+                    .into_iter()
+                    .map(|(request, submission)| {
+                        let WorkerProgramRequest::Direct(program) = request else {
+                            unreachable!("Direct batch checked")
+                        };
+                        (submission, program.recipe, program.artifact)
+                    })
+                    .collect(),
+            )?
+        } else {
+            self.driver.submit_workers(tasks)?
+        };
+        Ok(completions
+            .into_iter()
+            .map(|completion| NativeProgramTask { completion })
+            .collect())
+    }
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_PROGRAM_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-program-session", nonce);
@@ -124,56 +189,19 @@ impl NativeProgramSession {
     /// Atomically admits a topologically ordered graph before dispatching any task.
     pub fn submit_graph(
         &self,
-        mut tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
     ) -> NativeExecutionResult<Vec<NativeProgramTask>> {
-        if tasks.is_empty() {
-            return Err(NativeExecutionError::Protocol(
-                "native task graph must not be empty".into(),
-            ));
-        }
-        let values = self.values.lock().expect("local value registry poisoned");
-        let registered = values
-            .iter()
-            .map(|(id, (_, value))| (*id, value.clone()))
-            .collect::<HashMap<_, _>>();
-        for (program, submission) in &mut tasks {
-            program
-                .validate_for_portable_host()
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-            if submission.request.environment != program.environment
-                || submission.request.console != program.console
-                || submission.request.inputs != program.arguments
-                || submission.request.outputs.requested_outputs != program.requested_outputs
-                || submission.request.invocation_context != program.context
-                || submission.request.callable.program != program.callable
-            {
-                return Err(NativeExecutionError::Protocol(
-                    "native task inputs, outputs, or invocation context differ from its exact program request"
-                        .into(),
-                ));
-            }
-            if !matches!(
-                program.artifact.form,
-                ExecutableForm::MeshingWorkload
-                    | ExecutableForm::AnalysisWorkload
-                    | ExecutableForm::GeometryWorkload
-            ) {
-                let arguments = materialize_arguments(&program.arguments, &registered)?;
-                program.arguments = arguments.clone();
-                submission.request.inputs = arguments;
-            }
-        }
-        drop(values);
-        let completions = self.driver.submit_tasks(
+        self.submit_workers(
             tasks
                 .into_iter()
-                .map(|(program, submission)| (submission, program.recipe, program.artifact))
+                .map(|(program, task)| {
+                    (
+                        runmat_execution_artifact::WorkerProgramRequest::Direct(program),
+                        task,
+                    )
+                })
                 .collect(),
-        )?;
-        Ok(completions
-            .into_iter()
-            .map(|completion| NativeProgramTask { completion })
-            .collect())
+        )
     }
 
     /// Latest observed local snapshot publication, separate from task execution.
@@ -193,6 +221,34 @@ impl NativeProgramSession {
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+fn validate_direct(
+    program: &mut ProgramExecutionRequest,
+    submission: &mut TaskSubmission,
+    registered: &HashMap<ValueId, ValuePayload>,
+) -> NativeExecutionResult<()> {
+    program.validate_for_portable_host().map_err(protocol)?;
+    if submission.request.environment != program.environment
+        || submission.request.console != program.console
+        || submission.request.inputs != program.arguments
+        || submission.request.outputs.requested_outputs != program.requested_outputs
+        || submission.request.invocation_context != program.context
+        || submission.request.callable.program != program.callable
+    {
+        return Err(protocol("native task inputs, outputs, or invocation context differ from its exact program request"));
+    }
+    if !matches!(
+        program.artifact.form,
+        ExecutableForm::MeshingWorkload
+            | ExecutableForm::AnalysisWorkload
+            | ExecutableForm::GeometryWorkload
+    ) {
+        let arguments = materialize_arguments(&program.arguments, registered)?;
+        program.arguments = arguments.clone();
+        submission.request.inputs = arguments;
+    }
+    Ok(())
 }
 
 fn materialize_arguments(

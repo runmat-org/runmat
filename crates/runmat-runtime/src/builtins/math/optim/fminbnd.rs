@@ -149,7 +149,7 @@ async fn fminbnd_in_runtime(
     }
     let options_struct = parse_options(rest.into_iter().next())
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
-    let options = FminbndOptions::from_struct(options_struct.as_ref())
+    let options = FminbndOptions::from_struct(options_struct.as_ref(), runtime)
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
     crate::call::admission::admit_feval_target(&function)?;
     for (value, role) in [(&x1, "lower bound"), (&x2, "upper bound")] {
@@ -160,15 +160,17 @@ async fn fminbnd_in_runtime(
             role,
             &FMINBND_INPUT_NUMERIC_EXTENSION,
             &FMINBND_RESIDENT_EXTENSION,
+            runtime,
         )
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
     }
-    let x1 = crate::builtins::math::optim::common::prepare_floating_value(
+    let x1 = crate::builtins::math::optim::common::prepare_floating_value_with_cooperation(
         NAME,
         x1,
         &FMINBND_INPUT_NUMERIC_EXTENSION,
         &FMINBND_RESIDENT_EXTENSION,
         "lower bound",
+        &mut cooperation,
     )
     .await
     .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
@@ -176,12 +178,13 @@ async fn fminbnd_in_runtime(
         .await
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
     cooperation.completed(0).await?;
-    let x2 = crate::builtins::math::optim::common::prepare_floating_value(
+    let x2 = crate::builtins::math::optim::common::prepare_floating_value_with_cooperation(
         NAME,
         x2,
         &FMINBND_INPUT_NUMERIC_EXTENSION,
         &FMINBND_RESIDENT_EXTENSION,
         "upper bound",
+        &mut cooperation,
     )
     .await
     .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
@@ -208,12 +211,14 @@ async fn fminbnd_in_runtime(
 }
 
 fn parse_display(text: &str) -> BuiltinResult<OptimDisplay> {
-    let display = OptimDisplay::parse(text).ok_or_else(|| {
-        fminbnd_error_with_detail(
-            &FMINBND_ERROR_INVALID_ARGUMENT,
-            format!("option Display must be 'off', 'iter', 'notify', or 'final', got '{text}'"),
-        )
-    })?;
+    let display = OptimDisplay::parse(text)
+        .filter(|display| runmat_builtins::OptimSolver::Fminbnd.accepts_display(*display))
+        .ok_or_else(|| {
+            fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_ARGUMENT,
+                format!("option Display must be 'off', 'iter', 'notify', or 'final', got '{text}'"),
+            )
+        })?;
     Ok(if display == OptimDisplay::None {
         OptimDisplay::Off
     } else {
@@ -230,12 +235,16 @@ struct FminbndOptions {
 }
 
 impl FminbndOptions {
-    fn from_struct(options: Option<&StructValue>) -> BuiltinResult<Self> {
-        crate::builtins::math::optim::common::ensure_option_extensions(
-            NAME,
+    fn from_struct(
+        options: Option<&StructValue>,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
+        crate::builtins::math::optim::common::ensure_selected_option_extensions(
+            OptimSolver::Fminbnd,
             options,
             &FMINBND_OPTION_EXTENSION,
             &FMINBND_RESIDENT_EXTENSION,
+            runtime,
         )?;
         let fields = ScalarOptionFields::from_struct(options);
         let display = match fields.get(OptimOptionField::Display) {
@@ -273,9 +282,9 @@ fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
         Some(Value::Struct(options)) => Ok(Some(options)),
-        Some(other) => Err(fminbnd_error_with_detail(
+        Some(_) => Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_INVALID_ARGUMENT,
-            format!("options must be a struct, got {other:?}"),
+            "options must be a struct",
         )),
     }
 }
@@ -292,9 +301,9 @@ fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
                 )
             })
         }
-        other => Err(fminbnd_error_with_detail(
+        _ => Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_INVALID_ARGUMENT,
-            format!("option {field} must be a string, got {other:?}"),
+            format!("option {field} must be a string"),
         )),
     }
 }
@@ -323,10 +332,10 @@ fn option_f64(field: &str, value: &Value) -> BuiltinResult<f64> {
             }
             tensor::tensor_value_f64(tensor, 0)
         }
-        other => {
+        _ => {
             return Err(fminbnd_error_with_detail(
                 &FMINBND_ERROR_INVALID_ARGUMENT,
-                format!("option {field} must be a real scalar, got {other:?}"),
+                format!("option {field} must be a real numeric scalar"),
             ))
         }
     };
@@ -397,10 +406,10 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        other => {
+        _ => {
             return Err(fminbnd_error_with_detail(
                 &FMINBND_ERROR_INVALID_INPUT,
-                format!("{label} must be a finite real scalar, got {other:?}"),
+                format!("{label} must be a finite real scalar"),
             ))
         }
     };
@@ -546,6 +555,15 @@ fn build_message(result: &BrentMinResult) -> String {
     }
 }
 
+fn invalid_diagnostic_display() -> RuntimeError {
+    let mut error = fminbnd_error_with_detail(
+        &FMINBND_ERROR_INVALID_ARGUMENT,
+        "diagnostic display is not supported by fminbnd",
+    );
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn emit_summary(
     result: &BrentMinResult,
     exit_flag: i32,
@@ -556,6 +574,7 @@ fn emit_summary(
         OptimDisplay::Off | OptimDisplay::None => false,
         OptimDisplay::Final | OptimDisplay::Iter => true,
         OptimDisplay::Notify => exit_flag != 1,
+        OptimDisplay::Diagnose => return Err(invalid_diagnostic_display()),
     };
     if !should_emit {
         return Ok(());
@@ -577,6 +596,7 @@ fn emit_invalid_summary(
         OptimDisplay::Off | OptimDisplay::None => false,
         OptimDisplay::Final | OptimDisplay::Iter => true,
         OptimDisplay::Notify => exit_flag != 1,
+        OptimDisplay::Diagnose => return Err(invalid_diagnostic_display()),
     };
     if should_emit {
         crate::console::record_console_line(

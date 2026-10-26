@@ -132,19 +132,25 @@ fn update_type_in<'a>(
 
 fn type_matches(expected: CadParameterPhysicalType, actual: &FeaType) -> bool {
     match expected {
-        CadParameterPhysicalType::Dimensionless => matches!(
-            actual,
-            FeaType::Integer | FeaType::Real | FeaType::Quantity(PhysicalDimension::DIMENSIONLESS)
-        ),
-        CadParameterPhysicalType::Angle => {
-            actual == &FeaType::Quantity(PhysicalDimension::DIMENSIONLESS)
+        CadParameterPhysicalType::Dimensionless => {
+            (matches!(actual, FeaType::Integer | FeaType::Real)
+                || actual.is_quantity(PhysicalDimension::DIMENSIONLESS.into()))
         }
-        CadParameterPhysicalType::Length => actual == &FeaType::Quantity(PhysicalDimension::LENGTH),
-        CadParameterPhysicalType::Area => actual == &FeaType::Quantity(PhysicalDimension::AREA),
-        CadParameterPhysicalType::Volume => actual == &FeaType::Quantity(PhysicalDimension::VOLUME),
-        CadParameterPhysicalType::Mass => actual == &FeaType::Quantity(PhysicalDimension::MASS),
+        CadParameterPhysicalType::Angle => {
+            actual.is_quantity(runmat_types::physical::DynamicDimension::quantity_type(
+                runmat_types::physical::QuantityKind::Angle,
+            ))
+        }
+        CadParameterPhysicalType::Length => {
+            (actual).is_quantity((PhysicalDimension::LENGTH).into())
+        }
+        CadParameterPhysicalType::Area => (actual).is_quantity((PhysicalDimension::AREA).into()),
+        CadParameterPhysicalType::Volume => {
+            (actual).is_quantity((PhysicalDimension::VOLUME).into())
+        }
+        CadParameterPhysicalType::Mass => (actual).is_quantity((PhysicalDimension::MASS).into()),
         CadParameterPhysicalType::Temperature => {
-            actual == &FeaType::Quantity(PhysicalDimension::TEMPERATURE)
+            (actual).is_quantity((PhysicalDimension::TEMPERATURE).into())
         }
     }
 }

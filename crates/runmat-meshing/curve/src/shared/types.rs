@@ -62,8 +62,11 @@ pub struct SharedCurveNode {
     pub node_id: StableDigest,
     pub source_vertex_id: Option<PersistentEntityId>,
     pub parameter: f64,
-    pub arc_length_m: f64,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub arc_length_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,7 +94,8 @@ pub struct SharedCurveFaceUse {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CurveResolutionPolicy {
-    pub maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_tangent_change_rad: f64,
     pub minimum_metric_edge_length: f64,
     pub maximum_metric_edge_length: f64,
@@ -100,7 +104,8 @@ pub struct CurveResolutionPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CurveResolutionEvidence {
-    pub maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_tangent_change_rad: f64,
     pub minimum_metric_edge_length: f64,
     pub maximum_metric_edge_length: f64,

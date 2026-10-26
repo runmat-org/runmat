@@ -29,8 +29,10 @@ fn authenticated_heat_neighborhoods_recover_without_unbounded_refinement() {
             for maximum in [false, true] {
                 let index = (0..original.nodes.len())
                     .max_by(|&left, &right| {
-                        let order = original.nodes[left].coordinates_m[axis]
-                            .total_cmp(&original.nodes[right].coordinates_m[axis]);
+                        let order = original.nodes[left].coordinates_m.canonical_value()[axis]
+                            .total_cmp(
+                                &original.nodes[right].coordinates_m.canonical_value()[axis],
+                            );
                         if maximum {
                             order
                         } else {

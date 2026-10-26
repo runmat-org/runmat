@@ -58,6 +58,7 @@ async fn prepare(drive: Drive) -> SignalFixture {
     // interpolated solver sample at 3/16 Hz. Complex values come from RunMat execution.
     let source = "function y = pulse(f)\narguments\n f (:,1) double\nend\ny = complex(1 + 2*f, 0.5 - f);\nend\n";
     let compilation::CompiledSignalFixture {
+        session: _session,
         project_root,
         project,
         revision,

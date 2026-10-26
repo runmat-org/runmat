@@ -37,7 +37,8 @@ pub enum StructuralTransientContinuationApproach {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralTransientSchedulePoint {
-    pub time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub time_s: runmat_types::physical::Time,
     pub arrival: StructuralTransientScheduleArrival,
     pub continuation: StructuralTransientContinuationApproach,
 }
@@ -92,7 +93,9 @@ impl StructuralTransientSchedule {
             ));
         }
         for (ordinal, point) in self.points.iter().enumerate() {
-            if !point.time_s.is_finite() || (point.time_s == 0.0 && point.time_s.is_sign_negative())
+            if !point.time_s.canonical_value().is_finite()
+                || (point.time_s.canonical_value() == 0.0
+                    && point.time_s.canonical_value().is_sign_negative())
             {
                 return Err(AnalysisExecutionError::Invalid(
                     "structural transient schedule contains a noncanonical time".into(),
@@ -109,7 +112,7 @@ impl StructuralTransientSchedule {
                 }
                 continue;
             }
-            if point.time_s <= self.points[ordinal - 1].time_s {
+            if point.time_s.canonical_value() <= self.points[ordinal - 1].time_s.canonical_value() {
                 return Err(AnalysisExecutionError::Invalid(
                     "structural transient schedule points must be strictly ordered".into(),
                 ));

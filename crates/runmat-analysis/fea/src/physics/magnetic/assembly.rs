@@ -1,14 +1,20 @@
+use super::quantity_layout::{
+    MagneticPhysicalOperator, MagneticSaddleOperator, MagneticUnknownLayout,
+};
 use super::{
     boundary::MagneticBoundarySpace, MagneticSystemPlan, MagneticVolumeData, MagnetostaticError,
 };
 use crate::{
     algebra::{
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
-        RealSparseAssembler, RealSparseMatrix,
+        RealSparseAssembler,
     },
     topology::{AnalysisProjection, TetrahedralEdgeSpace},
 };
 use runmat_meshing_core::ElementOrder;
+use runmat_types::physical::{
+    kind, Length, MagneticPermeability, Quantity, QuantityLinearOperator, UniformQuantityLayout,
+};
 use std::collections::BTreeMap;
 
 pub(super) struct MagneticAssembly<'a> {
@@ -16,11 +22,11 @@ pub(super) struct MagneticAssembly<'a> {
     pub edge_space: TetrahedralEdgeSpace,
     pub boundary: MagneticBoundarySpace,
     pub volumes: Vec<MagneticVolumeData>,
-    pub saddle: RealSparseMatrix,
-    pub physical_stiffness: RealSparseMatrix,
-    pub physical_load: Vec<f64>,
-    pub scaled_rhs: Vec<f64>,
-    pub permeability_scale: f64,
+    pub saddle: MagneticSaddleOperator,
+    pub physical_stiffness: MagneticPhysicalOperator,
+    pub physical_load: Quantity<kind::ElectricCurrent, Vec<f64>>,
+    pub scaled_rhs: Quantity<kind::MagneticVectorPotential, Vec<f64>>,
+    pub permeability_scale: runmat_types::physical::MagneticPermeability,
 }
 
 impl<'a> MagneticAssembly<'a> {
@@ -42,10 +48,11 @@ impl<'a> MagneticAssembly<'a> {
         let boundary = MagneticBoundarySpace::derive(projection, &edge_space)?;
         let mut inventory = BTreeMap::new();
         for volume in volumes {
-            if !volume.permeability_h_per_m.is_finite()
-                || volume.permeability_h_per_m <= 0.0
+            if !volume.permeability_h_per_m.canonical_value().is_finite()
+                || volume.permeability_h_per_m.canonical_value() <= 0.0
                 || volume
                     .current_density_a_per_m2
+                    .canonical_value()
                     .iter()
                     .any(|v| !v.is_finite())
                 || inventory.insert(volume.element_identity, *volume).is_some()
@@ -71,7 +78,7 @@ impl<'a> MagneticAssembly<'a> {
         }
         // Scalar rescaling of the entire physical equation is invertible and
         // changes neither source compatibility nor the solution/physical residual.
-        let permeability_scale = volumes[0].permeability_h_per_m;
+        let permeability_scale = volumes[0].permeability_h_per_m.canonical_value();
         let edge_rows: BTreeMap<_, _> = boundary
             .free_edges
             .iter()
@@ -131,12 +138,13 @@ impl<'a> MagneticAssembly<'a> {
                 };
                 load[row] += moments.constant_vector_load[i]
                     .iter()
-                    .zip(data.current_density_a_per_m2)
+                    .zip(data.current_density_a_per_m2.canonical_value())
                     .map(|(n, j)| n * j)
                     .sum::<f64>();
                 for (j, &other) in indices.iter().enumerate() {
                     if let Some(&column) = edge_rows.get(&other) {
-                        let value = moments.curl_curl[i][j] / data.permeability_h_per_m;
+                        let value =
+                            moments.curl_curl[i][j] / data.permeability_h_per_m.canonical_value();
                         stiffness.add(row, column, value);
                         saddle.add(row, column, value * permeability_scale);
                     }
@@ -179,20 +187,43 @@ impl<'a> MagneticAssembly<'a> {
         for (rhs, value) in scaled_rhs.iter_mut().zip(&load) {
             *rhs = permeability_scale * value;
         }
+        let unknown_layout = MagneticUnknownLayout::try_new(
+            edge_rows.len(),
+            gauge_rows.len(),
+            MagneticPermeability::new(permeability_scale),
+            Length::new(length),
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.into()))?;
+        let saddle = QuantityLinearOperator::try_new(
+            unknown_layout,
+            UniformQuantityLayout::new(dimension),
+            saddle
+                .finish()
+                .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
+        let physical_stiffness = QuantityLinearOperator::try_new(
+            UniformQuantityLayout::new(edge_rows.len()),
+            UniformQuantityLayout::new(edge_rows.len()),
+            stiffness
+                .finish()
+                .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
         Ok(Self {
             projection,
             edge_space,
             boundary,
             volumes,
-            saddle: saddle
-                .finish()
+            saddle,
+            physical_stiffness,
+            physical_load: Quantity::try_new(load)
                 .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
-            physical_stiffness: stiffness
-                .finish()
+            scaled_rhs: Quantity::try_new(scaled_rhs)
                 .map_err(|e| MagnetostaticError::Operator(e.to_string()))?,
-            physical_load: load,
-            scaled_rhs,
-            permeability_scale,
+            permeability_scale: runmat_types::physical::MagneticPermeability::new(
+                permeability_scale,
+            ),
         })
     }
 }
@@ -214,9 +245,15 @@ pub(super) fn validate_affine_geometry(
             .into_iter()
             .enumerate()
         {
-            let midpoint = projection.nodes[element.node_indices[4 + midside]].coordinates_m;
-            let left = projection.nodes[element.node_indices[a]].coordinates_m;
-            let right = projection.nodes[element.node_indices[b]].coordinates_m;
+            let midpoint = projection.nodes[element.node_indices[4 + midside]]
+                .coordinates_m
+                .canonical_value();
+            let left = projection.nodes[element.node_indices[a]]
+                .coordinates_m
+                .canonical_value();
+            let right = projection.nodes[element.node_indices[b]]
+                .coordinates_m
+                .canonical_value();
             if (0..3).any(|axis| {
                 (midpoint[axis] - (left[axis] + right[axis]) * 0.5).abs()
                     > 64.0 * f64::EPSILON * length

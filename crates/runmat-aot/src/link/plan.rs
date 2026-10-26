@@ -132,32 +132,22 @@ pub fn build_link_plan(
     }
     let closed_world = object_product.manifest.runtime_binding_mode
         == runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld;
-    if closed_world && !runtime.manifest.capabilities.closed_world_linking {
-        return Err(AotError::contract(
-            "aot.link.closed_world",
-            "runtime archive does not support closed-world extraction",
-        ));
-    }
     let mut response_tokens = Vec::new();
-    let macos = object_product
+    let system = object_product
         .manifest
         .target
         .native_parts()
         .map_err(|error| AotError::contract("aot.link.target", error.to_string()))?
         .0
         .target
-        .operating_system
-        == runmat_execution::host::NativeOperatingSystem::Macos;
+        .operating_system;
+    let macos = system == runmat_execution::host::NativeOperatingSystem::Macos;
     match driver.family {
         LinkerFamily::UnixCc => {
             response_tokens.push(object.display().to_string());
             if closed_world {
                 response_tokens.push(archive.display().to_string());
-                response_tokens.push(if macos {
-                    "-Wl,-dead_strip".into()
-                } else {
-                    "-Wl,--gc-sections".into()
-                });
+                response_tokens.push(super::section_gc::argument(driver.family, system).into());
             } else {
                 push_native_input(&mut response_tokens, driver.family, macos, archive, true);
             }
@@ -168,7 +158,7 @@ pub fn build_link_plan(
             response_tokens.push(object.display().to_string());
             if closed_world {
                 response_tokens.push(archive.display().to_string());
-                response_tokens.push("/OPT:REF".into());
+                response_tokens.push(super::section_gc::argument(driver.family, system).into());
             } else {
                 push_native_input(&mut response_tokens, driver.family, macos, archive, true);
             }
@@ -209,6 +199,15 @@ pub(super) fn validate_pair(
         .validate()
         .map_err(|error| AotError::contract("aot.link.object", error.to_string()))?;
     runtime.manifest.validate()?;
+    if object.manifest.runtime_binding_mode
+        == runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld
+        && !runtime.manifest.capabilities.closed_world_linking
+    {
+        return Err(AotError::contract(
+            "aot.link.closed_world",
+            "runtime archive does not support closed-world extraction",
+        ));
+    }
     if object.manifest.product != runtime.manifest.product {
         return Err(AotError::contract(
             "aot.link.product",
@@ -389,6 +388,14 @@ mod tests {
 
     #[test]
     fn closed_world_uses_selective_archive_extraction_on_unix_and_msvc() {
+        use runmat_execution::host::NativeOperatingSystem::{Linux, Macos, Windows};
+        for (family, system, expected) in [
+            (LinkerFamily::UnixCc, Macos, "-Wl,-dead_strip"),
+            (LinkerFamily::UnixCc, Linux, "-Wl,--gc-sections"),
+            (LinkerFamily::Msvc, Windows, "/OPT:REF"),
+        ] {
+            assert_eq!(super::super::section_gc::argument(family, system), expected);
+        }
         let (object, runtime) = products(AotRuntimeBindingMode::ClosedWorld);
         for family in [LinkerFamily::UnixCc, LinkerFamily::Msvc] {
             let plan = build_link_plan(
@@ -412,6 +419,18 @@ mod tests {
                 .response_tokens
                 .iter()
                 .any(|token| token.contains("whole-archive") || token.contains("WHOLEARCHIVE")));
+            let system = object
+                .manifest
+                .target
+                .native_parts()
+                .unwrap()
+                .0
+                .target
+                .operating_system;
+            assert!(plan
+                .response_tokens
+                .iter()
+                .any(|token| { token == super::super::section_gc::argument(family, system) }));
         }
     }
 
@@ -435,6 +454,7 @@ mod tests {
             .response_tokens
             .iter()
             .any(|token| token == "/WHOLEARCHIVE:runtime.lib"));
+        assert!(!plan.response_tokens.iter().any(|token| token == "/OPT:REF"));
     }
 
     #[test]

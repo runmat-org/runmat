@@ -32,7 +32,11 @@ pub fn prepare_subscript_receiver(
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
 ) -> impl Future<Output = Result<PreparedSubscriptReceiver, RuntimeError>> {
-    prepare_subscript_receiver_with_context(None, root, materialized_prefix, access)
+    let runtime = crate::context::legacy::active();
+    async move {
+        prepare_subscript_receiver_with_context(runtime.as_ref(), root, materialized_prefix, access)
+            .await
+    }
 }
 
 pub fn prepare_subscript_receiver_in_context<'runtime>(
@@ -44,13 +48,28 @@ pub fn prepare_subscript_receiver_in_context<'runtime>(
     prepare_subscript_receiver_with_context(Some(runtime), root, materialized_prefix, access)
 }
 
+/// Borrow the prepared destination's proof through the canonical path owner.
+pub(crate) fn prepare_subscript_receiver_with_borrowed_access<'a>(
+    runtime: &'a crate::context::RuntimeContext,
+    root: Value,
+    materialized_prefix: Option<ObjectSubscriptPath>,
+    access: &'a ObjectAccessContext,
+) -> impl Future<Output = Result<PreparedSubscriptReceiver, RuntimeError>> + 'a {
+    super::context::scope(
+        Some(runtime),
+        prepare_subscript_receiver_in_scope(Some(runtime), root, materialized_prefix, access),
+    )
+}
+
 fn prepare_subscript_receiver_with_context<'runtime>(
     runtime: Option<&'runtime crate::context::RuntimeContext>,
     root: Value,
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
 ) -> impl Future<Output = Result<PreparedSubscriptReceiver, RuntimeError>> + use<'runtime> {
-    let work = prepare_subscript_receiver_in_scope(runtime, root, materialized_prefix, access);
+    let work = async move {
+        prepare_subscript_receiver_in_scope(runtime, root, materialized_prefix, &access).await
+    };
     super::context::scope(runtime, work)
 }
 
@@ -58,7 +77,7 @@ async fn prepare_subscript_receiver_in_scope(
     runtime: Option<&crate::context::RuntimeContext>,
     root: Value,
     materialized_prefix: Option<ObjectSubscriptPath>,
-    access: ObjectAccessContext,
+    access: &ObjectAccessContext,
 ) -> Result<PreparedSubscriptReceiver, RuntimeError> {
     let _root = match runtime {
         Some(context) => crate::execution::RootedValueLease::for_values_iterator_in_context(
@@ -69,21 +88,13 @@ async fn prepare_subscript_receiver_in_scope(
             .map_err(|error| error.into_runtime_error())?,
     };
     let receiver = match materialized_prefix {
-        Some(prefix) => match runtime {
-            Some(runtime) => {
-                super::read_subscript_path_with_access_in_context(
-                    runtime,
-                    root,
-                    prefix,
-                    access.clone(),
-                )
+        Some(prefix) => {
+            super::path_execution::read_single_with_borrowed_access(runtime, root, prefix, access)
                 .await?
-            }
-            None => super::read_subscript_path_with_access(root, prefix, access.clone()).await?,
-        },
+        }
         None => RootedValue::in_optional_context(root, runtime)?,
     };
-    let end = super::resolve_object_protocol(&receiver, ObjectProtocol::End, &access)?;
+    let end = super::resolve_object_protocol(&receiver, ObjectProtocol::End, access)?;
     Ok(PreparedSubscriptReceiver { receiver, end })
 }
 
@@ -92,7 +103,16 @@ pub fn resolve_subscript_end<'prepared>(
     component_index: usize,
     component_count: usize,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'prepared> {
-    resolve_subscript_end_with_context(None, prepared, component_index, component_count)
+    let runtime = crate::context::legacy::active();
+    async move {
+        resolve_subscript_end_with_context(
+            runtime.as_ref(),
+            prepared,
+            component_index,
+            component_count,
+        )
+        .await
+    }
 }
 
 pub fn resolve_subscript_end_in_context<'runtime, 'prepared>(

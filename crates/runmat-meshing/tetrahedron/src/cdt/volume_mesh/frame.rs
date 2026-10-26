@@ -16,12 +16,16 @@ impl CanonicalVolumeFrame {
         if constraints.nodes.len() < 4 {
             return None;
         }
-        let origin_m =
-            compensated_average(constraints.nodes.iter().map(|node| node.coordinates_m))?;
+        let origin_m = compensated_average(
+            constraints
+                .nodes
+                .iter()
+                .map(|node| node.coordinates_m.canonical_value()),
+        )?;
         let vectors = constraints
             .nodes
             .iter()
-            .map(|node| subtract(node.coordinates_m, origin_m))
+            .map(|node| subtract(node.coordinates_m.canonical_value(), origin_m))
             .collect::<Vec<_>>();
         let maximum_radius = vectors
             .iter()
@@ -44,9 +48,9 @@ impl CanonicalVolumeFrame {
         left: &DelaunayVolumeNode,
         right: &DelaunayVolumeNode,
     ) -> std::cmp::Ordering {
-        self.to_canonical(left.coordinates_m)
+        self.to_canonical(left.coordinates_m.canonical_value())
             .into_iter()
-            .zip(self.to_canonical(right.coordinates_m))
+            .zip(self.to_canonical(right.coordinates_m.canonical_value()))
             .find_map(|(left, right)| (left != right).then(|| left.total_cmp(&right)))
             .unwrap_or_else(|| left.identity.cmp(&right.identity))
     }
@@ -58,7 +62,10 @@ impl CanonicalVolumeFrame {
     ) -> DelaunayConstraints {
         let mut canonical = constraints.clone();
         for node in &mut canonical.nodes {
-            node.coordinates_m = self.to_canonical(node.coordinates_m);
+            node.coordinates_m =
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    self.to_canonical(node.coordinates_m.canonical_value()),
+                );
         }
         canonical
     }
@@ -281,7 +288,10 @@ mod tests {
                                 [if reversed { 20 - index } else { index + 1 } as u8; 32],
                             ),
                             source_vertex_id: None,
-                            coordinates_m,
+                            coordinates_m: runmat_types::physical::Quantity::<
+                                runmat_types::physical::kind::Position,
+                                _,
+                            >::new(coordinates_m),
                         },
                     )
                     .collect::<Vec<_>>();
@@ -310,7 +320,7 @@ mod tests {
             let mut points = constraints
                 .nodes
                 .iter()
-                .map(|node| node.coordinates_m)
+                .map(|node| node.coordinates_m.canonical_value())
                 .collect::<Vec<_>>();
             points.sort_by(|left, right| {
                 left.iter()
@@ -341,7 +351,10 @@ mod tests {
                     |(index, coordinates_m)| crate::cdt::DelaunayConstraintNode {
                         identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
                         source_vertex_id: None,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                     },
                 )
                 .collect(),

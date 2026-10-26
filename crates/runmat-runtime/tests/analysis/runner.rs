@@ -1,3 +1,4 @@
+use runmat_types::physical::Quantity;
 mod rejection;
 
 use super::harness::with_harness_provider;
@@ -172,12 +173,12 @@ enum FixtureExcitationQuantity {
     HeatGeneration(f64),
     ElectricCurrent {
         amperes: f64,
-        phase_radians: f64,
+        phase_radians: runmat_types::physical::Angle,
         amplitude_scale: f64,
     },
     CurrentDensity {
         amperes_per_square_meter: [f64; 3],
-        phase_radians: f64,
+        phase_radians: runmat_types::physical::Angle,
         amplitude_scale: f64,
     },
 }
@@ -300,10 +301,12 @@ fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcit
                 amplitude_scale,
             } => {
                 let amplitude = amperes * amplitude_scale;
-                let real =
-                    runmat_analysis_core::ElectricCurrent::new(amplitude * phase_radians.cos());
-                let imaginary =
-                    runmat_analysis_core::ElectricCurrent::new(amplitude * phase_radians.sin());
+                let real = runmat_analysis_core::ElectricCurrent::new(
+                    amplitude * phase_radians.canonical_value().cos(),
+                );
+                let imaginary = runmat_analysis_core::ElectricCurrent::new(
+                    amplitude * phase_radians.canonical_value().sin(),
+                );
                 (
                     PhysicalSignal::ElectricCurrent(fixture_signal(
                         signal_id.clone(),
@@ -335,12 +338,12 @@ fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcit
             } => {
                 let real = amperes_per_square_meter.map(|value| {
                     runmat_analysis_core::ElectricCurrentDensity::new(
-                        value * amplitude_scale * phase_radians.cos(),
+                        value * amplitude_scale * phase_radians.canonical_value().cos(),
                     )
                 });
                 let imaginary = amperes_per_square_meter.map(|value| {
                     runmat_analysis_core::ElectricCurrentDensity::new(
-                        value * amplitude_scale * phase_radians.sin(),
+                        value * amplitude_scale * phase_radians.canonical_value().sin(),
                     )
                 });
                 (
@@ -817,21 +820,21 @@ fn plasticity_for_fixture(spec_id: &str) -> Option<runmat_analysis_core::Materia
     use runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening;
     match spec_id {
         "nonlinear_plasticity_benchmark_gpu_provider" => Some(J2IsotropicLinearHardening {
-            yield_stress_pa: 250e6,
-            isotropic_hardening_modulus_pa: 1e9,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(250e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         }),
         "nonlinear_invalid_plasticity_options" => Some(J2IsotropicLinearHardening {
-            yield_stress_pa: -1.0,
-            isotropic_hardening_modulus_pa: 1e9,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(-1.0),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         }),
         "nonlinear_plastic_hardening_reference_gpu_provider" => Some(J2IsotropicLinearHardening {
-            yield_stress_pa: 300e6,
-            isotropic_hardening_modulus_pa: 2e9,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(300e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(2e9),
         }),
         "nonlinear_plastic_hardening_reference_complex_gpu_provider" => {
             Some(J2IsotropicLinearHardening {
-                yield_stress_pa: 350e6,
-                isotropic_hardening_modulus_pa: 3e9,
+                yield_stress_pa: runmat_types::physical::YieldStress::new(350e6),
+                isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(3e9),
             })
         }
         _ => None,
@@ -886,25 +889,25 @@ struct FixtureThermoRegionTemperatureDelta {
 }
 
 struct FixtureThermoMechanicalCoupling {
-    reference_temperature_k: f64,
-    applied_temperature_delta_k: f64,
-    thermal_expansion_coefficient: f64,
+    reference_temperature_k: runmat_types::physical::Temperature,
+    applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
     region_temperature_deltas: Vec<FixtureThermoRegionTemperatureDelta>,
 }
 
 struct FixtureElectroThermalCoupling {
-    reference_temperature_k: f64,
+    reference_temperature_k: runmat_types::physical::Temperature,
     applied_voltage_v: f64,
     base_electrical_conductivity_s_per_m: f64,
-    resistive_heating_coefficient: f64,
+    resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
 }
 
 fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalCoupling> {
     match spec_id {
         "thermo_mech_kickoff_rejected" => Some(FixtureThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: vec![
                 FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -917,9 +920,9 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
             ],
         }),
         "thermo_gradient_benign_rejected" => Some(FixtureThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 55.0,
-            thermal_expansion_coefficient: 1.0e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(55.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.0e-5),
             region_temperature_deltas: vec![
                 FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -932,9 +935,9 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
             ],
         }),
         "thermo_gradient_pathological_rejected" => Some(FixtureThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 220.0,
-            thermal_expansion_coefficient: 2.5e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(220.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(2.5e-5),
             region_temperature_deltas: vec![
                 FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -947,9 +950,9 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
             ],
         }),
         "thermo_ramp_smooth_rejected" => Some(FixtureThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(70.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.1e-5),
             region_temperature_deltas: vec![
                 FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -962,9 +965,9 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
             ],
         }),
         "thermo_shock_oscillatory_rejected" => Some(FixtureThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 140.0,
-            thermal_expansion_coefficient: 2.0e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(140.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(2.0e-5),
             region_temperature_deltas: vec![
                 FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -1001,28 +1004,28 @@ fn thermo_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
 fn electro_coupling_for_fixture(spec_id: &str) -> Option<FixtureElectroThermalCoupling> {
     match spec_id {
         "electro_thermal_joule_benign_rejected" => Some(FixtureElectroThermalCoupling {
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
         }),
         "electro_thermal_joule_pathological_rejected" => Some(FixtureElectroThermalCoupling {
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 180.0,
             base_electrical_conductivity_s_per_m: 2.0e7,
-            resistive_heating_coefficient: 9.5e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(9.5e-4),
         }),
         "electro_thermal_invalid_voltage" => Some(FixtureElectroThermalCoupling {
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
         }),
         "electro_thermal_invalid_conductivity" => Some(FixtureElectroThermalCoupling {
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 0.0,
-            resistive_heating_coefficient: 3.5e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
         }),
         _ => None,
     }
@@ -1190,10 +1193,10 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             format!("step_acoustic_{}", spec_id),
         )];
         for material in &mut model.materials {
-            material.mass_density_kg_per_m3 = Some(1.225);
+            material.mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(1.225));
             material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-                speed_of_sound_m_per_s: 343.0,
-                damping_ratio: 0.024,
+                speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+                damping_ratio: runmat_types::physical::DampingRatio::new(0.024),
             });
         }
         if model.materials.is_empty() {
@@ -1202,13 +1205,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 material_id: "mat_acoustic_air".to_string(),
                 name: "Acoustic Air".to_string(),
                 provenance: runmat_analysis_core::MaterialProvenance::Authored,
-                mass_density_kg_per_m3: Some(1.225),
+                mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(1.225)),
                 elasticity: None,
                 damping: None,
                 thermal: None,
                 acoustic: Some(runmat_analysis_core::MaterialAcousticModel {
-                    speed_of_sound_m_per_s: 343.0,
-                    damping_ratio: 0.024,
+                    speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+                    damping_ratio: runmat_types::physical::DampingRatio::new(0.024),
                 }),
                 electrical: None,
                 plastic: None,
@@ -1322,7 +1325,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .thermal
                         .as_mut()
                         .expect("thermal fixture material")
-                        .conductivity_w_per_mk = 0.0;
+                        .conductivity_w_per_mk =
+                        runmat_types::physical::ThermalConductivity::new(0.0);
                 }
             }
             "thermal_standalone_ramp_invalid_source" => {
@@ -1469,7 +1473,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         }
         if spec_id == "cht_coupled_invalid_cfd_domain" {
             if let Some(cfd_domain) = model.cfd.as_mut() {
-                cfd_domain.dynamic_viscosity.pascal_seconds = 0.0;
+                cfd_domain.dynamic_viscosity = runmat_types::physical::Quantity::new(0.0);
             }
         }
         set_temperature_history(
@@ -1545,7 +1549,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         }
         if spec_id == "fsi_coupled_invalid_cfd_domain" {
             if let Some(cfd_domain) = model.cfd.as_mut() {
-                cfd_domain.dynamic_viscosity.pascal_seconds = 0.0;
+                cfd_domain.dynamic_viscosity = runmat_types::physical::Quantity::new(0.0);
             }
         }
         if spec_id == "fsi_coupled_invalid_interface_mapping" {
@@ -1580,22 +1584,30 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     material_id: "mat_default".to_string(),
                     name: "Default".to_string(),
                     provenance: runmat_analysis_core::MaterialProvenance::Authored,
-                    mass_density_kg_per_m3: Some(7850.0),
+                    mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(7850.0)),
                     elasticity: Some(
                         runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
                             runmat_analysis_core::MaterialMechanicalModel {
-                                youngs_modulus_pa: 110e9,
-                                poisson_ratio: 0.31,
+                                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                                    110e9,
+                                ),
+                                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.31),
                             },
                         ),
                     ),
                     damping: None,
                     thermal: Some(runmat_analysis_core::MaterialThermalModel {
-                        reference_temperature_k: 293.15,
-                        modulus_temp_coeff_per_k: -2.5e-4,
-                        conductivity_w_per_mk: 45.0,
-                        specific_heat_j_per_kgk: 500.0,
-                        expansion_coefficient_per_k: 1.2e-5,
+                        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                        modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(
+                            -2.5e-4,
+                        ),
+                        conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(
+                            45.0,
+                        ),
+                        specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(500.0),
+                        expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(
+                            1.2e-5,
+                        ),
                     }),
                     acoustic: None,
                     electrical: None,
@@ -1608,28 +1620,28 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     name: "EM Copper".to_string(),
                     provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 5.8e7,
-                        resistive_heating_coefficient: 0.0039,
-                        relative_permittivity: 2.0,
-                        relative_permeability: 1.0,
+                        reference_temperature_k: Quantity::new(293.15),
+                        conductivity_s_per_m: Quantity::new(5.8e7),
+                        resistive_heating_coefficient: Quantity::new(0.0039),
+                        relative_permittivity: Quantity::new(2.0),
+                        relative_permeability: Quantity::new(1.0),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 1.05,
                                 dispersive_loss_scale: Some(0.02),
                                 relative_permittivity_scale: Some(1.01),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 200.0,
+                                frequency_hz: Quantity::new(200.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.025),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 0.94,
                                 dispersive_loss_scale: Some(0.03),
                                 relative_permittivity_scale: Some(0.99),
@@ -1644,28 +1656,28 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     name: "EM Ferrite".to_string(),
                     provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 8.0e4,
-                        resistive_heating_coefficient: 0.0020,
-                        relative_permittivity: 14.0,
-                        relative_permeability: 90.0,
+                        reference_temperature_k: Quantity::new(293.15),
+                        conductivity_s_per_m: Quantity::new(8.0e4),
+                        resistive_heating_coefficient: Quantity::new(0.0020),
+                        relative_permittivity: Quantity::new(14.0),
+                        relative_permeability: Quantity::new(90.0),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 1.32,
                                 dispersive_loss_scale: Some(0.08),
                                 relative_permittivity_scale: Some(1.15),
                                 relative_permeability_scale: Some(1.35),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 200.0,
+                                frequency_hz: Quantity::new(200.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.11),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 0.72,
                                 dispersive_loss_scale: Some(0.16),
                                 relative_permittivity_scale: Some(0.85),
@@ -1680,28 +1692,28 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     name: "EM Polymer".to_string(),
                     provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 0.2,
-                        resistive_heating_coefficient: 0.0010,
-                        relative_permittivity: 3.5,
-                        relative_permeability: 1.05,
+                        reference_temperature_k: Quantity::new(293.15),
+                        conductivity_s_per_m: Quantity::new(0.2),
+                        resistive_heating_coefficient: Quantity::new(0.0010),
+                        relative_permittivity: Quantity::new(3.5),
+                        relative_permeability: Quantity::new(1.05),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 0.88,
                                 dispersive_loss_scale: Some(0.24),
                                 relative_permittivity_scale: Some(0.95),
                                 relative_permeability_scale: Some(0.98),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 200.0,
+                                frequency_hz: Quantity::new(200.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.26),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 1.24,
                                 dispersive_loss_scale: Some(0.29),
                                 relative_permittivity_scale: Some(1.10),
@@ -1722,21 +1734,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 let conductivity_frequency_response = match idx % 3 {
                     0 => vec![
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 50.0,
+                            frequency_hz: Quantity::new(50.0),
                             conductivity_scale: 1.05,
                             dispersive_loss_scale: Some(0.02),
                             relative_permittivity_scale: Some(1.01),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 200.0,
+                            frequency_hz: Quantity::new(200.0),
                             conductivity_scale: 1.0,
                             dispersive_loss_scale: Some(0.025),
                             relative_permittivity_scale: Some(1.0),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 1_000.0,
+                            frequency_hz: Quantity::new(1_000.0),
                             conductivity_scale: 0.94,
                             dispersive_loss_scale: Some(0.03),
                             relative_permittivity_scale: Some(0.99),
@@ -1745,21 +1757,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     ],
                     1 => vec![
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 50.0,
+                            frequency_hz: Quantity::new(50.0),
                             conductivity_scale: 1.32,
                             dispersive_loss_scale: Some(0.08),
                             relative_permittivity_scale: Some(1.15),
                             relative_permeability_scale: Some(1.35),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 200.0,
+                            frequency_hz: Quantity::new(200.0),
                             conductivity_scale: 1.0,
                             dispersive_loss_scale: Some(0.11),
                             relative_permittivity_scale: Some(1.0),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 1_000.0,
+                            frequency_hz: Quantity::new(1_000.0),
                             conductivity_scale: 0.72,
                             dispersive_loss_scale: Some(0.16),
                             relative_permittivity_scale: Some(0.85),
@@ -1768,21 +1780,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     ],
                     _ => vec![
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 50.0,
+                            frequency_hz: Quantity::new(50.0),
                             conductivity_scale: 0.88,
                             dispersive_loss_scale: Some(0.24),
                             relative_permittivity_scale: Some(0.95),
                             relative_permeability_scale: Some(0.98),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 200.0,
+                            frequency_hz: Quantity::new(200.0),
                             conductivity_scale: 1.0,
                             dispersive_loss_scale: Some(0.26),
                             relative_permittivity_scale: Some(1.0),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 1_000.0,
+                            frequency_hz: Quantity::new(1_000.0),
                             conductivity_scale: 1.24,
                             dispersive_loss_scale: Some(0.29),
                             relative_permittivity_scale: Some(1.10),
@@ -1791,11 +1803,15 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     ],
                 };
                 material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                    reference_temperature_k: 293.15,
-                    conductivity_s_per_m: sigma,
-                    resistive_heating_coefficient: 0.0025,
-                    relative_permittivity: eps_r,
-                    relative_permeability: mu_r,
+                    reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                    conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                        sigma,
+                    ),
+                    resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                        0.0025,
+                    ),
+                    relative_permittivity: runmat_types::physical::RelativePermittivity::new(eps_r),
+                    relative_permeability: runmat_types::physical::RelativePermeability::new(mu_r),
                     conductivity_frequency_response,
                 });
             }
@@ -1805,28 +1821,35 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ElectromagneticFixtureKind::Homogeneous => {
                 for material in &mut model.materials {
                     material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 5.8e7,
-                        resistive_heating_coefficient: 0.0039,
-                        relative_permittivity: 2.1,
-                        relative_permeability: 1.0,
+                        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                            5.8e7,
+                        ),
+                        resistive_heating_coefficient:
+                            runmat_types::physical::InverseTemperature::new(0.0039),
+                        relative_permittivity: runmat_types::physical::RelativePermittivity::new(
+                            2.1,
+                        ),
+                        relative_permeability: runmat_types::physical::RelativePermeability::new(
+                            1.0,
+                        ),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 1.02,
                                 dispersive_loss_scale: Some(0.015),
                                 relative_permittivity_scale: Some(1.01),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 60.0,
+                                frequency_hz: Quantity::new(60.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.017),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 0.95,
                                 dispersive_loss_scale: Some(0.03),
                                 relative_permittivity_scale: Some(0.99),
@@ -2083,7 +2106,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_region_homogeneous".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2092,7 +2115,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_region_homogeneous".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [1.0, 0.0, 0.0],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2101,7 +2124,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_region_homogeneous".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.0, 1.0, 0.0],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2125,7 +2148,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_region_0".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a * 0.85,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2134,7 +2157,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.8, 0.3, 0.1],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2162,7 +2185,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_sparse_region_0".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a * 0.4,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2171,7 +2194,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_sparse_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.0, 0.6, 0.2],
-                                phase_radians: 0.2,
+                                phase_radians: Quantity::new(0.2),
                                 amplitude_scale: 0.8,
                             },
                         },
@@ -2180,7 +2203,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_sparse_region_2".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.3, 0.1, 0.4],
-                                phase_radians: 0.4,
+                                phase_radians: Quantity::new(0.4),
                                 amplitude_scale: 0.7,
                             },
                         },
@@ -2189,7 +2212,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_sparse_region_3".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.1, 0.0, 0.7],
-                                phase_radians: 0.6,
+                                phase_radians: Quantity::new(0.6),
                                 amplitude_scale: 0.6,
                             },
                         },
@@ -2223,7 +2246,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_multiregion_region_0".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a * 0.25,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2232,7 +2255,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_multiregion_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.4, 0.2, 0.1],
-                                phase_radians: 0.15,
+                                phase_radians: Quantity::new(0.15),
                                 amplitude_scale: 0.9,
                             },
                         },
@@ -2241,7 +2264,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_multiregion_region_2".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.1, 0.5, 0.2],
-                                phase_radians: 0.35,
+                                phase_radians: Quantity::new(0.35),
                                 amplitude_scale: 0.8,
                             },
                         },
@@ -2250,7 +2273,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_multiregion_region_3".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.2, 0.1, 0.6],
-                                phase_radians: 0.55,
+                                phase_radians: Quantity::new(0.55),
                                 amplitude_scale: 0.7,
                             },
                         },
@@ -2259,7 +2282,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_multiregion_region_4".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.3, 0.3, 0.3],
-                                phase_radians: 0.75,
+                                phase_radians: Quantity::new(0.75),
                                 amplitude_scale: 0.65,
                             },
                         },
@@ -2283,7 +2306,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_overlap_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2292,7 +2315,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_overlap_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: -profile.applied_current_a * 0.92,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2301,7 +2324,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_overlap_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [1.0, 0.4, 0.0],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2310,7 +2333,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_overlap_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [-0.8, -0.35, 0.0],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2348,7 +2371,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_boundary_region_24".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a * 0.9,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2357,7 +2380,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_boundary_region_25".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.9, -0.5, 0.2],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2390,7 +2413,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_penalty_region_10".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2399,7 +2422,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_penalty_region_13".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a * -0.65,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2408,7 +2431,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_penalty_region_29".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [1.2, -0.7, 0.15],
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2432,7 +2455,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_phase_region_1".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a,
-                                phase_radians: 0.0,
+                                phase_radians: Quantity::new(0.0),
                                 amplitude_scale: 1.0,
                             },
                         },
@@ -2441,7 +2464,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_phase_region_3".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: -profile.applied_current_a * 0.8,
-                                phase_radians: std::f64::consts::PI * 0.85,
+                                phase_radians: Quantity::new(std::f64::consts::PI * 0.85),
                                 amplitude_scale: 0.9,
                             },
                         },
@@ -2450,7 +2473,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_phase_region_7".to_string(),
                             quantity: FixtureExcitationQuantity::ElectricCurrent {
                                 amperes: profile.applied_current_a * 0.55,
-                                phase_radians: std::f64::consts::FRAC_PI_2,
+                                phase_radians: Quantity::new(std::f64::consts::FRAC_PI_2),
                                 amplitude_scale: 0.8,
                             },
                         },
@@ -2459,7 +2482,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_phase_region_10".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [0.9, -0.45, 0.2],
-                                phase_radians: std::f64::consts::PI / 3.0,
+                                phase_radians: Quantity::new(std::f64::consts::PI / 3.0),
                                 amplitude_scale: 0.9,
                             },
                         },
@@ -2468,7 +2491,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             region_id: "em_phase_region_12".to_string(),
                             quantity: FixtureExcitationQuantity::CurrentDensity {
                                 amperes_per_square_meter: [-0.85, 0.35, -0.1],
-                                phase_radians: -std::f64::consts::FRAC_PI_2,
+                                phase_radians: Quantity::new(-std::f64::consts::FRAC_PI_2),
                                 amplitude_scale: 0.85,
                             },
                         },
@@ -2512,9 +2535,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     let mut thermo = thermo_coupling_for_fixture(spec_id);
     if thermo.is_none() && spec_id == "nonlinear_load_path_mix_gpu_provider" {
         thermo = Some(FixtureThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 75.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(75.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         });
     }
@@ -2522,15 +2545,15 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         set_temperature_history(
             model,
             &format!("thermo_temperature_{spec_id}"),
-            value.reference_temperature_k,
-            value.applied_temperature_delta_k,
+            value.reference_temperature_k.canonical_value(),
+            value.applied_temperature_delta_k.canonical_value(),
             thermo_history_for_fixture(spec_id),
         );
         for (index, delta) in value.region_temperature_deltas.iter().enumerate() {
             set_temperature_excitation(
                 model,
                 &format!("thermo_region_temperature_{spec_id}_{index}"),
-                value.reference_temperature_k,
+                value.reference_temperature_k.canonical_value(),
                 delta.temperature_delta_k,
                 &[],
                 runmat_analysis_core::ExcitationTarget::Region(
@@ -2540,12 +2563,16 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         }
         for material in &mut model.materials {
             let thermal = material.thermal.as_mut().expect("thermal fixture material");
-            thermal.reference_temperature_k = value.reference_temperature_k;
-            thermal.expansion_coefficient_per_k = value.thermal_expansion_coefficient;
+            thermal.reference_temperature_k = runmat_types::physical::Temperature::new(
+                value.reference_temperature_k.canonical_value(),
+            );
+            thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(
+                value.thermal_expansion_coefficient.canonical_value(),
+            );
         }
         model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
             reference_temperature: runmat_analysis_core::Temperature::new(
-                value.reference_temperature_k,
+                value.reference_temperature_k.canonical_value(),
             ),
         });
         for step in &mut model.sequence.steps {
@@ -2567,11 +2594,17 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
         for material in &mut model.materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                reference_temperature_k: electro.reference_temperature_k,
-                conductivity_s_per_m: electro.base_electrical_conductivity_s_per_m,
-                resistive_heating_coefficient: electro.resistive_heating_coefficient,
-                relative_permittivity: 1.0,
-                relative_permeability: 1.0,
+                reference_temperature_k: runmat_types::physical::Temperature::new(
+                    electro.reference_temperature_k.canonical_value(),
+                ),
+                conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                    electro.base_electrical_conductivity_s_per_m,
+                ),
+                resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                    electro.resistive_heating_coefficient.canonical_value(),
+                ),
+                relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+                relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
                 conductivity_frequency_response: Vec::new(),
             });
         }
@@ -2583,7 +2616,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         );
         model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
             reference_temperature: runmat_analysis_core::Temperature::new(
-                electro.reference_temperature_k,
+                electro.reference_temperature_k.canonical_value(),
             ),
         });
     }
@@ -4052,7 +4085,10 @@ fn subdivide_fixture_tetrahedron(mesh: &mut SolverMeshArtifact, model: &Analysis
     mesh.topology.nodes.push(SolverMeshNode {
         node_id: interior_node_id,
         stable_identity: interior_identity,
-        coordinates_m: [0.25, 0.25, 0.25],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.25, 0.25, 0.25,
+            ]),
         provenance: mesh.topology.nodes[0].provenance.clone(),
         exact_parameters: Vec::new(),
     });
@@ -4273,7 +4309,6 @@ pub(super) fn run_fixture(
     let validate_start = Instant::now();
     let validate_result = analysis_validate(
         &model,
-        UnitSystem::Meter,
         &runmat_analysis_core::CoordinateFrame::Global,
         OperationContext::new(Some(format!("trace-validate-{}", spec.id)), None),
     );

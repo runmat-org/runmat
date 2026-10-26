@@ -35,6 +35,8 @@ pub(super) async fn run() {
             include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
         )
         .unwrap();
+        std::fs::create_dir_all(directory.path().join("geometry/.runmat/geometry")).unwrap();
+        std::fs::write(directory.path().join("geometry/.runmat/geometry/box.brep.json"), include_bytes!("../../../../docs/simulation/examples/geometry/.runmat/geometry/box.brep.json")).unwrap();
         let path = directory.path().join("plastic.fea");
         std::fs::write(
             &path,

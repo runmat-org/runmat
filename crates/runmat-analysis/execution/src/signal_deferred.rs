@@ -190,7 +190,7 @@ impl FrozenDeferredSignal {
         )?;
         if admitted.generator_identity != self.admitted.generator_identity
             || admitted.provenance != self.admitted.provenance
-            || admitted.captures != self.admitted.captures
+            || admitted.frozen_inputs != self.admitted.frozen_inputs
             || admitted.materialization_identity == self.admitted.materialization_identity
         {
             return Err(AnalysisBridgeError::Identity("mesh resolution changed frozen invocation or retained unresolved materialization identity"));

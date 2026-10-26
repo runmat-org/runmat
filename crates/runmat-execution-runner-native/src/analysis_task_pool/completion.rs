@@ -45,11 +45,15 @@ impl AnalysisTaskCompletion {
                 | TaskState::Failed
                 | TaskState::Cancelled
                 | TaskState::Indeterminate
-        ) || evidence
-            .attempts
-            .iter()
-            .any(|attempt| attempt.terminal.is_none())
-        {
+        ) || evidence.attempts.iter().any(|attempt| {
+            attempt.terminal.is_none()
+                && !(result.is_err()
+                    && evidence.task.state == TaskState::Indeterminate
+                    && attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none()))
+        }) {
             return Err(protocol(
                 "analysis completion still has active scheduler work",
             ));

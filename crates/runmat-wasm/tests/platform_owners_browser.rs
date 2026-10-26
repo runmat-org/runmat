@@ -49,7 +49,14 @@ fn caught_error_codec_and_rethrow_preserve_runtime_metadata() {
     );
     assert_eq!(reraised.context.call_frames[0].function, "origin");
     assert_eq!(original.context.call_frames[0].span, Some((2, 5)));
-    assert_eq!(retained.stack, ["origin"]);
+    assert_eq!(
+        retained
+            .stack
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>(),
+        ["origin"]
+    );
     let recaught = Value::MException(exception_from_error(reraised));
     let encoded = encode_inline_value(&recaught).expect("encode shared rethrow owner");
     let Value::MException(repeated) =

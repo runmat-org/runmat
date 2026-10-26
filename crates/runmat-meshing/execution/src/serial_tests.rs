@@ -1169,6 +1169,11 @@ impl Fixture {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage: MeshingStageKind::SurfaceMesh,
             geometry: GeometryRevisionRef {
+                source_unit_evidence:
+                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                        runmat_geometry_core::LengthUnit::Meter,
+                        "canonical solver fixture",
+                    ),
                 source_digest: stable(1),
                 geometry_revision: 2,
                 persistent_mapping_version: 1,
@@ -1302,7 +1307,7 @@ impl Fixture {
             else {
                 unreachable!()
             };
-            properties.volume_m3 = 0.0;
+            properties.volume_m3 = runmat_geometry_core::physical::Volume::new(0.0);
         }
         let partition = if stage == MeshingStageKind::CurveMesh {
             runmat_meshing_curve::curve_partition_descriptors(&topology, 32)
@@ -1338,20 +1343,23 @@ impl Fixture {
         request.tolerance = document.tolerance;
         if relaxed_volume {
             request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
-            request.quality.curve.maximum_chordal_deviation_m = 0.1;
+            request.quality.curve.maximum_chordal_deviation_m =
+                runmat_types::physical::Length::new(0.1);
             request.quality.curve.maximum_tangent_change_degrees = 180.0;
             request.quality.curve.minimum_metric_edge_length = 0.01;
             request.quality.curve.maximum_metric_edge_length = 10.0;
             request.quality.surface.minimum_metric_angle_degrees = 0.1;
             request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
-            request.quality.surface.maximum_chordal_deviation_m = 0.1;
+            request.quality.surface.maximum_chordal_deviation_m =
+                runmat_types::physical::Length::new(0.1);
             request.quality.surface.maximum_normal_deviation_degrees = 180.0;
             request.quality.volume.maximum_metric_edge_length = 2.0;
             request.quality.volume.maximum_radius_edge_ratio = 10.0;
             request.quality.volume.minimum_scaled_jacobian = 0.01;
         }
         if stage == MeshingStageKind::CurveMesh {
-            request.quality.curve.maximum_chordal_deviation_m = 0.05;
+            request.quality.curve.maximum_chordal_deviation_m =
+                runmat_types::physical::Length::new(0.05);
             request.quality.curve.maximum_tangent_change_degrees = 20.0;
             request.resources.maximum_nodes = 10_000;
             request.resources.maximum_elements = 10_000;
@@ -1372,6 +1380,11 @@ impl Fixture {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage,
             geometry: GeometryRevisionRef {
+                source_unit_evidence:
+                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                        runmat_geometry_core::LengthUnit::Meter,
+                        "canonical solver fixture",
+                    ),
                 source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
                 geometry_revision: document.revision.revision,
                 persistent_mapping_version: document.revision.persistent_mapping_version,
@@ -1452,6 +1465,11 @@ impl Fixture {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage: MeshingStageKind::SurfaceMesh,
             geometry: GeometryRevisionRef {
+                source_unit_evidence:
+                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                        runmat_geometry_core::LengthUnit::Meter,
+                        "canonical solver fixture",
+                    ),
                 source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
                 geometry_revision: document.revision.revision,
                 persistent_mapping_version: document.revision.persistent_mapping_version,
@@ -1593,11 +1611,11 @@ pub(crate) fn request() -> MeshingRequest {
             validation: "validation/v2".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
@@ -1607,7 +1625,7 @@ pub(crate) fn request() -> MeshingRequest {
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.5,
@@ -1616,7 +1634,7 @@ pub(crate) fn request() -> MeshingRequest {
                 minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {

@@ -17,6 +17,7 @@ impl AcousticAssembly {
         impedance: &mut RealSparseAssembler,
         owned: &mut BTreeSet<u64>,
     ) -> Result<(), AcousticHarmonicError> {
+        let mut source_error = None;
         if load.policy.distribution != ExcitationDistribution::UniformKinematic {
             return Err(AcousticHarmonicError::Unsupported(
                 "nonuniform incident pressure".into(),
@@ -45,8 +46,23 @@ impl AcousticAssembly {
                         let shape = point.shape_values()[i];
                         evidence.add_projected(row, shape * real, shape * imaginary);
                         // exp(+i omega t): v_inc=-Y p_inc; b=i omega(Y p_inc-v_inc).
-                        self.source[row].real -= 2.0 * self.omega * admittance * shape * imaginary;
-                        self.source[row].imaginary += 2.0 * self.omega * admittance * shape * real;
+                        if let Err(error) =
+                            crate::physics::acoustic::canonical::quantity_layout::accumulate_source(
+                                &mut self.source,
+                                row,
+                                -(2.0
+                                    * self.derivative_rate.canonical_value()
+                                    * admittance
+                                    * shape
+                                    * imaginary),
+                                2.0 * self.derivative_rate.canonical_value()
+                                    * admittance
+                                    * shape
+                                    * real,
+                            )
+                        {
+                            source_error = Some(error);
+                        }
                         for (j, &column) in face.node_indices.iter().enumerate() {
                             impedance.add(
                                 row,
@@ -58,6 +74,9 @@ impl AcousticAssembly {
                 })
                 .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
             self.incident_faces.push((face, admittance));
+        }
+        if let Some(error) = source_error {
+            return Err(error);
         }
         let evidence = evidence.finish();
         evidence
@@ -83,11 +102,13 @@ impl AcousticAssembly {
         let normal = first
             .oriented_area_vector_m2
             .map(|x| x / norm(first.oriented_area_vector_m2));
-        let origin = self.projection.nodes[first.node_indices[0]].coordinates_m;
+        let origin = self.projection.nodes[first.node_indices[0]]
+            .coordinates_m
+            .canonical_value();
         let admittance = self.radiation_admittance(first)?;
         let first_owner = first.adjacent_element_indices[0];
-        let density = self.density[first_owner];
-        let compressibility = self.compressibility[first_owner];
+        let density = self.density.canonical_values()[first_owner];
+        let compressibility = self.compressibility.canonical_values()[first_owner];
         for face in faces {
             let y = self.radiation_admittance(face)?;
             let owner = face.adjacent_element_indices[0];
@@ -99,14 +120,16 @@ impl AcousticAssembly {
                 .iter()
                 .map(|&node| {
                     norm(std::array::from_fn(|axis| {
-                        self.projection.nodes[node].coordinates_m[axis] - origin[axis]
+                        self.projection.nodes[node].coordinates_m.canonical_value()[axis]
+                            - origin[axis]
                     }))
                 })
                 .fold(0.0_f64, f64::max);
             let mut planar = scale > 0.0
                 && (y - admittance).abs() <= 1e-12 * admittance
-                && (self.density[owner] - density).abs() <= 1e-12 * density
-                && (self.compressibility[owner] - compressibility).abs() <= 1e-12 * compressibility
+                && (self.density.canonical_values()[owner] - density).abs() <= 1e-12 * density
+                && (self.compressibility.canonical_values()[owner] - compressibility).abs()
+                    <= 1e-12 * compressibility
                 && norm(std::array::from_fn(|axis| direction[axis] - normal[axis])) <= 1e-10;
             self.projection
                 .visit_boundary_quadrature(face, |point| {

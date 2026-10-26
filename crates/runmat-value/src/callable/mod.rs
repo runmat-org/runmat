@@ -5,6 +5,7 @@ mod metadata;
 mod instance;
 mod lexical_environment;
 mod named;
+mod scoped;
 
 pub use binding::{
     BoundFunctionAuthority, BoundFunctionBinding, FunctionDefinitionLease, FunctionDefinitionOwner,
@@ -17,3 +18,5 @@ pub(crate) use instance::CallableInstanceKind;
 pub use instance::{CallableInstanceId, CallableInstanceKey};
 pub use lexical_environment::LexicalEnvironment;
 pub use named::NamedFunctionHandle;
+
+pub use scoped::{ScopedFunctionHandle, ScopedFunctionRevoker};

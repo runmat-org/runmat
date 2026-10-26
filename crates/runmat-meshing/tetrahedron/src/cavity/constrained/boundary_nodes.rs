@@ -17,7 +17,7 @@ pub(super) fn boundary_node_coordinates(
 ) -> Result<BTreeMap<u32, Point3>, ConstrainedCavityRefillError> {
     let coordinates = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for face in &cavity.boundary_faces {
         for node_id in face.node_ids {
@@ -93,7 +93,7 @@ pub(super) fn resolved_cavity_tolerance(
         .map(|coordinate| coordinate.abs())
         .fold(1.0_f64, f64::max);
     MeshingTolerance {
-        absolute_m: configured.length_epsilon(scale_m),
+        absolute_m: runmat_types::physical::Length::new(configured.length_epsilon(scale_m)),
         relative: configured.relative,
     }
 }
@@ -319,7 +319,7 @@ mod tests {
             ],
         ];
         let tolerance = MeshingTolerance {
-            absolute_m: 0.0,
+            absolute_m: runmat_types::physical::Length::new(0.0),
             relative: 0.0,
         };
         let triangles = cavity_boundary_triangles(&cavity, &nodes).unwrap();
@@ -445,7 +445,10 @@ mod tests {
             .iter()
             .map(|(node_id, coordinates_m)| ConstrainedCavityNode {
                 node_id: *node_id,
-                coordinates_m: *coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(*coordinates_m),
             })
             .collect::<Vec<_>>();
         let generated = generate_constrained_cavity_interior_steiner_candidates(
@@ -464,7 +467,10 @@ mod tests {
         for coordinates_m in generated {
             refill_nodes.push(ConstrainedCavityNode {
                 node_id: next_node_id,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             });
             next_node_id += 1;
         }

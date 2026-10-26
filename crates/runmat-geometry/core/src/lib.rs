@@ -1,5 +1,6 @@
 //! Canonical geometry domain model for RunMat.
 
+pub use runmat_types::physical;
 /// Actual package build configuration used for internal artifact reuse.
 #[doc(hidden)]
 pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
@@ -25,21 +26,21 @@ pub use model::{
     Ap242EnvironmentCondition, Ap242ExchangeInventory, Ap242ExportDisposition,
     Ap242ExportItemReport, Ap242ExportReport, Ap242MaterialCandidate, Ap242MaterialClass,
     Ap242Measure, Ap242Parameter, Ap242ParameterAccess, Ap242PersistentId, Ap242PersistentIdRole,
-    Ap242PhysicalDimension, Ap242UnsupportedConcept, AssemblyNode, BodyMassProperties,
-    CadColorEvidence, CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator,
-    CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator,
-    CadLabelRef, CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType,
-    CadParameterSelector, CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind,
-    CurveDerivatives, CurveEvaluatorId, CurveProjection, DecodedExactGeometryComponents,
-    DerivedGeometryDefinition, DisplayTessellationRef, EncodedExactGeometryClosure,
-    EncodedFacetedSolidClosure, EntityIdRange, ExactAssembly, ExactBRepModel, ExactBRepTopology,
-    ExactBody, ExactCoedge, ExactContactDefinition, ExactContactPair, ExactCurveDefinition,
-    ExactCurveEvaluator, ExactCurveEvaluatorRecord, ExactCurveImplementation, ExactEdge,
-    ExactEvaluatorRegistry, ExactFace, ExactGeometryCapabilities, ExactGeometryComponentBytes,
-    ExactGeometryManifest, ExactInstance, ExactLump, ExactMassPropertiesEvaluator,
-    ExactMassPropertiesImplementation, ExactMassPropertiesRecord, ExactPcurveDefinition,
-    ExactPcurveEvaluator, ExactPcurveEvaluatorRecord, ExactPcurveImplementation, ExactRegion,
-    ExactSharedInterface, ExactShell, ExactSolid, ExactSurfaceDefinition, ExactSurfaceEvaluator,
+    Ap242UnsupportedConcept, AssemblyNode, BodyMassProperties, CadColorEvidence,
+    CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
+    CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator, CadLabelRef,
+    CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType, CadParameterSelector,
+    CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, CurveDerivatives,
+    CurveEvaluatorId, CurveProjection, DecodedExactGeometryComponents, DerivedGeometryDefinition,
+    DisplayTessellationRef, EncodedExactGeometryClosure, EncodedFacetedSolidClosure, EntityIdRange,
+    ExactAssembly, ExactBRepModel, ExactBRepTopology, ExactBody, ExactCoedge,
+    ExactContactDefinition, ExactContactPair, ExactCurveDefinition, ExactCurveEvaluator,
+    ExactCurveEvaluatorRecord, ExactCurveImplementation, ExactEdge, ExactEvaluatorRegistry,
+    ExactFace, ExactGeometryCapabilities, ExactGeometryComponentBytes, ExactGeometryManifest,
+    ExactInstance, ExactLump, ExactMassPropertiesEvaluator, ExactMassPropertiesImplementation,
+    ExactMassPropertiesRecord, ExactPcurveDefinition, ExactPcurveEvaluator,
+    ExactPcurveEvaluatorRecord, ExactPcurveImplementation, ExactRegion, ExactSharedInterface,
+    ExactShell, ExactSolid, ExactSurfaceDefinition, ExactSurfaceEvaluator,
     ExactSurfaceEvaluatorRecord, ExactSurfaceImplementation, ExactTrimClassifier,
     ExactTrimClassifierImplementation, ExactTrimClassifierRecord, ExactVertex, ExactWire,
     FacetedShell, FacetedShellOrientation, FacetedSolid, FacetedSolidModel, FacetedTriangle,
@@ -47,31 +48,36 @@ pub use model::{
     GeneratedGeometryProduct, GeneratedGeometryRegionOutput, GeometryAllocationReservation,
     GeometryAllocationScope, GeometryAsset, GeometryAuthoringCapabilities, GeometryAuthoringValue,
     GeometryCanonicalControl, GeometryContractError, GeometryDefinition, GeometryDefinitionRef,
-    GeometryDefinitionSource, GeometryDigest, GeometryDocument, GeometryEvaluationControl,
-    GeometryEvaluationError, GeometryEvaluationErrorKind, GeometryFeature, GeometryFeatureGraph,
-    GeometryFeatureOperation, GeometryFeatureRef, GeometryFeatureRegionSelection,
-    GeometryHealingFailure, GeometryHealingOperation, GeometryHealingOperationKind,
-    GeometryHealingPolicy, GeometryHealingReport, GeometryModel, GeometryObjectRef,
-    GeometryParameterDefinition, GeometryParameterType, GeometryRegionCardinality,
-    GeometryRegionDefinition, GeometryRegionRef, GeometryRegionRole, GeometryRegionSelector,
-    GeometryRevisionConflict, GeometryRevisionConflictKind, GeometryRevisionIdentity,
-    GeometryRevisionMap, GeometryRevisionMappingError, GeometryRevisionOperation,
-    GeometryRevisionResolution, GeometryScalarExpression, GeometryScalarOperator, GeometrySource,
-    GeometrySourceFormat, GeometrySourceIdentity, GeometryTolerancePolicy, GeometryTransform,
-    ImportedGeometryDefinition, KernelEvaluatorRef, MassPropertiesEvaluatorId, MaterialEvidence,
+    GeometryDefinitionSource, GeometryDerivative, GeometryDigest, GeometryDocument,
+    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
+    GeometryFeature, GeometryFeatureGraph, GeometryFeatureOperation, GeometryFeatureRef,
+    GeometryFeatureRegionSelection, GeometryHealingFailure, GeometryHealingOperation,
+    GeometryHealingOperationKind, GeometryHealingPolicy, GeometryHealingReport, GeometryModel,
+    GeometryObjectRef, GeometryParameterAxis, GeometryParameterCoordinate,
+    GeometryParameterDefinition, GeometryParameterDerivative, GeometryParameterFrame,
+    GeometryParameterType, GeometryRegionCardinality, GeometryRegionDefinition, GeometryRegionRef,
+    GeometryRegionRole, GeometryRegionSelector, GeometryRevisionConflict,
+    GeometryRevisionConflictKind, GeometryRevisionIdentity, GeometryRevisionMap,
+    GeometryRevisionMappingError, GeometryRevisionOperation, GeometryRevisionResolution,
+    GeometryScalarExpression, GeometryScalarOperator, GeometrySource, GeometrySourceFormat,
+    GeometrySourceIdentity, GeometryTolerancePolicy, GeometryTransform, ImportedGeometryDefinition,
+    KernelEvaluatorRef, LengthUnit, MassPropertiesEvaluatorId, MaterialEvidence,
     MaterialEvidenceConfidence, MeshDescriptor, MeshKind, NurbsCurve2, NurbsCurve3, NurbsSurface3,
     OrientedEntityUse, ParameterRange, PcurveDerivatives, PcurveEvaluatorId, PersistentEntityId,
-    PersistentEntityKind, PortableExactEvaluator, Region, RegionEntityMapping,
+    PersistentEntityKind, PortableExactEvaluator, QuantityKind, Region, RegionEntityMapping,
     ResolvedGeometryRegion, ResolvedGeometryRegions, SourceGeometry, SourceGeometryKind,
     SurfaceCurvature, SurfaceDerivatives, SurfaceEvaluatorId, SurfaceMesh, SurfaceProjection,
     TessellationProfile, TopologicalOrientation, TopologyValidity, TrimClassifierId,
-    TrimDomainLocation, UnitSystem, DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE,
+    TrimDomainLocation, DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE,
     EXACT_BREP_TOPOLOGY_SCHEMA_VERSION, EXACT_CONTACT_PAIRING_SCHEMA_VERSION,
     EXACT_EVALUATOR_MEDIA_TYPE, EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION,
     EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE, FACETED_SOLID_MEDIA_TYPE,
     FACETED_SOLID_SCHEMA_VERSION, GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_HEALING_MEDIA_TYPE,
     GEOMETRY_HEALING_REPORT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
     GEOMETRY_REVISION_MAP_SCHEMA_VERSION, KERNEL_REPRESENTATION_MEDIA_TYPE,
+};
+pub use model::{
+    geometry_selection_metadata_path, is_geometry_selection_metadata_path, GeometryNamedSelections,
 };
 pub use selection::{EntityKind, EntityRef};
 
@@ -83,6 +89,7 @@ mod tests {
         GeometryAsset {
             geometry_id: "geo_test".to_string(),
             source: GeometrySource {
+                unit_evidence: Default::default(),
                 path: "/models/part.stl".to_string(),
                 sha256: "abc123".to_string(),
                 importer_version: "stl/v1".to_string(),
@@ -95,7 +102,7 @@ mod tests {
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
-            units: UnitSystem::Meter,
+            coordinate_units: None,
             revision: 1,
             meshes: vec![MeshDescriptor {
                 mesh_id: "mesh_1".to_string(),
@@ -120,6 +127,31 @@ mod tests {
     }
 
     #[test]
+    fn preview_scale_cannot_create_missing_file_unit_evidence() {
+        let mut asset = sample_asset();
+        assert!(asset.validate().is_ok());
+        asset.coordinate_units = Some(physical::CoordinateUnits::new(LengthUnit::Meter));
+        assert!(asset.validate().is_err());
+        asset.source.unit_evidence = physical::LengthUnitEvidence::explicit_fallback(
+            LengthUnit::Meter,
+            "fixture source interpretation",
+        );
+        assert!(asset.validate().is_ok());
+    }
+
+    #[test]
+    fn legacy_unit_label_assets_require_reimport() {
+        let mut wire = serde_json::to_value(sample_asset()).unwrap();
+        let object = wire.as_object_mut().unwrap();
+        object.remove("coordinate_units");
+        object.insert(
+            "units".into(),
+            serde_json::to_value(LengthUnit::Meter).unwrap(),
+        );
+        assert!(serde_json::from_value::<GeometryAsset>(wire).is_err());
+    }
+
+    #[test]
     fn entity_identity_stable_within_revision() {
         let first = EntityRef {
             geometry_id: "geo_test".to_string(),
@@ -141,12 +173,9 @@ mod tests {
     }
 
     #[test]
-    fn unit_metadata_must_be_present() {
-        let mut asset = sample_asset();
-        asset.units = UnitSystem::Unspecified;
-        let error = asset
-            .validate()
-            .expect_err("expected unspecified units to fail");
-        assert_eq!(error, "geometry units must be specified");
+    fn invalid_preview_coordinate_conversion_is_rejected() {
+        let mut value = serde_json::to_value(sample_asset()).unwrap();
+        value["coordinate_units"] = serde_json::json!({"dimension": {"length":1,"mass":0,"time":0,"current":0,"temperature":0,"amount":0,"luminous_intensity":0,"information":0},"scale":-1.0,"offset":0.0});
+        assert!(serde_json::from_value::<GeometryAsset>(value).is_err());
     }
 }

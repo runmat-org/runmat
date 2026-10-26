@@ -5,7 +5,8 @@ import { MAX_WORKSPACE_PUBLICATION_BYTES, MAX_WORKSPACE_PUBLICATION_EDITS } from
 import { workspaceRevisionSchema } from "./workspace-contracts.js";
 import { encodeWorkspace } from "./workspace-codec.js";
 
-import { canonicalIndexedDbPath, invalidInput, isDescendant, notFound, parentDirectories } from "./workspace-path.js";
+import { canonicalIndexedDbPath, isDescendant, parentDirectories } from "./workspace-path.js";
+import { invalidInput, notFound } from "./errors.js";
 type WorkspaceRevision = WorkspaceSnapshot["revision"];
 
 export type BrowserWorkspaceEntry = { kind: "dir"; readonly?: boolean } | { kind: "file"; bytes: Uint8Array; readonly?: boolean };

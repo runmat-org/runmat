@@ -48,7 +48,7 @@ pub(super) fn compile_prescribed(
         let canonical = &topology.nodes[node];
         let basis = translation_basis(
             &constraint.frame,
-            canonical.coordinates_m,
+            canonical.coordinates_m.canonical_value(),
             boundary_normals
                 .as_ref()
                 .and_then(|normals| normals.get(&canonical.identity))
@@ -62,7 +62,7 @@ pub(super) fn compile_prescribed(
                 .ok_or_else(|| ConstraintPlanError::ScheduledValue {
                     constraint_id: constraint.constraint_id.clone(),
                 })?
-                .meters;
+                .canonical_value();
             rows.push(row::new_direction(
                 &constraint.constraint_id,
                 canonical.identity,
@@ -88,7 +88,7 @@ pub(super) fn compile_prescribed(
                 .ok_or_else(|| ConstraintPlanError::ScheduledValue {
                     constraint_id: constraint.constraint_id.clone(),
                 })?
-                .radians;
+                .canonical_value();
             rows.push(row::new_singleton(
                 &constraint.constraint_id,
                 canonical.identity,
@@ -193,7 +193,7 @@ pub(super) fn compile_coupling(
         resolve_explicit_surface(structural, topology, &target, &constraint.constraint_id)?;
     let identity = reference_point_identity(
         &coupling.reference_point.reference_point_id,
-        coupling.reference_point.position.meters,
+        coupling.reference_point.position.canonical_value(),
     )?;
     let (rows, evidence) = compile_reference_coupling_for_nodes(
         &surface.nodes,

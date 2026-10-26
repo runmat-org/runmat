@@ -98,14 +98,17 @@ fn borrowed_initial_evidence_preserves_derived_json_and_canonical_wire() {
     #[derive(Serialize)]
     struct ThermalInitialStateEvidence<'a> {
         procedure_step_id: &'a str,
-        reference_temperature_k: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        reference_temperature_k: runmat_types::physical::Temperature,
         applied_initial_condition_ids: &'a [String],
         authored_node_count: usize,
         prescribed_node_count: usize,
         authored_and_prescribed_node_count: usize,
         reference_node_count: usize,
-        minimum_temperature_k: f64,
-        maximum_temperature_k: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        minimum_temperature_k: runmat_types::physical::Temperature,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        maximum_temperature_k: runmat_types::physical::Temperature,
     }
     let (mut model, _, projection) = thermal_model();
     model.initial_conditions = vec![uniform_condition(
@@ -125,14 +128,20 @@ fn borrowed_initial_evidence_preserves_derived_json_and_canonical_wire() {
     .evidence;
     let old_wire = ThermalInitialStateEvidence {
         procedure_step_id: &actual.procedure_step_id,
-        reference_temperature_k: actual.reference_temperature_k,
+        reference_temperature_k: runmat_types::physical::Temperature::new(
+            actual.reference_temperature_k.canonical_value(),
+        ),
         applied_initial_condition_ids: &actual.applied_initial_condition_ids,
         authored_node_count: actual.authored_node_count,
         prescribed_node_count: actual.prescribed_node_count,
         authored_and_prescribed_node_count: actual.authored_and_prescribed_node_count,
         reference_node_count: actual.reference_node_count,
-        minimum_temperature_k: actual.minimum_temperature_k,
-        maximum_temperature_k: actual.maximum_temperature_k,
+        minimum_temperature_k: runmat_types::physical::Temperature::new(
+            actual.minimum_temperature_k.canonical_value(),
+        ),
+        maximum_temperature_k: runmat_types::physical::Temperature::new(
+            actual.maximum_temperature_k.canonical_value(),
+        ),
     };
     assert_eq!(
         serde_json::to_vec(&actual).unwrap(),

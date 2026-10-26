@@ -661,10 +661,10 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
         Witness {
             id: "FEA-WITNESS-LANGUAGE-PARSE",
             locator: WitnessLocator::CargoTest {
-                package: "runmat-parser",
+                package: "runmat-fea-syntax",
                 target: CargoTarget::Library,
-                name: "fea::tests::parses_representative_language_surface",
-                source: "crates/runmat-parser/src/fea/tests.rs"
+                name: "tests::parses_representative_language_surface",
+                source: "crates/runmat-fea-syntax/src/tests.rs"
             },
             claims: &[
                 CoverageClaim {
@@ -680,10 +680,10 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
         Witness {
             id: "FEA-WITNESS-LANGUAGE-FORMAT",
             locator: WitnessLocator::CargoTest {
-                package: "runmat-parser",
+                package: "runmat-fea-syntax",
                 target: CargoTarget::Library,
-                name: "fea::tests::formatter_is_canonical_and_idempotent",
-                source: "crates/runmat-parser/src/fea/tests.rs"
+                name: "tests::formatter_is_canonical_and_idempotent",
+                source: "crates/runmat-fea-syntax/src/tests.rs"
             },
             claims: &[
                 CoverageClaim {

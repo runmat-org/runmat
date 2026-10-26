@@ -141,15 +141,26 @@ impl FluidSteadySolverResult {
         let original = self.original();
         let velocity_count = original
             .velocity_m_per_s
+            .canonical_values()
             .len()
             .checked_mul(3)
             .ok_or_else(|| invalid("fluid velocity count overflow"))?;
         let mut velocity = Vec::with_capacity(velocity_count);
-        velocity.extend(original.velocity_m_per_s.iter().flatten().copied());
+        velocity.extend(
+            original
+                .velocity_m_per_s
+                .canonical_values()
+                .iter()
+                .flatten()
+                .copied(),
+        );
         let mut values = [
             velocity,
-            original.pressure_pa.clone(),
-            original.face_volume_flux_m3_per_s.clone(),
+            original.pressure_pa.canonical_values().clone(),
+            original
+                .face_volume_flux_m3_per_s
+                .canonical_values()
+                .clone(),
         ]
         .into_iter();
         let definitions = fluid_native_field_definition_inventory()?;

@@ -45,7 +45,8 @@ impl AdmittedGeometryGenerator {
         if self.invocation.callable.owner_identity.trim().is_empty()
             || self.invocation.callable.qualified_name != self.request.function
             || self.invocation.callable.source_digest.bytes() != self.request.source_digest.bytes()
-            || !self.invocation.captures.is_empty()
+            || !self.invocation.frozen_inputs.direct_captures().is_empty()
+            || self.invocation.frozen_inputs.graph().is_some()
             || self.arguments.len() != self.request.arguments.len()
         {
             return Err(AnalysisBridgeError::Invalid(
@@ -92,6 +93,8 @@ impl GeneratorProgramAdmission for AdmittedGeometryGenerator {
             function: self.invocation.function,
             generator_identity: self.invocation.generator_identity,
             required_capabilities: &self.invocation.required_capabilities,
+            frozen_inputs: &self.invocation.frozen_inputs,
+            provenance: &self.invocation.provenance,
         }
     }
 
@@ -184,7 +187,7 @@ pub fn admit_named_geometry_generator(
             executable_source_digest,
             compiled_binding,
             function: function.function,
-            captures: Vec::new(),
+            frozen_inputs: crate::FrozenGeneratorInputs::DirectCaptures(Vec::new()),
             generator_identity,
             required_capabilities: function.capabilities.0.clone(),
             provenance: runmat_analysis_core::GeneratorProvenance {
@@ -301,6 +304,11 @@ fn dense_f64(values: Vec<f64>, shape: Vec<u64>) -> ValuePayload {
 fn literal(expression: &GeometryScalarExpression) -> AnalysisBridgeResult<f64> {
     match expression {
         GeometryScalarExpression::Literal { value } if value.is_finite() => Ok(*value),
+        // Explicit numerical-language boundary: the resolved request retains its
+        // typed declarations/identity while MATLAB receives canonical numbers.
+        GeometryScalarExpression::Canonical { value } if value.canonical_value().is_finite() => {
+            Ok(value.canonical_value())
+        }
         _ => Err(AnalysisBridgeError::Invalid(
             "geometry generator argument was not fully resolved".into(),
         )),
@@ -417,7 +425,7 @@ fn validate_resolved_request(
                 literal(value)?;
             }
             GeometryAuthoringValue::Vector(values) => {
-                for value in values {
+                for value in values.iter() {
                     literal(value)?;
                 }
             }

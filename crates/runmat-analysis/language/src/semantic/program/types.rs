@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_parser::fea::{FeaAssignmentRelation, FeaModelDefinitionKind};
+use runmat_fea_syntax::{FeaAssignmentRelation, FeaModelDefinitionKind};
 use runmat_types::Span;
 use runmat_types::{OperationIdentity, OperationOverloadIdentity, OperationSignature};
 
@@ -79,7 +79,7 @@ pub enum CheckedFeaStatementKind {
     UniformSample {
         start: CheckedExpression,
         end: CheckedExpression,
-        rate: CheckedExpression,
+        rate: Box<CheckedExpression>,
     },
     AppliedLoad {
         kind: String,

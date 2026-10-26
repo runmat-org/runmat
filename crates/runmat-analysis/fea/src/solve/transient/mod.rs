@@ -106,10 +106,14 @@ pub(crate) fn rebuild_transient_balance(result: &mut TransientSolveResult) -> Re
     result.reaction_snapshots = history.reaction_snapshots().to_vec();
     result.strain_energy_snapshots = history.strain_energy_j().to_vec();
     result.kinetic_energy_snapshots = history.kinetic_energy_j().to_vec();
-    result.external_work_j = history.external_work_j().to_vec();
-    result.support_work_j = history.support_work_j().to_vec();
-    result.damping_dissipation_j = history.damping_dissipation_j().to_vec();
-    result.energy_balance_residual_j = history.energy_balance_residual_j().to_vec();
+    result.external_work_j =
+        runmat_types::physical::Quantity::new(history.external_work_j().to_vec());
+    result.support_work_j =
+        runmat_types::physical::Quantity::new(history.support_work_j().to_vec());
+    result.damping_dissipation_j =
+        runmat_types::physical::Quantity::new(history.damping_dissipation_j().to_vec());
+    result.energy_balance_residual_j =
+        runmat_types::physical::Quantity::new(history.energy_balance_residual_j().to_vec());
     result.relative_energy_balance_error = history.relative_energy_balance_error().to_vec();
     result.dynamic_balance_snapshots = history.balances().to_vec();
     Ok(())
@@ -145,8 +149,8 @@ pub fn solve_transient_system(
         options,
         backend,
         TransientTimeDomain {
-            start_time_s: 0.0,
-            end_time_s: 1.0,
+            start_time_s: runmat_types::physical::Time::new(0.0),
+            end_time_s: runmat_types::physical::Time::new(1.0),
             step_boundaries: &[],
         },
         initial_displacement,
@@ -170,6 +174,9 @@ pub(crate) fn solve_transient_system_with_assembly<E: std::fmt::Display>(
             end_time_s,
             step_boundaries,
         } = time_domain;
+        // The numerical integrator works in canonical seconds after typed admission.
+        let (start_time_s, end_time_s) =
+            (start_time_s.canonical_value(), end_time_s.canonical_value());
         validate_options(&options, start_time_s, end_time_s)?;
         if !initial_displacement.is_empty() || !initial_velocity.is_empty() {
             return Err(TransientSolveError::InvalidOptions(
@@ -228,6 +235,8 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
         end_time_s,
         step_boundaries,
     } = time_domain;
+    // Retained output times re-enter Time; this scope is the numerical integrator.
+    let (start_time_s, end_time_s) = (start_time_s.canonical_value(), end_time_s.canonical_value());
     validate_options(&options, start_time_s, end_time_s)?;
     if summary.dof_count == 0 {
         return Err(TransientSolveError::InvalidOptions(
@@ -266,7 +275,7 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
         Some(total_steps as u64),
         Some(total_steps as u64),
     );
-    let mut time_points_s = vec![initial.time_s];
+    let mut time_points_s = vec![initial.time_s.canonical_value()];
     let mut displacement_snapshots = vec![initial.state.displacement().to_vec()];
     let mut velocity_snapshots = vec![initial.state.velocity().to_vec()];
     let mut acceleration_snapshots = vec![initial.state.acceleration().to_vec()];
@@ -281,33 +290,33 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
             0
         },
     );
-    let mut strain_energy_snapshots = vec![initial.strain_energy_j];
-    let mut kinetic_energy_snapshots = vec![initial.kinetic_energy_j];
+    let mut strain_energy_snapshots = vec![initial.strain_energy_j.canonical_value()];
+    let mut kinetic_energy_snapshots = vec![initial.kinetic_energy_j.canonical_value()];
     let mut external_work_j = vec![0.0];
     let mut support_work_j = vec![0.0];
     let mut damping_dissipation_j = vec![0.0];
-    let mut energy_balance_residual_j = vec![initial.energy_balance_residual_j];
+    let mut energy_balance_residual_j = vec![initial.energy_balance_residual_j.canonical_value()];
     let mut relative_energy_balance_error = vec![initial.relative_energy_balance_error];
     let mut dynamic_balance_snapshots = vec![initial.dynamic_balance];
     for sample in block.samples {
         debug_assert_eq!(sample.schedule_ordinal as usize, time_points_s.len());
-        time_points_s.push(sample.time_s);
+        time_points_s.push(sample.time_s.canonical_value());
         displacement_snapshots.push(sample.state.displacement().to_vec());
         velocity_snapshots.push(sample.state.velocity().to_vec());
         acceleration_snapshots.push(sample.state.acceleration().to_vec());
         residual_norms.push(sample.projected_residual_norm);
-        accepted_time_steps_s.push(sample.accepted_time_step_s);
+        accepted_time_steps_s.push(sample.accepted_time_step_s.canonical_value());
         assembly_snapshots.push(sample.summary);
         reaction_snapshots.push(sample.reaction);
         if let Some(interval) = sample.integration_interval {
             integration_intervals.push(interval);
         }
-        strain_energy_snapshots.push(sample.strain_energy_j);
-        kinetic_energy_snapshots.push(sample.kinetic_energy_j);
-        external_work_j.push(sample.applied_load_work_j);
-        support_work_j.push(sample.support_work_j);
-        damping_dissipation_j.push(sample.damping_dissipation_j);
-        energy_balance_residual_j.push(sample.energy_balance_residual_j);
+        strain_energy_snapshots.push(sample.strain_energy_j.canonical_value());
+        kinetic_energy_snapshots.push(sample.kinetic_energy_j.canonical_value());
+        external_work_j.push(sample.applied_load_work_j.canonical_value());
+        support_work_j.push(sample.support_work_j.canonical_value());
+        damping_dissipation_j.push(sample.damping_dissipation_j.canonical_value());
+        energy_balance_residual_j.push(sample.energy_balance_residual_j.canonical_value());
         relative_energy_balance_error.push(sample.relative_energy_balance_error);
         dynamic_balance_snapshots.push(sample.dynamic_balance);
     }
@@ -351,10 +360,10 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
         integration_intervals,
         strain_energy_snapshots,
         kinetic_energy_snapshots,
-        external_work_j,
-        support_work_j,
-        damping_dissipation_j,
-        energy_balance_residual_j,
+        external_work_j: runmat_types::physical::Quantity::new(external_work_j),
+        support_work_j: runmat_types::physical::Quantity::new(support_work_j),
+        damping_dissipation_j: runmat_types::physical::Quantity::new(damping_dissipation_j),
+        energy_balance_residual_j: runmat_types::physical::Quantity::new(energy_balance_residual_j),
         relative_energy_balance_error,
         dynamic_balance_snapshots,
     })
@@ -367,7 +376,9 @@ fn require_stable_system<E>(
     if candidate.dof_count != initial.dof_count {
         return Err(TransientSolveError::DofCountChanged);
     }
-    if candidate.structural_dof_layout != initial.structural_dof_layout {
+    if candidate.structural_dof_layout != initial.structural_dof_layout
+        || candidate.structural_reduced_basis != initial.structural_reduced_basis
+    {
         return Err(TransientSolveError::StructuralSystemChanged {
             component: "DOF layout",
         });

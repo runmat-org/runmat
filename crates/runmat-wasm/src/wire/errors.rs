@@ -67,7 +67,7 @@ pub(crate) fn js_error(message: &str) -> JsValue {
 }
 
 pub(crate) fn js_value_to_string(value: JsValue) -> String {
-    value.as_string().unwrap_or_else(|| format!("{value:?}"))
+    value.as_string().or_else(|| Reflect::get(&value, &JsValue::from_str("message")).ok().and_then(|message| message.as_string())).unwrap_or_else(|| format!("{value:?}"))
 }
 
 pub(crate) fn runtime_error_to_js(err: &RuntimeError) -> JsValue {

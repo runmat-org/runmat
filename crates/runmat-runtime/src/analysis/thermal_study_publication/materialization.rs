@@ -104,7 +104,9 @@ pub(in crate::analysis) fn admit(
             heat_flux_snapshots,
             energy_storage_rate_snapshots,
             residual_norms: manifest.residual_norms.clone(),
-            reference_temperature_k: manifest.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                manifest.reference_temperature_k.canonical_value(),
+            ),
             initial_state: manifest.initial_state.clone(),
         }),
         transient_results: None,

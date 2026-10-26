@@ -3,15 +3,19 @@
 //! No options are parsed here, no builtin is redispatched, and no backend policy
 //! or timing model lives in the runtime. Controls remain in the caller's typed
 //! state. An absent service preserves ordinary runtime/provider execution.
+mod execution;
 mod owned;
-mod request;
-mod host_resources;
-mod host_numerical_output;
-mod real_unary;
-mod real_power;
-mod real_power_scalar;
+mod request_execution;
+use execution::execute_prepared_resources;
+use request_execution::execute_request_resources;
 mod compound;
 mod compound_resources;
+mod host_numerical_output;
+mod host_resources;
+mod real_power;
+mod real_power_scalar;
+mod real_unary;
+mod request;
 pub use crate::builtins::common::real_unary_preparation::RealUnaryPublication;
 pub use crate::dispatcher::direct_call_observation::{
     PreparedBindingAuthority, PreparedCompletionRight, PreparedHostExecution,
@@ -88,36 +92,6 @@ where
     })
 }
 
-fn execute_prepared_resources<F, Fut>(
-    mut prepared: PreparedBuiltinOperands,
-    execute: F,
-) -> impl Future<Output = Result<RootedValue, RuntimeError>>
-where
-    F: FnOnce(
-        Vec<Value>,
-        Option<AdmittedBuiltinCompound>,
-        Option<PreparedHostNumericalOutput>,
-    ) -> Fut,
-    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
-{
-    let recorder = prepared.provider_recorder();
-    let no_replay = prepared.forbids_gpu_gather_retry();
-    runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
-        prepared.begin_execution();
-        let compound = prepared.take_compound();
-        let host_cast_output = prepared.take_host_numerical_output();
-        let result = execute(prepared.take_operands(), compound, host_cast_output).await;
-        let cleanup = prepared.finish(result.as_ref().map(|value| value.value()));
-        let mut result = crate::runtime_error::complete_with_cleanup(result, cleanup);
-        if no_replay {
-            if let Err(error) = &mut result {
-                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            }
-        }
-        result
-    })
-}
-
 pub(crate) async fn execute_invocation<F, Fut>(
     context: Option<&RuntimeContext>,
     admission: BuiltinPreparationAdmission,
@@ -160,43 +134,44 @@ where
     .await
 }
 
-pub(crate) async fn execute_request_numerical<F, Fut>(
-    context: Option<&RuntimeContext>,
+pub(crate) fn execute_request_numerical<'a, F, Fut>(
+    context: Option<&'a RuntimeContext>,
     request: AdmittedBuiltinPreparation,
     execute: F,
-) -> Result<RootedValue, RuntimeError>
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + 'a
 where
     F: FnOnce(
-        Vec<Value>,
-        Option<AdmittedBuiltinCompound>,
-        Option<PreparedHostNumericalOutput>,
-    ) -> Fut,
-    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
+            Vec<Value>,
+            Option<AdmittedBuiltinCompound>,
+            Option<PreparedHostNumericalOutput>,
+        ) -> Fut
+        + 'a,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>> + 'a,
 {
-    execute_request_resources(context, request, true, execute).await
+    execute_request_resources(context, request, true, execute)
 }
 
-pub(crate) async fn execute_request_host_numerical<F, Fut>(
-    context: Option<&RuntimeContext>,
+pub(crate) fn execute_request_host_numerical<'a, F, Fut>(
+    context: Option<&'a RuntimeContext>,
     request: AdmittedBuiltinPreparation,
     execute: F,
-) -> Result<RootedValue, RuntimeError>
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + 'a
 where
-    F: FnOnce(Vec<Value>, Option<PreparedHostNumericalOutput>) -> Fut,
-    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
+    F: FnOnce(Vec<Value>, Option<PreparedHostNumericalOutput>) -> Fut + 'a,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>> + 'a,
 {
     execute_request_resources(
         context,
         request,
         true,
-        |values, compound, numerical_output| async move {
+        move |values, compound, numerical_output| {
             if compound.is_some() {
-                return Err(missing_compound_consumer());
+                futures::future::Either::Left(std::future::ready(Err(missing_compound_consumer())))
+            } else {
+                futures::future::Either::Right(execute(values, numerical_output))
             }
-            execute(values, numerical_output).await
         },
     )
-    .await
 }
 
 fn missing_compound_consumer() -> RuntimeError {
@@ -211,78 +186,4 @@ fn missing_host_numerical_consumer() -> RuntimeError {
         request::invalid("selected host numerical route requires its exact output domain consumer");
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
-}
-
-async fn execute_request_resources<F, Fut>(
-    context: Option<&RuntimeContext>,
-    request: AdmittedBuiltinPreparation,
-    consumes_host_numerical_output: bool,
-    execute: F,
-) -> Result<RootedValue, RuntimeError>
-where
-    F: FnOnce(
-        Vec<Value>,
-        Option<AdmittedBuiltinCompound>,
-        Option<PreparedHostNumericalOutput>,
-    ) -> Fut,
-    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
-{
-    match context {
-        Some(context) => {
-            // A finite host invocation with an actual numerical consumer
-            // does not require an acceleration service. With no service,
-            // admit the canonical numerical owner
-            // before entering the ordinary prepared body, rather than letting
-            // passthrough operands imply an unclaimed host result.
-            //
-            // Service-backed preparations retain their existing authority:
-            // they alone choose/provide their output owner. Ordinary unbounded
-            // calls keep their allocation-neutral passthrough path.
-            let host_output = if consumes_host_numerical_output
-                && context.service_ports().acceleration().is_none()
-            {
-                use super::host_allocation::{
-                    host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
-                };
-                let error = |cause| {
-                    host_allocation_runtime_error(
-                        Some(context),
-                        "RunMat:Placement:HostNumericalOutput",
-                        "admitted host numerical output preparation failed",
-                        cause,
-                    )
-                };
-                match HostAllocationReceipt::policy(Some(context)).map_err(error)? {
-                    HostAllocationPolicy::Managed => request
-                        .prepare_host_numerical_output(context)
-                        .map_err(error)?,
-                    HostAllocationPolicy::Unbounded => None,
-                }
-            } else {
-                None
-            };
-            execute_prepared_resources(
-                prepare_admitted(context, request).await?,
-                |values, compound, numerical_output| async move {
-                    // host_output can exist only with no acceleration
-                    // service; that passthrough has no observation/output.
-                    // Refuse any contradictory delivery before body effects.
-                    if host_output.is_some() && numerical_output.is_some() {
-                        return Err(missing_host_numerical_consumer());
-                    }
-                    execute(values, compound, numerical_output.or(host_output)).await
-                },
-            )
-            .await
-        }
-        None => {
-            execute_prepared_resources(
-                request
-                    .into_operands()
-                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)??,
-                execute,
-            )
-            .await
-        }
-    }
 }

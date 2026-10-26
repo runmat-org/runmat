@@ -21,7 +21,8 @@ use super::ObservationError;
 #[derive(Clone, Debug)]
 pub(crate) struct ObservationNode {
     pub identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,7 +88,10 @@ impl<'a> ObservationTopology<'a> {
                 .iter()
                 .map(|node| ObservationNode {
                     identity: node.stable_identity,
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                 })
                 .collect(),
             volume_elements: projection
@@ -205,7 +209,10 @@ impl<'a> ObservationTopology<'a> {
                 .iter()
                 .map(|node| ObservationNode {
                     identity: node.identity,
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                 })
                 .collect(),
             volume_elements: projection
@@ -403,7 +410,10 @@ fn integration_point_elements(
                     .ok_or(ObservationError::Identity(
                         "observation element references an absent projection node",
                     ))?;
-                for (position, coordinate) in position_m.iter_mut().zip(node.coordinates_m) {
+                for (position, coordinate) in position_m
+                    .iter_mut()
+                    .zip(node.coordinates_m.canonical_value())
+                {
                     *position += value * coordinate;
                 }
             }
@@ -435,7 +445,7 @@ fn centroid(indices: &[usize], nodes: &[ObservationNode]) -> Result<[f64; 3], Ob
         let node = nodes.get(*index).ok_or(ObservationError::Identity(
             "structural element exceeds its canonical node space",
         ))?;
-        for (total, coordinate) in sum.iter_mut().zip(node.coordinates_m) {
+        for (total, coordinate) in sum.iter_mut().zip(node.coordinates_m.canonical_value()) {
             *total += coordinate;
         }
     }

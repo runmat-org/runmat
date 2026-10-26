@@ -118,16 +118,22 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     .unwrap();
     assert!(at_start
         .prescribed_temperature_k
+        .canonical_values()
         .iter()
         .flatten()
         .all(|value| *value == 300.0));
     assert!(at_end
         .prescribed_temperature_k
+        .canonical_values()
         .iter()
         .flatten()
         .all(|value| *value == 320.0));
-    let start_flux_power = at_start.applied_source.iter().sum::<f64>();
-    let end_flux_power = at_end.applied_source.iter().sum::<f64>();
+    let start_flux_power = at_start
+        .applied_source
+        .canonical_values()
+        .iter()
+        .sum::<f64>();
+    let end_flux_power = at_end.applied_source.canonical_values().iter().sum::<f64>();
     assert!((end_flux_power - 2.0 * start_flux_power).abs() <= 1.0e-12);
 
     model.boundaries = vec![AnalysisBoundary {
@@ -232,8 +238,12 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
         let energy = assembly
             .energy_balance(&model, sample, &equilibrium, &equilibrium, 1.0, 0.0)
             .unwrap();
-        assert_eq!(energy.boundary_loss_w, 0.0, "{approach:?}");
-        assert_eq!(energy.applied_power_w, 0.0);
+        assert_eq!(
+            energy.boundary_loss_w.canonical_value(),
+            0.0,
+            "{approach:?}"
+        );
+        assert_eq!(energy.applied_power_w.canonical_value(), 0.0);
         assert_eq!(energy.relative_residual, 0.0);
     }
 }

@@ -15,6 +15,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let initial = request.arguments.get(1);
     facts::numeric(initial, 1, false, &mut diagnostics);
     facts::options(request.arguments.get(2), 2, false, &mut diagnostics);
+    if let Some(ValueKindFact::Struct(options)) = request.arguments.get(2).map(|value| &value.kind)
+    {
+        for name in options.fields.keys() {
+            if crate::OptimOptionField::parse(name).is_some()
+                && crate::OptimOptionField::parse_for_solver(name, crate::OptimSolver::Fminunc)
+                    .is_none()
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FMINUNC-OPTION",
+                    "option is not recognized for fminunc",
+                    2,
+                ));
+            }
+        }
+    }
     let x = facts::like(initial);
     let n = initial.and_then(|v| v.shape.element_count());
     let callback = scalar_facts::callback_invocation_with_arguments(request, vec![x.clone()]);
@@ -30,8 +45,37 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             0,
         ));
     }
-    let hessian = if x.storage == StorageFact::Scalar {
-        facts::scalar()
+    // Struct field facts do not retain the Algorithm string's literal value.
+    // A selected/unknown TR mode can return [], a sparse/dense last model, or
+    // arbitrary original Hinfo. Do not forge an n-by-n numeric sixth output.
+    let known_qn = match request.arguments.get(2).map(|value| &value.kind) {
+        None => true,
+        Some(ValueKindFact::Struct(options)) => {
+            options.fields_complete
+                && !options.fields.keys().any(|name| {
+                    crate::OptimOptionField::parse(name) == Some(crate::OptimOptionField::Algorithm)
+                })
+        }
+        _ => false,
+    };
+    let update_may_be_limited_memory = match request.arguments.get(2).map(|value| &value.kind) {
+        Some(ValueKindFact::Struct(options)) => options.fields.keys().any(|name| {
+            matches!(
+                crate::OptimOptionField::parse(name),
+                Some(
+                    crate::OptimOptionField::HessianApproximation
+                        | crate::OptimOptionField::HessUpdate
+                )
+            )
+        }),
+        _ => false,
+    };
+    let hessian = if !known_qn {
+        ValueFact::unknown(DynamicReason::RuntimeValue)
+    } else if update_may_be_limited_memory {
+        // The update field has no literal value here. L-BFGS returns [],
+        // while the other QN updates return a dense Hessian estimate.
+        facts::double(ShapeFact::Unknown, StorageFact::Dense)
     } else {
         facts::matrix(n, n)
     };

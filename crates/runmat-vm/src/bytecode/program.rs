@@ -435,6 +435,21 @@ impl Default for FunctionBytecode {
 }
 
 impl FunctionBytecode {
+    /// Copied captures may be omitted only when every slot has a compiled
+    /// alternative owner. An activation cannot substitute for a by-value
+    /// snapshot (including anonymous transit captures).
+    pub(crate) fn captures_owned_without_copies(&self, has_activation: bool) -> bool {
+        self.capture_slots.iter().all(|slot| {
+            self.inherited_storage_slots
+                .iter()
+                .any(|entry| entry.slot == *slot)
+                || (has_activation
+                    && self.lexical_binding_slots.iter().any(|entry| {
+                        entry.slot == *slot && entry.kind == LexicalBindingKind::Inherited
+                    }))
+        })
+    }
+
     /// Preserve the point owner's own identity domain: closed-unit and
     /// session rebinding may intentionally assign different FunctionId and
     /// ProgramFunctionId values. The later MIR bridge must match its selected
@@ -1916,6 +1931,12 @@ fn builtin_execution_stack(name: &str) -> runmat_types::ExecutionStackRequiremen
 }
 
 impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry {
+    fn name_resolution_completeness(
+        &self,
+    ) -> runmat_runtime::call::descriptor::NameResolutionCompleteness {
+        runmat_runtime::call::descriptor::NameResolutionCompleteness::Complete
+    }
+
     fn resolve_function(&self, name: &str) -> Option<FunctionId> {
         self.resolve_name(name)
     }
@@ -2451,6 +2472,33 @@ mod function_registry_tests {
         RegionProvenance, REGION_CONTRACT_SCHEMA_VERSION,
     };
     use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn omitted_capture_copies_require_every_compiled_slot_owner() {
+        use super::{LexicalBindingKind, LexicalBindingSlot};
+        let mut body = FunctionBytecode {
+            capture_slots: vec![2, 3],
+            lexical_binding_slots: vec![
+                LexicalBindingSlot {
+                    binding: runmat_types::BindingId(7),
+                    slot: 2,
+                    kind: LexicalBindingKind::Inherited,
+                },
+                LexicalBindingSlot {
+                    binding: runmat_types::BindingId(8),
+                    slot: 3,
+                    kind: LexicalBindingKind::Inherited,
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(body.captures_owned_without_copies(true));
+        assert!(!body.captures_owned_without_copies(false));
+        body.lexical_binding_slots[1].kind = LexicalBindingKind::Transit;
+        assert!(!body.captures_owned_without_copies(true));
+        body.lexical_binding_slots.pop();
+        assert!(!body.captures_owned_without_copies(true));
+    }
 
     #[test]
     fn catch_scope_metadata_rejects_missing_or_mismatched_artifact_facts() {

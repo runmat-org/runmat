@@ -125,10 +125,11 @@ impl Driver {
             .workers
             .values()
             .filter(|worker| {
-                !matches!(
-                    worker.lifecycle,
-                    WorkerLifecycle::Lost | WorkerLifecycle::Stopped
-                )
+                worker.active_attempts > 0
+                    || !matches!(
+                        worker.lifecycle,
+                        WorkerLifecycle::Lost | WorkerLifecycle::Stopped
+                    )
             })
             .count();
         if live_worker_count >= pool.spec.max_workers as usize {
@@ -151,6 +152,17 @@ impl Driver {
     }
 
     pub(super) fn activate_worker(&mut self, worker_id: WorkerId) -> RunnerResult<()> {
+        if self.snapshot.attempts.values().any(|attempt| {
+            attempt.request.worker_id == worker_id
+                && attempt
+                    .unverified_retirement
+                    .as_ref()
+                    .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none())
+        }) {
+            return Err(RunnerError::Invalid(
+                "worker still owns an unresolved physical attempt".into(),
+            ));
+        }
         let worker = self.worker_mut(worker_id)?;
         if worker.lifecycle == WorkerLifecycle::Lost {
             return Err(RunnerError::Invalid(format!(
@@ -163,7 +175,13 @@ impl Driver {
     }
 
     pub(super) fn drain_worker(&mut self, worker_id: WorkerId) -> RunnerResult<()> {
-        self.worker_mut(worker_id)?.lifecycle = WorkerLifecycle::Draining;
+        let worker = self.worker_mut(worker_id)?;
+        if worker.lifecycle == WorkerLifecycle::Lost {
+            return Err(RunnerError::Invalid(
+                "lost worker cannot be unfenced by draining".into(),
+            ));
+        }
+        worker.lifecycle = WorkerLifecycle::Draining;
         self.emit(DriverEventKind::WorkerDraining { worker_id });
         Ok(())
     }

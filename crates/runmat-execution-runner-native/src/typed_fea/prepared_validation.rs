@@ -15,36 +15,44 @@ pub(super) fn validate_prepared_execution(
                 $root.program_revision == prepared.revision,
                 $backend,
                 $root.analysis_accelerator_requests == options.accelerators,
+                $root.local_execution.thread_count(),
             )
         };
     }
-    let (study_matches, revision_matches, backend, accelerators_match) = match &prepared.root {
-        PreparedFeaStudyRoot::Electrical(root) => {
-            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
-        }
-        PreparedFeaStudyRoot::Magnetic(root) => {
-            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
-        }
-        PreparedFeaStudyRoot::Maxwell(root) => {
-            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
-        }
-        PreparedFeaStudyRoot::Nonlinear(root) => {
-            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
-        }
-        PreparedFeaStudyRoot::Fluid(root) => {
-            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
-        }
-        PreparedFeaStudyRoot::Acoustic(root) => {
-            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
-        }
-        PreparedFeaStudyRoot::Thermal(root) => metadata!(root, root.planning.backend),
-        PreparedFeaStudyRoot::Structural(root) => {
-            let expected = root.result_expectation();
-            metadata!(expected, expected.planning.backend)
-        }
-    };
+    let (study_matches, revision_matches, backend, accelerators_match, original_threads) =
+        match &prepared.root {
+            PreparedFeaStudyRoot::Electrical(root) => {
+                metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+            }
+            PreparedFeaStudyRoot::Magnetic(root) => {
+                metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+            }
+            PreparedFeaStudyRoot::Maxwell(root) => {
+                metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+            }
+            PreparedFeaStudyRoot::Nonlinear(root) => {
+                metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+            }
+            PreparedFeaStudyRoot::Fluid(root) => {
+                metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+            }
+            PreparedFeaStudyRoot::Acoustic(root) => {
+                metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+            }
+            PreparedFeaStudyRoot::Thermal(root) => metadata!(root, root.planning.backend),
+            PreparedFeaStudyRoot::Structural(root) => {
+                let expected = root.result_expectation();
+                metadata!(expected, expected.planning.backend)
+            }
+        };
     if !study_matches || !revision_matches {
         return Err("prepared study metadata differs from original root study/revision".into());
+    }
+    if options
+        .cpu_threads_per_worker
+        .is_some_and(|threads| threads != original_threads)
+    {
+        return Err("Execution threads differ from the prepared CPU admission.".into());
     }
     if options.backend != backend || !accelerators_match {
         return Err("execution options differ from prepared backend/accelerator admission".into());

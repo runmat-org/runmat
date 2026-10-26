@@ -15,6 +15,91 @@ struct ExistingTask {
 }
 
 impl RemotePoolDriver {
+    /// Admit the existing Direct or selected-Graph route without changing the
+    /// caller's task grant. Graph requires an authenticated staged transfer.
+    pub fn submit_worker(
+        self: &Arc<Self>,
+        program: WorkerProgramRequest,
+        submission: TaskSubmission,
+        transfer: Option<RemoteGraphTransfer>,
+    ) -> NativeExecutionResult<RemoteTaskCompletion> {
+        match program {
+            WorkerProgramRequest::Direct(program) => {
+                if transfer.is_some() {
+                    return Err(NativeExecutionError::Protocol(
+                        "Direct program cannot claim a Graph transfer".into(),
+                    ));
+                }
+                self.submit(submission, program)
+            }
+            WorkerProgramRequest::Graph(graph) => {
+                graph
+                    .validate()
+                    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                let task = &submission.request;
+                let expected =
+                    runmat_execution::identity::ArtifactId::derive(&[graph.artifact.id.0.bytes()]);
+                let callable = graph
+                    .scheduler_callable()
+                    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                let host = graph
+                    .execution_host_requirement(task.host.permitted_trust_tiers.clone())
+                    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                let schema = runmat_execution::value::GraphRequiredSchema::from_version(
+                    graph.schema_version,
+                )
+                .ok_or_else(|| NativeExecutionError::Protocol("unsupported Graph schema".into()))?;
+                if task.program_artifact_id() != Some(expected)
+                    || task.callable.program != callable
+                    || task.host != host
+                    || task.outputs != graph.recipe.outputs
+                    || task.invocation_context != graph.context
+                    || task.environment != runmat_execution::EnvironmentSnapshot::default()
+                    || task.console.is_some()
+                    || !task.inputs.is_empty()
+                    || graph.assignment.is_some()
+                    || graph.job_id.is_some()
+                    || !task
+                        .resources
+                        .required_capabilities
+                        .contains(&runmat_execution::resource::Capability::ProcessIsolation)
+                    || schema.required_capability().is_some_and(|capability| {
+                        !task.resources.required_capabilities.contains(&capability)
+                    })
+                {
+                    return Err(NativeExecutionError::Protocol(
+                        "remote Graph task differs from its exact selected invocation".into(),
+                    ));
+                }
+                let transfer = transfer.ok_or_else(|| {
+                    NativeExecutionError::Protocol(
+                        "Graph program requires an authenticated transfer".into(),
+                    )
+                })?;
+                let (digest, length) = crate::metadata_identity::json_identity(
+                    b"",
+                    &graph,
+                    transfer.maximum_program_bytes,
+                )?;
+                if digest != transfer.program_digest || length != transfer.program_length {
+                    return Err(NativeExecutionError::Protocol(
+                        "Graph program changed after encrypted transfer admission".into(),
+                    ));
+                }
+                self.submit_graph_program(
+                    submission,
+                    graph,
+                    usize::try_from(length).map_err(|_| {
+                        NativeExecutionError::Protocol(
+                            "Graph length exceeds host address space".into(),
+                        )
+                    })?,
+                    Some(transfer),
+                )
+            }
+        }
+    }
+
     pub fn submit(
         self: &Arc<Self>,
         submission: TaskSubmission,
@@ -120,34 +205,15 @@ impl RemotePoolDriver {
                 "direct request cannot use a graph-only remote pool".into(),
             ));
         }
-        program.validate().map_err(|error| {
-            NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
-        })?;
-        program
-            .recipe
-            .validate_resource_request(&submission.request.resources)
-            .map_err(|error| {
-                NativeExecutionError::Protocol(format!(
-                    "remote scheduler resources do not satisfy the program: {error}"
-                ))
-            })?;
-        let artifact_id =
-            runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
-        if submission.request.scope_id != self.scope_id
-            || submission.request.pool_id != self.pool_id
-            || submission.request.program_artifact_id() != Some(artifact_id)
-            || submission.request.callable.program != program.callable
-            || submission.request.invocation_context != program.context
-            || submission.request.environment != program.environment
-            || submission.request.console != program.console
-            || submission.request.inputs != program.arguments
-            || submission.request.outputs.requested_outputs != program.requested_outputs
-        {
-            return Err(NativeExecutionError::Protocol(
-                "remote task differs from its exact program request".into(),
-            ));
-        }
-        Ok(())
+        super::super::direct_admission::validate(
+            program,
+            super::super::direct_admission::Admission::Pool {
+                task: &submission.request,
+                scope_id: self.scope_id,
+                pool_id: self.pool_id,
+            },
+        )
+        .map_err(|message| NativeExecutionError::Protocol(message.into()))
     }
 
     /// Atomically admits a topologically ordered graph before dispatching any task.

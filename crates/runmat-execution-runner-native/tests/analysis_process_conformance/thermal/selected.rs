@@ -28,7 +28,7 @@ pub(super) fn configure_model(
         .thermal
         .as_mut()
         .unwrap()
-        .expansion_coefficient_per_k = 1.0e-5;
+        .expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(1.0e-5);
     let prefix = ProcedureStep::structural_static("mechanical_context");
     let mut consumer = ProcedureStep::coupled(
         "thermal_expansion",

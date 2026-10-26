@@ -48,10 +48,14 @@ pub(super) fn classify_acute_vertices(
                     ));
                 }
                 let endpoints = [
-                    constraints.nodes[adjacent[first] as usize].coordinates_m,
-                    constraints.nodes[adjacent[second] as usize].coordinates_m,
+                    constraints.nodes[adjacent[first] as usize]
+                        .coordinates_m
+                        .canonical_value(),
+                    constraints.nodes[adjacent[second] as usize]
+                        .coordinates_m
+                        .canonical_value(),
                 ];
-                let point = constraints.nodes[center].coordinates_m;
+                let point = constraints.nodes[center].coordinates_m.canonical_value();
                 let relation = diametral_sphere_position(endpoints, point).map_err(|failure| {
                     error(
                         DelaunaySegmentRecoveryErrorKind::InvalidConstraints,

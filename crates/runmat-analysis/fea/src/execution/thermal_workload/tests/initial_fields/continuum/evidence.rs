@@ -98,11 +98,13 @@ fn extrapolate(coarse: &FeaThermalRunResult, fine: &FeaThermalRunResult) -> Fiel
                 .last()
                 .unwrap()
                 .prescribed_boundary_power_w
+                .canonical_value()
             - coarse
                 .energy_balances
                 .last()
                 .unwrap()
-                .prescribed_boundary_power_w,
+                .prescribed_boundary_power_w
+                .canonical_value(),
     }
 }
 
@@ -138,7 +140,7 @@ fn integrate(
         let coordinates = element
             .node_indices
             .iter()
-            .map(|&node| projection.nodes[node].coordinates_m)
+            .map(|&node| projection.nodes[node].coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         let mut reference_flux_integral = 0.0;
         visit_volume_rule(

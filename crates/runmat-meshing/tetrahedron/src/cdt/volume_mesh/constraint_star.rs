@@ -49,9 +49,13 @@ fn build_visible_constraint_star(
     if constraints.nodes.is_empty() || constraints.facets.is_empty() {
         return Ok(None);
     }
-    let seed_coordinates =
-        super::centroid::canonical_average(constraints.nodes.iter().map(|node| node.coordinates_m))
-            .expect("nonempty constraint node inventory checked above");
+    let seed_coordinates = super::centroid::canonical_average(
+        constraints
+            .nodes
+            .iter()
+            .map(|node| node.coordinates_m.canonical_value()),
+    )
+    .expect("nonempty constraint node inventory checked above");
     let seed = DelaunayVolumeNode::explicit(
         super::region_seed::region_seed_identity(region),
         seed_coordinates,
@@ -60,7 +64,9 @@ fn build_visible_constraint_star(
         let nodes = facet.vertex_indices.map(|index| {
             DelaunayVolumeNode::explicit(
                 constraints.nodes[index as usize].identity,
-                constraints.nodes[index as usize].coordinates_m,
+                constraints.nodes[index as usize]
+                    .coordinates_m
+                    .canonical_value(),
             )
         });
         let side = orient_materialized_volume_nodes([nodes[0], nodes[1], nodes[2], seed])
@@ -87,9 +93,9 @@ fn build_visible_constraint_star(
                 facet_index,
                 ?side,
                 ?expected,
-                seed_x = seed.coordinates_m[0],
-                seed_y = seed.coordinates_m[1],
-                seed_z = seed.coordinates_m[2],
+                seed_x = seed.coordinates_m.canonical_value()[0],
+                seed_y = seed.coordinates_m.canonical_value()[1],
+                seed_z = seed.coordinates_m.canonical_value()[2],
                 "constraint star rejected non-visible facet"
             );
             return Ok(None);

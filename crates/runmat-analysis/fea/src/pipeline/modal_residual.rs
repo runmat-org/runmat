@@ -113,7 +113,12 @@ pub(super) fn build_directional_residual_vectors(
                 "residual vector is linearly dependent on the retained modal basis".into(),
             ));
         }
-        let scale = modal_mass.sqrt().recip();
+        let reference = super::modal_basis::ModalBasisCoordinates::canonical_reference_mass();
+        let scale = runmat_types::physical::Mass::new(modal_mass)
+            .ratio_to(reference)
+            .canonical_value()
+            .sqrt()
+            .recip();
         shape.iter_mut().for_each(|value| *value *= scale);
         let modal_mass = dot(&shape, &apply_m(&summary.operator, &shape));
         let modal_stiffness = dot(&shape, &apply_k(&summary.operator, &shape));

@@ -592,7 +592,7 @@ fn completed_scalar_series(
     let mut request = spec(
         "series",
         ObservationTarget::Point {
-            position: Position::new(projection.nodes[0].coordinates_m),
+            position: Position::new(projection.nodes[0].coordinates_m.canonical_value()),
         },
     );
     request.sampling = SamplingPolicy::TimeSeconds(times.to_vec());
@@ -716,7 +716,7 @@ fn field_and_exact_probe_use_typed_source_and_canonical_entities() {
     let probe_request = ObservationRequest::Probe(spec(
         "probe",
         ObservationTarget::Point {
-            position: Position::new(node.coordinates_m),
+            position: Position::new(node.coordinates_m.canonical_value()),
         },
     ));
     let step = thermal_step(vec![field_request, probe_request]);
@@ -958,7 +958,7 @@ fn path_interpolation_reproduces_linear_fields_for_tet4_and_tet10() {
             .nodes
             .iter()
             .map(|node| {
-                let [x, y, z] = node.coordinates_m;
+                let [x, y, z] = node.coordinates_m.canonical_value();
                 10.0 + 2.0 * x - 3.0 * y + 4.0 * z
             })
             .collect::<Vec<_>>();
@@ -1028,7 +1028,7 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
     let linear_values = projection
         .nodes
         .iter()
-        .map(|node| node.coordinates_m.iter().sum())
+        .map(|node| node.coordinates_m.canonical_value().iter().sum())
         .collect::<Vec<f64>>();
     let definition = scalar_definition();
     let mut volume = spec("volume_average", ObservationTarget::WholeModel);

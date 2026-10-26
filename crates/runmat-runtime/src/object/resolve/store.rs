@@ -15,7 +15,7 @@ where
         base,
         field,
         rhs,
-        caller_function_name,
+        MemberCaller::named(caller_function_name),
         on_write,
     )
     .await
@@ -37,7 +37,7 @@ where
         base,
         field,
         rhs,
-        caller_function_name,
+        MemberCaller::named(caller_function_name),
         on_write,
     )
     .await
@@ -61,7 +61,7 @@ where
                 base,
                 field,
                 rhs,
-                caller_function_name,
+                MemberCaller::named(caller_function_name),
                 on_write,
             )
             .await
@@ -72,7 +72,7 @@ where
                 base,
                 field,
                 rhs,
-                caller_function_name,
+                MemberCaller::named(caller_function_name),
                 on_write,
             )
             .await
@@ -85,7 +85,7 @@ async fn store_member_with_scope<'a, M, OnWrite>(
     base: Value,
     field: String,
     rhs: Value,
-    caller_function_name: Option<&'a str>,
+    caller_function_name: MemberCaller<'a>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
@@ -109,12 +109,13 @@ where
     .await
 }
 
-pub(crate) async fn store_member_text_with_context<OnWrite>(
+pub(crate) async fn store_member_text_with_optional_access<OnWrite>(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
     field: runmat_value::Utf8Text,
     rhs: Value,
     caller_function_name: Option<&str>,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
@@ -122,23 +123,29 @@ where
 {
     match context {
         Some(context) => {
-            store_member_text_with_scope(
+            store_member_text_with_caller_scope(
                 ContextualMemberScope(context),
                 base,
                 field,
                 rhs,
-                caller_function_name,
+                match access {
+                    Some(access) => MemberCaller::frame(caller_function_name, access),
+                    None => MemberCaller::named(caller_function_name),
+                },
                 on_write,
             )
             .await
         }
         None => {
-            store_member_text_with_scope(
+            store_member_text_with_caller_scope(
                 OrdinaryMemberScope,
                 base,
                 field,
                 rhs,
-                caller_function_name,
+                match access {
+                    Some(access) => MemberCaller::frame(caller_function_name, access),
+                    None => MemberCaller::named(caller_function_name),
+                },
                 on_write,
             )
             .await
@@ -146,12 +153,12 @@ where
     }
 }
 
-pub(crate) async fn store_member_text_with_scope<'a, M, OnWrite>(
+pub(super) async fn store_member_text_with_caller_scope<'a, M, OnWrite>(
     scope: M,
     base: Value,
     field: runmat_value::Utf8Text,
     rhs: Value,
-    caller_function_name: Option<&'a str>,
+    caller_function_name: MemberCaller<'a>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
@@ -199,7 +206,7 @@ fn member_store_roots(
 fn store_member_scoped<'a, M, OnWrite>(
     scope: M,
     request: MemberStore,
-    caller_function_name: Option<&'a str>,
+    caller_function_name: MemberCaller<'a>,
     on_write: OnWrite,
 ) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a
 where
@@ -217,7 +224,7 @@ where
 async fn store_member_in_scope<OnWrite>(
     context: Option<&crate::context::RuntimeContext>,
     request: MemberStore,
-    caller_function_name: Option<&str>,
+    caller_function_name: MemberCaller<'_>,
     mut on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
@@ -232,9 +239,7 @@ where
     match base {
         Value::Object(obj) => {
             let base = Value::Object(obj.clone());
-            let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
-                caller_function_name,
-            );
+            let access = caller_function_name.protocol_access();
             if let Some(method) =
                 crate::object::protocol::resolve_object_protocol(
                     &base,
@@ -300,9 +305,7 @@ where
             // Invalid handle stores retain their established property-store
             // error domain before selected protocol authority is consulted.
             property_store::require_valid_handle(&handle)?;
-            let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
-                caller_function_name,
-            );
+            let access = caller_function_name.protocol_access();
             if let Some(method) =
                 crate::object::protocol::resolve_object_protocol(
                     &base,
@@ -384,4 +387,47 @@ where
     OnWrite: FnMut(&Value, &Value),
 {
     store_member(base, name, rhs, caller_function_name, on_write).await
+}
+
+pub(crate) fn store_member_text_with_optional_access_scope<'a, M, OnWrite>(
+    scope: M,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    rhs: Value,
+    caller_function_name: Option<&'a str>,
+    access: Option<&'a crate::object::protocol::ObjectAccessContext>,
+    on_write: OnWrite,
+) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a
+where
+    M: MemberStoreScope<'a> + 'a,
+    OnWrite: FnMut(&Value, &Value) + 'a,
+{
+    store_member_text_with_caller_scope(
+        scope,
+        base,
+        field,
+        rhs,
+        match access {
+            Some(access) => MemberCaller::frame(caller_function_name, access),
+            None => MemberCaller::named(caller_function_name),
+        },
+        on_write,
+    )
+}
+pub fn store_member_traced_with_access<'a>(
+    context: &'a crate::context::RuntimeContext,
+    base: Value,
+    field: String,
+    rhs: Value,
+    caller_function_name: Option<&'a str>,
+    access: &'a crate::object::protocol::ObjectAccessContext,
+) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
+    store_member_with_scope(
+        ContextualMemberScope(context),
+        base,
+        field,
+        rhs,
+        MemberCaller::frame(caller_function_name, access),
+        runmat_gc::gc_record_write,
+    )
 }

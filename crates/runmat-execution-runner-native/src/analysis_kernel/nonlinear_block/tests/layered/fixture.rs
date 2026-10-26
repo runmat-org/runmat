@@ -24,7 +24,8 @@ pub(super) fn prepare(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
                         .iter()
                         .find(|node| node.node_id == *id)
                         .unwrap()
-                        .coordinates_m[0]
+                        .coordinates_m
+                        .canonical_value()[0]
                 })
                 .sum::<f64>()
                 / 4.0;
@@ -68,8 +69,8 @@ pub(super) fn prepare(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         let mut material = original_material.clone();
         material.material_id = format!("layer_material_{layer}");
         material.plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: yield_stress,
-            isotropic_hardening_modulus_pa: 30.0,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(yield_stress),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(30.0),
         });
         model.material_assignments.push(MaterialAssignment {
             target: PropertyRegionTarget::solid(format!("layer_{layer}")),
@@ -91,7 +92,7 @@ pub(super) fn prepare(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
             },
         ];
-        if node.coordinates_m[0] == 0.0 {
+        if node.coordinates_m.canonical_value()[0] == 0.0 {
             translations.push(TranslationDofValue {
                 dof: StructuralTranslationDof::Ux,
                 value: PrescribedValue::Constant(Displacement::new(0.0)),

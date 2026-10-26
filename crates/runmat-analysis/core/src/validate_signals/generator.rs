@@ -4,11 +4,15 @@ use crate::problem::signal::{
 
 use super::validate_artifact;
 
-pub(super) fn validate_generator(generator: &SignalGenerator) -> Result<(), String> {
+pub(super) fn validate_generator(
+    generator: &SignalGenerator,
+    inputs: Option<&[crate::AuthoredInputDefinition]>,
+) -> Result<(), String> {
+    generator.domain.axis_descriptor(inputs)?;
     validate_generator_invocation(&generator.invocation)?;
     if matches!(
         &generator.domain,
-        GeneratorDomain::StudyParameter { parameter_id } if parameter_id.trim().is_empty()
+        GeneratorDomain::StudyParameter { parameter_id, .. } if parameter_id.trim().is_empty()
     ) {
         return Err("study-parameter generators require a parameter id".to_string());
     }

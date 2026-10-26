@@ -45,6 +45,7 @@ pub(super) fn classify(value: Value) -> Input {
         | Value::StructArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

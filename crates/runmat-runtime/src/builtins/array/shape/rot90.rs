@@ -98,7 +98,8 @@ async fn rot90_builtin(
             "rot90: cell arrays are not yet supported",
             &ROT90_ERROR_UNSUPPORTED_INPUT,
         )),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

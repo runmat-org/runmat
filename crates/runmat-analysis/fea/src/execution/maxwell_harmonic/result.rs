@@ -83,14 +83,18 @@ impl MaxwellHarmonicSolverResult {
             || sampling.sampling_digest() != r.sampling_digest
             || sampling.rule()
                 != crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen
-            || r.angular_frequency_rad_per_s != input.angular_frequency_rad_per_s
-            || !r.angular_frequency_rad_per_s.is_finite()
-            || r.angular_frequency_rad_per_s <= 0.0
+            || r.angular_frequency_rad_per_s.canonical_value()
+                != input.angular_frequency_rad_per_s.canonical_value()
+            || !r.angular_frequency_rad_per_s.canonical_value().is_finite()
+            || r.angular_frequency_rad_per_s.canonical_value() <= 0.0
             || !within(r.relative_physical_residual, 8.0 * t)
             || !within(r.relative_complex_power_error, 16.0 * t)
             || !within(r.relative_charge_continuity_residual, 16.0 * t)
-            || r.edge_circulations_v.len() != r.edge_node_identities.len()
-            || r.edge_circulations_v.iter().any(|v| !v.is_finite())
+            || r.edge_circulations_v.canonical_values().len() != r.edge_node_identities.len()
+            || r.edge_circulations_v
+                .canonical_values()
+                .iter()
+                .any(|v| !v.is_finite())
             || !r
                 .edge_node_identities
                 .iter()
@@ -141,19 +145,19 @@ impl MaxwellHarmonicSolverResult {
                 || s.ordinal != authority.ordinal
                 || s.position_m != authority.position_m
                 || s.volume_weight_m3 != authority.volume_weight_m3
-                || !law.permeability_h_per_m.is_finite()
-                || law.permeability_h_per_m <= 0.0
-                || !law.permittivity_f_per_m.is_finite()
-                || law.permittivity_f_per_m <= 0.0
-                || !law.conductivity_s_per_m.is_finite()
-                || law.conductivity_s_per_m <= 0.0
+                || !law.permeability_h_per_m.canonical_value().is_finite()
+                || law.permeability_h_per_m.canonical_value() <= 0.0
+                || !law.permittivity_f_per_m.canonical_value().is_finite()
+                || law.permittivity_f_per_m.canonical_value() <= 0.0
+                || !law.conductivity_s_per_m.canonical_value().is_finite()
+                || law.conductivity_s_per_m.canonical_value() <= 0.0
                 || [
-                    s.electric_field_v_per_m,
-                    s.flux_density_t,
-                    s.magnetic_field_a_per_m,
-                    s.electric_displacement_c_per_m2,
-                    s.conduction_current_density_a_per_m2,
-                    j.current_density_a_per_m2,
+                    s.electric_field_v_per_m.canonical_value(),
+                    s.flux_density_t.canonical_value(),
+                    s.magnetic_field_a_per_m.canonical_value(),
+                    s.electric_displacement_c_per_m2.canonical_value(),
+                    s.conduction_current_density_a_per_m2.canonical_value(),
+                    j.current_density_a_per_m2.canonical_value(),
                 ]
                 .into_iter()
                 .flatten()
@@ -164,27 +168,31 @@ impl MaxwellHarmonicSolverResult {
             let mut ee = 0.0;
             let mut hh = 0.0;
             for axis in 0..3 {
-                let e = s.electric_field_v_per_m[axis];
-                let b = s.flux_density_t[axis];
-                if s.magnetic_field_a_per_m[axis] != b / law.permeability_h_per_m
-                    || s.electric_displacement_c_per_m2[axis] != e * law.permittivity_f_per_m
-                    || s.conduction_current_density_a_per_m2[axis] != e * law.conductivity_s_per_m
+                let e = s.electric_field_v_per_m.canonical_value()[axis];
+                let b = s.flux_density_t.canonical_value()[axis];
+                if s.magnetic_field_a_per_m.canonical_value()[axis]
+                    != b / law.permeability_h_per_m.canonical_value()
+                    || s.electric_displacement_c_per_m2.canonical_value()[axis]
+                        != e * law.permittivity_f_per_m.canonical_value()
+                    || s.conduction_current_density_a_per_m2.canonical_value()[axis]
+                        != e * law.conductivity_s_per_m.canonical_value()
                 {
                     return Err(invalid("Maxwell retained constitutive fields differ"));
                 }
                 ee += e.norm_squared();
-                hh += s.magnetic_field_a_per_m[axis].norm_squared();
+                hh += s.magnetic_field_a_per_m.canonical_value()[axis].norm_squared();
             }
             let weight = s.volume_weight_m3;
-            we += 0.25 * weight * law.permittivity_f_per_m * ee;
-            wm += 0.25 * weight * law.permeability_h_per_m * hh;
-            ohmic += 0.5 * weight * law.conductivity_s_per_m * ee;
+            we += 0.25 * weight * law.permittivity_f_per_m.canonical_value() * ee;
+            wm += 0.25 * weight * law.permeability_h_per_m.canonical_value() * hh;
+            ohmic += 0.5 * weight * law.conductivity_s_per_m.canonical_value() * ee;
             let power = (0..3).fold(crate::physics::maxwell::ComplexPhasor::ZERO, |sum, axis| {
-                sum + s.electric_field_v_per_m[axis] * j.current_density_a_per_m2[axis].conjugate()
+                sum + s.electric_field_v_per_m.canonical_value()[axis]
+                    * j.current_density_a_per_m2.canonical_value()[axis].conjugate()
             });
             source += power * (-0.5 * weight);
         }
-        let reactive = 2.0 * r.angular_frequency_rad_per_s * (wm - we);
+        let reactive = 2.0 * r.angular_frequency_rad_per_s.canonical_value() * (wm - we);
         let predicted = crate::physics::maxwell::ComplexPhasor::new(ohmic, reactive);
         let scale = predicted.abs().max(source.abs());
         let closure = if scale > 0.0 {
@@ -192,12 +200,15 @@ impl MaxwellHarmonicSolverResult {
         } else {
             (source - predicted).abs()
         };
-        if !close(we, r.electric_energy_j)
-            || !close(wm, r.magnetic_energy_j)
-            || !close(ohmic, r.ohmic_power_w)
-            || !close(reactive, r.reactive_power_var)
-            || !close(source.real, r.source_power_va.real)
-            || !close(source.imaginary, r.source_power_va.imaginary)
+        if !close(we, r.electric_energy_j.canonical_value())
+            || !close(wm, r.magnetic_energy_j.canonical_value())
+            || !close(ohmic, r.ohmic_power_w.canonical_value())
+            || !close(reactive, r.reactive_power_var.canonical_value())
+            || !close(source.real, r.source_power_va.canonical_value().real)
+            || !close(
+                source.imaginary,
+                r.source_power_va.canonical_value().imaginary,
+            )
             || !close(closure, r.relative_complex_power_error)
         {
             return Err(invalid("Maxwell retained power/energy summaries disagree"));

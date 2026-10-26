@@ -42,7 +42,7 @@ pub(super) fn star_refill_candidate_with_rejection_reason(
             boundary_nodes[&face.node_ids[0]],
             boundary_nodes[&face.node_ids[1]],
             boundary_nodes[&face.node_ids[2]],
-            interior_node.coordinates_m,
+            interior_node.coordinates_m.canonical_value(),
         ];
         let tetrahedron =
             match raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options) {

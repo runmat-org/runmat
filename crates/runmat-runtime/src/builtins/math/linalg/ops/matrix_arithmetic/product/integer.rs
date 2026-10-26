@@ -15,6 +15,7 @@ pub(super) fn contains(value: &Value) -> bool {
 }
 
 pub(super) async fn evaluate(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: &Value,
     rhs: &Value,
 ) -> crate::BuiltinResult<BuiltinResult<Value>> {
@@ -27,7 +28,7 @@ pub(super) async fn evaluate(
     )?;
     let lhs = crate::dispatcher::gather_if_needed_async(lhs).await?;
     let rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
-    let result = product_try!(host::evaluate(lhs, rhs).await?);
+    let result = product_try!(host::evaluate(context, lhs, rhs).await?);
     let Some(source) = restore_source else {
         return Ok(Ok(result));
     };

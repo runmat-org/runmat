@@ -9,6 +9,8 @@ use runmat_value::SelectedObjectClassFacts;
 use runmat_value::Value;
 use std::rc::Rc;
 
+mod intra_class;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjectProtocolCallingConvention {
     StandardSubstruct,
@@ -129,6 +131,19 @@ pub(crate) fn selected_receiver_facts(
             "object handle is invalid",
         )),
         Value::ObjectArray(array) => {
+            if array.data().is_empty() {
+                return match (
+                    array.selected_provenance(),
+                    array.has_unselected_provenance(),
+                ) {
+                    ([], _) => Ok(None),
+                    ([facts], false) => Ok(Some(Rc::clone(facts))),
+                    _ => Err(semantic_error(
+                        "SelectedObjectReceiverInvalid",
+                        "empty object array has ambiguous retained class products",
+                    )),
+                };
+            }
             let mut selected: Option<Option<Rc<SelectedObjectClassFacts>>> = None;
             for element in array.data() {
                 let facts = selected_receiver_facts(element)?;
@@ -161,15 +176,41 @@ fn selected_method(
     method_name: &MethodName,
     access: &ObjectAccessContext,
 ) -> Result<Option<ResolvedObjectMethod>, RuntimeError> {
+    selected_method_kind(facts, method_name, access, DeclaredMethodKind::Instance)
+}
+
+#[derive(Clone, Copy)]
+enum DeclaredMethodKind {
+    Instance,
+    Static,
+}
+
+impl DeclaredMethodKind {
+    fn validate(self, is_static: bool, name: &MethodName) -> Result<(), RuntimeError> {
+        match (self, is_static) {
+            (Self::Instance, false) | (Self::Static, true) => Ok(()),
+            (Self::Instance, true) => Err(semantic_error(
+                "MethodStaticOnInstance",
+                format!("Method '{name}' is static"),
+            )),
+            (Self::Static, false) => Err(semantic_error(
+                "MethodInstanceOnClass",
+                format!("Method '{name}' is not static"),
+            )),
+        }
+    }
+}
+
+fn selected_method_kind(
+    facts: &Rc<SelectedObjectClassFacts>,
+    method_name: &MethodName,
+    access: &ObjectAccessContext,
+    kind: DeclaredMethodKind,
+) -> Result<Option<ResolvedObjectMethod>, RuntimeError> {
     let Some(method) = facts.method(method_name) else {
         return Ok(None);
     };
-    if method.owner.is_static {
-        return Err(semantic_error(
-            "MethodStaticOnInstance",
-            format!("Method '{}' is static", method_name.0),
-        ));
-    }
+    kind.validate(method.owner.is_static, method_name)?;
     if method.is_abstract {
         return Err(semantic_error(
             "MethodAbstract",
@@ -226,7 +267,11 @@ pub fn resolve_object_protocol(
         return Ok(None);
     };
     let method_name = protocol.method();
-    if let Some(facts) = selected_receiver_facts(base)? {
+    let selected = selected_receiver_facts(base)?;
+    if intra_class::uses_builtin_indexing(&class, protocol, access, selected.as_deref())? {
+        return Ok(None);
+    }
+    if let Some(facts) = selected {
         let Some(method) = selected_method(&facts, &method_name, access)? else {
             return Ok(None);
         };
@@ -336,22 +381,36 @@ pub fn resolve_declared_object_method(
     method_name: &MethodName,
     access: &ObjectAccessContext,
 ) -> Result<Option<ResolvedObjectMethod>, RuntimeError> {
+    resolve_declared_object_method_kind(base, method_name, access, DeclaredMethodKind::Instance)
+}
+
+/// Resolve a static factory using its prototype's retained class product.
+/// A same-named current class cannot replace an absent retained method.
+pub(crate) fn resolve_declared_object_static_method(
+    base: &Value,
+    method_name: &MethodName,
+    access: &ObjectAccessContext,
+) -> Result<Option<ResolvedObjectMethod>, RuntimeError> {
+    resolve_declared_object_method_kind(base, method_name, access, DeclaredMethodKind::Static)
+}
+
+fn resolve_declared_object_method_kind(
+    base: &Value,
+    method_name: &MethodName,
+    access: &ObjectAccessContext,
+    kind: DeclaredMethodKind,
+) -> Result<Option<ResolvedObjectMethod>, RuntimeError> {
     let Some(class) = crate::object::indexing::class_name_from_base(base).cloned() else {
         return Ok(None);
     };
     if let Some(facts) = selected_receiver_facts(base)? {
-        return selected_method(&facts, method_name, access);
+        return selected_method_kind(&facts, method_name, access, kind);
     }
     let Some(bound) = crate::class_registry::lookup_bound_method(&class, method_name) else {
         return Ok(None);
     };
     let method = &bound.declaration;
-    if method.is_static {
-        return Err(semantic_error(
-            "MethodStaticOnInstance",
-            format!("Method '{}' is static", method_name.0),
-        ));
-    }
+    kind.validate(method.is_static, method_name)?;
     if method.is_abstract {
         return Err(semantic_error(
             "MethodAbstract",

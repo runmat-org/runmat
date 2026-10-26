@@ -39,6 +39,9 @@ pub(super) fn face_uses_for_parameters(
             .map(|parameter| {
                 pcurves
                     .point(&coedge.pcurve_evaluator_id, *parameter, control)
+                    .map(|uv| {
+                        uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value))
+                    })
                     .map_err(|error| geometry_error(edge, error))
             })
             .collect::<Result<Vec<_>, _>>()?;

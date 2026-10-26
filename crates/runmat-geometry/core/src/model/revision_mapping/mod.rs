@@ -1,4 +1,5 @@
 mod resolution;
+mod regions;
 mod validation;
 pub(crate) use validation::RevisionIndex;
 
@@ -59,6 +60,7 @@ pub enum GeometryRevisionResolution {
 #[serde(rename_all = "snake_case")]
 pub enum GeometryRevisionConflictKind {
     SourceNotMapped,
+    Deleted,
     MultipleCandidates,
 }
 

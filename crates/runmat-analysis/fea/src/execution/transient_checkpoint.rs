@@ -70,14 +70,15 @@ impl StructuralTransientNumericalState {
                     ..
                 },
             ) if basis_state == expected_basis => {
-                if coordinates.displacement.len() != *coordinate_count
-                    || coordinates.velocity.len() != *coordinate_count
-                    || coordinates.acceleration.len() != *coordinate_count
+                if coordinates.displacement.canonical_values().len() != *coordinate_count
+                    || coordinates.velocity.canonical_values().len() != *coordinate_count
+                    || coordinates.acceleration.canonical_values().len() != *coordinate_count
                     || coordinates
                         .displacement
+                        .canonical_values()
                         .iter()
-                        .chain(&coordinates.velocity)
-                        .chain(&coordinates.acceleration)
+                        .chain(coordinates.velocity.canonical_values())
+                        .chain(coordinates.acceleration.canonical_values())
                         .any(|value| !value.is_finite())
                 {
                     return Err(AnalysisExecutionError::Invalid(
@@ -207,7 +208,8 @@ impl StructuralTransientCheckpointScope {
 #[serde(deny_unknown_fields)]
 pub struct StructuralTransientContinuationPoint {
     pub schedule_ordinal: u64,
-    pub time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub time_s: runmat_types::physical::Time,
     pub approach: StructuralTransientContinuationApproach,
 }
 
@@ -242,10 +244,14 @@ impl StructuralTransientContinuationState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralTransientBalanceAccumulator {
-    pub initial_mechanical_energy_j: f64,
-    pub applied_load_work_j: f64,
-    pub support_work_j: f64,
-    pub damping_dissipation_j: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub initial_mechanical_energy_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub applied_load_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub support_work_j: runmat_types::physical::Energy,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub damping_dissipation_j: runmat_types::physical::Energy,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -407,7 +413,8 @@ impl StructuralTransientCheckpoint {
                 "structural transient continuation lies outside its exact schedule".into(),
             )
         })?;
-        if point.time_s.to_bits() != self.continuation.time_s.to_bits()
+        if point.time_s.canonical_value().to_bits()
+            != self.continuation.time_s.canonical_value().to_bits()
             || point.continuation != self.continuation.approach
         {
             return Err(AnalysisExecutionError::Identity(
@@ -419,15 +426,15 @@ impl StructuralTransientCheckpoint {
             .validate_against(&self.scope.coordinate_space, &self.state)?;
         let balance = &self.balance;
         if [
-            balance.initial_mechanical_energy_j,
-            balance.applied_load_work_j,
-            balance.support_work_j,
-            balance.damping_dissipation_j,
+            balance.initial_mechanical_energy_j.canonical_value(),
+            balance.applied_load_work_j.canonical_value(),
+            balance.support_work_j.canonical_value(),
+            balance.damping_dissipation_j.canonical_value(),
         ]
         .into_iter()
         .any(|value| !value.is_finite())
-            || balance.initial_mechanical_energy_j < 0.0
-            || balance.damping_dissipation_j < 0.0
+            || balance.initial_mechanical_energy_j.canonical_value() < 0.0
+            || balance.damping_dissipation_j.canonical_value() < 0.0
             || !self.counters.application_counts_are_valid()
             || match &self.scope.coordinate_space {
                 StructuralTransientCoordinateSpace::Direct => {
@@ -491,9 +498,18 @@ impl StructuralTransientCheckpoint {
             || self.predecessor != Some(predecessor.identity)
             || self.block_ordinal != expected_block_ordinal
             || self.continuation.schedule_ordinal <= predecessor.continuation.schedule_ordinal
-            || self.balance.initial_mechanical_energy_j.to_bits()
-                != predecessor.balance.initial_mechanical_energy_j.to_bits()
-            || self.balance.damping_dissipation_j < predecessor.balance.damping_dissipation_j
+            || self
+                .balance
+                .initial_mechanical_energy_j
+                .canonical_value()
+                .to_bits()
+                != predecessor
+                    .balance
+                    .initial_mechanical_energy_j
+                    .canonical_value()
+                    .to_bits()
+            || self.balance.damping_dissipation_j.canonical_value()
+                < predecessor.balance.damping_dissipation_j.canonical_value()
             || self.counters.host_sync_count < predecessor.counters.host_sync_count
             || self.counters.device_apply_k_count < predecessor.counters.device_apply_k_count
             || self.counters.device_apply_k_attempt_count

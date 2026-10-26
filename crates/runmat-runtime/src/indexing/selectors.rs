@@ -108,6 +108,7 @@ pub(crate) async fn build_component_selectors_with_context(
         let extent = effective_index_extent(base_shape, dims, dimension)?;
         let selector = match component {
             ObjectIndexComponent::Colon => SliceSelector::Colon,
+            ObjectIndexComponent::End => SliceSelector::Scalar(extent),
             ObjectIndexComponent::Value(value) if dims == 1 && !assignment => {
                 let materialized = owner
                     .await_stage(materialize_index_value_in_context(context, value))
@@ -840,8 +841,8 @@ pub async fn build_scalar_selectors(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_component_selectors, build_scalar_selectors, build_slice_selectors,
-        indices_from_value_linear, selector_from_value_dim, SliceSelector,
+        build_component_selectors, build_component_selectors_with_context, build_scalar_selectors,
+        build_slice_selectors, indices_from_value_linear, selector_from_value_dim, SliceSelector,
     };
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
@@ -1004,6 +1005,24 @@ mod tests {
                 assert_eq!(output_shape, &shape);
             }
         }
+        let components = [
+            crate::object::indexing::ObjectIndexComponent::Value(Value::Num(1.0)),
+            crate::object::indexing::ObjectIndexComponent::End,
+        ];
+        let selectors = futures::executor::block_on(build_component_selectors_with_context(
+            None,
+            &components,
+            &[2, 3, 4],
+            false,
+        ))
+        .unwrap();
+        assert!(matches!(selectors[1], SliceSelector::Scalar(12)));
+        let plan = crate::indexing::plan::build_index_plan(&selectors, 2, &[2, 3, 4]).unwrap();
+        assert_eq!(&*plan.indices, &[22]);
+        let error = crate::object::indexing::ObjectIndexComponent::End
+            .protocol_value()
+            .expect_err("unresolved syntax cannot be public protocol text");
+        assert_eq!(error.identifier(), Some("RunMat:UnresolvedObjectIndexEnd"));
     }
 
     #[test]

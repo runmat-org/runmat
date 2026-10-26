@@ -22,16 +22,37 @@ impl ExactPcurveEvaluator for Pcurves {
         id: &PcurveEvaluatorId,
         _: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 2], GeometryEvaluationError> {
+    ) -> Result<[runmat_geometry_core::GeometryParameterCoordinate; 2], GeometryEvaluationError>
+    {
         control.checkpoint()?;
-        Ok([
+        let values = [
             1.0 + if id == &self.representative {
                 0.0
             } else {
                 self.offset
             },
             2.0,
-        ])
+        ];
+        let axes = [
+            runmat_geometry_core::GeometryParameterAxis::SurfaceU,
+            runmat_geometry_core::GeometryParameterAxis::SurfaceV,
+        ];
+        let coordinate = |index| {
+            runmat_geometry_core::GeometryParameterCoordinate::try_new(
+                values[index],
+                runmat_geometry_core::GeometryParameterFrame::native(
+                    "fixture:surface",
+                    axes[index],
+                ),
+            )
+            .map_err(|error| {
+                GeometryEvaluationError::new(
+                    runmat_geometry_core::GeometryEvaluationErrorKind::InvalidResult,
+                    error.to_string(),
+                )
+            })
+        };
+        Ok([coordinate(0)?, coordinate(1)?])
     }
     fn derivatives(
         &self,
@@ -82,7 +103,9 @@ fn incident_pcurves_share_one_coordinate_independently_of_partition_or_traversal
     };
     let original = pcurves
         .point(&coedge.pcurve_evaluator_id, 0.0, &Control)
-        .unwrap();
+        .unwrap()
+        .each_ref()
+        .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value));
     assert_ne!(original, [1.0, 2.0]);
     for _ in 0..2 {
         let uv = VertexUvContext {
@@ -109,7 +132,9 @@ fn endpoint_authority_preserves_distinct_vertices_and_rejects_excess_error() {
     let coedge = &topology.coedges[1];
     let original = pcurves
         .point(&coedge.pcurve_evaluator_id, 0.0, &Control)
-        .unwrap();
+        .unwrap()
+        .each_ref()
+        .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value));
     let context = VertexUvContext {
         topology: &topology,
         pcurves: &pcurves,

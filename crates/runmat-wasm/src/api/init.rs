@@ -4,9 +4,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use runmat_core::{TelemetryPlatformInfo, TelemetrySink};
-use runmat_runtime::build_runtime_error;
 use runmat_runtime::builtins::wasm_registry;
-use runmat_value::Value;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
@@ -72,7 +70,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
 
     apply_plotting_overrides(&parsed_opts);
     wasm_registry::register_all();
-    ensure_internal_builtins();
     let builtin_count = runmat_builtins::builtin_functions().len();
     log::info!("RunMat wasm: builtins registered ({builtin_count})");
     #[cfg(target_arch = "wasm32")]
@@ -288,55 +285,6 @@ fn ensure_getrandom_js() {
     if let Err(err) = getrandom::getrandom(&mut buf) {
         log::warn!("RunMat wasm: failed to initialize JS randomness source: {err}");
     }
-}
-
-pub(crate) fn ensure_internal_builtins() {
-    if runmat_builtins::builtin_function_by_name("make_anon").is_none() {
-        register_make_anon_fallback();
-    }
-}
-
-fn register_make_anon_fallback() {
-    use runmat_builtins::wasm_registry::submit_builtin_function;
-    use runmat_builtins::BuiltinFunction;
-
-    fn make_anon_impl(args: &[Value]) -> runmat_builtins::BuiltinFuture {
-        let args = args.to_vec();
-        Box::pin(async move {
-            if args.len() != 2 {
-                return Err(build_runtime_error("make_anon: expected 2 inputs")
-                    .with_identifier("RunMat:make_anon:InvalidInput")
-                    .build());
-            }
-            let params: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
-                build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("RunMat:make_anon:InvalidInput")
-                    .build()
-            })?;
-            let body: String = std::convert::TryInto::try_into(&args[1]).map_err(|err| {
-                build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("RunMat:make_anon:InvalidInput")
-                    .build()
-            })?;
-            Ok(Value::String(format!("@anon({params}) {body}")))
-        })
-    }
-
-    let builtin = BuiltinFunction::new(
-        "make_anon",
-        "",
-        "",
-        "",
-        "",
-        vec![runmat_builtins::Type::String, runmat_builtins::Type::String],
-        runmat_builtins::Type::Unknown,
-        None,
-        make_anon_impl,
-        &[],
-        false,
-        true,
-    );
-    submit_builtin_function(builtin);
 }
 
 #[cfg(target_arch = "wasm32")]

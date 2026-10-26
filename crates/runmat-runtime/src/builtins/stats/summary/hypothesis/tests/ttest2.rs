@@ -1,11 +1,43 @@
 use super::*;
 #[test]
+fn ttest2_positive_dimension_above_old_cap_and_unrepresentable_metadata() {
+    let _guard = crate::output_count::push_output_count(Some(4)).unwrap();
+    let outputs = output_list(
+        block_on(ttest2_builtin(
+            None,
+            Value::Num(1.0),
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Dim"),
+                Value::Num(1025.0),
+            ]),
+        ))
+        .unwrap(),
+    );
+    let Value::Tensor(ci) = &outputs[2] else {
+        panic!("ci")
+    };
+    assert_eq!(ci.shape().len(), 1025);
+    assert_eq!(ci.shape()[0], 2);
+    let x = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+    assert!(evaluate(
+        &x,
+        &x,
+        Options {
+            dim: Some(usize::MAX - 1),
+            ..Default::default()
+        }
+    )
+    .is_err());
+}
+#[test]
 fn ttest2_equal_variance_vector_outputs_match_reference_values() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(ttest2_builtin(
+            None,
             x,
             y,
             crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -60,6 +92,7 @@ fn ttest2_unequal_variance_tail_and_nan_omission() {
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(ttest2_builtin(
+            None,
             x,
             y,
             crate::builtins::common::test_support::builtin_arguments(vec![
@@ -106,6 +139,7 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
         let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_list(
             block_on(ttest2_builtin(
+                None,
                 x,
                 y,
                 crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -125,6 +159,7 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
     let row_x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 5.0, 7.0], vec![2, 2]).unwrap());
     let row_y = Value::Tensor(Tensor::new(vec![2.0, 2.0, 4.0, 4.0], vec![2, 2]).unwrap());
     let out = block_on(ttest2_builtin(
+        None,
         row_x,
         row_y,
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -144,6 +179,7 @@ fn ttest2_rejects_bad_options_and_shapes() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
     let err = block_on(ttest2_builtin(
+        None,
         x,
         y,
         crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -152,6 +188,7 @@ fn ttest2_rejects_bad_options_and_shapes() {
     assert!(err.message.contains("same size"));
 
     let err = block_on(ttest2_builtin(
+        None,
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -177,6 +214,7 @@ fn ttest2_host_invalid_controls_precede_sample_provider_access() {
     );
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
     let error = block_on(ttest2_builtin(
+        None,
         resident,
         y,
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -206,6 +244,7 @@ fn ttest2_sample_provider_failure_preserves_nested_cause() {
     );
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
     let error = block_on(ttest2_builtin(
+        None,
         resident,
         y,
         crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -227,6 +266,7 @@ fn ttest2_rejects_too_many_outputs_and_huge_dim() {
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0], vec![3, 1]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let err = block_on(ttest2_builtin(
+        None,
         x,
         y,
         crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -235,6 +275,7 @@ fn ttest2_rejects_too_many_outputs_and_huge_dim() {
     assert!(err.message.contains("too many output arguments"));
 
     let err = block_on(ttest2_builtin(
+        None,
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -252,6 +293,7 @@ fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap());
     let out = block_on(ttest2_builtin(
+        None,
         x,
         y,
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -265,6 +307,7 @@ fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
     let err = block_on(ttest2_builtin(
+        None,
         x,
         y,
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -282,6 +325,7 @@ fn ttest2_sample_values_read_typed_integer_storage_exactly() {
     let x = poisoned_integer_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![4, 1]);
     let y = poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 4, 8]), vec![4, 1]);
     let out = block_on(ttest2_builtin(
+        None,
         x,
         y,
         crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -326,6 +370,7 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(ttest2_builtin(
+            None,
             empty_x,
             empty_y,
             crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -358,6 +403,7 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(ttest2_builtin(
+            None,
             x,
             y,
             crate::builtins::common::test_support::builtin_arguments(Vec::new()),

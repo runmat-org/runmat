@@ -107,18 +107,14 @@ pub fn persist_thermal_observations(
     completed: &ThermalStudyCompletion,
     source: &ThermalStudyObjectSource,
 ) -> Result<(), String> {
-    global_store()
-        .read()
-        .map_err(|_| "artifact store lock poisoned")?
+    capture_artifact_store()?
         .persist_thermal_observations(run_id, completed, source)
 }
 
 pub fn load_observation_publication(
     run_id: &str,
 ) -> Result<Option<ThermalObservationPublication>, String> {
-    global_store()
-        .read()
-        .map_err(|_| "artifact store lock poisoned")?
+    capture_artifact_store()?
         .load_observation_publication(run_id)
 }
 
@@ -127,9 +123,7 @@ pub fn load_observation_history_sample(
     observation_id: &ObservationId,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationHistoryLookup, String> {
-    global_store()
-        .read()
-        .map_err(|_| "artifact store lock poisoned")?
+    capture_artifact_store()?
         .load_observation_history_sample(run_id, observation_id, sample)
 }
 

@@ -281,7 +281,7 @@ fn mixed_structural_fixture() -> (
     CanonicalStructuralConstraintPlan,
 ) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0].provenance.push(PersistentEntityId {
         kind: runmat_meshing_core::PersistentEntityKind::Vertex,
         source_topology_id: "beam_root".into(),

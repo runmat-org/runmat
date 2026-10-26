@@ -14,10 +14,11 @@ fn waveform<Q>(amplitude: SignalValue<Q>, cosine: f64, sine: f64) -> SignalRepre
         amplitude,
         offset: None,
         // One complete period before initial time avoids a one-sided load-start event.
-        start_seconds: -std::f64::consts::TAU / OMEGA,
-        duration_seconds: None,
-        frequency_hz: Some(OMEGA / std::f64::consts::TAU),
-        phase_radians: cosine.atan2(sine),
+        start_seconds: runmat_types::physical::Time::new(-std::f64::consts::TAU / OMEGA),
+        duration_seconds: (None).map(runmat_types::physical::Time::new),
+        frequency_hz: (Some(OMEGA / std::f64::consts::TAU))
+            .map(runmat_types::physical::Frequency::new),
+        phase_radians: runmat_types::physical::Angle::new(cosine.atan2(sine)),
         duty_cycle: None,
     })
 }
@@ -33,7 +34,12 @@ fn forced_model(mesh: &SolverMeshArtifact, damped: bool) -> AnalysisModel {
             panic!("displacement fixture")
         };
         condition.value = InitialValue::UniformVector3(
-            [AMPLITUDE * node.coordinates_m[0], 0.0, 0.0].map(Displacement::new),
+            [
+                AMPLITUDE * node.coordinates_m.canonical_value()[0],
+                0.0,
+                0.0,
+            ]
+            .map(Displacement::new),
         );
     }
     replace_fixture_excitations(
@@ -84,8 +90,13 @@ fn forced_model(mesh: &SolverMeshArtifact, damped: bool) -> AnalysisModel {
                             .nodes
                             .iter()
                             .flat_map(|node| {
-                                [body_cos.hypot(body_sin) * node.coordinates_m[0], 0.0, 0.0]
-                                    .map(BodyForceDensity::new)
+                                [
+                                    body_cos.hypot(body_sin)
+                                        * node.coordinates_m.canonical_value()[0],
+                                    0.0,
+                                    0.0,
+                                ]
+                                .map(BodyForceDensity::new)
                             })
                             .collect(),
                     },
@@ -166,7 +177,9 @@ fn errors_from_result(
             assert_eq!(values.len(), 3 * mesh.topology.nodes.len());
             for (node, value) in mesh.topology.nodes.iter().zip(values.chunks_exact(3)) {
                 assert!(value[1].abs() < 1e-12 && value[2].abs() < 1e-12);
-                sum[quantity] += ((value[0] - node.coordinates_m[0] * state[quantity]) / scale)
+                sum[quantity] += ((value[0]
+                    - node.coordinates_m.canonical_value()[0] * state[quantity])
+                    / scale)
                     .powi(2)
                     / mesh.topology.nodes.len() as f64;
             }

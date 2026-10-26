@@ -66,14 +66,14 @@ study load_study {
     let input = &declaration.inputs["load"];
     assert_eq!(
         input.value_type,
-        FeaType::Quantity(PhysicalDimension::FORCE)
+        FeaType::Quantity((PhysicalDimension::FORCE).into())
     );
     assert!(!input.required);
     assert_eq!(
         declaration.outputs["displacement"],
         FeaType::Field(FeaFieldType {
             value: Box::new(FeaType::Vector {
-                element: Box::new(FeaType::Quantity(PhysicalDimension::LENGTH)),
+                element: Box::new(FeaType::Quantity((PhysicalDimension::LENGTH).into())),
                 length: Some(3),
             }),
             location: Some(runmat_analysis_core::FieldLocation::Node),
@@ -219,10 +219,15 @@ material steel {
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let material = program.materials.values().next().unwrap();
-    assert_eq!(material.mass_density_kg_per_m3, Some(7850.0));
+    assert_eq!(
+        material
+            .mass_density_kg_per_m3
+            .map(|quantity| quantity.canonical_value()),
+        Some(7850.0)
+    );
     let mechanical = material.require_mechanical().unwrap();
-    assert_eq!(mechanical.youngs_modulus_pa, 200.0e9);
-    assert_eq!(mechanical.poisson_ratio, 0.3);
+    assert_eq!(mechanical.youngs_modulus_pa.canonical_value(), 200.0e9);
+    assert_eq!(mechanical.poisson_ratio.canonical_value(), 0.3);
 }
 
 #[test]
@@ -285,14 +290,17 @@ mesh bracket_mesh on geometry.bracket_geometry {
         mesh.settings.element_order,
         runmat_meshing_core::ElementOrder::Tet10
     );
-    assert_eq!(mesh.settings.target_edge_length_m, 0.005);
-    assert_eq!(mesh.settings.maximum_chordal_deviation_m, 0.00005);
+    assert_eq!(mesh.settings.target_edge_length_m.canonical_value(), 0.005);
+    assert_eq!(
+        mesh.settings.maximum_chordal_deviation_m.canonical_value(),
+        0.00005
+    );
     assert_eq!(mesh.settings.maximum_grading_ratio, 1.4);
     assert_eq!(mesh.settings.deterministic_seed, 17);
 }
 
 #[test]
-fn mesh_request_rejects_missing_physical_settings_and_wrong_target_namespace() {
+fn mesh_request_rejects_invalid_physical_settings_and_wrong_target_namespace() {
     let source = r#"
 geometry part {
     construct {
@@ -326,8 +334,9 @@ mesh incomplete on geometry.part {
     assert!(program.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("geometry` namespace")
     }));
-    assert!(program.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("maximum_deviation")
+    assert!(!program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.mesh"
+            && diagnostic.message.contains("requires `maximum_deviation`")
     }));
     assert!(program.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("length quantity")
@@ -368,7 +377,7 @@ geometry part {
     file = "./geometry/part.step"
     units = mm
     region body : solid {
-        select name "Part body"
+        select persistent_id "persistent-entity:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         expect exactly_one
     }
     region mounting_faces : face {
@@ -503,7 +512,7 @@ geometry bracket {
     let width = runmat_types::OperationParameter {
         name: "width".to_string(),
         value: runmat_types::OperationTypePattern::Quantity(
-            runmat_types::QuantityDimension::Length,
+            runmat_types::physical::DynamicDimension::from(runmat_types::PhysicalDimension::LENGTH),
         ),
         arity: runmat_types::OperationParameterArity::Required,
         default: None,
@@ -511,7 +520,7 @@ geometry bracket {
     let depth = runmat_types::OperationParameter {
         name: "depth".to_string(),
         value: runmat_types::OperationTypePattern::Quantity(
-            runmat_types::QuantityDimension::Length,
+            runmat_types::physical::DynamicDimension::from(runmat_types::PhysicalDimension::LENGTH),
         ),
         arity: runmat_types::OperationParameterArity::Required,
         default: None,
@@ -594,4 +603,46 @@ geometry recursive from geometry.recursive {
         .iter()
         .any(|diagnostic| diagnostic.message.contains("cannot derive from itself")));
     assert!(program.geometries.is_empty());
+}
+
+#[test]
+fn mesh_requests_resolve_omitted_settings_from_mesher_defaults() {
+    for body in ["", "tetrahedra {}", "tetrahedra { order = quadratic }"] {
+        let source = format!(
+            r#"
+geometry part {{
+    construct {{
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }}
+}}
+mesh volume on geometry.part {{ {body} }}
+"#
+        );
+        let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+            modules: ModuleGraphRequest {
+                source_root: LogicalSourcePath::new("project").unwrap(),
+                root: source_module("project/main.fea", &source, 1),
+            },
+        });
+        assert!(program.is_valid(), "{:#?}", program.diagnostics);
+        let settings = &program.meshes.values().next().unwrap().settings;
+        let defaults = runmat_meshing_core::MeshingRequestSettings::default();
+        assert_eq!(
+            settings.target_edge_length_m.canonical_value(),
+            defaults.target_edge_length_m.canonical_value()
+        );
+        assert_eq!(
+            settings.maximum_chordal_deviation_m.canonical_value(),
+            defaults.maximum_chordal_deviation_m.canonical_value()
+        );
+        assert_eq!(
+            settings.element_order,
+            if body.contains("quadratic") {
+                runmat_meshing_core::ElementOrder::Tet10
+            } else {
+                defaults.element_order
+            }
+        );
+    }
 }

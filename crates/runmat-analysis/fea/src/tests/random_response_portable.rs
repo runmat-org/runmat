@@ -454,17 +454,25 @@ fn random_excitation() -> RandomExcitationSpectrum {
     };
     RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("broadband-base".into()),
-        frequencies_hz: vec![1.0e-3, 100.0, 1_000.0, 10_000.0],
+        frequencies_hz: runmat_types::physical::Quantity::new(vec![
+            1.0e-3, 100.0, 1_000.0, 10_000.0,
+        ]),
         channels: vec![channel],
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
-            vec![CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+            vec![
+                CrossPowerSpectralDensity::diagonal(&runmat_types::physical::Quantity::new([
+                    2.5e-4
+                ]));
+                4
+            ],
             "sha256:test-broadband-base",
         ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     }

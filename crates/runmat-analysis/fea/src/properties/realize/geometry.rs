@@ -27,7 +27,10 @@ pub(super) fn structural_node(
         .map_err(|_| PropertyRealizationError::NodeIdOverflow(mesh_node_id))?;
     nodes.push(StructuralNode {
         node_id: id,
-        coordinates_m: source.coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                source.coordinates_m.canonical_value(),
+            ),
         solid_attachment: Some(ConformalSolidAttachment::SolverNode {
             stable_identity: source.stable_identity.0,
         }),
@@ -99,7 +102,7 @@ pub(super) fn orientation_axis(
             FormulationOrientationRole::Shell => value.x_axis,
         },
         Some(AuthoredOrientationDefinition::Cylindrical(value)) => {
-            let radial = subtract(point, value.origin_m);
+            let radial = subtract(point, value.origin_m.canonical_value());
             let axis = normalized(value.axis);
             let projected = subtract(radial, scale(axis, dot(radial, axis)));
             if dot(projected, projected) > f64::EPSILON {
@@ -109,7 +112,7 @@ pub(super) fn orientation_axis(
             }
         }
         Some(AuthoredOrientationDefinition::Spherical(value)) => {
-            let radial = subtract(point, value.origin_m);
+            let radial = subtract(point, value.origin_m.canonical_value());
             if dot(radial, radial) > f64::EPSILON {
                 radial
             } else {

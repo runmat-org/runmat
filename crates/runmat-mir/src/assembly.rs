@@ -1,4 +1,5 @@
 use crate::{MirBody, MirFunctionMetadata};
+mod class_sources;
 use runmat_types::FunctionId;
 use runmat_types::{ClassDeclaration, ClassId, IntegerLiteral, MemberName};
 use serde::{Deserialize, Serialize};

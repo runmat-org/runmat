@@ -444,7 +444,8 @@ impl Type {
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle(_) => Type::Function {
+            | Value::BoundFunctionHandle(_)
+            | Value::ScopedFunctionHandle(_) => Type::Function {
                 params: vec![Type::Unknown],
                 returns: Box::new(Type::Unknown),
             },

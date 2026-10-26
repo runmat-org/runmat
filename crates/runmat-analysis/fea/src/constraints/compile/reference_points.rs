@@ -41,7 +41,7 @@ fn from_constraints<'a>(
         identity_materialization_bytes = identity_materialization_bytes.max(
             super::super::plan::canonical_value_workspace_bytes(&(
                 coupling.reference_point.reference_point_id.trim(),
-                coupling.reference_point.position.meters,
+                coupling.reference_point.position.canonical_value(),
             ))?,
         );
         bytes = add(
@@ -82,7 +82,7 @@ pub(in crate::constraints) fn canonical_reference_points(
             _ => continue,
         };
         let id = coupling.reference_point.reference_point_id.trim();
-        let position = coupling.reference_point.position.meters;
+        let position = coupling.reference_point.position.canonical_value();
         if id.is_empty() || position.iter().any(|v| !v.is_finite()) {
             return Err(ConstraintPlanError::Invalid(format!(
                 "constraint `{}` has an invalid reference point",

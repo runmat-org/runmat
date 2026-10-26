@@ -101,7 +101,7 @@ fn solve_manufactured_interface(divisions: usize, order: ElementOrder) -> (f64, 
         .iter()
         .zip(displacement.chunks_exact(3))
         .map(|(node, actual)| {
-            let exact = exact_displacement(node.coordinates_m[0]);
+            let exact = exact_displacement(node.coordinates_m.canonical_value()[0]);
             (actual[0] - exact).powi(2) + actual[1].powi(2) + actual[2].powi(2)
         })
         .sum::<f64>();
@@ -123,7 +123,9 @@ fn solve_manufactured_interface(divisions: usize, order: ElementOrder) -> (f64, 
         .zip(stress.chunks_exact(4 * 6))
     {
         let corners = std::array::from_fn::<_, 4, _>(|index| {
-            mesh.topology.nodes[element.node_ids[index] as usize - 1].coordinates_m[0]
+            mesh.topology.nodes[element.node_ids[index] as usize - 1]
+                .coordinates_m
+                .canonical_value()[0]
         });
         for point in 0..4 {
             let quadrature_x = corners

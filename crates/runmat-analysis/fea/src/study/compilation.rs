@@ -163,7 +163,7 @@ pub fn compile_analysis_study(
         study,
         geometry_id: &study.geometry.definition.geometry_id,
         geometry_revision,
-        units: geometry.source.source_units,
+        units: runmat_types::physical::CoordinateUnits::canonical(),
         regions,
         materials,
     })?;
@@ -251,9 +251,16 @@ fn validate_realized_geometry_source(
     geometry: &GeometryDocument,
 ) -> Result<(), AnalysisStudyCompilationError> {
     if let GeometryDefinitionSource::Imported(imported) = &study.geometry.source {
-        if imported.content_digest != geometry.source.content_digest
+        let file_evidence_matches = match &geometry.source.unit_evidence {
+            runmat_types::physical::LengthUnitEvidence::ExplicitFallback {
+                declaration, ..
+            } => imported.unit_fallback == Some(declaration.unit),
+            _ => imported.unit_evidence == geometry.source.unit_evidence,
+        };
+        if !file_evidence_matches
+            || imported.content_digest != geometry.source.content_digest
             || imported.format != geometry.source.format
-            || imported.units != geometry.source.source_units
+            || matches!(&geometry.source.unit_evidence,runmat_types::physical::LengthUnitEvidence::ExplicitFallback{declaration,..} if imported.unit_fallback.is_some_and(|unit|unit!=declaration.unit))
         {
             return Err(AnalysisStudyCompilationError::ImportedGeometrySourceMismatch);
         }

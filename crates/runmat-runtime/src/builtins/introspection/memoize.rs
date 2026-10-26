@@ -41,6 +41,63 @@ const TOTAL_MISSES_PROPERTY: &str = "__runmat_memoize_total_misses";
 const DEFAULT_CACHE_SIZE: usize = 10;
 
 #[cfg(test)]
+mod scoped_cache_tests {
+    use super::*;
+    use crate::execution::{scoped_callable, RootedValueSequence};
+    use std::ops::ControlFlow;
+
+    #[test]
+    fn cache_hit_cannot_revive_an_expired_scoped_evaluator() {
+        let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let payload = || Value::Cell(CellArray::new(vec![Value::Num(3.0)], 1, 1).unwrap());
+        let mut calls = 0;
+        let result = futures::executor::block_on(scoped_callable::drive(
+            None,
+            None,
+            |handle, _| {
+                Ok(async move {
+                    let wrapper =
+                        memoize_builtin(None, Value::ScopedFunctionHandle(handle)).await?;
+                    let rooted = crate::execution::RootedValue::new(wrapper)
+                        .map_err(|error| error.into_runtime_error())?;
+                    let handle = memoized_handle(rooted.value())?;
+                    for _ in 0..2 {
+                        let result = call_memoized(None, handle, payload()).await?;
+                        assert_eq!(result.value(), &Value::Num(9.0));
+                    }
+                    RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(rooted.value().clone())
+                            .map_err(crate::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
+                })
+            },
+            async |_| {
+                calls += 1;
+                Ok(ControlFlow::<(), _>::Continue(
+                    RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(Value::Num(9.0))
+                            .map_err(crate::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())?,
+                ))
+            },
+        ))
+        .unwrap();
+        let ControlFlow::Continue(result) = result else {
+            panic!("completed child")
+        };
+        assert_eq!(calls, 1, "the second live call used the existing cache");
+        let handle = memoized_handle(&result.as_slice()[0]).unwrap();
+        let error =
+            futures::executor::block_on(call_memoized(None, handle, payload())).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:ScopedCallable:Expired"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(calls, 1);
+    }
+}
+
+#[cfg(test)]
 pub(crate) static MEMOIZE_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[derive(Debug, Clone)]
@@ -384,7 +441,8 @@ fn canonicalize_memoized_function(
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     match function {
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
@@ -534,6 +592,12 @@ async fn call_memoized(
     let args = cell.data_owner().clone();
     let requested_outputs = crate::current_requested_outputs();
     let (function, enabled, cache_size) = memoized_state(handle)?;
+
+    // A cache hit must not revive an escaped invocation-scoped capability or
+    // bypass its original-owner/cancellation/finite-policy admission.
+    if let Value::ScopedFunctionHandle(handle) = &function {
+        crate::execution::scoped_callable::validate_target(runtime, handle)?;
+    }
 
     if enabled {
         if let Some(output) = take_cache_hit(handle, &args, requested_outputs, cache_size)? {
@@ -1137,6 +1201,7 @@ fn object_properties(object: &ObjectInstance) -> StructValue {
 
 fn function_key(function: &Value) -> String {
     match function {
+        Value::ScopedFunctionHandle(handle) => format!("scoped:{:?}", handle.instance_id()),
         Value::FunctionHandle(name) => format!("fh:{name}"),
         Value::ExternalFunctionHandle(name) => format!("external:{name}"),
         Value::MethodFunctionHandle(name) => format!("method:{name}"),

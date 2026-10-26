@@ -96,7 +96,7 @@ where
             edge,
             coedge,
             face,
-            tolerance_m.max(edge.tolerance_m),
+            tolerance_m.max(edge.tolerance_m.canonical_value()),
             control,
             &additional_parameters,
         )?;
@@ -120,8 +120,8 @@ where
     let point =
         ExactCurveEvaluator::point(evaluator, &edge.curve_evaluator_id, parameter, control)?;
     require_consistent(
-        distance(point, vertex.point_m),
-        tolerance_m.max(vertex.tolerance_m),
+        distance(point.canonical_value(), vertex.point_m.canonical_value()),
+        tolerance_m.max(vertex.tolerance_m.canonical_value()),
         format!(
             "curve endpoint {:?} at parameter {parameter:e} disagrees with topological vertex {:?}",
             edge.id, vertex.id
@@ -269,12 +269,13 @@ where
     let curve_point =
         ExactCurveEvaluator::point(evaluator, &edge.curve_evaluator_id, parameter, control)?;
     let uv =
-        ExactPcurveEvaluator::point(evaluator, &coedge.pcurve_evaluator_id, parameter, control)?;
+        ExactPcurveEvaluator::point(evaluator, &coedge.pcurve_evaluator_id, parameter, control)?
+            .map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value));
     let mapped_point =
         ExactSurfaceEvaluator::point(evaluator, &face.surface_evaluator_id, uv, control)?;
     Ok(Sample {
-        curve_point,
-        mapped_point,
+        curve_point: curve_point.canonical_value(),
+        mapped_point: mapped_point.canonical_value(),
     })
 }
 

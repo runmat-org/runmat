@@ -18,3 +18,5 @@ pub(in crate::builtins::math::reduction) fn failure(
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
 }
+
+pub(in crate::builtins::math::reduction) mod geometry;

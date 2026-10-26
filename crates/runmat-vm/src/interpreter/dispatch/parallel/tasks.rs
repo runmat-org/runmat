@@ -1,10 +1,15 @@
 use crate::bytecode::program::ExecutionContext;
+use crate::program_execution::callable_admission::{
+    bind_selected_semantic_target, callable_capabilities,
+};
 use crate::FunctionRegistry;
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 use super::{execution_error, pop};
+
+mod outputs;
+use outputs::{fetch_next_outputs, root_join_outputs, select_outputs, split_outputs};
 
 pub(super) fn schedule_feval(
     stack: &mut crate::interpreter::stack::InterpreterStack,
@@ -121,7 +126,7 @@ pub(super) fn create_future(
     );
     let program = if !context.runtime.execution().requires_program_capture() {
         runmat_runtime::execution::DeferredProgram::Local
-    } else if builtin && !graph_required {
+    } else if builtin && !graph_required && context.graph_program.is_none() {
         // A builtin has typed catalog authority but no V3 function body. Keep
         // its existing direct V2 worker route instead of inventing a graph
         // callable owner or rejecting previously supported async builtins.
@@ -139,7 +144,13 @@ pub(super) fn create_future(
                 "async worker execution has no selected V3 executable authority",
             )
         })?;
-        runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
+        runmat_runtime::execution::DeferredProgram::SelectedGraph(
+            selected.clone().with_validation_workspace(
+                runmat_runtime::execution::value_codec::ValidationWorkspaceOwner::capture(
+                    &context.runtime,
+                ),
+            ),
+        )
     };
     if matches!(
         &program,
@@ -207,103 +218,6 @@ pub(super) fn create_future(
             program,
         })
         .map_err(execution_error)
-}
-
-fn callable_capabilities(
-    descriptor: &runmat_runtime::call::descriptor::CallableDescriptor,
-    registry: &FunctionRegistry,
-) -> Result<runmat_types::CapabilitySet, RuntimeError> {
-    use runmat_hir::CallableIdentity;
-
-    use runmat_runtime::call::descriptor::CallableTarget;
-
-    if let CallableTarget::Bound(binding) | CallableTarget::BoundLexical { binding, .. } =
-        &descriptor.target
-    {
-        let function = runmat_hir::FunctionId(binding.function);
-        let selected = registry
-            .owned_view(function, &binding.authority)
-            .and_then(|view| view.get(function).map(|body| body.capabilities.clone()))
-            .ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    "async bound callable has no exact selected definition",
-                )
-            })?;
-        return Ok(selected);
-    }
-    let identity = match &descriptor.target {
-        CallableTarget::Resolved { identity, .. }
-        | CallableTarget::CapturedResolved { identity, .. } => identity.as_identity(),
-        _ => {
-            return Err(crate::interpreter::errors::mex(
-                "ExecutionProgram",
-                "async execution requires an exact selected callable before capability binding",
-            ));
-        }
-    };
-    match identity {
-        CallableIdentity::BoundFunction(function)
-        | CallableIdentity::AnonymousFunction(function)
-        | CallableIdentity::ExternalFunction { function, .. } => registry
-            .get(*function)
-            .map(|function| function.capabilities.clone())
-            .ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    "async callable is absent from the exact function registry",
-                )
-            }),
-        CallableIdentity::Builtin(name) if runmat_builtins::builtin_name_is_known(&name.0) => {
-            Ok(runmat_builtins::builtin_required_capabilities(&name.0))
-        }
-        CallableIdentity::Builtin(_) => Err(crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            "async builtin is absent from the exact builtin registry",
-        )),
-        _ => Err(crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            "async callable kind has no portable execution identity",
-        )),
-    }
-}
-
-/// A semantic name is resolved only at Future admission, while its selected
-/// registry and source owner are still present. The resulting local authority
-/// retains the exact body/dependency leases; the worker snapshot never
-/// resolves the name or a reused numeric function ID.
-fn bind_selected_semantic_target(
-    descriptor: &mut runmat_runtime::call::descriptor::CallableDescriptor,
-    registry: &FunctionRegistry,
-) -> Result<(), RuntimeError> {
-    use runmat_hir::CallableIdentity;
-    use runmat_runtime::call::descriptor::CallableTarget;
-
-    let identity = match &descriptor.target {
-        CallableTarget::Resolved { identity, .. }
-        | CallableTarget::CapturedResolved { identity, .. } => identity.as_identity(),
-        _ => return Ok(()),
-    };
-    let function = match identity {
-        CallableIdentity::BoundFunction(function)
-        | CallableIdentity::AnonymousFunction(function)
-        | CallableIdentity::ExternalFunction { function, .. } => *function,
-        _ => return Ok(()),
-    };
-    let binding = registry.exact_bound_binding(function).ok_or_else(|| {
-        crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            "async semantic callable has no exact selected definition and source graph",
-        )
-    })?;
-    descriptor.target = match &descriptor.target {
-        CallableTarget::CapturedResolved { closure, .. } => CallableTarget::BoundLexical {
-            binding,
-            closure: closure.clone(),
-        },
-        _ => CallableTarget::Bound(binding),
-    };
-    Ok(())
 }
 
 pub(super) fn semantic_descriptor(
@@ -376,29 +290,7 @@ pub(super) async fn await_value(
     context: &ExecutionContext,
     value: Value,
 ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
-    use runmat_runtime::sequence::ResolveValueSequence;
-
-    await_sequence(context, value).await?.try_map_owned(
-        |sequence| {
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                runmat_runtime::sequence::SequenceResolutionContext::default(),
-            )?;
-            values
-                .try_into_first()
-                .map_err(|_| {
-                    runmat_runtime::sequence::sequence_error_to_runtime(
-                        runmat_value::ValueSequenceError::SharedOutputStorage,
-                    )
-                })?
-                .ok_or_else(|| {
-                    execution_error(
-                        runmat_runtime::execution::ExecutionServiceError::InvalidOutputContract,
-                    )
-                })
-        },
-        runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
-    )
+    await_sequence(context, value).await?.try_into_single()
 }
 
 async fn await_sequence(
@@ -425,7 +317,11 @@ async fn await_sequence(
             }
             AwaitAction::Completed(sequence) => return Ok(sequence),
             AwaitAction::Pending(pending) => {
-                yield_once().await;
+                if let Some(waiting) = context.runtime.execution().wait_pending(&pending) {
+                    waiting.await.map_err(execution_error)?;
+                } else {
+                    yield_once(context).await?;
+                }
                 value = pending;
             }
             AwaitAction::ExecuteFuture { handle, call } => {
@@ -602,7 +498,7 @@ pub(super) async fn fetch_next(
                     .mark_task_result_read(task)
                     .map_err(execution_error)?;
                 let result = result?;
-                return fetch_next_outputs(index, result, requested_outputs);
+                return fetch_next_outputs(index, result, requested_outputs, &context.runtime);
             }
             TaskResultClaim::Exhausted => {
                 return Err(crate::interpreter::errors::mex(
@@ -615,7 +511,7 @@ pub(super) async fn fetch_next(
                 {
                     return empty_outputs(requested_outputs);
                 }
-                yield_once().await;
+                yield_once(context).await?;
             }
         }
     }
@@ -651,13 +547,10 @@ pub(super) async fn fetch_outputs(
             .mark_task_result_read(task)
             .map_err(execution_error)?;
         let result = result?;
-        worker_outputs.push(split_outputs(result, requested_outputs)?);
-    }
-    if tasks.len() == 1 {
-        return worker_outputs
-            .pop()
-            .expect("one task produced one output row")
-            .with_owned_output_storage(root_join_outputs);
+        if tasks.len() == 1 {
+            return select_outputs(result, requested_outputs);
+        }
+        worker_outputs.push(split_outputs(result, requested_outputs, &context.runtime)?);
     }
     let mut combined =
         runmat_runtime::execution::RootedValuesBuilder::with_capacity(requested_outputs);
@@ -676,28 +569,8 @@ pub(super) async fn fetch_outputs(
             );
             let output = crate::call::execute_callable_descriptor(&context.runtime, descriptor)
                 .await?
-                .try_map_owned(
-                    |sequence| {
-                        let values = sequence.resolve(
-                            runmat_types::SequenceUse::RequireSingle,
-                            runmat_runtime::sequence::SequenceResolutionContext::default(),
-                        )?;
-                        values
-                            .try_into_first()
-                            .map_err(|_| {
-                                runmat_runtime::sequence::sequence_error_to_runtime(
-                                    runmat_value::ValueSequenceError::SharedOutputStorage,
-                                )
-                            })?
-                            .ok_or_else(|| {
-                                execution_error(
-                            runmat_runtime::execution::ExecutionServiceError::InvalidOutputContract,
-                        )
-                            })
-                    },
-                    runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
-                )?;
-            output.with_owned(|value| combined.push(value).map_err(execution_error))?;
+                .try_into_single()?;
+            combined.push_owned(output);
         } else {
             combined
                 .push(Value::Cell(
@@ -710,7 +583,7 @@ pub(super) async fn fetch_outputs(
     combined
         .finish()
         .map_err(execution_error)?
-        .with_owned_output_storage(root_join_outputs)
+        .with_owned_output_storage(|storage| root_join_outputs(storage, &context.runtime))
 }
 
 pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, RuntimeError> {
@@ -745,62 +618,6 @@ pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, Runtime
     Ok(uniform_output)
 }
 
-fn split_outputs(
-    sequence: runmat_runtime::execution::RootedValueSequence,
-    count: usize,
-) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
-    sequence.with_owned_sequence(|sequence| {
-        let values = match count {
-            0 => Ok(runmat_value::OutputListStorage::empty()),
-            1 => sequence.resolve(
-                runmat_types::SequenceUse::SelectPrefix { count: 1 },
-                runmat_runtime::sequence::SequenceResolutionContext::default(),
-            ),
-            _ => sequence
-                .resolve(
-                    runmat_types::SequenceUse::SelectPrefix { count },
-                    runmat_runtime::sequence::SequenceResolutionContext::default(),
-                )
-                .map_err(|_| {
-                    crate::interpreter::errors::mex(
-                        "OutputCountMismatch",
-                        "future result does not contain the requested number of outputs",
-                    )
-                }),
-        }?;
-        runmat_runtime::execution::RootedValues::from_output_storage(values)
-            .map_err(execution_error)
-    })
-}
-
-fn join_outputs(
-    outputs: runmat_value::OutputListStorage,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
-    Ok(match outputs.len() {
-        0 => runmat_value::ValueSequence::empty(),
-        1 => runmat_value::ValueSequence::single(
-            outputs
-                .try_into_first()
-                .map_err(|_| {
-                    runmat_runtime::sequence::sequence_error_to_runtime(
-                        runmat_value::ValueSequenceError::SharedOutputStorage,
-                    )
-                })?
-                .expect("one output is present"),
-        )
-        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
-        _ => runmat_value::ValueSequence::from_output_storage(outputs)
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
-    })
-}
-
-fn root_join_outputs(
-    outputs: runmat_value::OutputListStorage,
-) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
-    runmat_runtime::execution::RootedValueSequence::new(join_outputs(outputs)?)
-        .map_err(execution_error)
-}
-
 pub(super) fn timeout_seconds(value: Value) -> Result<f64, RuntimeError> {
     let seconds = match value {
         Value::Num(value) => value,
@@ -814,41 +631,6 @@ pub(super) fn timeout_seconds(value: Value) -> Result<f64, RuntimeError> {
         ));
     }
     Ok(seconds)
-}
-
-fn fetch_next_outputs(
-    index: usize,
-    result: runmat_runtime::execution::RootedValueSequence,
-    requested_outputs: usize,
-) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
-    if requested_outputs == 0 {
-        return runmat_runtime::execution::RootedValueSequence::new(
-            runmat_value::ValueSequence::empty(),
-        )
-        .map_err(execution_error);
-    }
-    if requested_outputs == 1 {
-        return runmat_runtime::execution::RootedValueSequence::new(
-            runmat_value::ValueSequence::single(Value::Num((index + 1) as f64))
-                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
-        )
-        .map_err(execution_error);
-    }
-    result.try_map_owned(
-        |result| {
-            let mut outputs = Vec::with_capacity(requested_outputs);
-            outputs.push(Value::Num((index + 1) as f64));
-            let values = result.into_output_storage().try_into_owned().map_err(|_| {
-                runmat_runtime::sequence::sequence_error_to_runtime(
-                    runmat_value::ValueSequenceError::SharedOutputStorage,
-                )
-            })?;
-            outputs.extend(values);
-            runmat_value::ValueSequence::comma_separated(outputs)
-                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
-        },
-        runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
-    )
 }
 
 fn empty_outputs(
@@ -872,7 +654,18 @@ fn empty_outputs(
     runmat_runtime::execution::RootedValueSequence::new(sequence).map_err(execution_error)
 }
 
-pub(super) async fn yield_once() {
+pub(super) async fn yield_once(context: &ExecutionContext) -> Result<(), RuntimeError> {
+    if matches!(
+        context.runtime.execution().cpu_cooperation_policy(),
+        runmat_runtime::execution::CpuCooperationPolicy::WorkQuantum(_)
+    ) {
+        return context
+            .runtime
+            .execution()
+            .cooperate_cpu()
+            .await
+            .map_err(execution_error);
+    }
     let mut yielded = false;
     futures::future::poll_fn(|context| {
         if yielded {
@@ -884,6 +677,7 @@ pub(super) async fn yield_once() {
         }
     })
     .await;
+    Ok(())
 }
 
 pub(super) fn pool_handle(value: Value) -> Result<runmat_execution::PoolHandle, RuntimeError> {

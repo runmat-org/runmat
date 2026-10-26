@@ -148,7 +148,8 @@ impl AuthoredModel {
                     .map(|domain| domain.reference_temperature),
             ),
         ] {
-            if temperature.is_some_and(|value| !value.is_finite() || value.kelvin < 0.0) {
+            if temperature.is_some_and(|value| !value.is_finite() || value.canonical_value() < 0.0)
+            {
                 return Err(AuthoredModelError::InvalidDomainReferenceTemperature(
                     domain,
                 ));
@@ -330,12 +331,11 @@ impl AuthoredModel {
             });
             result?;
         }
-        crate::validate_physical_signals(&self.signals).map_err(|error| {
-            AuthoredModelError::InvalidPhysics {
+        crate::validate_signals::validate_signals_with_inputs(&self.signals, Some(&self.inputs))
+            .map_err(|error| AuthoredModelError::InvalidPhysics {
                 kind: "signal",
                 detail: error.to_string(),
-            }
-        })?;
+            })?;
         let mut parameterized_signal_ids = BTreeSet::new();
         for signal in &self.parameterized_signals {
             signal

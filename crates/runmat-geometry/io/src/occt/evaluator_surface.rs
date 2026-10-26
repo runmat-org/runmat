@@ -34,7 +34,7 @@ impl ExactSurfaceEvaluator for OcctExactEvaluator {
         id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 3], GeometryEvaluationError> {
+    ) -> Result<runmat_geometry_core::physical::Position, GeometryEvaluationError> {
         Ok(self.surface_derivatives(id, uv, control)?.point_m)
     }
 
@@ -68,10 +68,12 @@ impl ExactSurfaceEvaluator for OcctExactEvaluator {
     fn closest_point(
         &self,
         id: &SurfaceEvaluatorId,
-        point_m: [f64; 3],
-        absolute_error_m: f64,
+        point_m: runmat_geometry_core::physical::Position,
+        absolute_error_m: runmat_geometry_core::physical::Length,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<SurfaceProjection, GeometryEvaluationError> {
+        let point_m = point_m.canonical_value();
+        let absolute_error_m = absolute_error_m.canonical_value();
         if point_m.iter().any(|value| !value.is_finite())
             || !absolute_error_m.is_finite()
             || absolute_error_m <= 0.0
@@ -90,30 +92,26 @@ impl ExactSurfaceEvaluator for OcctExactEvaluator {
         )
         .map_err(projection_error)?;
         control.checkpoint()?;
-        let result = SurfaceProjection {
-            uv: [value.u, value.v],
-            point_m: [value.point_x, value.point_y, value.point_z],
-            distance_m: value.distance,
-        };
-        if result
-            .uv
-            .into_iter()
-            .chain(result.point_m)
-            .chain([result.distance_m])
-            .any(|value| !value.is_finite())
-            || result.distance_m < 0.0
-        {
-            return Err(invalid("OCCT surface projection result is invalid"));
-        }
-        let [u, v] = self.parameter_bounds(id)?;
-        if result.uv[0] < u.start
-            || result.uv[0] > u.end
-            || result.uv[1] < v.start
-            || result.uv[1] > v.end
-        {
-            return Err(invalid("OCCT surface projection is outside its domain"));
-        }
-        Ok(result)
+        let evaluator = format!("occt:{}:{}", self.session_id, id.as_str());
+        SurfaceProjection::from_parameter_coefficients(
+            [value.u, value.v],
+            [value.point_x, value.point_y, value.point_z],
+            value.distance,
+            [
+                super::evaluator::parameter_frame(
+                    value.u_parameter_unit,
+                    value.parameter_scale,
+                    evaluator.clone(),
+                    runmat_geometry_core::GeometryParameterAxis::SurfaceU,
+                )?,
+                super::evaluator::parameter_frame(
+                    value.v_parameter_unit,
+                    value.parameter_scale,
+                    evaluator,
+                    runmat_geometry_core::GeometryParameterAxis::SurfaceV,
+                )?,
+            ],
+        )
     }
 }
 
@@ -154,26 +152,30 @@ impl OcctExactEvaluator {
         )
         .map_err(query_error)?;
         control.checkpoint()?;
-        let result = SurfaceDerivatives {
-            point_m: [value.point_x, value.point_y, value.point_z],
-            du_m: [value.du_x, value.du_y, value.du_z],
-            dv_m: [value.dv_x, value.dv_y, value.dv_z],
-            duu_m: [value.duu_x, value.duu_y, value.duu_z],
-            duv_m: [value.duv_x, value.duv_y, value.duv_z],
-            dvv_m: [value.dvv_x, value.dvv_y, value.dvv_z],
-        };
-        if result
-            .point_m
-            .into_iter()
-            .chain(result.du_m)
-            .chain(result.dv_m)
-            .chain(result.duu_m)
-            .chain(result.duv_m)
-            .chain(result.dvv_m)
-            .any(|value| !value.is_finite())
-        {
-            return Err(invalid("OCCT surface derivatives are not finite"));
-        }
+        let evaluator = format!("occt:{}:{}", self.session_id, id.as_str());
+        let frames = [
+            super::evaluator::parameter_frame(
+                value.u_parameter_unit,
+                value.parameter_scale,
+                evaluator.clone(),
+                runmat_geometry_core::GeometryParameterAxis::SurfaceU,
+            )?,
+            super::evaluator::parameter_frame(
+                value.v_parameter_unit,
+                value.parameter_scale,
+                evaluator,
+                runmat_geometry_core::GeometryParameterAxis::SurfaceV,
+            )?,
+        ];
+        let result = SurfaceDerivatives::from_parameter_coefficients(
+            [value.point_x, value.point_y, value.point_z],
+            [value.du_x, value.du_y, value.du_z],
+            [value.dv_x, value.dv_y, value.dv_z],
+            [value.duu_x, value.duu_y, value.duu_z],
+            [value.duv_x, value.duv_y, value.duv_z],
+            [value.dvv_x, value.dvv_y, value.dvv_z],
+            frames,
+        )?;
         Ok(result)
     }
 }

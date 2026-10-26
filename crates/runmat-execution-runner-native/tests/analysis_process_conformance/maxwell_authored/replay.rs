@@ -38,7 +38,15 @@ pub(super) fn check(completed: &CompletedMaxwellStudy, source: &impl CacheImport
         .electrical
         .as_mut()
         .unwrap()
-        .conductivity_s_per_m *= 1.125;
+        .conductivity_s_per_m = runmat_types::physical::Quantity::new(
+        changed.product.compiled.model.materials[0]
+            .electrical
+            .as_mut()
+            .unwrap()
+            .conductivity_s_per_m
+            .canonical_value()
+            * (1.125),
+    );
     changed.product.compiled.properties =
         compile_property_map(&changed.product.compiled.model, Some(&changed.mesh)).unwrap();
     changed.product.workload =

@@ -71,7 +71,8 @@ fn value_kind(value: &Value) -> &'static str {
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::Struct(_) | Value::StructArray(_) => "struct",
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

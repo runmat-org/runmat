@@ -131,7 +131,7 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
+use runmat_geometry_core::{EntityKind, GeometryAsset, LengthUnit};
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
 };
@@ -368,8 +368,8 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     );
     for material in &mut model.materials {
         material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-            speed_of_sound_m_per_s: 343.0,
-            damping_ratio: 0.02,
+            speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+            damping_ratio: runmat_types::physical::DampingRatio::new(0.02),
         });
     }
     model.material_assignments = vec![MaterialAssignment {
@@ -486,7 +486,7 @@ fn material_conflict_contract_model() -> AnalysisModel {
     polymer
         .require_mechanical_mut()
         .expect("structural fixture material")
-        .youngs_modulus_pa = 3.0e9;
+        .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(3.0e9);
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
         target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
@@ -586,7 +586,7 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
 fn analysis_validate_contract_is_v1_and_maps_codes() {
     let model = contract_linear_static_model();
     let context = OperationContext::new(Some("trace-contract-2".to_string()), None);
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
+    let envelope = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect("validate should succeed");
     assert_eq!(envelope.operation, "fea.validate");
     assert_eq!(envelope.op_version, "fea.validate/v1");
@@ -595,7 +595,6 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
     invalid.materials.clear();
     let err = analysis_validate(
         &invalid,
-        UnitSystem::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(None, None),
     )
@@ -1009,25 +1008,20 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
-    let mut unit_mismatch = contract_linear_static_model();
-    unit_mismatch.units = UnitSystem::Inch;
-    let unit_err = analysis_validate(
-        &unit_mismatch,
-        UnitSystem::Meter,
-        &CoordinateFrame::Global,
-        OperationContext::new(Some("trace-contract-2b".to_string()), None),
-    )
-    .expect_err("validate should fail for units");
-    assert_eq!(unit_err.error_code, "RM.FEA.VALIDATE.UNIT_MISMATCH");
+fn analysis_model_decode_rejects_noncanonical_units_and_validate_maps_frame_mismatch() {
+    let canonical = contract_linear_static_model();
+    let mut wire = serde_json::to_value(&canonical).expect("encode canonical model");
     assert_eq!(
-        unit_err.context.get("model_units").map(|s| s.as_str()),
-        Some("Inch")
+        wire["units"],
+        serde_json::to_value(LengthUnit::Meter).unwrap()
     );
-    assert_eq!(
-        unit_err.context.get("geometry_units").map(|s| s.as_str()),
-        Some("Meter")
-    );
+    serde_json::from_value::<AnalysisModel>(wire.clone()).expect("decode canonical model");
+    wire["units"] = serde_json::to_value(LengthUnit::Inch).unwrap();
+    let unit_err = serde_json::from_value::<AnalysisModel>(wire)
+        .expect_err("canonical model admission must reject inch coordinates");
+    assert!(unit_err
+        .to_string()
+        .contains("canonical solver coordinates must be meters"));
 
     let mut frame_mismatch = contract_linear_static_model();
     frame_mismatch.frame = CoordinateFrame::Cartesian(runmat_analysis_core::CartesianFrame {
@@ -1038,7 +1032,6 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     });
     let frame_err = analysis_validate(
         &frame_mismatch,
-        UnitSystem::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(Some("trace-contract-2c".to_string()), None),
     )

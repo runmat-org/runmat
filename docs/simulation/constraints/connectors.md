@@ -34,20 +34,14 @@ $$
 The two endpoints receive equal-and-opposite forces $\mp F\mathbf a$. Motion perpendicular to
 $\mathbf a$ does not stretch the small-displacement connector.
 
+Save `mount_pin` and `frame_pin` as named vertex selections on the CAD asset using geometry selection tools.
+
 ```fea
 geometry bracket {
     file = "./geometry/bracket.step"
     units = mm
-
-    region mount_pin : vertex {
-        select persistent_id "mount-pin-center"
-        expect exactly_one
-    }
-
-    region frame_pin : vertex {
-        select persistent_id "frame-pin-center"
-        expect exactly_one
-    }
+    region mount_pin : vertex { select name "mount_pin"; expect exactly_one }
+    region frame_pin : vertex { select name "frame_pin"; expect exactly_one }
 }
 
 model supported_bracket {
@@ -134,15 +128,13 @@ $$
 The physical face area therefore controls total stiffness; refining the mesh does not multiply the
 foundation stiffness.
 
+Save `grout_bearing_face` as a named face selection on the CAD asset.
+
 ```fea
 geometry base {
-    file = "./geometry/machine-base.step"
+    file = "./geometry/base.step"
     units = mm
-
-    region grout_bearing_face : face {
-        select persistent_id "grout-bearing-face"
-        expect exactly_one
-    }
+    region grout_bearing_face : face { select name "grout_bearing_face"; expect exactly_one }
 }
 
 model mounted_base {

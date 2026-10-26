@@ -16,8 +16,8 @@ if ! command -v nm >/dev/null || ! command -v jq >/dev/null; then
   echo "closed-world verification requires nm and jq" >&2
   exit 2
 fi
-if [[ "$(jq -r '.policy' "$plan_path")" != "closed-world" ]]; then
-  echo "link plan is not closed-world" >&2
+if ! jq -e '.schema_version == 7 and (.runtime_composition.selected.bindings | type == "array")' "$plan_path" >/dev/null; then
+  echo "link plan does not select exact runtime composition" >&2
   exit 1
 fi
 
@@ -29,7 +29,7 @@ case "$(uname -s)" in
   Darwin) nm -gU "$binary_path" >"$symbol_file" ;;
   *) nm -g --defined-only "$binary_path" >"$symbol_file" ;;
 esac
-jq -r '.retained_builtin_bindings[].native_symbol' "$plan_path" | sort -u >"$expected_file"
+jq -r '.runtime_composition.selected.bindings[].native_symbol' "$plan_path" | sort -u >"$expected_file"
 
 # Inspect every binding ABI version: an obsolete symbol must appear in the
 # exact-plan comparison rather than being silently excluded by the scanner.

@@ -78,6 +78,7 @@ impl Drop for FundingProbe {
 
 #[test]
 fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment() {
+    optional::check();
     // Opaque embedding futures are not evidence of their concrete layout.
     // Managed rejection precedes factory effects; ordinary adoption retains
     // the exact original Box instead of allocating a Box around its pointer.
@@ -114,8 +115,25 @@ fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment
         denied.is_err(),
         "legacy None cannot bypass an active finite owner"
     );
+    let borrowed = admit_optional_hostcall_with_contextual_error(None, || {
+        legacy_factory.set(true);
+        std::future::pending::<Result<(), RuntimeError>>()
+    });
+    assert!(
+        borrowed.is_err(),
+        "borrowed None cannot invent a finite owner"
+    );
     assert!(!legacy_factory.get());
     drop(active);
+    let ordinary = Cell::new(false);
+    let borrowed = admit_optional_hostcall_with_contextual_error(None, || async {
+        ordinary.set(true);
+        Ok::<(), RuntimeError>(())
+    })
+    .expect("ordinary borrowed hostcall needs no manufactured runtime");
+    assert!(!ordinary.get());
+    futures::executor::block_on(borrowed).unwrap();
+    assert!(ordinary.get());
     let concrete = crate::user_functions::admit_user_function_with(None, || {
         std::future::pending::<Result<crate::execution::RootedValueSequence, RuntimeError>>()
     })
@@ -347,6 +365,9 @@ fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 }
+
+#[path = "native_metadata_tests/optional.rs"]
+mod optional;
 
 #[test]
 fn cancelled_native_admission_never_constructs_or_polls_child() {

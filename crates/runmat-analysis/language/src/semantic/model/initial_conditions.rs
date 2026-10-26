@@ -8,8 +8,8 @@ use runmat_analysis_core::{
     AuthoredInitialConditionTarget, CoordinateFrame, Displacement, ElectricPotential,
     MagneticVectorPotential, PhysicalQuantityKind, PhysicalSignal, Pressure, Temperature, Velocity,
 };
-use runmat_parser::fea::FeaAssignmentRelation;
-use runmat_parser::fea::FeaModelDefinitionKind;
+use runmat_fea_syntax::FeaAssignmentRelation;
+use runmat_fea_syntax::FeaModelDefinitionKind;
 use std::collections::BTreeSet;
 
 mod values;

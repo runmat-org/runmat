@@ -117,7 +117,7 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             let deviation = displacement[0]
                 .hypot(displacement[1])
                 .hypot(displacement[2]);
-            if deviation > policy.quality.maximum_chordal_deviation_m {
+            if deviation > policy.quality.maximum_chordal_deviation_m.canonical_value() {
                 return Err(ExactFaceRefinementError::new(
                     ExactFaceRefinementErrorKind::InvalidQuality,
                     &geometry.source_face_id,
@@ -154,8 +154,8 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             )
             .map_err(map_acceptance)?;
             for (triangle_index, triangle) in report.triangles.iter().enumerate() {
-                let (reason, witness_uv) = if triangle.maximum_chordal_deviation_m
-                    > policy.quality.maximum_chordal_deviation_m
+                let (reason, witness_uv) = if triangle.maximum_chordal_deviation_m.canonical_value()
+                    > policy.quality.maximum_chordal_deviation_m.canonical_value()
                 {
                     (
                         ExactFaceRefinementReason::ChordalDeviation,

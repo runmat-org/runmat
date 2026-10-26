@@ -948,7 +948,9 @@ impl RunMatSession {
             .var_names
             .iter()
             .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-        let mut variables = vec![Value::Num(0.0); runtime_bytecode.var_count];
+        // The VM allocates its dense storage. Supplying placeholders here
+        // would declare every slot assigned before the script has run.
+        let mut variables = Vec::new();
         match runmat_vm::interpret_with_workspace_and_dynamic_admission_in_context(
             runtime_bytecode,
             &mut variables,

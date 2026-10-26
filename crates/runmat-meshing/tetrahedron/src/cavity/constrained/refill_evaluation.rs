@@ -142,14 +142,17 @@ pub fn evaluate_constrained_cavity_refill_candidates(
         if !candidate_respects_protected_boundary_distance(
             cavity,
             &boundary_node_map,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             options,
         ) {
             record_refill_rejection(&mut rejected_by_reason, "protected_boundary_distance");
             continue;
         }
-        if point_in_closed_triangle_surface(node.coordinates_m, &boundary_triangles, tolerance)
-            != PointInClosedSurface::Inside
+        if point_in_closed_triangle_surface(
+            node.coordinates_m.canonical_value(),
+            &boundary_triangles,
+            tolerance,
+        ) != PointInClosedSurface::Inside
         {
             record_refill_rejection(&mut rejected_by_reason, "interior_point_outside_cavity");
             continue;

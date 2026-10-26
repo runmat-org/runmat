@@ -36,18 +36,18 @@ fn unknown_effect_loss_is_never_silently_replayed() {
 }
 
 #[test]
-fn reviewed_idempotency_and_test_policy_allow_bounded_replay() {
+fn idempotency_cannot_replay_a_possibly_live_lost_attempt() {
     assert_eq!(
         lose_once(RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 }),
-        (TaskState::Assigned, 1)
+        (TaskState::Indeterminate, 0)
     );
     assert_eq!(
         lose_once(RetryPolicy::TestPolicy { max_attempts: 2 }),
-        (TaskState::Assigned, 1)
+        (TaskState::Indeterminate, 0)
     );
     assert_eq!(
         lose_once(RetryPolicy::IdempotentInfrastructure),
-        (TaskState::Assigned, 1)
+        (TaskState::Indeterminate, 0)
     );
 }
 
@@ -107,7 +107,7 @@ fn unverified_worker_retirement_is_indeterminate_even_for_idempotent_work() {
     );
     assert_eq!(
         fixture.driver.snapshot().attempts[&request.id].state,
-        AttemptState::Lost
+        AttemptState::Assigned
     );
     assert!(!actions
         .iter()
@@ -173,7 +173,7 @@ fn active_graph_cancellation_waits_for_verified_worker_retirement() {
     );
     assert_eq!(
         fixture.driver.snapshot().attempts[&request.id].state,
-        AttemptState::Lost
+        AttemptState::Assigned
     );
     assert!(!actions
         .iter()
@@ -189,11 +189,11 @@ fn only_an_explicit_graph_retirement_report_certifies_cancellation() {
                 message: "worker disappeared".into(),
             },
             TaskState::Indeterminate,
-            AttemptState::Lost,
+            AttemptState::Assigned,
         ),
         (
             "graph-cancel-retired",
-            AttemptReport::GraphRetiredCancelled,
+            AttemptReport::Retired,
             TaskState::Cancelled,
             AttemptState::Cancelled,
         ),

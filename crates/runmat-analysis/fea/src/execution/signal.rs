@@ -273,6 +273,9 @@ impl CanonicalSignalContent<'_> {
     }
 
     fn validate(&self) -> AnalysisExecutionResult<()> {
+        self.domain
+            .axis_descriptor(None)
+            .map_err(AnalysisExecutionError::Invalid)?;
         if self.knots.len() < 2 || self.evidence.sample_count != self.knots.len() {
             return Err(AnalysisExecutionError::Invalid(
                 "signal content sample metadata is incomplete or inconsistent".into(),
@@ -280,7 +283,7 @@ impl CanonicalSignalContent<'_> {
         }
         if matches!(
             self.domain,
-            GeneratorDomain::StudyParameter { parameter_id } if parameter_id.trim().is_empty()
+            GeneratorDomain::StudyParameter { parameter_id, .. } if parameter_id.trim().is_empty()
         ) {
             return Err(AnalysisExecutionError::Invalid(
                 "study-parameter signal content requires a parameter id".into(),

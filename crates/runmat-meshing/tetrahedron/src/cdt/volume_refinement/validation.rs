@@ -66,7 +66,11 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
             .ok_or_else(|| invalid("candidate source is absent from topology"))?;
     let mut points = input.topology.tetrahedra[topology_index]
         .vertex_indices
-        .map(|vertex| input.topology.nodes[vertex as usize].coordinates_m);
+        .map(|vertex| {
+            input.topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
     points.sort_by(compare_points);
     let mut work = CandidateWork::new(options, cancellation);
     work.evaluate()?;
@@ -81,9 +85,11 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
             "candidate construction tetrahedron is outside the source region",
         ));
     }
-    let mut construction_points = construction
-        .vertex_indices
-        .map(|vertex| input.topology.nodes[vertex as usize].coordinates_m);
+    let mut construction_points = construction.vertex_indices.map(|vertex| {
+        input.topology.nodes[vertex as usize]
+            .coordinates_m
+            .canonical_value()
+    });
     construction_points.sort_by(compare_points);
     work.evaluate()?;
     let expected_coordinates = match observed.kind {
@@ -140,7 +146,7 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
         }
     };
     let coordinates_consistent = coordinates_match(
-        observed.node.coordinates_m,
+        observed.node.coordinates_m.canonical_value(),
         expected_coordinates,
         construction_points,
     );
@@ -158,12 +164,13 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
             )
         || input.topology.nodes.iter().any(|node| {
             node.identity == observed.node.identity
-                || node.coordinates_m == observed.node.coordinates_m
+                || node.coordinates_m.canonical_value()
+                    == observed.node.coordinates_m.canonical_value()
         })
     {
         return Err(invalid(format!(
             "candidate does not match independent construction: observed kind {:?}, observed coordinates {:?}, expected coordinates {expected_coordinates:?}, coordinate match {coordinates_consistent}",
-            observed.kind, observed.node.coordinates_m
+            observed.kind, observed.node.coordinates_m.canonical_value()
         )));
     }
     Ok(())

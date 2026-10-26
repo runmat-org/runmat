@@ -9,6 +9,7 @@ const NOTICE_SOURCES = [
   resolve(__dirname, "../../crates/runmat-runtime/licenses/UNICODE-LICENSE.txt"),
   resolve(__dirname, "../../crates/runmat-runtime/licenses/CLARABEL-LICENSE.txt"),
   resolve(__dirname, "../../crates/runmat-runtime/licenses/CLARABEL-DEPENDENCIES-NOTICES.txt"),
+  resolve(__dirname, "../../crates/runmat-runtime/licenses/SOBOL-NOTICES.txt"),
 ];
 
 function thirdPartyNoticeBytes() {

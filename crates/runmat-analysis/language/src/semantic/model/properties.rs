@@ -11,7 +11,7 @@ use runmat_analysis_core::{
     HomogeneousShellReferenceSurface, HomogeneousShellSection, PlyOrderDirection,
     RectangularBeamSection, ShellReferenceSurface, TubularBeamSection,
 };
-use runmat_parser::fea::FeaModelDefinitionKind;
+use runmat_fea_syntax::FeaModelDefinitionKind;
 
 mod values;
 pub(super) use values::*;
@@ -148,50 +148,99 @@ fn section(
     };
     validate_assignments(declaration, body, supported, diagnostics);
     Some(match kind {
-        "general_beam" => AuthoredSectionDefinition::GeneralBeam(GeneralBeamSection {
-            section_id: id.into(),
-            area_m2: required_quantity(
-                declaration,
-                body,
-                "area",
-                PhysicalDimension::AREA,
-                diagnostics,
-            )?,
-            iy_m4: required_fourth_length(declaration, body, "iy", diagnostics)?,
-            iz_m4: required_fourth_length(declaration, body, "iz", diagnostics)?,
-            torsion_j_m4: required_fourth_length(
-                declaration,
-                body,
-                "torsion_constant",
-                diagnostics,
-            )?,
-            outer_fiber_y_m: required_length(declaration, body, "outer_fiber_y", diagnostics)?,
-            outer_fiber_z_m: required_length(declaration, body, "outer_fiber_z", diagnostics)?,
-            torsion_outer_radius_m: required_length(
-                declaration,
-                body,
-                "torsion_outer_radius",
-                diagnostics,
-            )?,
-        }),
+        "general_beam" => {
+            AuthoredSectionDefinition::GeneralBeam(GeneralBeamSection {
+                section_id: id.into(),
+                area_m2: runmat_types::physical::Area::new(required_quantity(
+                    declaration,
+                    body,
+                    "area",
+                    PhysicalDimension::AREA,
+                    diagnostics,
+                )?),
+                iy_m4: runmat_types::physical::SecondMomentOfArea::new(required_fourth_length(
+                    declaration,
+                    body,
+                    "iy",
+                    diagnostics,
+                )?),
+                iz_m4: runmat_types::physical::SecondMomentOfArea::new(required_fourth_length(
+                    declaration,
+                    body,
+                    "iz",
+                    diagnostics,
+                )?),
+                torsion_j_m4: runmat_types::physical::SecondMomentOfArea::new(
+                    required_fourth_length(declaration, body, "torsion_constant", diagnostics)?,
+                ),
+                outer_fiber_y_m: runmat_types::physical::Length::new(required_length(
+                    declaration,
+                    body,
+                    "outer_fiber_y",
+                    diagnostics,
+                )?),
+                outer_fiber_z_m: runmat_types::physical::Length::new(required_length(
+                    declaration,
+                    body,
+                    "outer_fiber_z",
+                    diagnostics,
+                )?),
+                torsion_outer_radius_m: runmat_types::physical::Length::new(required_length(
+                    declaration,
+                    body,
+                    "torsion_outer_radius",
+                    diagnostics,
+                )?),
+            })
+        }
         "rectangular_beam" => AuthoredSectionDefinition::RectangularBeam(RectangularBeamSection {
             section_id: id.into(),
-            width_m: required_length(declaration, body, "width", diagnostics)?,
-            height_m: required_length(declaration, body, "height", diagnostics)?,
+            width_m: runmat_types::physical::Length::new(required_length(
+                declaration,
+                body,
+                "width",
+                diagnostics,
+            )?),
+            height_m: runmat_types::physical::Length::new(required_length(
+                declaration,
+                body,
+                "height",
+                diagnostics,
+            )?),
         }),
         "circular_beam" => AuthoredSectionDefinition::CircularBeam(CircularBeamSection {
             section_id: id.into(),
-            radius_m: required_length(declaration, body, "radius", diagnostics)?,
+            radius_m: runmat_types::physical::Length::new(required_length(
+                declaration,
+                body,
+                "radius",
+                diagnostics,
+            )?),
         }),
         "tubular_beam" => AuthoredSectionDefinition::TubularBeam(TubularBeamSection {
             section_id: id.into(),
-            outer_radius_m: required_length(declaration, body, "outer_radius", diagnostics)?,
-            inner_radius_m: required_length(declaration, body, "inner_radius", diagnostics)?,
+            outer_radius_m: runmat_types::physical::Length::new(required_length(
+                declaration,
+                body,
+                "outer_radius",
+                diagnostics,
+            )?),
+            inner_radius_m: runmat_types::physical::Length::new(required_length(
+                declaration,
+                body,
+                "inner_radius",
+                diagnostics,
+            )?),
         }),
         "homogeneous_shell" => {
             AuthoredSectionDefinition::HomogeneousShell(HomogeneousShellSection {
                 section_id: id.into(),
-                thickness_m: required_length(declaration, body, "thickness", diagnostics)?,
+                thickness_m: runmat_types::physical::Length::new(required_length(
+                    declaration,
+                    body,
+                    "thickness",
+                    diagnostics,
+                )?),
                 reference_surface: homogeneous_reference_surface(declaration, body, diagnostics)?,
                 shear_correction: required_scalar(
                     declaration,
@@ -281,13 +330,16 @@ fn orientation(
             );
             AuthoredOrientationDefinition::Cartesian(CartesianOrientation {
                 orientation_id: id.into(),
-                origin_m: required_vector(
+                origin_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(required_vector(
                     declaration,
                     body,
                     "origin",
                     PhysicalDimension::LENGTH,
                     diagnostics,
-                )?,
+                )?),
                 x_axis: required_vector(
                     declaration,
                     body,
@@ -313,13 +365,16 @@ fn orientation(
             );
             let value = AxisOrientation {
                 orientation_id: id.into(),
-                origin_m: required_vector(
+                origin_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(required_vector(
                     declaration,
                     body,
                     "origin",
                     PhysicalDimension::LENGTH,
                     diagnostics,
-                )?,
+                )?),
                 axis: required_vector(
                     declaration,
                     body,
@@ -461,14 +516,22 @@ fn layup(
         plies.push(AuthoredPly {
             ply_id: ply_id.trim().into(),
             material: material_source(bound, declaration, material, diagnostics)?,
-            thickness_m: required_length(declaration, body, "thickness", diagnostics)?,
-            angle_rad: required_quantity(
+            thickness_m: runmat_types::physical::Length::new(required_length(
                 declaration,
                 body,
-                "angle",
-                PhysicalDimension::DIMENSIONLESS,
+                "thickness",
                 diagnostics,
-            )?,
+            )?),
+            angle_rad:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle, _>::new(
+                    required_quantity(
+                        declaration,
+                        body,
+                        "angle",
+                        PhysicalDimension::DIMENSIONLESS,
+                        diagnostics,
+                    )?,
+                ),
         });
     }
     Some(AuthoredLayupDefinition {
@@ -502,7 +565,7 @@ fn validate_layup_members(
                     );
                     continue;
                 };
-                if *relation != runmat_parser::fea::FeaAssignmentRelation::Equal
+                if *relation != runmat_fea_syntax::FeaAssignmentRelation::Equal
                     || !matches!(
                         name.as_str(),
                         "reference_orientation"

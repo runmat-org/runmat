@@ -10,7 +10,6 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::{
-    algebra::apply_k,
     assembly::AssemblySummary,
     planning::resource::LocalExecutionPlan,
     post::{
@@ -36,8 +35,7 @@ use formulation::{recover_beam_result_fields, recover_shell_result_fields};
 use scalars::{recover_strain_energy_density, recover_stress, recover_von_mises};
 use state::{
     recover_displacement, recover_reaction_force, recover_reaction_moment,
-    recover_residual_metrics, recover_rotation, recover_total_strain_energy, rotation_shape,
-    structural_displacement_node_count,
+    recover_residual_metrics, recover_rotation, rotation_shape, structural_displacement_node_count,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -61,9 +59,37 @@ pub fn recover_result_fields(
     }
 
     let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
-    let internal_force = apply_k(&summary.operator, &solve_result.solution);
-    let reaction_values = recover_reaction_force(summary, &internal_force, node_count);
-    let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
+    let physical_operator =
+        crate::assembly::physical_fields::StructuralPhysicalOperator::from_assembly(summary)
+            .map_err(
+                |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                    reason: format!("{error:?}"),
+                },
+            )?;
+    let physical_state = summary
+        .state_field(0, &solve_result.solution)
+        .map_err(
+            |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                reason: format!("{error:?}"),
+            },
+        )?;
+    let internal_force = physical_operator
+        .apply(
+            crate::assembly::physical_fields::StructuralOperatorRole::Stiffness,
+            &physical_state,
+        )
+        .map_err(
+            |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                reason: format!("{error:?}"),
+            },
+        )?;
+    let (reaction_values, reaction_moment_values) =
+        internal_force.with_canonical_storage(|values| {
+            (
+                recover_reaction_force(summary, values, node_count),
+                recover_reaction_moment(summary, values),
+            )
+        });
     let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
     let mut fields = recover_deformation_result_fields_with_plan(
         summary,
@@ -76,7 +102,14 @@ pub fn recover_result_fields(
     }) {
         super::thermoelastic_energy::total_elastic_energy(summary, &fields)?
     } else {
-        recover_total_strain_energy(&solve_result.solution, &internal_force)
+        physical_operator
+            .elastic_energy(&physical_state, &internal_force)
+            .map_err(
+                |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                    reason: format!("{error:?}"),
+                },
+            )?
+            .canonical_value()
     };
     fields.extend([
         AnalysisField::host_f64(

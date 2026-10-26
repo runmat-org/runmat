@@ -8,7 +8,7 @@ use runmat_execution_runner::{
 };
 
 #[test]
-fn lost_retry_retains_unknown_consumption_and_cannot_claim_winner_only_usage() {
+fn retired_infrastructure_retry_retains_unknown_consumption_and_cannot_claim_winner_only_usage() {
     let mut fixture = common::fixture(1, 1);
     let task = common::task(
         "lost-history",
@@ -25,7 +25,8 @@ fn lost_retry_retains_unknown_consumption_and_cannot_claim_winner_only_usage() {
         .driver
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &first,
-            AttemptReport::Lost {
+            AttemptReport::Failed {
+                kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
                 message: "producer disappeared".into(),
             },
         )))
@@ -56,7 +57,9 @@ fn lost_retry_retains_unknown_consumption_and_cannot_claim_winner_only_usage() {
     assert_eq!(history.len(), 2);
     assert_eq!(
         history[0].terminal.as_ref().unwrap().disposition,
-        AttemptDisposition::Lost
+        AttemptDisposition::Failed {
+            kind: runmat_execution_runner::AttemptFailureKind::Infrastructure
+        }
     );
     assert_eq!(
         history[0]
@@ -186,16 +189,13 @@ fn recovery_loss_keeps_attempt_history_without_inventing_worker_usage() {
         .unwrap()
         .snapshot();
     let history = restored.task_attempt_history(request.task_id).unwrap();
-    assert_eq!(
-        history[0].terminal.as_ref().unwrap().disposition,
-        AttemptDisposition::Lost
-    );
+    assert!(history[0].terminal.is_none());
     assert_eq!(
         history[0]
-            .terminal
+            .unverified_retirement
             .as_ref()
             .unwrap()
-            .closed_at_driver_millis,
+            .observed_at_driver_millis,
         5
     );
     assert!(restored
@@ -204,7 +204,7 @@ fn recovery_loss_keeps_attempt_history_without_inventing_worker_usage() {
 }
 
 #[test]
-fn portable_history_preserves_lost_attempt_and_rejects_lineage_corruption() {
+fn portable_history_preserves_retired_failed_attempt_and_rejects_lineage_corruption() {
     let mut fixture = common::fixture(1, 1);
     let task = common::task(
         "portable-history",
@@ -217,7 +217,8 @@ fn portable_history_preserves_lost_attempt_and_rejects_lineage_corruption() {
         .driver
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &first,
-            AttemptReport::Lost {
+            AttemptReport::Failed {
+                kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
                 message: "original producer lost".into(),
             },
         )))
@@ -297,7 +298,8 @@ fn live_task_extraction_preserves_original_retry_history_and_rejects_unknown_tas
         .driver
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &first,
-            AttemptReport::Lost {
+            AttemptReport::Failed {
+                kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
                 message: "original loss".into(),
             },
         )))
@@ -378,20 +380,18 @@ fn borrowed_pool_inspection_tracks_admitted_work_and_worker_loss() {
         .handle(DriverCommand::WorkerLost(request.worker_id))
         .unwrap();
     let pool = fixture.driver.pool_record(fixture.pool).unwrap();
-    assert_eq!(pool.active_attempts, 0);
+    assert_eq!(pool.active_attempts, 1);
     assert_eq!(
         pool.workers[&request.worker_id].lifecycle,
         WorkerLifecycle::Lost
     );
-    assert_eq!(pool.workers[&request.worker_id].active_attempts, 0);
+    assert_eq!(pool.workers[&request.worker_id].active_attempts, 1);
     let history = fixture
         .driver
         .task_execution_evidence(request.task_id)
         .unwrap();
-    assert_eq!(
-        history.attempts[0].terminal.as_ref().unwrap().disposition,
-        AttemptDisposition::Lost
-    );
+    assert!(history.attempts[0].terminal.is_none());
+    assert!(history.attempts[0].unverified_retirement.is_some());
     assert!(history.resource_aggregate(1).is_err());
     assert!(matches!(
         fixture

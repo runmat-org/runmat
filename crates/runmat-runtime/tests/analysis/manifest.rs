@@ -1857,30 +1857,6 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             min_gpu_speedup_ratio: None,
         },
-        FixtureSpec {
-            id: "unit_mismatch",
-            description: "unit mismatch fixture must fail validation with mismatch code",
-            model: || {
-                let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-                model.units = UnitSystem::Inch;
-                model
-            },
-            expect_validate_error: Some("RM.FEA.VALIDATE.UNIT_MISMATCH"),
-            expect_run_error: None,
-            expected_numerically_acceptable: None,
-            parity_tolerance: None,
-            gpu_mode: None,
-            published_field_storage_expectation: None,
-            max_solver_host_sync_count: None,
-            min_solver_device_apply_k_ratio: None,
-            expected_solver_backend: None,
-            modal_mode_count: None,
-            transient_step_count: None,
-            max_modal_orthogonality_offdiag: None,
-            min_modal_relative_frequency_separation: None,
-            max_transient_residual_norm: None,
-            min_gpu_speedup_ratio: None,
-        },
     ]
 }
 
@@ -1928,4 +1904,23 @@ pub(super) fn default_options(solver_mesh_artifact_path: Option<String>) -> Anal
         quality_policy: QualityPolicy::Balanced,
         solver_mesh_artifact_path,
     }
+}
+
+#[test]
+fn unit_mismatch_is_rejected_at_canonical_model_decode() {
+    // A typed canonical AnalysisModel cannot contain inch coordinates. Exercise
+    // the persisted input boundary instead of fabricating an invalid typed model.
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut wire = serde_json::to_value(&model).expect("encode canonical fixture");
+    assert_eq!(
+        wire["units"],
+        serde_json::to_value(LengthUnit::Meter).unwrap()
+    );
+    serde_json::from_value::<AnalysisModel>(wire.clone()).expect("decode canonical fixture");
+    wire["units"] = serde_json::to_value(LengthUnit::Inch).unwrap();
+    let error = serde_json::from_value::<AnalysisModel>(wire)
+        .expect_err("canonical fixture admission must reject inch coordinates");
+    assert!(error
+        .to_string()
+        .contains("canonical solver coordinates must be meters"));
 }

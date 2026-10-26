@@ -95,7 +95,7 @@ fn changed_frozen_admission_source_limits_and_foreign_resolved_expectations_reje
         .validate_resolved_expectation(&expectation, &foreign)
         .is_err());
     let mut substituted = expectation.clone();
-    substituted.admitted.sample_points[1] = 0.125;
+    substituted.admitted.sample_points.try_replace(1, runmat_types::physical::Quantity::try_from_descriptor(substituted.admitted.sample_points.descriptor(), 0.125).unwrap()).unwrap();
     assert!(expected
         .validate_resolved_expectation(&substituted, &mesh)
         .is_err());

@@ -15,8 +15,10 @@ use super::{
 pub struct MeshingRequestSettings {
     pub element_order: ElementOrder,
     pub deterministic_seed: u64,
-    pub target_edge_length_m: f64,
-    pub maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub target_edge_length_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_grading_ratio: f64,
     pub resources: MeshingResourceBudget,
     pub cancellation: CancellationPolicy,
@@ -27,8 +29,8 @@ impl Default for MeshingRequestSettings {
         Self {
             element_order: ElementOrder::Tet4,
             deterministic_seed: 0,
-            target_edge_length_m: 0.01,
-            maximum_chordal_deviation_m: 0.0001,
+            target_edge_length_m: runmat_types::physical::Length::new(0.01),
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0001),
             maximum_grading_ratio: 1.3,
             resources: MeshingResourceBudget {
                 maximum_nodes: 10_000_000,
@@ -52,10 +54,13 @@ impl Default for MeshingRequestSettings {
 impl MeshingRequestSettings {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         for (field, value) in [
-            ("target edge length", self.target_edge_length_m),
+            (
+                "target edge length",
+                self.target_edge_length_m.canonical_value(),
+            ),
             (
                 "maximum chordal deviation",
-                self.maximum_chordal_deviation_m,
+                self.maximum_chordal_deviation_m.canonical_value(),
             ),
             ("maximum grading ratio", self.maximum_grading_ratio),
         ] {
@@ -63,7 +68,9 @@ impl MeshingRequestSettings {
                 return Err(MeshingContractError::invalid(field, "must be finite"));
             }
         }
-        if self.target_edge_length_m <= 0.0 || self.maximum_chordal_deviation_m <= 0.0 {
+        if self.target_edge_length_m.canonical_value() <= 0.0
+            || self.maximum_chordal_deviation_m.canonical_value() <= 0.0
+        {
             return Err(MeshingContractError::invalid(
                 "meshing length settings",
                 "target edge length and chordal deviation must be positive",
@@ -105,7 +112,7 @@ pub fn resolve_meshing_request(
     settings: MeshingRequestSettings,
 ) -> Result<MeshingRequest, MeshingContractError> {
     settings.validate()?;
-    let metric = MetricTensor3::isotropic_length_m(settings.target_edge_length_m)
+    let metric = MetricTensor3::isotropic_length_m(settings.target_edge_length_m.canonical_value())
         .map_err(|error| MeshingContractError::invalid("target edge length", error.to_string()))?;
     let request = MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
@@ -121,7 +128,9 @@ pub fn resolve_meshing_request(
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: settings.maximum_chordal_deviation_m,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                    settings.maximum_chordal_deviation_m.canonical_value(),
+                ),
                 maximum_tangent_change_degrees: 180.0,
                 minimum_metric_edge_length: 0.01,
                 maximum_metric_edge_length: 1.0,
@@ -130,7 +139,9 @@ pub fn resolve_meshing_request(
                 minimum_metric_edge_length: 0.01,
                 minimum_metric_angle_degrees: 0.1,
                 maximum_physical_aspect_ratio: 1_000.0,
-                maximum_chordal_deviation_m: settings.maximum_chordal_deviation_m,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                    settings.maximum_chordal_deviation_m.canonical_value(),
+                ),
                 maximum_normal_deviation_degrees: 180.0,
             },
             volume: VolumeQualityTargets {
@@ -152,11 +163,11 @@ mod tests {
 
     fn tolerance() -> GeometryTolerancePolicy {
         GeometryTolerancePolicy {
-            source_tolerance_m: 0.0,
-            absolute_floor_m: 1.0e-12,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_term: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         }
     }
 
@@ -183,7 +194,7 @@ mod tests {
     #[test]
     fn invalid_target_length_is_rejected_before_execution() {
         let settings = MeshingRequestSettings {
-            target_edge_length_m: 0.0,
+            target_edge_length_m: runmat_types::physical::Length::new(0.0),
             ..MeshingRequestSettings::default()
         };
         assert!(resolve_meshing_request(tolerance(), settings).is_err());

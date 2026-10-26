@@ -8,6 +8,11 @@ pub enum OptimNumericInput {
     OptionalVector,
     NonemptyVector,
     OptionalMatrix,
+    /// Real sparse or dense matrix; only consumers with a CSC adapter use it.
+    OptionalSparseMatrix,
+    /// Column-major flattened arrays for bound and initial-point consumers.
+    OptionalSparseArray,
+    NonemptySparseMatrix,
     NonemptyMatrix,
     Scalar,
 }
@@ -15,14 +20,25 @@ pub enum OptimNumericInput {
 impl OptimNumericInput {
     /// Metadata preflight, not a payload/finite-value or allocation certificate.
     pub fn accepts_metadata(self, fact: &ValueFact) -> bool {
-        if fact.storage == StorageFact::Sparse {
+        if fact.storage == StorageFact::Sparse
+            && !matches!(
+                self,
+                Self::OptionalSparseMatrix | Self::OptionalSparseArray | Self::NonemptySparseMatrix
+            )
+        {
             return false;
         }
         let vector = matches!(
             self,
             Self::OptionalVector | Self::NonemptyVector | Self::Scalar
         );
-        let empty = matches!(self, Self::OptionalVector | Self::OptionalMatrix);
+        let empty = matches!(
+            self,
+            Self::OptionalVector
+                | Self::OptionalMatrix
+                | Self::OptionalSparseMatrix
+                | Self::OptionalSparseArray
+        );
         match fact.kind {
             ValueKindFact::Unknown => return true,
             ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real => {}
@@ -34,7 +50,7 @@ impl OptimNumericInput {
         if fact.shape.element_count() == Some(0) {
             return empty;
         }
-        if fact.shape.rank().is_some_and(|rank| rank > 2) {
+        if self != Self::OptionalSparseArray && fact.shape.rank().is_some_and(|rank| rank > 2) {
             return false;
         }
         if self == Self::Scalar {

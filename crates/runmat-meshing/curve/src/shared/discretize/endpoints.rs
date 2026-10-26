@@ -23,5 +23,5 @@ pub(super) fn canonical_vertex_point(
                 "exact endpoint vertex is absent from admitted topology",
             )
         })?;
-    Ok(transform.transform_point(vertex.point_m))
+    Ok(transform.transform_point(vertex.point_m.canonical_value()))
 }

@@ -9,8 +9,26 @@ pub enum GeometryScalarExpression {
     Literal {
         value: f64,
     },
+    /// Already canonical value with its checked physical descriptor.
+    Canonical {
+        value: runmat_types::physical::DimensionedScalar,
+    },
+    /// Source unit syntax is retained instead of flattened into naked scale factors.
+    Quantity {
+        value: Box<Self>,
+        unit: runmat_types::physical::UnitDefinition,
+        source_unit_symbol: String,
+        semantic_kind: Option<runmat_types::physical::QuantityKind>,
+    },
+    SourceMeasure {
+        value: runmat_types::physical::SourceQuantity,
+    },
     Parameter {
         name: String,
+    },
+    ParameterComponent {
+        name: String,
+        component: usize,
     },
     Negate {
         value: Box<Self>,
@@ -35,7 +53,7 @@ pub enum GeometryScalarOperator {
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum GeometryAuthoringValue {
     Scalar(GeometryScalarExpression),
-    Vector([GeometryScalarExpression; 3]),
+    Vector(Box<[GeometryScalarExpression; 3]>),
     Matrix(Vec<GeometryScalarExpression>),
     Text(String),
     Boolean(bool),
@@ -54,6 +72,47 @@ impl GeometryScalarExpression {
             Self::Literal { .. } => Err(GeometryContractError::invalid(
                 "geometry expression",
                 "literal values must be finite",
+            )),
+            Self::Canonical { value } if value.canonical_value().is_finite() => Ok(()),
+            Self::Canonical { .. } => Err(GeometryContractError::invalid(
+                "geometry expression",
+                "canonical value must be finite",
+            )),
+            Self::Quantity {
+                value,
+                unit,
+                source_unit_symbol,
+                semantic_kind,
+            } => {
+                value.validate(parameters)?;
+                if source_unit_symbol.trim().is_empty()
+                    || source_unit_symbol.len() > 256
+                    || source_unit_symbol.chars().any(char::is_control)
+                    || runmat_types::physical::DynamicDimension::from_unit(*unit)
+                        .with_semantic_kind(*semantic_kind)
+                        .is_err()
+                    || (unit.offset() != 0.0
+                        && *semantic_kind
+                            != Some(runmat_types::physical::QuantityKind::Temperature))
+                {
+                    return Err(GeometryContractError::invalid(
+                        "geometry quantity",
+                        "invalid source unit or semantic kind",
+                    ));
+                }
+                Ok(())
+            }
+            Self::SourceMeasure { value } => value.validate().map_err(|error| {
+                GeometryContractError::invalid("geometry source measure", error.to_string())
+            }),
+            Self::ParameterComponent { name, component }
+                if *component < 3 && parameters.contains(name.as_str()) =>
+            {
+                Ok(())
+            }
+            Self::ParameterComponent { .. } => Err(GeometryContractError::invalid(
+                "geometry parameter component",
+                "requires a declared vector parameter and component 0..2",
             )),
             Self::Parameter { name } if parameters.contains(name.as_str()) => Ok(()),
             Self::Parameter { .. } => Err(GeometryContractError::invalid(
@@ -74,7 +133,9 @@ impl GeometryScalarExpression {
         parameters: &BTreeSet<&str>,
     ) -> Result<(), GeometryContractError> {
         self.validate(parameters)?;
-        if matches!(self, Self::Literal { value } if *value <= 0.0) {
+        if matches!(self, Self::Literal { value } if *value <= 0.0)
+            || matches!(self, Self::Canonical { value } if value.canonical_value() <= 0.0)
+        {
             return Err(GeometryContractError::invalid(
                 field,
                 "literal value must be positive",
@@ -91,7 +152,7 @@ impl GeometryAuthoringValue {
     ) -> Result<(), GeometryContractError> {
         match self {
             Self::Scalar(value) => value.validate(parameters),
-            Self::Vector(values) => validate_expressions(values, parameters),
+            Self::Vector(values) => validate_expressions(values.as_slice(), parameters),
             Self::Matrix(values) => validate_expressions(values, parameters),
             Self::Text(value) | Self::Parameter(value) if value.trim().is_empty() => Err(
                 GeometryContractError::invalid("geometry value", "must not be empty"),

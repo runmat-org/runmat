@@ -96,7 +96,7 @@ pub(super) async fn execute_for_composition(
     }
     let regions = match &completed.regions {
         MeshedGeometryRegions::Materialized(regions) => regions,
-        MeshedGeometryRegions::ImporterAliases(_) => {
+        MeshedGeometryRegions::PersistentEntities(_) => {
             return Ok(
                 super::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(
                     "typed structural studies require source-neutral materialized geometry".into(),
@@ -132,7 +132,7 @@ pub(super) async fn execute_for_composition(
         )
     })?;
     let mut completed = completed;
-    completed.regions = MeshedGeometryRegions::ImporterAliases(BTreeMap::new());
+    completed.regions = MeshedGeometryRegions::PersistentEntities(BTreeMap::new());
     let execution_view = crate::DecodedExactStructuralStudyRoot {
         authored_study_digest: decoded.authored_study_digest,
         frozen_project_digest: decoded.frozen_project_digest,

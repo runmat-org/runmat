@@ -29,8 +29,8 @@ impl PreparedStructuralStudyIntent {
         self.meshing_request.as_ref()
     }
 
-    pub fn geometry_units(&self) -> runmat_geometry_core::UnitSystem {
-        self.geometry_units
+    pub fn geometry_unit_evidence(&self) -> &runmat_geometry_core::physical::LengthUnitEvidence {
+        &self.geometry_unit_evidence
     }
 
     pub fn meshing_contacts(&self) -> &[crate::meshing::MeshingContactDefinition] {
@@ -44,10 +44,10 @@ impl PreparedStructuralStudyIntent {
     pub fn continuation_bytes(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
         let bytes = serde_json::to_vec(&StructuralStudyIntentContinuation {
-            schema_version: 1,
+            schema_version: 2,
             study_id: self.study_id.clone(),
             geometry_source_digest: self.geometry_source_digest,
-            geometry_units: self.geometry_units,
+            geometry_unit_evidence: self.geometry_unit_evidence.clone(),
             meshing_request: self.meshing_request.clone(),
             meshing_contacts: self.meshing_contacts.clone(),
             context: self.context.clone(),
@@ -71,13 +71,13 @@ impl PreparedStructuralStudyIntent {
         }
         let continuation: StructuralStudyIntentContinuation =
             serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-        if continuation.schema_version != 1 {
+        if continuation.schema_version != 2 {
             return Err("unsupported structural study intent continuation schema".into());
         }
         let intent = Self {
             study_id: continuation.study_id,
             geometry_source_digest: continuation.geometry_source_digest,
-            geometry_units: continuation.geometry_units,
+            geometry_unit_evidence: continuation.geometry_unit_evidence,
             meshing_request: continuation.meshing_request,
             meshing_contacts: continuation.meshing_contacts,
             context: continuation.context,
@@ -93,6 +93,15 @@ impl PreparedStructuralStudyIntent {
     }
 
     pub(in crate::analysis) fn validate(&self) -> Result<(), String> {
+        self.geometry_unit_evidence
+            .validate()
+            .map_err(|error| error.to_string())?;
+        if !self.geometry_unit_evidence.physical_scale_resolved() {
+            return Err(
+                "structural study intent requires resolved source-unit interpretation".into(),
+            );
+        }
+
         if let Some(request) = &self.meshing_request {
             request.validate().map_err(|error| error.to_string())?;
         }
@@ -444,7 +453,7 @@ impl PreparedStructuralStudyIntent {
         let bytes = serde_json::to_vec(&(
             &self.study_id,
             self.geometry_source_digest,
-            self.geometry_units,
+            &self.geometry_unit_evidence,
             &self.meshing_request,
             &self.meshing_contacts,
             &self.model,

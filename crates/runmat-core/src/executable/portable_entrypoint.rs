@@ -97,6 +97,15 @@ pub(super) fn resolve_declaration_source(
     class: &runmat_types::ClassIdentity,
     primary_source: runmat_types::ProgramSourceId,
 ) -> Result<PortableEntrypoint, String> {
+    validate_declaration_source(unit, class, primary_source)?;
+    Ok(PortableEntrypoint::DeclarationOnly(class.clone()))
+}
+
+fn validate_declaration_source(
+    unit: &ExecutableUnit,
+    class: &runmat_types::ClassIdentity,
+    primary_source: runmat_types::ProgramSourceId,
+) -> Result<(), String> {
     if unit.mir().functions.values().any(|metadata| {
         metadata.source == primary_source
             && metadata.class_method_owner.as_ref().is_some_and(|owner| {
@@ -112,77 +121,88 @@ pub(super) fn resolve_declaration_source(
         .entries()
         .first()
         .ok_or("declaration-only product has no primary source")?;
-    let primary_registration = (unit
+    let declaration = unit
+        .mir()
+        .classes
+        .iter()
+        .find(|declaration| {
+            declaration.source == primary_source && class.matches_qualified_name(&declaration.name)
+        })
+        .ok_or("declaration-only product lacks its primary class declaration")?;
+    if primary.source_id != primary_source
+        || primary_registration(unit, &declaration.name, primary_source) != Some(class)
+    {
+        return Err("declaration-only product lacks its primary class declaration".into());
+    }
+    Ok(())
+}
+
+/// Registration is required evidence, not declaration-source authority: a
+/// companion registration can appear in a primary function prologue.
+fn primary_registration<'a>(
+    unit: &'a ExecutableUnit,
+    class: &runmat_types::QualifiedName,
+    primary_source: runmat_types::ProgramSourceId,
+) -> Option<&'a runmat_types::ClassIdentity> {
+    let declared = |instruction: &'a runmat_vm::Instr| match instruction {
+        runmat_vm::Instr::RegisterClass { name, .. } if name.matches_qualified_name(class) => {
+            Some(name)
+        }
+        _ => None,
+    };
+    if unit
         .bytecode()
         .source_id
         .and_then(runmat_vm::BytecodeSourceRef::program)
         == Some(primary_source)
-        && unit.bytecode().instructions.iter().any(|instruction| {
-            matches!(instruction, runmat_vm::Instr::RegisterClass { name, .. } if name == class)
-        }))
-        || unit.functions().functions.values().any(|body| {
-            body.source_id.and_then(runmat_vm::BytecodeSourceRef::program)
-                == Some(primary_source)
-                && body.instructions.iter().any(|instruction| {
-                    matches!(instruction, runmat_vm::Instr::RegisterClass { name, .. } if name == class)
-                })
-        });
-    if primary.source_id != primary_source
-        || !unit.mir().classes.iter().any(|declaration| {
-            declaration.name.display_name().as_deref() == Some(class.display_name())
-        })
-        || !primary_registration
     {
-        return Err("declaration-only product lacks its primary class declaration".into());
+        if let Some(name) = unit.bytecode().instructions.iter().find_map(declared) {
+            return Some(name);
+        }
     }
-    Ok(PortableEntrypoint::DeclarationOnly(class.clone()))
-}
-
-/// Identify a genuine primary-source class declaration when no new callable
-/// entrypoint is selected. A copied prior function body can still carry a
-/// RegisterClass prologue; only typed MIR and the declaration validator count.
-fn primary_declaration_only_class(
-    unit: &ExecutableUnit,
-    primary_source: runmat_types::ProgramSourceId,
-) -> Result<Option<runmat_types::ClassIdentity>, String> {
-    let declares = |instruction: &runmat_vm::Instr| match instruction {
-        runmat_vm::Instr::RegisterClass { name, .. } => Some(name.clone()),
-        _ => None,
-    };
-    let mut candidates = unit
-        .bytecode()
-        .source_id
-        .and_then(runmat_vm::BytecodeSourceRef::program)
-        .filter(|source| *source == primary_source)
-        .into_iter()
-        .flat_map(|_| unit.bytecode().instructions.iter().filter_map(declares))
-        .collect::<std::collections::BTreeSet<_>>();
     for body in unit.functions().functions.values().filter(|body| {
         body.source_id
             .and_then(runmat_vm::BytecodeSourceRef::program)
             == Some(primary_source)
     }) {
-        candidates.extend(body.instructions.iter().filter_map(declares));
+        if let Some(name) = body.instructions.iter().find_map(declared) {
+            return Some(name);
+        }
     }
+    None
+}
+
+/// Only the actual original declaration source can make a primary class
+/// candidate. Copied companion registration prologues grant no such identity.
+fn primary_declaration_only_class(
+    unit: &ExecutableUnit,
+    primary_source: runmat_types::ProgramSourceId,
+) -> Result<Option<runmat_types::ClassIdentity>, String> {
     let mut selected = None;
-    for class in candidates {
-        let has_constructor = unit.mir().functions.values().any(|metadata| {
-            metadata.source == primary_source
-                && metadata.class_method_owner.as_ref().is_some_and(|owner| {
-                    owner.role == runmat_types::ClassMethodRole::Constructor
-                        && !owner.is_static
-                        && owner.declaring_class == class
-                })
-        });
-        if has_constructor {
+    for declaration in unit
+        .mir()
+        .classes
+        .iter()
+        .filter(|declaration| declaration.source == primary_source)
+    {
+        // The declaration's methods have already passed the shared exact MIR
+        // source/owner consistency check. No name-based body lookup is needed.
+        if declaration.methods.iter().any(|method| {
+            method.role == runmat_types::ClassMethodRole::Constructor && !method.is_static
+        }) {
             continue;
         }
-        resolve_declaration_source(unit, &class, primary_source)?;
-        if selected.replace(class).is_some() {
+        if selected.replace(declaration).is_some() {
             return Err("primary source has ambiguous declaration-only classes".into());
         }
     }
-    Ok(selected)
+    let Some(declaration) = selected else {
+        return Ok(None);
+    };
+    let class = primary_registration(unit, &declaration.name, primary_source)
+        .ok_or("primary class declaration has no matching registration")?;
+    validate_declaration_source(unit, class, primary_source)?;
+    Ok(Some(class.clone()))
 }
 
 impl ExecutableUnit {

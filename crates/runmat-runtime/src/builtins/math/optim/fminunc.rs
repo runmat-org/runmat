@@ -10,11 +10,10 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::common::{call_function, vector_to_value};
+use crate::builtins::math::optim::common::{call_function_in_context, vector_to_value};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fminunc";
-const ALGORITHM: &str = "quasi-newton bfgs";
 const DEFAULT_TOL_X: f64 = 1.0e-6;
 const DEFAULT_TOL_FUN: f64 = 1.0e-6;
 const DEFAULT_MAX_ITER: usize = 400;
@@ -66,7 +65,7 @@ async fn fminunc_builtin_registered(
     function: Value,
     x0: Value,
     rest: crate::call::BuiltinArguments,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValueSequence> {
     fminunc_in_runtime(runtime.as_ref(), function, x0, rest).await
 }
 
@@ -74,7 +73,7 @@ async fn fminunc_builtin_registered(
 async fn fminunc_builtin(function: Value, x0: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let rest =
         crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
-    fminunc_in_runtime(None, function, x0, rest.into()).await
+    legacy_test_value(fminunc_in_runtime(None, function, x0, rest.into()).await?)
 }
 
 async fn fminunc_in_runtime(
@@ -82,7 +81,8 @@ async fn fminunc_in_runtime(
     function: Value,
     x0: Value,
     rest: crate::call::BuiltinArguments,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValueSequence> {
+    crate::context::host_allocation::require_unbounded_workspace(runtime, NAME, "finite host-memory execution is unsupported; this optimizer has no complete workspace and factorization bound")?;
     crate::output_count::validate_bounded_outputs(
         &FMINUNC_DESCRIPTOR,
         &FMINUNC_ERROR_INVALID_ARGUMENT,
@@ -125,12 +125,40 @@ async fn fminunc_in_runtime(
         guess.values.len(),
     )
     .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_ARGUMENT))?;
+    let callback_fields = crate::builtins::math::optim::common::ScalarOptionFields::from_struct(
+        options_struct.as_ref().map(|value| value.structure()),
+    );
+    if options.trust_region_fallback {
+        reporting::trust_region_fallback(runtime)?;
+    }
+    if options.trust_region.is_some() {
+        let outcome = trust_region::minimize(
+            &function,
+            guess.values,
+            &guess.shape,
+            guess.scalar,
+            &options,
+            callback_fields.exact(runmat_builtins::OptimOptionField::OutputFcn),
+            &mut cooperation,
+        )
+        .await
+        .map_err(|error| fminunc_map_error(error, &FMINUNC_ERROR_INVALID_INPUT))?;
+        return trust_region::finalize(
+            outcome,
+            &guess.shape,
+            guess.scalar,
+            &options,
+            &mut cooperation,
+        )
+        .await;
+    }
     let outcome = minimize(
         &function,
         guess.values,
         &guess.shape,
         guess.scalar,
         &options,
+        callback_fields.get(runmat_builtins::OptimOptionField::OutputFcn),
         &mut cooperation,
     )
     .await
@@ -145,9 +173,40 @@ async fn fminunc_in_runtime(
     .await
 }
 
+fn publish_result(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::execution::RootedValueSequence> {
+    let sequence = match value {
+        Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values),
+        value => runmat_value::ValueSequence::single(value),
+    }
+    .map_err(crate::sequence::sequence_error_to_runtime)?;
+    match runtime {
+        Some(runtime) => crate::execution::RootedValueSequence::in_context(sequence, runtime),
+        None => crate::execution::RootedValueSequence::new(sequence)
+            .map_err(|source| source.into_runtime_error()),
+    }
+}
+
+#[cfg(test)]
+fn legacy_test_value(result: crate::execution::RootedValueSequence) -> BuiltinResult<Value> {
+    result.with_owned_sequence(|sequence| {
+        let values = sequence.into_output_storage();
+        if crate::output_count::current_output_count().is_some() {
+            Ok(Value::OutputList(values))
+        } else {
+            crate::sequence::into_first_output(values)?.ok_or_else(|| {
+                fminunc_error_with_detail(&FMINUNC_ERROR_INVALID_INPUT, "missing test result")
+            })
+        }
+    })
+}
+
 fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
+        Some(Value::Tensor(value)) if value.is_empty() => Ok(None),
         Some(Value::Struct(options)) => Ok(Some(options.clone())),
         Some(other) => Err(fminunc_error_with_detail(
             &FMINUNC_ERROR_INVALID_ARGUMENT,
@@ -159,12 +218,14 @@ fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
 type DisplayMode = runmat_builtins::OptimDisplay;
 
 fn parse_display(text: &str) -> BuiltinResult<DisplayMode> {
-    DisplayMode::parse(text).ok_or_else(|| {
-        fminunc_error_with_detail(
-            &FMINUNC_ERROR_INVALID_ARGUMENT,
-            format!("option Display must be 'off', 'iter', 'notify', or 'final', got '{text}'"),
-        )
-    })
+    DisplayMode::parse(text)
+        .filter(|display| runmat_builtins::OptimSolver::Fminunc.accepts_display(*display))
+        .ok_or_else(|| {
+            fminunc_error_with_detail(
+                &FMINUNC_ERROR_INVALID_ARGUMENT,
+                format!("option Display must be 'off', 'iter', 'notify', or 'final', got '{text}'"),
+            )
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +236,13 @@ struct FminuncOptions {
     max_fun_evals: usize,
     display: DisplayMode,
     specify_objective_gradient: bool,
+    function_tolerance: f64,
+    trust_region: Option<trust_region::Controls>,
+    trust_region_fallback: bool,
+    update: runmat_builtins::OptimQuasiNewtonUpdate,
+    objective_limit: f64,
+    parallel: crate::execution::CallbackParallelMode,
+    scaling: crate::builtins::math::optim::common::derivative_scaling::DerivativeScaling,
 }
 
 impl FminuncOptions {
@@ -182,57 +250,152 @@ impl FminuncOptions {
         let fields = crate::builtins::math::optim::common::ScalarOptionFields::from_struct(options);
         let display =
             parse_display(&fields.text(runmat_builtins::OptimOptionField::Display, "off")?)?;
-        let algorithm =
-            fields.text(runmat_builtins::OptimOptionField::Algorithm, "quasi-newton")?;
-        if !matches!(
-            runmat_builtins::OptimAlgorithm::parse(&algorithm),
-            Some(
-                runmat_builtins::OptimAlgorithm::QuasiNewton
-                    | runmat_builtins::OptimAlgorithm::Bfgs
-            )
-        ) {
-            return Err(fminunc_error_with_detail(
-                &FMINUNC_ERROR_INVALID_ARGUMENT,
-                "fminunc: Algorithm must be 'quasi-newton' or 'bfgs'",
-            ));
-        }
-        let tol_x = fields.real(NAME, runmat_builtins::OptimOptionField::TolX, DEFAULT_TOL_X)?;
-        let tol_fun = fields.real(
+        use runmat_builtins::{OptimAlgorithm, OptimOptionField as Field};
+        let algorithm = fields.text(Field::Algorithm, "quasi-newton")?;
+        let algorithm = OptimAlgorithm::parse(&algorithm)
+            .filter(|algorithm| {
+                matches!(
+                    algorithm,
+                    OptimAlgorithm::QuasiNewton
+                        | OptimAlgorithm::Bfgs
+                        | OptimAlgorithm::TrustRegion
+                )
+            })
+            .ok_or_else(|| {
+                fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    "Algorithm must be 'quasi-newton', 'bfgs', or 'trust-region'",
+                )
+            })?;
+        let specify_objective_gradient = fields
+            .exact(Field::SpecifyObjectiveGradient)
+            .map(|value| bool_value(Field::SpecifyObjectiveGradient.name(), value))
+            .transpose()?
+            .unwrap_or(false);
+        let actual_tr = algorithm == OptimAlgorithm::TrustRegion && specify_objective_gradient;
+        let tol_x = crate::builtins::math::optim::common::option_f64_value(
             NAME,
-            runmat_builtins::OptimOptionField::TolFun,
+            fields.exact(Field::TolX),
+            "StepTolerance",
+            DEFAULT_TOL_X,
+        )?;
+        let legacy = fields.exact(Field::TolFun);
+        let modern_field = if actual_tr {
+            Field::FunctionTolerance
+        } else {
+            Field::OptimalityTolerance
+        };
+        let modern = fields.exact(modern_field);
+        if let (Some(legacy), Some(modern)) = (legacy, modern) {
+            let legacy = crate::builtins::math::optim::common::option_f64_value(
+                NAME,
+                Some(legacy),
+                "TolFun",
+                DEFAULT_TOL_FUN,
+            )?;
+            let modern = crate::builtins::math::optim::common::option_f64_value(
+                NAME,
+                Some(modern),
+                modern_field.name(),
+                DEFAULT_TOL_FUN,
+            )?;
+            if legacy != modern {
+                return Err(fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!(
+                        "TolFun conflicts with {} for the effective algorithm",
+                        modern_field.name()
+                    ),
+                ));
+            }
+        }
+        let tol_fun = crate::builtins::math::optim::common::option_f64_value(
+            NAME,
+            fields
+                .exact(Field::OptimalityTolerance)
+                .or(if actual_tr { None } else { legacy }),
+            "OptimalityTolerance",
             DEFAULT_TOL_FUN,
         )?;
-        if tol_x <= 0.0 || tol_fun <= 0.0 {
+        // FunctionTolerance has no QN stopping role. Dormant TR operands are
+        // not parsed merely because an imported/default struct retains them.
+        let function_tolerance = if actual_tr {
+            crate::builtins::math::optim::common::option_f64_value(
+                NAME,
+                modern.or(legacy),
+                "FunctionTolerance",
+                DEFAULT_TOL_FUN,
+            )?
+        } else {
+            DEFAULT_TOL_FUN
+        };
+        if tol_x < 0.0 || tol_fun < 0.0 || function_tolerance < 0.0 {
             return Err(fminunc_error_with_detail(
                 &FMINUNC_ERROR_INVALID_ARGUMENT,
-                "options TolX and TolFun must be positive",
+                "step, function and optimality tolerances must be nonnegative",
             ));
         }
-        let max_iter = bounded_option_usize(
-            &fields,
-            runmat_builtins::OptimOptionField::MaxIter,
-            DEFAULT_MAX_ITER,
-            MAX_ITER_LIMIT,
-        )?
-        .max(1);
+        let max_iter =
+            bounded_option_usize(&fields, Field::MaxIter, DEFAULT_MAX_ITER, MAX_ITER_LIMIT)?;
+        let evaluation_default = if actual_tr {
+            variables.checked_mul(100).ok_or_else(|| {
+                fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    "default MaxFunEvals extent overflow",
+                )
+            })?
+        } else {
+            DEFAULT_MAX_FUN_EVALS
+        };
         let max_fun_evals = bounded_option_usize(
             &fields,
-            runmat_builtins::OptimOptionField::MaxFunEvals,
-            DEFAULT_MAX_FUN_EVALS,
+            Field::MaxFunEvals,
+            evaluation_default,
             MAX_FUN_EVAL_LIMIT,
-        )?
-        .max(1);
-        let specify_objective_gradient = fields
-            .get(runmat_builtins::OptimOptionField::SpecifyObjectiveGradient)
+        )?;
+        if max_fun_evals == 0 {
+            return Err(fminunc_error_with_detail(
+                &FMINUNC_ERROR_INVALID_ARGUMENT,
+                "MaxFunEvals must be positive",
+            ));
+        }
+        let update = if actual_tr {
+            runmat_builtins::OptimQuasiNewtonUpdate::Bfgs
+        } else {
+            quasi_newton::controls(&fields)?
+        };
+        let objective_limit = fields
+            .exact(Field::ObjectiveLimit)
             .map(|value| {
-                bool_value(
-                    runmat_builtins::OptimOptionField::SpecifyObjectiveGradient.name(),
-                    value,
+                crate::builtins::math::optim::common::quasi_newton_controls::objective_limit(
+                    NAME, value,
                 )
             })
             .transpose()?
-            .unwrap_or(false);
-        validate_problem_size(variables)?;
+            .unwrap_or(-1e20);
+        let parallel = if !actual_tr && !specify_objective_gradient {
+            fields
+                .exact(Field::UseParallel)
+                .map(|value| {
+                    crate::builtins::math::optim::common::quasi_newton_controls::parallel_mode(
+                        NAME, value,
+                    )
+                })
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            crate::execution::CallbackParallelMode::Off
+        };
+        let scaling = crate::builtins::math::optim::common::derivative_scaling::DerivativeScaling::from_fields(NAME,&fields,!specify_objective_gradient)?;
+        scaling.validate_variables(NAME, variables)?;
+        let trust_region = if actual_tr {
+            Some(trust_region::Controls::from_fields(&fields, variables)?)
+        } else {
+            if update.dense() {
+                validate_problem_size(variables)?;
+            }
+            None
+        };
         Ok(Self {
             tol_x,
             tol_fun,
@@ -240,6 +403,14 @@ impl FminuncOptions {
             max_fun_evals,
             display,
             specify_objective_gradient,
+            function_tolerance,
+            trust_region,
+            update,
+            objective_limit,
+            parallel,
+            scaling,
+            trust_region_fallback: algorithm == OptimAlgorithm::TrustRegion
+                && !specify_objective_gradient,
         })
     }
 }
@@ -374,7 +545,16 @@ fn bool_from_text(field: &str, value: &str) -> BuiltinResult<bool> {
 }
 
 mod algorithm;
+mod evaluation;
+pub(in crate::builtins::math::optim) mod compiled;
+mod quasi_newton;
+mod reporting;
+mod trust_region;
 use algorithm::{finalize, minimize};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "fminunc/output_tests.rs"]
+mod output_tests;

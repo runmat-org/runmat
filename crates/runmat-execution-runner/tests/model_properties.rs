@@ -104,14 +104,10 @@ fn randomized_loss_policy_never_replays_unknown_effects() {
                 runmat_execution_runner::driver::DriverAction::Launch(_)
             )
         });
-        if policy == RetryPolicy::Never {
-            assert!(!replayed);
-            assert_eq!(
-                fixture.driver.snapshot().tasks[&task_id].state,
-                TaskState::Indeterminate
-            );
-        } else {
-            assert!(replayed);
-        }
+        assert!(!replayed, "unknown physical work is never replay authority");
+        assert_eq!(
+            fixture.driver.snapshot().tasks[&task_id].state,
+            TaskState::Indeterminate
+        );
     }
 }

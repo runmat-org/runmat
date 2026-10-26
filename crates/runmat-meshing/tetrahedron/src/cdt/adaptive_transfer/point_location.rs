@@ -50,7 +50,7 @@ fn element_centroid(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut centroid = [0.0; 3];
     for node in &element.node_ids[..4] {
@@ -73,7 +73,7 @@ fn locate_source_element(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut containing = Vec::new();
     for element in &source.topology.volume_elements {

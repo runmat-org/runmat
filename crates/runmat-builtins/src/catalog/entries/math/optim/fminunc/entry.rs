@@ -21,6 +21,8 @@ pub const FMINUNC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
+            EffectKind::FilesystemWrite,
+            EffectKind::UserInterface,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,

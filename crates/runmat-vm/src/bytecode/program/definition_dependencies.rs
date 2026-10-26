@@ -15,6 +15,16 @@ pub(super) fn owners(
     registry: &FunctionRegistry,
     function: FunctionId,
 ) -> Result<Vec<(FunctionId, Arc<FunctionDefinitionOwner>)>, SuperConstructorDependencyError> {
+    owners_with_capture(registry, function, None)
+}
+
+/// Bootstrap local owners only after the complete immutable import graph has
+/// been validated. This view does not issue a callable or any counted lease.
+pub(super) fn owners_with_capture(
+    registry: &FunctionRegistry,
+    function: FunctionId,
+    selected_capture: Option<&super::SelectedStaticCapture>,
+) -> Result<Vec<(FunctionId, Arc<FunctionDefinitionOwner>)>, SuperConstructorDependencyError> {
     let mut super_constructors = None;
     let mut visited = HashSet::new();
     let mut owners = Vec::new();
@@ -43,7 +53,7 @@ pub(super) fn owners(
         // callable; pushing its numeric ID here could retain a newer body
         // with the same session-local number instead.
         let mut imports = HashMap::new();
-        if let Some(capture) = body.selected_static_capture.as_ref() {
+        if let Some(capture) = selected_capture.or(body.selected_static_capture.as_deref()) {
             let product = body
                 .selected_executable_product
                 .as_ref()

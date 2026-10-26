@@ -76,6 +76,7 @@ fn admitted() -> AdmittedSignalGenerator {
     )
     .unwrap();
     AdmittedSignalGenerator {
+        schema_version: 2,
         value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: revision,
         callable: BundleCallable {
@@ -91,7 +92,7 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("executable-source"),
         ),
         function: ProgramFunctionId(7),
-        captures: Vec::new(),
+        frozen_inputs: crate::FrozenGeneratorInputs::DirectCaptures(Vec::new()),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),
             digest("captures"),
@@ -104,7 +105,13 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("sampling"),
         )
         .unwrap(),
-        sample_points: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            runmat_analysis_core::GeneratorDomain::TimeSeconds
+                .axis_descriptor(None)
+                .unwrap(),
+            vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        )
+        .unwrap(),
         required_capabilities: BTreeSet::new(),
         provenance: GeneratorProvenance {
             project_revision: "project-revision".into(),
@@ -196,9 +203,10 @@ fn planning_chunks_large_histories_and_preserves_typed_argument_order() {
 fn planning_places_frozen_closure_captures_before_the_sample_axis() {
     let signal = signal(SignalShape::Scalar, SignalPrecision::Real64);
     let mut admitted = admitted();
-    admitted.captures = vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
-        7.0_f64.to_bits(),
-    )))];
+    admitted.frozen_inputs =
+        crate::FrozenGeneratorInputs::DirectCaptures(vec![ValuePayload::Inline(Box::new(
+            InlineValue::F64Bits(7.0_f64.to_bits()),
+        ))]);
     let chunks = plan_signal_generator_chunks(
         &signal,
         &admitted,
@@ -208,7 +216,7 @@ fn planning_places_frozen_closure_captures_before_the_sample_axis() {
     )
     .unwrap();
     assert!(chunks.chunks.iter().all(|chunk| {
-        chunk.arguments.first() == admitted.captures.first()
+        chunk.arguments.first() == admitted.frozen_inputs.direct_captures().first()
             && matches!(
                 chunk.arguments.get(1),
                 Some(ValuePayload::Inline(value)) if matches!(value.as_ref(), InlineValue::Dense(_))
@@ -383,7 +391,7 @@ fn generated_nodal_vectors_preserve_each_node_component_and_sample() {
             SignalPrecision::Real64,
         );
         let mut admitted = admitted();
-        admitted.sample_points = vec![0.0, 1.0];
+        admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(), vec![0.0, 1.0]).unwrap();
         let chunks = plan_signal_generator_chunks(
             &authored,
             &admitted,
@@ -433,7 +441,7 @@ fn generated_nodal_vectors_preserve_each_node_component_and_sample() {
             for node in 0..nodes {
                 for component in 0..3 {
                     assert_eq!(
-                        values[3 * node + component].newtons,
+                        values[3 * node + component].canonical_value(),
                         (1000 * sample + 10 * node + component) as f64
                     );
                 }
@@ -450,7 +458,7 @@ fn matrix_output_is_reordered_from_column_major_to_sample_major() {
     };
     value.frame = Some(runmat_analysis_core::CoordinateFrame::Global);
     let mut admitted = admitted();
-    admitted.sample_points = vec![0.0, 1.0];
+    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(), vec![0.0, 1.0]).unwrap();
     let chunks = plan_signal_generator_chunks(
         &signal,
         &admitted,
@@ -726,7 +734,7 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
     assert!(matches!(
         &table.knots[2].value,
         runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(value)))
-            if value.newtons == 30.0
+            if value.canonical_value() == 30.0
     ));
     assert!(matches!(signal.provenance, SignalProvenance::Generated(_)));
 

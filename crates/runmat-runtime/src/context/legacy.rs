@@ -13,3 +13,9 @@ pub fn active() -> Option<RuntimeContext> {
 pub(crate) fn error_namespace() -> Option<String> {
     active_runtime_context().map(|context| context.error_namespace())
 }
+
+/// Read-only migration guard without cloning the complete active invocation.
+/// Readers must not enter a scope or construct selected work while borrowed.
+pub(crate) fn read_active<T>(read: impl FnOnce(Option<&RuntimeContext>) -> T) -> T {
+    super::scope::with_active_runtime_context(read)
+}

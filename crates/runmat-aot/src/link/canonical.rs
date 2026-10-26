@@ -29,6 +29,7 @@ pub enum SelectedLinkOption {
     NoDefaultLibraries,
     MsvcMachine,
     MsvcNoDefaultLibraries,
+    RemoveUnusedSections,
     Output,
 }
 
@@ -92,6 +93,7 @@ pub(super) fn selected_link_plan(
     selected: &SelectedNativeProduct<'_>,
     admission: &super::ExternalNativeLinkAdmission,
     inputs: NativeProgramLinkIdentity,
+    binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
 ) -> AotResult<CanonicalSelectedLinkPlan> {
     use super::NativeHostedDependency;
     use runmat_execution::host::{NativeArchitecture, NativeOperatingSystem};
@@ -166,6 +168,9 @@ pub(super) fn selected_link_plan(
             "aot.link.canonical",
             "trusted hosted locator set differs from exact reached native dependencies",
         ));
+    }
+    if binding_mode == runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld {
+        options.push(SelectedLinkOption::RemoveUnusedSections);
     }
     options.push(SelectedLinkOption::Output);
     Ok(CanonicalSelectedLinkPlan::new(
@@ -308,6 +313,7 @@ mod tests {
             vec![
                 SelectedLinkOption::MsvcMachine,
                 SelectedLinkOption::MsvcNoDefaultLibraries,
+                SelectedLinkOption::RemoveUnusedSections,
                 SelectedLinkOption::Output,
             ],
             vec![
@@ -336,6 +342,11 @@ mod tests {
         assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
         changed = first.clone();
         changed.native_inputs.reverse();
+        assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
+        changed = first.clone();
+        changed
+            .options
+            .retain(|option| *option != SelectedLinkOption::RemoveUnusedSections);
         assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
     }
 

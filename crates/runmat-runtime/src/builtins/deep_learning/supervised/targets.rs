@@ -18,7 +18,8 @@ pub(super) enum LossKind {
 pub(super) fn parse_trainnet_loss(value: &Value) -> BuiltinResult<LossKind> {
     if matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)

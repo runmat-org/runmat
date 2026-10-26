@@ -23,43 +23,56 @@ pub enum AuthoredSectionDefinition {
 #[serde(deny_unknown_fields)]
 pub struct GeneralBeamSection {
     pub section_id: String,
-    pub area_m2: f64,
-    pub iy_m4: f64,
-    pub iz_m4: f64,
-    pub torsion_j_m4: f64,
-    pub outer_fiber_y_m: f64,
-    pub outer_fiber_z_m: f64,
-    pub torsion_outer_radius_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub area_m2: runmat_types::physical::Area,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iy_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iz_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub torsion_j_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub outer_fiber_y_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub outer_fiber_z_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub torsion_outer_radius_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RectangularBeamSection {
     pub section_id: String,
-    pub width_m: f64,
-    pub height_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub width_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub height_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CircularBeamSection {
     pub section_id: String,
-    pub radius_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub radius_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TubularBeamSection {
     pub section_id: String,
-    pub outer_radius_m: f64,
-    pub inner_radius_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub outer_radius_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub inner_radius_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HomogeneousShellSection {
     pub section_id: String,
-    pub thickness_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thickness_m: runmat_types::physical::Length,
     pub reference_surface: HomogeneousShellReferenceSurface,
     pub shear_correction: f64,
 }
@@ -80,8 +93,10 @@ pub struct AuthoredLayupDefinition {
 pub struct AuthoredPly {
     pub ply_id: String,
     pub material: AuthoredMaterialSource,
-    pub thickness_m: f64,
-    pub angle_rad: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thickness_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub angle_rad: runmat_types::physical::Quantity<runmat_types::physical::kind::Angle, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,7 +112,9 @@ pub enum AuthoredOrientationDefinition {
 #[serde(deny_unknown_fields)]
 pub struct CartesianOrientation {
     pub orientation_id: String,
-    pub origin_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub origin_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub x_axis: [f64; 3],
     pub y_axis: [f64; 3],
 }
@@ -106,7 +123,9 @@ pub struct CartesianOrientation {
 #[serde(deny_unknown_fields)]
 pub struct AxisOrientation {
     pub orientation_id: String,
-    pub origin_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub origin_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub axis: [f64; 3],
     pub reference_direction: [f64; 3],
 }
@@ -169,29 +188,33 @@ impl AuthoredSectionDefinition {
         token("section id", self.id())?;
         match self {
             Self::GeneralBeam(value) => {
-                positive("area", value.area_m2)?;
-                positive("iy", value.iy_m4)?;
-                positive("iz", value.iz_m4)?;
-                positive("torsion constant", value.torsion_j_m4)?;
-                nonnegative("outer fiber y", value.outer_fiber_y_m)?;
-                nonnegative("outer fiber z", value.outer_fiber_z_m)?;
-                nonnegative("torsion outer radius", value.torsion_outer_radius_m)
+                positive("area", value.area_m2.canonical_value())?;
+                positive("iy", value.iy_m4.canonical_value())?;
+                positive("iz", value.iz_m4.canonical_value())?;
+                positive("torsion constant", value.torsion_j_m4.canonical_value())?;
+                nonnegative("outer fiber y", value.outer_fiber_y_m.canonical_value())?;
+                nonnegative("outer fiber z", value.outer_fiber_z_m.canonical_value())?;
+                nonnegative(
+                    "torsion outer radius",
+                    value.torsion_outer_radius_m.canonical_value(),
+                )
             }
             Self::RectangularBeam(value) => {
-                positive("width", value.width_m)?;
-                positive("height", value.height_m)
+                positive("width", value.width_m.canonical_value())?;
+                positive("height", value.height_m.canonical_value())
             }
-            Self::CircularBeam(value) => positive("radius", value.radius_m),
+            Self::CircularBeam(value) => positive("radius", value.radius_m.canonical_value()),
             Self::TubularBeam(value) => {
-                positive("outer radius", value.outer_radius_m)?;
-                positive("inner radius", value.inner_radius_m)?;
-                if value.inner_radius_m >= value.outer_radius_m {
+                positive("outer radius", value.outer_radius_m.canonical_value())?;
+                positive("inner radius", value.inner_radius_m.canonical_value())?;
+                if value.inner_radius_m.canonical_value() >= value.outer_radius_m.canonical_value()
+                {
                     return Err(AuthoredPropertyError::InvalidTubeRadii);
                 }
                 Ok(())
             }
             Self::HomogeneousShell(value) => {
-                positive("thickness", value.thickness_m)?;
+                positive("thickness", value.thickness_m.canonical_value())?;
                 if let HomogeneousShellReferenceSurface::OffsetFromMidSurface(value) =
                     value.reference_surface
                 {
@@ -226,8 +249,8 @@ impl AuthoredLayupDefinition {
             if !ids.insert(&ply.ply_id) {
                 return Err(AuthoredPropertyError::DuplicatePly(ply.ply_id.clone()));
             }
-            positive("ply thickness", ply.thickness_m)?;
-            finite("ply angle", ply.angle_rad)?;
+            positive("ply thickness", ply.thickness_m.canonical_value())?;
+            finite("ply angle", ply.angle_rad.canonical_value())?;
         }
         Ok(())
     }
@@ -255,11 +278,11 @@ impl AuthoredOrientationDefinition {
         match self {
             Self::GlobalCartesian { .. } => Ok(()),
             Self::Cartesian(value) => {
-                finite_vector("orientation origin", value.origin_m)?;
+                finite_vector("orientation origin", value.origin_m.canonical_value())?;
                 independent(value.x_axis, value.y_axis)
             }
             Self::Cylindrical(value) | Self::Spherical(value) => {
-                finite_vector("orientation origin", value.origin_m)?;
+                finite_vector("orientation origin", value.origin_m.canonical_value())?;
                 independent(value.axis, value.reference_direction)
             }
         }

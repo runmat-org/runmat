@@ -251,14 +251,6 @@ pub(super) fn map_validate_error(
             "RM.FEA.VALIDATE.DEPENDENCY_GRAPH_RESOURCE_OVERFLOW",
             "dependency graph workspace inventory overflows".into(), BTreeMap::new(),
         ),
-        AnalysisValidationError::UnitMismatch { model, geometry } => (
-            "RM.FEA.VALIDATE.UNIT_MISMATCH",
-            format!("model units {model:?} do not match geometry units {geometry:?}"),
-            BTreeMap::from([
-                ("model_units".to_string(), format!("{model:?}")),
-                ("geometry_units".to_string(), format!("{geometry:?}")),
-            ]),
-        ),
         AnalysisValidationError::FrameMismatch { model, geometry } => (
             "RM.FEA.VALIDATE.FRAME_MISMATCH",
             format!("model frame {model:?} does not match geometry frame {geometry:?}"),

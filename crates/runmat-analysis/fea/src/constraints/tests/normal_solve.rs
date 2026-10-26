@@ -15,8 +15,11 @@ fn solve_face_normal_offset(angle: f64) {
     let (mut model, mut mesh) = model_and_mesh();
     let (sin, cos) = angle.sin_cos();
     for node in &mut mesh.topology.nodes {
-        let [x, y, z] = node.coordinates_m;
-        node.coordinates_m = [x, cos * y - sin * z, sin * y + cos * z];
+        let [x, y, z] = node.coordinates_m.canonical_value();
+        node.coordinates_m = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new([x, cos * y - sin * z, sin * y + cos * z]);
     }
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();

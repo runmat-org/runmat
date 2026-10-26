@@ -6,7 +6,7 @@ use runmat_value::Value;
 
 use super::codec::{feature_value, region_output_from_value};
 use super::combine::{append_operation, merge_values, unary_operation};
-use super::primitives::{scalar, vector3};
+use super::primitives::{physical_scalar, position, scalar, vector3};
 use super::{feature_type, invalid};
 use crate::BuiltinResult;
 
@@ -29,7 +29,11 @@ pub async fn geometry_extrude_builtin(
     let graph = super::codec::feature_from_value(&profile, builtin)?;
     let operation = GeometryFeatureOperation::Extrude {
         profile: graph.result.clone(),
-        distance_m: scalar(distance),
+        distance_m: physical_scalar(
+            distance,
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
         direction: vector3(&direction, builtin, "direction")?.map(scalar),
     };
     feature_value(unary_operation(graph, operation)?)
@@ -56,8 +60,8 @@ pub async fn geometry_revolve_builtin(
     let operation = GeometryFeatureOperation::Revolve {
         profile: graph.result.clone(),
         axis: vector3(&axis, builtin, "axis")?.map(scalar),
-        origin_m: vector3(&origin, builtin, "origin")?.map(scalar),
-        angle_rad: scalar(angle),
+        origin_m: position(vector3(&origin, builtin, "origin")?, builtin)?,
+        angle_rad: physical_scalar(angle, runmat_types::physical::QuantityKind::Angle, builtin)?,
     };
     feature_value(unary_operation(graph, operation)?)
 }
@@ -83,10 +87,14 @@ pub async fn geometry_hole_builtin(
     let graph = super::codec::feature_from_value(&target, builtin)?;
     let operation = GeometryFeatureOperation::Hole {
         target: graph.result.clone(),
-        radius_m: scalar(radius),
-        depth_m: scalar(depth),
+        radius_m: physical_scalar(
+            radius,
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
+        depth_m: physical_scalar(depth, runmat_types::physical::QuantityKind::Length, builtin)?,
         axis: vector3(&axis, builtin, "axis")?.map(scalar),
-        origin_m: vector3(&origin, builtin, "origin")?.map(scalar),
+        origin_m: position(vector3(&origin, builtin, "origin")?, builtin)?,
     };
     feature_value(unary_operation(graph, operation)?)
 }
@@ -112,7 +120,7 @@ pub async fn geometry_pocket_builtin(
     let operation = GeometryFeatureOperation::Pocket {
         target: operands[0].clone(),
         profile: operands[1].clone(),
-        depth_m: scalar(depth),
+        depth_m: physical_scalar(depth, runmat_types::physical::QuantityKind::Length, builtin)?,
         direction: vector3(&direction, builtin, "direction")?.map(scalar),
     };
     feature_value(append_operation(graph, operation)?)
@@ -133,11 +141,16 @@ pub async fn geometry_fillet_builtin(
     edges: Value,
     radius: f64,
 ) -> BuiltinResult<Value> {
+    let radius = physical_scalar(
+        radius,
+        runmat_types::physical::QuantityKind::Length,
+        "geometry.fillet",
+    )?;
     edge_treatment(target, edges, "geometry.fillet", |target, edges| {
         GeometryFeatureOperation::Fillet {
             target,
             edges,
-            radius_m: scalar(radius),
+            radius_m: radius,
         }
     })
 }
@@ -157,11 +170,16 @@ pub async fn geometry_chamfer_builtin(
     edges: Value,
     distance: f64,
 ) -> BuiltinResult<Value> {
+    let distance = physical_scalar(
+        distance,
+        runmat_types::physical::QuantityKind::Length,
+        "geometry.chamfer",
+    )?;
     edge_treatment(target, edges, "geometry.chamfer", |target, edges| {
         GeometryFeatureOperation::Chamfer {
             target,
             edges,
-            distance_m: scalar(distance),
+            distance_m: distance,
         }
     })
 }

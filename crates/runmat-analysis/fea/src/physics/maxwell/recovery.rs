@@ -13,7 +13,11 @@ pub(super) fn recover(
     iterations: u32,
     tolerance: f64,
 ) -> Result<MaxwellResponse, MaxwellError> {
-    let omega = assembled.input.angular_frequency_rad_per_s;
+    let omega = assembled
+        .input
+        .angular_frequency_rad_per_s
+        .phasor_derivative_rate()
+        .canonical_value();
     let mut samples = Vec::with_capacity(assembled.input.sampling.integration_samples().len());
     let exterior = assembled
         .edge_space
@@ -36,7 +40,9 @@ pub(super) fn recover(
             .visit_element_quadrature(&assembled.projection, index, |point| {
                 let position = index * 15 + ordinal;
                 let authority = &assembled.input.sampling.integration_samples()[position];
-                let source = assembled.input.source_current[position].current_density_a_per_m2;
+                let source = assembled.input.source_current[position]
+                    .current_density_a_per_m2
+                    .canonical_value();
                 let electric = std::array::from_fn(|axis| {
                     (0..6).fold(ComplexPhasor::ZERO, |sum, i| {
                         sum + edges[indices[i]] * point.values[i][axis]
@@ -48,15 +54,25 @@ pub(super) fn recover(
                     })
                 });
                 let flux = curl.map(|value| value.times_i() / omega);
-                let magnetic = flux.map(|value| value / data.permeability_h_per_m);
-                let displacement = electric.map(|value| value * data.permittivity_f_per_m);
-                let conduction = electric.map(|value| value * data.conductivity_s_per_m);
+                let magnetic =
+                    flux.map(|value| value / data.permeability_h_per_m.canonical_value());
+                let displacement =
+                    electric.map(|value| value * data.permittivity_f_per_m.canonical_value());
+                let conduction =
+                    electric.map(|value| value * data.conductivity_s_per_m.canonical_value());
                 let weight = point.volume_weight_m3;
-                electric_energy +=
-                    0.25 * weight * data.permittivity_f_per_m * vector_norm_squared(electric);
-                magnetic_energy +=
-                    0.25 * weight * data.permeability_h_per_m * vector_norm_squared(magnetic);
-                ohmic += 0.5 * weight * data.conductivity_s_per_m * vector_norm_squared(electric);
+                electric_energy += 0.25
+                    * weight
+                    * data.permittivity_f_per_m.canonical_value()
+                    * vector_norm_squared(electric);
+                magnetic_energy += 0.25
+                    * weight
+                    * data.permeability_h_per_m.canonical_value()
+                    * vector_norm_squared(magnetic);
+                ohmic += 0.5
+                    * weight
+                    * data.conductivity_s_per_m.canonical_value()
+                    * vector_norm_squared(electric);
                 source_power += dot_conjugate(electric, source) * (-0.5 * weight);
                 continuity.accumulate(
                     &assembled.projection.elements[index].node_indices[..4],
@@ -72,11 +88,26 @@ pub(super) fn recover(
                     ordinal,
                     position_m: point.position_m,
                     volume_weight_m3: weight,
-                    electric_field_v_per_m: electric,
-                    flux_density_t: flux,
-                    magnetic_field_a_per_m: magnetic,
-                    electric_displacement_c_per_m2: displacement,
-                    conduction_current_density_a_per_m2: conduction,
+                    electric_field_v_per_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::ElectricField,
+                        _,
+                    >::new(electric),
+                    flux_density_t: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::MagneticFluxDensity,
+                        _,
+                    >::new(flux),
+                    magnetic_field_a_per_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::MagneticFieldIntensity,
+                        _,
+                    >::new(magnetic),
+                    electric_displacement_c_per_m2: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::ElectricDisplacement,
+                        _,
+                    >::new(displacement),
+                    conduction_current_density_a_per_m2: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::ElectricCurrentDensity,
+                        _,
+                    >::new(conduction),
                 });
                 ordinal += 1;
             })
@@ -107,11 +138,11 @@ pub(super) fn recover(
         || charge > tolerance * 16.0
         || samples.iter().any(|s| {
             [
-                s.electric_field_v_per_m,
-                s.flux_density_t,
-                s.magnetic_field_a_per_m,
-                s.electric_displacement_c_per_m2,
-                s.conduction_current_density_a_per_m2,
+                s.electric_field_v_per_m.canonical_value(),
+                s.flux_density_t.canonical_value(),
+                s.magnetic_field_a_per_m.canonical_value(),
+                s.electric_displacement_c_per_m2.canonical_value(),
+                s.conduction_current_density_a_per_m2.canonical_value(),
             ]
             .into_iter()
             .flatten()
@@ -128,20 +159,39 @@ pub(super) fn recover(
         mesh_digest: assembled.projection.mesh_digest,
         projection_digest: assembled.projection.projection_digest,
         sampling_digest: assembled.input.sampling.sampling_digest(),
-        angular_frequency_rad_per_s: omega,
+        angular_frequency_rad_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::AngularFrequency,
+            _,
+        >::new(omega),
         edge_node_identities: assembled
             .edge_space
             .edges()
             .iter()
             .map(|edge| edge.node_identities)
             .collect(),
-        edge_circulations_v: edges,
+        edge_circulations_v: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ElectricPotential,
+            _,
+        >::new(edges),
         samples,
-        electric_energy_j: electric_energy,
-        magnetic_energy_j: magnetic_energy,
-        source_power_va: source_power,
-        ohmic_power_w: ohmic,
-        reactive_power_var: reactive,
+        electric_energy_j: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Energy,
+            _,
+        >::new(electric_energy),
+        magnetic_energy_j: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Energy,
+            _,
+        >::new(magnetic_energy),
+        source_power_va: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ApparentPower,
+            _,
+        >::new(source_power),
+        ohmic_power_w:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Power, _>::new(ohmic),
+        reactive_power_var: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ReactivePower,
+            _,
+        >::new(reactive),
         relative_physical_residual: physical,
         relative_complex_power_error: closure,
         relative_charge_continuity_residual: charge,

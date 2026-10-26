@@ -60,7 +60,7 @@ fn altered_mesh_or_property_ownership_is_rejected() {
             .electrical
             .as_mut()
             .unwrap()
-            .relative_permeability = 2.0;
+            .relative_permeability = runmat_types::physical::RelativePermeability::new(2.0);
         assert!(matches!(
             plan_magnetic_study_product(changed, &original, policy()),
             Err(MagneticStudyProductError::Compilation(_))
@@ -87,7 +87,7 @@ fn post_mesh_ground_gauge_and_material_limits_are_not_inferred() {
         .electrical
         .as_mut()
         .unwrap()
-        .resistive_heating_coefficient = 1.0;
+        .resistive_heating_coefficient = runmat_types::physical::InverseTemperature::new(1.0);
     for changed in [
         missing_ground,
         missing_gauge,

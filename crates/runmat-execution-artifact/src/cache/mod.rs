@@ -9,3 +9,6 @@ pub use export::CacheExport;
 pub use filesystem::FilesystemObjectStore;
 pub use import::{copy_verified_bounded_with_admission, import_verified_object, CacheImport};
 pub use namespace::CacheNamespace;
+
+mod memory;
+pub use memory::MemoryObjectStore;

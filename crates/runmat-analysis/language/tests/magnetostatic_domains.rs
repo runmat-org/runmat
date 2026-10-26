@@ -91,7 +91,7 @@ fn included_static_electrical_domain_cannot_replace_magnetic_intent() {
             study: &study,
             geometry_id: "part",
             geometry_revision: 1,
-            units: runmat_geometry_core::UnitSystem::Meter,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
             regions: &Default::default(),
             materials: &resolved.material_catalog,
         },

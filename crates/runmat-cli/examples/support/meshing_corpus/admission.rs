@@ -4,7 +4,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_runner_native::{
     prepare_exact_geometry_admission, ExactGeometryAdmissionError,
 };
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::LengthUnit;
 use runmat_geometry_io::{ExactCadImportOptions, GeometryImportContext};
 
 use super::contract::{
@@ -14,11 +14,11 @@ use super::report::{AdmissionReport, ObservedFailure};
 
 pub fn import_options(units: SourceUnits, healing: &HealingSettings) -> ExactCadImportOptions {
     let mut options = ExactCadImportOptions {
-        source_units: match units {
-            SourceUnits::Meter => UnitSystem::Meter,
-            SourceUnits::Millimeter => UnitSystem::Millimeter,
-            SourceUnits::Inch => UnitSystem::Inch,
-        },
+        source_units: Some(match units {
+            SourceUnits::Meter => LengthUnit::Meter,
+            SourceUnits::Millimeter => LengthUnit::Millimeter,
+            SourceUnits::Inch => LengthUnit::Inch,
+        }),
         ..ExactCadImportOptions::default()
     };
     options.analysis.healing.sew = healing.sew;
@@ -30,7 +30,8 @@ pub fn import_options(units: SourceUnits, healing: &HealingSettings) -> ExactCad
         .healing
         .simplify_short_edges_and_sliver_faces = healing.simplify_short_edges_and_sliver_faces;
     if let Some(limit) = healing.maximum_displacement_m {
-        options.analysis.maximum_healing_displacement_m = limit;
+        options.analysis.maximum_healing_displacement_m =
+            runmat_types::physical::Length::new(limit);
     }
     options
 }

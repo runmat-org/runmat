@@ -37,7 +37,7 @@ pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
     }
     let mut coordinates = node_coordinates.clone();
     for node in &refill.inserted_nodes {
-        coordinates.insert(node.node_id, node.coordinates_m);
+        coordinates.insert(node.node_id, node.coordinates_m.canonical_value());
     }
     let thresholds = LocalTetrahedronFlipQualityThresholds {
         min_volume_m3: options.min_volume_m3,

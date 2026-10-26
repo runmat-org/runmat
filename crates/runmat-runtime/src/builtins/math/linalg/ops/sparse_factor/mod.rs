@@ -3,11 +3,14 @@
 //! LU and sparse QR/COD share actual-policy fill and cooperative workspace.
 
 mod coefficient;
+pub(crate) mod equality_factor;
+pub(crate) mod least_squares;
 mod managed_cholesky;
 mod managed_ilu;
 mod managed_lu;
 mod managed_qr;
 mod managed_storage;
+pub(crate) mod orthogonal_frame;
 use coefficient::coefficient_as;
 mod publication;
 mod retained;

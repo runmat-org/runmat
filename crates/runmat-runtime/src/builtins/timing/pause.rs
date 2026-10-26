@@ -231,6 +231,7 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

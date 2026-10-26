@@ -97,6 +97,11 @@ fn evidence() -> MeshingEvidence {
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: StableDigest::from_bytes([1; 32]),
             geometry_revision: 1,
             persistent_mapping_version: 1,

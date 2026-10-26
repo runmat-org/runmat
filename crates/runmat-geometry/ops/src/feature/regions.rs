@@ -25,12 +25,6 @@ pub trait GeometryRegionEvidence {
         tag: &str,
     ) -> Result<Vec<PersistentEntityId>, Self::Error>;
 
-    fn by_alias(
-        &self,
-        role: GeometryRegionRole,
-        alias: &str,
-    ) -> Result<Vec<PersistentEntityId>, Self::Error>;
-
     fn generated_output(
         &self,
         role: GeometryRegionRole,
@@ -50,6 +44,7 @@ pub fn resolve_geometry_regions<E: GeometryRegionEvidence>(
         history_by_feature,
         &BTreeMap::new(),
         evidence,
+        None,
     )
 }
 
@@ -59,6 +54,7 @@ pub fn resolve_geometry_regions_with_generated_outputs<E: GeometryRegionEvidence
     history_by_feature: &BTreeMap<String, GeometryTopologyHistory>,
     generated_outputs: &BTreeMap<String, GeneratedGeometryRegionOutput>,
     evidence: &E,
+    revision_map: Option<&runmat_geometry_core::GeometryRevisionMap>,
 ) -> Result<ResolvedGeometryRegions, GeometryFeatureError> {
     let mut definition = definition.clone();
     for region in &mut definition.regions {
@@ -79,7 +75,13 @@ pub fn resolve_geometry_regions_with_generated_outputs<E: GeometryRegionEvidence
         }
         region.selector = output.selector.clone();
     }
-    resolve_geometry_regions_inner(&definition, topology, history_by_feature, evidence)
+    resolve_geometry_regions_inner(
+        &definition,
+        topology,
+        history_by_feature,
+        evidence,
+        revision_map,
+    )
 }
 
 fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
@@ -87,6 +89,7 @@ fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
     topology: &ExactBRepTopology,
     history_by_feature: &BTreeMap<String, GeometryTopologyHistory>,
     evidence: &E,
+    revision_map: Option<&runmat_geometry_core::GeometryRevisionMap>,
 ) -> Result<ResolvedGeometryRegions, GeometryFeatureError> {
     let mut resolved = BTreeMap::new();
     for region in &definition.regions {
@@ -99,13 +102,7 @@ fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
             GeometryRegionSelector::Tag(tag) => evidence
                 .by_tag(region.role, tag)
                 .map_err(|error| evidence_error(&region.region_id, error))?,
-            GeometryRegionSelector::SourceAlias(alias) => evidence
-                .by_alias(region.role, alias)
-                .map_err(|error| evidence_error(&region.region_id, error))?,
-            GeometryRegionSelector::PersistentId(selection) => available
-                .into_iter()
-                .filter(|entity| entity.matches_analysis_selection(selection))
-                .collect(),
+            GeometryRegionSelector::PersistentId(selection) => resolve_persistent_region_selection(topology, region.role, selection, revision_map)?,
             GeometryRegionSelector::Result => available,
             GeometryRegionSelector::FeatureResult(feature) => history_by_feature
                 .get(&feature.0)
@@ -222,4 +219,17 @@ fn evidence_error(region_id: &str, error: impl Display) -> GeometryFeatureError 
     GeometryFeatureError::InvalidPlan(format!(
         "region `{region_id}` evidence resolution failed: {error}"
     ))
+}
+
+/// Single persistent-selection admission path for authored IDs and managed named selections.
+pub fn resolve_persistent_region_selection(topology: &ExactBRepTopology, role: GeometryRegionRole, selection: &str, revision_map: Option<&runmat_geometry_core::GeometryRevisionMap>) -> Result<Vec<PersistentEntityId>, GeometryFeatureError> {
+    PersistentEntityId::validate_analysis_selection_id(selection).map_err(|e| evidence_error("selection", e))?;
+    let available = role_entities(topology, role);
+    let current: Vec<_> = available.iter().filter(|entity| entity.matches_analysis_selection(selection)).cloned().collect();
+    if !current.is_empty() { return Ok(current); }
+    if let Some(map) = revision_map {
+        let rebound = map.remap_selection_id(selection, role, topology).map_err(|e| evidence_error("selection", e))?;
+        return Ok(available.into_iter().filter(|entity| entity.matches_analysis_selection(&rebound)).collect());
+    }
+    Ok(Vec::new())
 }

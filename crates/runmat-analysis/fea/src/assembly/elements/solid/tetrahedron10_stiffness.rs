@@ -148,11 +148,12 @@ mod tests {
     #[test]
     fn isotropic_gradient_form_matches_full_b_transpose_d_b_at_every_entry() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-        let base_nodes_m = std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m);
+        let base_nodes_m =
+            std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m.canonical_value());
         let material = SolidMaterial {
-            youngs_modulus_pa: 100.0,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
         let elasticity = elasticity_matrix(material).unwrap();
         for warp in [0.0, 0.1, 0.2] {
@@ -195,13 +196,14 @@ mod tests {
     #[test]
     fn strongly_curved_element_fails_closed_when_quadrature_does_not_converge() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-        let mut nodes_m = std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m);
+        let mut nodes_m =
+            std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m.canonical_value());
         nodes_m[4][0] += 0.24;
         let geometry = Tetrahedron10ElementGeometry { nodes_m };
         let material = SolidMaterial {
-            youngs_modulus_pa: 100.0,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
         assert_eq!(
             global_stiffness_matrix(material, geometry),

@@ -984,6 +984,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
     let asset = GeometryAsset {
         geometry_id: "geo_semantic".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/models/bracket.step".to_string(),
             sha256: "abc123".to_string(),
             importer_version: "cad/occt/step/v1".to_string(),
@@ -996,7 +997,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),
@@ -1071,6 +1072,7 @@ fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
     let asset = GeometryAsset {
         geometry_id: "geo_batched_preview".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/models/bracket.step".to_string(),
             sha256: "abc123".to_string(),
             importer_version: "cad/occt/step/v1".to_string(),
@@ -1087,7 +1089,7 @@ fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),

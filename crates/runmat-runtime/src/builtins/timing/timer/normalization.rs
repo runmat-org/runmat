@@ -74,7 +74,7 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
     match value {
         Value::String(_)
         | Value::CharArray(runmat_value::CharArray { rows: 1, .. })
-        | Value::FunctionHandle(_)
+        | Value::ScopedFunctionHandle(_) | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
@@ -96,7 +96,8 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
 fn is_callback_function(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)

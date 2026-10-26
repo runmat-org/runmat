@@ -54,8 +54,8 @@ enum ContinuationBody<'a, O, E> {
 impl<O, E> Unpin for RuntimeContinuationFuture<'_, O, E> {}
 
 impl<'a, O: 'a, E: 'a> RuntimeContinuationFuture<'a, O, E> {
-    fn admitted<F>(
-        future: F,
+    fn admitted_with<F>(
+        make_future: impl FnOnce() -> F,
         claim: Option<HostAllocationReceipt>,
         cancellation: Option<RuntimeCancellationContext>,
         label: &'static str,
@@ -64,7 +64,15 @@ impl<'a, O: 'a, E: 'a> RuntimeContinuationFuture<'a, O, E> {
     where
         F: Future<Output = Result<O, E>> + 'a,
     {
-        Self::from_pinned(Box::pin(future), claim, cancellation, label, map_error)
+        // Carry the factory to the allocation boundary rather than forwarding
+        // its large concrete future through another by-value call frame.
+        Self::from_pinned(
+            Box::pin(make_future()),
+            claim,
+            cancellation,
+            label,
+            map_error,
+        )
     }
 
     fn from_pinned(
@@ -154,12 +162,11 @@ where
     F: Future<Output = Result<O, RuntimeError>> + 'static,
     O: RootedCompletion + 'static,
 {
-    let cancellation = unbounded_callable_cancellation(None)?;
+    let (cancellation, admission) = checked_layout::<F, O, RuntimeError>(None);
     let map_error = ControlErrorMapper::Contextual(semantic_control_error);
-    let claim = admit_layout::<F, O, RuntimeError>(None)
-        .map_err(|cause| map_error.map(cancellation.as_ref(), label, cause))?;
-    Ok(RuntimeContinuationFuture::admitted(
-        make_future(),
+    let claim = admission.map_err(|cause| map_error.map(cancellation.as_ref(), label, cause))?;
+    Ok(RuntimeContinuationFuture::admitted_with(
+        make_future,
         claim,
         cancellation,
         label,
@@ -273,11 +280,10 @@ where
     F: Future<Output = Result<O, RuntimeError>> + 'a,
     O: RootedCompletion + 'a,
 {
-    let cancellation = runtime.map(RuntimeContext::cancellation_context);
-    let admission = admit_layout::<F, O, RuntimeError>(runtime);
+    let (cancellation, admission) = checked_layout::<F, O, RuntimeError>(runtime);
     match admission {
-        Ok(claim) => RuntimeContinuationFuture::admitted(
-            future,
+        Ok(claim) => RuntimeContinuationFuture::admitted_with(
+            move || future,
             claim,
             cancellation,
             label,
@@ -303,10 +309,10 @@ where
     F: Future<Output = Result<O, RuntimeError>> + 'a,
     O: RootedCompletion + 'a,
 {
-    let cancellation = runtime.as_ref().map(RuntimeContext::cancellation_context);
-    match admit_layout::<F, O, RuntimeError>(runtime.as_ref()) {
-        Ok(claim) => RuntimeContinuationFuture::admitted(
-            make_future(runtime),
+    let (cancellation, admission) = checked_layout::<F, O, RuntimeError>(runtime.as_ref());
+    match admission {
+        Ok(claim) => RuntimeContinuationFuture::admitted_with(
+            move || make_future(runtime),
             claim,
             cancellation,
             label,
@@ -335,8 +341,8 @@ where
     let label = "native execution";
     let claim = admit_layout::<F, O, RuntimeError>(Some(runtime))
         .map_err(|error| semantic_control_error(cancellation.as_ref(), label, error))?;
-    Ok(RuntimeContinuationFuture::admitted(
-        make_future(),
+    Ok(RuntimeContinuationFuture::admitted_with(
+        make_future,
         claim,
         cancellation,
         label,
@@ -359,8 +365,8 @@ where
     E: 'static,
 {
     let claim = admit_layout::<F, O, E>(Some(runtime)).map_err(map_error)?;
-    Ok(RuntimeContinuationFuture::admitted(
-        make_future(),
+    Ok(RuntimeContinuationFuture::admitted_with(
+        make_future,
         claim,
         Some(runtime.cancellation_context()),
         "native hostcall",
@@ -382,20 +388,12 @@ where
     O: 'static,
     E: 'static,
 {
-    if runtime.is_none()
-        && HostAllocationReceipt::policy(None).map_err(map_error)?
-            != crate::context::host_allocation::HostAllocationPolicy::Unbounded
-    {
-        return Err(map_error(HostAllocationError::MissingManagedOwner));
-    }
-    let claim = admit_layout::<F, O, E>(runtime).map_err(map_error)?;
-    Ok(RuntimeContinuationFuture::admitted(
-        make_future(),
-        claim,
-        runtime.map(RuntimeContext::cancellation_context),
+    admit_selected_future_with_error_from(
+        runtime,
         "owned hostcall",
         ControlErrorMapper::Cause(map_error),
-    ))
+        make_future,
+    )
 }
 
 /// Contextual diagnostic form of the same native hostcall owner. Admission
@@ -414,6 +412,21 @@ where
     O: 'a,
     E: From<RuntimeError> + 'a,
 {
+    admit_optional_hostcall_with_contextual_error(Some(runtime), make_future)
+}
+
+/// Borrowed hostcall admission for the original selected or ordinary caller.
+/// Domain input/output roots remain with that caller; no runtime is synthesized.
+#[inline(never)]
+pub(crate) fn admit_optional_hostcall_with_contextual_error<'a, F, O, E>(
+    runtime: Option<&RuntimeContext>,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'a, O, E>, E>
+where
+    F: Future<Output = Result<O, E>> + 'a,
+    O: 'a,
+    E: From<RuntimeError> + 'a,
+{
     admit_selected_future_with_error_from(
         runtime,
         "native hostcall",
@@ -422,6 +435,55 @@ where
         }),
         make_future,
     )
+}
+
+/// One optional-context guard for every concrete selected layout. An ambient
+/// owner can deny or cancel ordinary admission, never fund or select its work.
+fn checked_layout<F, O, E>(
+    runtime: Option<&RuntimeContext>,
+) -> (
+    Option<RuntimeCancellationContext>,
+    Result<Option<HostAllocationReceipt>, HostAllocationError>,
+)
+where
+    F: Future<Output = Result<O, E>>,
+{
+    let (cancellation, guard) = match runtime {
+        Some(runtime) => {
+            let cancellation = Some(runtime.cancellation_context());
+            let guard = checkpoint(None, cancellation.as_ref());
+            (cancellation, guard)
+        }
+        None => {
+            let (cancellation, parallel) = crate::context::legacy::read_active(|active| {
+                (
+                    active.map(RuntimeContext::cancellation_context),
+                    active
+                        .and_then(|runtime| runtime.service_ports().parallel())
+                        .cloned(),
+                )
+            });
+            let guard = checkpoint(None, cancellation.as_ref()).and_then(|()| {
+                if HostAllocationReceipt::policy_for_parallel(parallel.as_deref())?
+                    != crate::context::host_allocation::HostAllocationPolicy::Unbounded
+                {
+                    return Err(HostAllocationError::MissingManagedOwner);
+                }
+                Ok(())
+            });
+            (cancellation, guard)
+        }
+    };
+    // The borrowed ambient stack is released before actual admission, error
+    // presentation or factory construction can invoke any runtime operation.
+    let admission = checkpoint(None, cancellation.as_ref())
+        .and(guard)
+        .and_then(|()| admit_layout::<F, O, E>(runtime))
+        .and_then(|claim| {
+            checkpoint(claim.as_ref(), cancellation.as_ref())?;
+            Ok(claim)
+        });
+    (cancellation, admission)
 }
 
 fn admit_layout<F, O, E>(
@@ -485,7 +547,7 @@ where
     F: Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a,
 {
     admit_selected_future_with_error_from(
-        runtime,
+        Some(runtime),
         "executable",
         ControlErrorMapper::Contextual(semantic_control_error),
         make_future,
@@ -505,7 +567,7 @@ where
 {
     use futures::FutureExt;
     admit_selected_future_with_error_from(
-        runtime,
+        Some(runtime),
         "dynamic function load",
         ControlErrorMapper::Contextual(semantic_control_error),
         move || {
@@ -532,7 +594,7 @@ where
     F: Future<Output = Result<super::RootedResult<T>, RuntimeError>> + 'a,
 {
     admit_selected_future_with_error_from(
-        runtime,
+        Some(runtime),
         "rooted execution",
         ControlErrorMapper::Contextual(semantic_control_error),
         make_future,
@@ -552,7 +614,7 @@ where
     F: Future<Output = Result<Option<super::RootedResult<T>>, RuntimeError>> + 'a,
 {
     admit_selected_future_with_error_from(
-        runtime,
+        Some(runtime),
         "optional rooted execution",
         ControlErrorMapper::Contextual(semantic_control_error),
         make_future,
@@ -621,7 +683,7 @@ where
     F: Future<Output = Result<(), RuntimeError>> + 'a,
 {
     admit_selected_future_with_error_from(
-        runtime,
+        Some(runtime),
         "domain continuation",
         ControlErrorMapper::Contextual(semantic_control_error),
         make_future,
@@ -656,12 +718,12 @@ where
     O: 'a,
     E: 'a,
 {
-    admit_selected_future_with_error_from(runtime, label, map_error, || future)
+    admit_selected_future_with_error_from(Some(runtime), label, map_error, || future)
 }
 
 #[inline(never)]
 fn admit_selected_future_with_error_from<'a, F, O, E>(
-    runtime: &RuntimeContext,
+    runtime: Option<&RuntimeContext>,
     label: &'static str,
     map_error: ControlErrorMapper<E>,
     make_future: impl FnOnce() -> F,
@@ -671,12 +733,10 @@ where
     O: 'a,
     E: 'a,
 {
-    let cancellation = Some(runtime.cancellation_context());
-    let claim = admit_layout::<F, O, E>(Some(runtime))
-        .map_err(|error| map_error.map(cancellation.as_ref(), label, error))?;
-    let future = make_future();
-    Ok(RuntimeContinuationFuture::admitted(
-        future,
+    let (cancellation, admission) = checked_layout::<F, O, E>(runtime);
+    let claim = admission.map_err(|error| map_error.map(cancellation.as_ref(), label, error))?;
+    Ok(RuntimeContinuationFuture::admitted_with(
+        make_future,
         claim,
         cancellation,
         label,

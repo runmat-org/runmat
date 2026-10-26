@@ -91,8 +91,8 @@ fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine(
                 pressures.push(pressure);
                 velocities.push(velocity);
                 assert!(result.relative_residual < 1e-10);
-                assert!(result.mean_impedance_loss_w.abs() < 1e-12);
-                assert!(result.mean_input_power_w.abs() < 1e-8);
+                assert!(result.mean_impedance_loss_w.canonical_value().abs() < 1e-12);
+                assert!(result.mean_input_power_w.canonical_value().abs() < 1e-8);
                 if cells == if quadratic { 4 } else { 8 } {
                     assert!(
                         pressure < 0.004,
@@ -170,8 +170,14 @@ fn unphased_periodic_anchored_trace_matches_independent_cosine_solution() {
         let k = std::f64::consts::TAU * 0.2 / 2.0;
         let mut error = 0.0;
         let mut norm = 0.0;
-        for (node, pressure) in result.projection.nodes.iter().zip(&result.pressure_pa) {
-            let ratio = (k * (node.coordinates_m[0] - 0.5)).cos() / (0.5 * k).cos();
+        for (node, pressure) in result
+            .projection
+            .nodes
+            .iter()
+            .zip(result.pressure_pa.canonical_values())
+        {
+            let ratio =
+                (k * (node.coordinates_m.canonical_value()[0] - 0.5)).cos() / (0.5 * k).cos();
             let reference = amplitude.map(|value| value * ratio);
             error += (pressure.real - reference[0]).powi(2)
                 + (pressure.imaginary - reference[1]).powi(2);

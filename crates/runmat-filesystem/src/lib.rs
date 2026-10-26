@@ -419,6 +419,8 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Capability metadata only; capture and publication still perform admission.
+    fn supports_workspace_transactions(&self) -> bool { false }
     /// Coherent access through this provider's existing publication/recovery authority.
     fn workspace_access(
         &self,

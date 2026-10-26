@@ -1,10 +1,16 @@
 //! Exact affine reduction, fixed shared right LU, and physical warm corrections.
+use super::super::quantity_layout::{
+    equation_descriptor, ReducedPressureLayout, ReducedPressureOperator,
+};
 use super::*;
 use crate::{
-    algebra::{spmv, RealSparseMatrix},
+    algebra::spmv,
     constraints::{build_phase_reduction, AffineConstraintReduction},
     contracts::SolverPreconditioner,
     solve::krylov::right_ilu::{SparseRightIlu, SparseRightIluError},
+};
+use runmat_types::physical::{
+    kind, Quantity, QuantityField, QuantityLinearOperator, UniformQuantityLayout,
 };
 
 mod operator;
@@ -12,10 +18,10 @@ mod operator;
 mod tests;
 
 pub(super) struct PreparedReduced {
-    reduction: AffineConstraintReduction,
-    operator: RealSparseMatrix,
-    rhs: Vec<f64>,
-    residual_reference: f64,
+    reduction: std::sync::Arc<AffineConstraintReduction>,
+    operator: ReducedPressureOperator,
+    rhs: Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
+    residual_reference: Quantity<runmat_types::physical::DynamicDimension>,
     preconditioner: Option<SparseRightIlu>,
     size: usize,
     uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
@@ -39,17 +45,26 @@ impl PreparedReduced {
         check_cancelled()?;
         let reduction = match &assembly.reduction {
             Some(reduction) => reduction.clone(),
-            None => {
-                build_phase_reduction(assembly.projection.nodes.len(), &[], &assembly.prescribed)
-                    .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?
-            }
+            None => build_phase_reduction(
+                assembly.projection.nodes.len(),
+                &[],
+                assembly.prescribed.canonical_values(),
+            )
+            .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?,
         };
         let full_operator = operator::materialize(assembly)?;
         let source = assembly
             .source
+            .canonical_values()
             .iter()
             .map(|value| value.real)
-            .chain(assembly.source.iter().map(|value| value.imaginary))
+            .chain(
+                assembly
+                    .source
+                    .canonical_values()
+                    .iter()
+                    .map(|value| value.imaginary),
+            )
             .collect::<Vec<_>>();
         let operator = reduction
             .reduce_sparse_operator(&full_operator)
@@ -109,8 +124,20 @@ impl PreparedReduced {
                 ))
             }
         };
+        let layout = ReducedPressureLayout::try_new(reduction, assembly.projection.nodes.len())?;
+        let operator = QuantityLinearOperator::try_new(
+            layout.clone(),
+            UniformQuantityLayout::from_descriptor(rhs.len(), equation_descriptor(2)),
+            operator,
+        )
+        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let rhs = Quantity::try_from_descriptor(equation_descriptor(2), rhs)
+            .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let residual_reference =
+            Quantity::try_from_descriptor(equation_descriptor(2), residual_reference)
+                .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         Ok(Self {
-            reduction,
+            reduction: layout.reduction.clone(),
             operator,
             rhs,
             residual_reference,
@@ -124,20 +151,27 @@ impl PreparedReduced {
         &self,
         assembly: &AcousticAssembly,
         policy: AcousticHarmonicPolicy,
-        initial: Option<&[f64]>,
+        initial: Option<&QuantityField<ReducedPressureLayout, Vec<f64>>>,
     ) -> Result<ReducedSolution, AcousticHarmonicError> {
         check_cancelled()?;
+        if initial.is_some_and(|field| field.layout() != self.operator.input_layout()) {
+            return Err(AcousticHarmonicError::InvalidInput(
+                "pressure warm start belongs to a different phase basis".into(),
+            ));
+        }
         let mut solution = initial
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| vec![0.0; self.rhs.len()]);
-        if solution.len() != self.rhs.len() || solution.iter().any(|value| !value.is_finite()) {
+            .map(|field| field.with_canonical_storage(<[f64]>::to_vec))
+            .unwrap_or_else(|| vec![0.0; self.rhs.canonical_values().len()]);
+        if solution.len() != self.rhs.canonical_values().len()
+            || solution.iter().any(|value| !value.is_finite())
+        {
             return Err(AcousticHarmonicError::InvalidInput(
                 "physical warm-start shape or values".into(),
             ));
         }
         let mut iterations = 0;
-        let mut reference = self.residual_reference;
-        if !self.rhs.is_empty() {
+        let mut reference = self.residual_reference.canonical_value();
+        if !self.rhs.canonical_values().is_empty() {
             let residual = self.residual(&solution)?;
             let residual_norm = norm(&residual);
             if !residual_norm.is_finite() {
@@ -167,8 +201,12 @@ impl PreparedReduced {
                         maximum_iterations: policy.maximum_iterations,
                     },
                     |value| {
-                        spmv(&self.operator, &self.right_apply(value)?)
-                            .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))
+                        {
+                            let applied = self.right_apply(value)?;
+                            self.operator
+                                .with_canonical_storage(|matrix| spmv(matrix, &applied))
+                        }
+                        .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))
                     },
                     |a, b| Ok(a.iter().zip(b).map(|(a, b)| a * b).sum()),
                     crate::is_fea_cancelled,
@@ -206,9 +244,16 @@ impl PreparedReduced {
         applied.extend(applied_imaginary);
         let residual = assembly
             .source
+            .canonical_values()
             .iter()
             .map(|value| value.real)
-            .chain(assembly.source.iter().map(|value| value.imaginary))
+            .chain(
+                assembly
+                    .source
+                    .canonical_values()
+                    .iter()
+                    .map(|value| value.imaginary),
+            )
             .zip(applied)
             .map(|(source, applied)| source - applied)
             .collect::<Vec<_>>();
@@ -232,9 +277,14 @@ impl PreparedReduced {
         let imaginary = full.split_off(self.size);
         check_cancelled()?;
         Ok(ReducedSolution {
-            real: full,
-            imaginary,
-            coordinates: solution,
+            real: Quantity::try_new(full)
+                .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?,
+            imaginary: Quantity::try_new(imaginary)
+                .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?,
+            coordinates: QuantityField::try_new(self.operator.input_layout().clone(), solution)
+                .map_err(|e| {
+                    AcousticHarmonicError::Operator(format!("invalid pressure coordinates: {e:?}"))
+                })?,
             iterations,
             relative_residual,
             uniqueness: self.uniqueness,
@@ -253,9 +303,11 @@ impl PreparedReduced {
     fn residual(&self, solution: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
         Ok(self
             .rhs
+            .canonical_values()
             .iter()
             .zip(
-                spmv(&self.operator, solution)
+                self.operator
+                    .with_canonical_storage(|matrix| spmv(matrix, solution))
                     .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?,
             )
             .map(|(source, applied)| source - applied)
@@ -286,15 +338,15 @@ fn check_cancelled() -> Result<(), AcousticHarmonicError> {
 pub(super) fn solve(
     assembly: &AcousticAssembly,
     policy: AcousticHarmonicPolicy,
-    initial: Option<&[f64]>,
+    initial: Option<&QuantityField<ReducedPressureLayout, Vec<f64>>>,
 ) -> Result<ReducedSolution, AcousticHarmonicError> {
     PreparedReduced::new(assembly, policy)?.solve(assembly, policy, initial)
 }
 
 pub(super) struct ReducedSolution {
-    pub real: Vec<f64>,
-    pub imaginary: Vec<f64>,
-    pub coordinates: Vec<f64>,
+    pub real: Quantity<kind::Pressure, Vec<f64>>,
+    pub imaginary: Quantity<kind::Pressure, Vec<f64>>,
+    pub coordinates: QuantityField<ReducedPressureLayout, Vec<f64>>,
     pub iterations: u32,
     pub relative_residual: f64,
     pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,

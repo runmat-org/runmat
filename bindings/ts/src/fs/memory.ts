@@ -4,6 +4,7 @@ import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../ge
 import type { AtomicCreateResult } from "../generated/collaboration-contracts.js";
 import { basename, dirname, isSubPath, normalizePath } from "./path.js";
 import { notifyCommittedMutation } from "./mutation-notification.js";
+import { notFound } from "./errors.js";
 import type {
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
@@ -190,7 +191,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`File not found: ${normalized}`);
+      throw notFound(normalized, "File");
     }
     if (entry.kind !== "file") {
       throw new Error(`Path ${normalized} is not a file`);
@@ -207,7 +208,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`Path not found: ${normalized}`);
+      throw notFound(normalized);
     }
     if (entry.kind === "file") {
       return {
@@ -349,7 +350,7 @@ export class MemoryVolume {
     const dst = normalizeAbsolute(to);
     const entry = this.entries.get(src);
     if (!entry) {
-      throw new Error(`Path not found: ${src}`);
+      throw notFound(src);
     }
     if (src === dst) {
       return;
@@ -402,7 +403,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`Path not found: ${normalized}`);
+      throw notFound(normalized);
     }
     entry.readonly = readonly;
     entry.modified = this.now();
@@ -450,8 +451,11 @@ export class MemoryVolume {
   private getFile(path: string): FileEntry {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
-    if (!entry || entry.kind !== "file") {
-      throw new Error(`File not found: ${normalized}`);
+    if (!entry) {
+      throw notFound(normalized, "File");
+    }
+    if (entry.kind !== "file") {
+      throw new Error(`Path is not a file: ${normalized}`);
     }
     return entry;
   }
@@ -460,7 +464,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`Directory not found: ${normalized}`);
+      throw notFound(normalized, "Directory");
     }
     if (entry.kind !== "dir") {
       throw new Error(`Path is not a directory: ${normalized}`);

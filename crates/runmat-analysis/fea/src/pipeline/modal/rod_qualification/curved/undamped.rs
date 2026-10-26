@@ -17,7 +17,7 @@ fn curved_tet10_harmonic_loading_field_and_reaction_converge_to_continuum() {
                 let mut resultant = [0.0; 3];
                 let mut moment = [0.0; 3];
                 for (node, f) in mesh.topology.nodes.iter().zip(load.chunks_exact(3)) {
-                    let [x, y, z] = node.coordinates_m;
+                    let [x, y, z] = node.coordinates_m.canonical_value();
                     for axis in 0..3 {
                         resultant[axis] += f[axis];
                     }

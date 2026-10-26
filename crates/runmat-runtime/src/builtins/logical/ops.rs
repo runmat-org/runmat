@@ -152,7 +152,8 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::Object(obj) => Err(conversion_error(obj.class_name().display_name())),
         Value::HandleObject(handle) => Err(conversion_error(handle.class_name.display_name())),
         Value::Listener(_) => Err(conversion_error("event.listener")),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

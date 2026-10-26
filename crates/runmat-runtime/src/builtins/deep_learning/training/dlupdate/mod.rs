@@ -102,7 +102,8 @@ async fn dlupdate_in_runtime(
 fn is_function_handle(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)

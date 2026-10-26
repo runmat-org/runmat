@@ -25,7 +25,7 @@ pub(crate) fn split_completion_tetrahedra_for_node(
         let points = [
             boundary_nodes[&node_ids[0]],
             boundary_nodes[&node_ids[1]],
-            split_node.coordinates_m,
+            split_node.coordinates_m.canonical_value(),
             boundary_nodes[&cap_node_id],
         ];
         let tetrahedron =
@@ -61,7 +61,7 @@ pub(crate) fn edge_split_completion_tetrahedra_for_node(
     for node_ids in child_specs {
         let points = node_ids.map(|node_id| {
             if node_id == split_node.node_id {
-                split_node.coordinates_m
+                split_node.coordinates_m.canonical_value()
             } else {
                 boundary_nodes[&node_id]
             }

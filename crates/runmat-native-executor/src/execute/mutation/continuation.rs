@@ -436,14 +436,16 @@ fn read_step(
     let field = field_name(state, segment)?;
     let runtime = state.runtime.clone();
     let caller = state.function.name.clone();
+    let access = super::super::subscript_path::frame_access(state)?;
     member_call(state, move || async move {
         let value = runtime
-            .scope(runmat_runtime::object::resolve::load_member_with_context(
+            .scope(runmat_runtime::object::resolve::load_member_with_access(
                 Some(&runtime),
                 base,
                 field,
                 allow_init,
                 Some(&caller),
+                &access,
             ))
             .await?;
         single_member_sequence(value).map_err(|error| *error)
@@ -463,15 +465,17 @@ fn write_step(
     let field = field_name(state, segment)?;
     let runtime = state.runtime.clone();
     let caller = state.function.name.clone();
+    let access = super::super::subscript_path::frame_access(state)?;
     member_call(state, move || async move {
         let value = runtime
             .scope(
-                runmat_runtime::object::resolve::store_member_traced_in_context(
+                runmat_runtime::object::resolve::store_member_traced_with_access(
                     &runtime,
                     base,
                     field,
                     rhs,
                     Some(&caller),
+                    &access,
                 ),
             )
             .await?;

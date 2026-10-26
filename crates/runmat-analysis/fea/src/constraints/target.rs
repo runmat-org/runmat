@@ -83,7 +83,7 @@ pub(super) fn node_coordinates(
         .nodes
         .iter()
         .find(|node| node.stable_identity == identity)
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .ok_or_else(|| {
             ConstraintPlanError::Invalid(format!(
                 "constraint `{constraint_id}` references a node absent from solver topology"

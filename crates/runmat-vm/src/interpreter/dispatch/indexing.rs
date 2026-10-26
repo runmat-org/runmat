@@ -21,6 +21,8 @@ use runmat_value::{CellArray, Value};
 
 mod scalar_read_and_cell;
 mod scalar_store;
+mod dispatch;
+pub use dispatch::dispatch_indexing;
 
 /// Admit the exact selector window while every source operand is still on
 /// the stack. The separate root lease follows moved values through awaits.
@@ -466,6 +468,7 @@ async fn execute_brace_operation(
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
+            | Value::ScopedFunctionHandle(_)
     ) {
         return Err(crate::interpreter::errors::mex(
             "UnsupportedFunctionHandleSelector",
@@ -768,6 +771,7 @@ pub async fn paren_index_sequence(
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
+            | Value::ScopedFunctionHandle(_)
     ) {
         return match crate::call::feval::execute_feval(
             runtime,
@@ -811,7 +815,8 @@ pub async fn paren_index_sequence(
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
-        | Value::Closure(_) => unreachable!("callable values returned above"),
+        | Value::Closure(_)
+        | Value::ScopedFunctionHandle(_) => unreachable!("callable values returned above"),
         Value::Symbolic(expr) => {
             if let Some((name, parameters)) = expr.function_reference_signature() {
                 runmat_runtime::indexing::symbolic::apply_function_reference(
@@ -878,73 +883,6 @@ pub async fn paren_index_value(
     )
     .await?;
     resolve_single_sequence(sequence)
-}
-
-pub async fn dispatch_indexing(
-    instr: &crate::bytecode::Instr,
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    vars: &mut InterpreterVars,
-    function_registry: &crate::bytecode::FunctionRegistry,
-    pc: usize,
-    runtime: &runmat_runtime::context::RuntimeContext,
-    sequence_register: &mut super::SequenceState,
-) -> Result<bool, RuntimeError> {
-    match instr {
-        crate::bytecode::Instr::Index(_)
-        | crate::bytecode::Instr::IndexCell { .. }
-        | crate::bytecode::Instr::IndexCellExpand { .. }
-        | crate::bytecode::Instr::IndexCellList { .. }
-        | crate::bytecode::Instr::StoreIndexCell { .. }
-        | crate::bytecode::Instr::StoreIndexCellDelete { .. } => {
-            scalar_read_and_cell::dispatch(
-                instr,
-                stack,
-                vars,
-                function_registry,
-                pc,
-                runtime,
-                sequence_register,
-            )
-            .await
-        }
-        crate::bytecode::Instr::StoreIndex(_) | crate::bytecode::Instr::StoreIndexDelete(_) => {
-            scalar_store::dispatch(
-                instr,
-                stack,
-                vars,
-                function_registry,
-                pc,
-                runtime,
-                sequence_register,
-            )
-            .await
-        }
-        crate::bytecode::Instr::IndexSlice(..) => {
-            slice_read::dispatch(
-                instr,
-                stack,
-                vars,
-                function_registry,
-                pc,
-                runtime,
-                sequence_register,
-            )
-            .await
-        }
-        crate::bytecode::Instr::StoreSlice(..) | crate::bytecode::Instr::StoreSliceDelete(..) => {
-            slice_store::dispatch(
-                instr,
-                stack,
-                vars,
-                function_registry,
-                pc,
-                runtime,
-                sequence_register,
-            )
-            .await
-        }
-        _ => Ok(false),
-    }
 }
 
 #[cfg(test)]

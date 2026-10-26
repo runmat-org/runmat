@@ -142,7 +142,11 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
     }))
     .unwrap();
     let Value::GpuTensor(resident_output) = output.value() else {
-        panic!("fallback must restore resident output");
+        panic!(
+            "fallback must restore resident output, got {:?}; selected graphs={}, casts={}, uploads={}, downloads={}",
+            output.value(), probe.requests.borrow().len(), provider.casts.load(Ordering::Relaxed),
+            provider.uploads.load(Ordering::Relaxed), provider.downloads.load(Ordering::Relaxed)
+        );
     };
     assert_eq!(resident_output.shape(), &[1, 2, 2]);
     assert_eq!(provider.casts.load(Ordering::Relaxed), 1);
@@ -158,12 +162,11 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
         "runtime fallback gathered"
     );
     let feedback = probe.feedback.borrow();
-    assert_eq!(feedback.len(), 1);
-    assert!(
-        !feedback[0].succeeded,
-        "restored residency cannot prove the declined GPU route"
-    );
-    assert_eq!(feedback[0].total_elapsed_ns, 0);
+    // This is an admitted whole-call candidate, not a legacy preparation
+    // sample. Its unsupported body falls back successfully, so neither the
+    // promised provider route nor a failed whole call completed. Restoration
+    // must not manufacture either kind of completed placement feedback.
+    assert!(feedback.is_empty());
     drop(feedback);
     let HostNumericDataOwned::F32(actual) =
         futures::executor::block_on(provider.inner.download_numeric(resident_output))

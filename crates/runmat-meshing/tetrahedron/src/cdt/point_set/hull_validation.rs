@@ -54,12 +54,18 @@ pub(super) fn validate_convex_hull_closure(
             continue;
         }
         let (face, interior) = faces[first];
-        let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+        let points = face.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         let interior_sign = work.orient3d([
             points[0],
             points[1],
             points[2],
-            topology.nodes[interior as usize].coordinates_m,
+            topology.nodes[interior as usize]
+                .coordinates_m
+                .canonical_value(),
         ])?;
         if interior_sign == PredicateSign::Zero {
             return Err(error(
@@ -68,7 +74,12 @@ pub(super) fn validate_convex_hull_closure(
             ));
         }
         for (index, node) in topology.nodes.iter().enumerate() {
-            let sign = work.orient3d([points[0], points[1], points[2], node.coordinates_m])?;
+            let sign = work.orient3d([
+                points[0],
+                points[1],
+                points[2],
+                node.coordinates_m.canonical_value(),
+            ])?;
             if sign != PredicateSign::Zero && sign != interior_sign {
                 return Err(error(DelaunayPointSetErrorKind::InvalidTopology,
                     format!("boundary face {face:?} does not support the admitted convex hull; node {index} lies on its exterior side")));
@@ -110,7 +121,9 @@ fn coplanar(
             plane[0],
             plane[1],
             plane[2],
-            topology.nodes[vertex as usize].coordinates_m,
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value(),
         ])? != PredicateSign::Zero
         {
             return Ok(false);

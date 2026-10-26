@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_parser::fea::{
+use runmat_fea_syntax::{
     FeaBlock, FeaCallArgument, FeaExpression, FeaExpressionKind, FeaModuleItem, FeaReference,
     FeaStatementKind,
 };

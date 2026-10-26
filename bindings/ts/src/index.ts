@@ -1,4 +1,30 @@
+export { physicalLengthUnit, physicalLengthUnitName, isPhysicalLengthUnit, resolvedSourceLengthUnit, sourceLengthUnitLabel, PHYSICAL_LENGTH_UNITS } from "./physical.js";
+export type { LengthUnit, LengthUnitEvidence } from "./physical.js";
 import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
+import type {
+  RunMatProgramTaskCancellation,
+  RunMatProgramTaskTerminal,
+  RunMatWorkerProgramInvocation,
+  RunMatProgramWorkerInventory,
+} from "./execution/program-terminal.js";
+export type {
+  RunMatProgramExecutionAssignment,
+  RunMatProgramAcceleratorLease,
+  RunMatWorkerAcceleratorDevice,
+  RunMatWorkerHostCapability,
+  RunMatProgramWorkerInventory,
+  RunMatProgramCancellationReason,
+  RunMatProgramTaskCancellation,
+  RunMatProgramTaskRetirement,
+  RunMatProgramTaskTerminal,
+  RunMatProgramRuntimeFailure,
+  RunMatProgramExecutionResponse,
+  RunMatWorkerProgramInvocation,
+} from "./execution/program-terminal.js";
+export {
+  sameProgramAssignment,
+  isRetiredProgramTerminal,
+} from "./execution/program-terminal.js";
 import type { InputManifest } from "./generated/collaboration-contracts.js";
 export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
 export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
@@ -15,6 +41,11 @@ import type {
 } from "./fs/provider-types.js";
 import type {
   FeaCapabilities,
+  FeaExecutionChoices,
+  FeaExecutionCandidate,
+  FeaExecutionDuration,
+  FeaExecutionMode,
+  FeaExecutionReadiness,
   FeaSourceCheckResult,
   FeaBrowseRequest,
   FeaBrowseOutcome,
@@ -148,6 +179,11 @@ export type {
   FeaBoundaryInput,
   FeaCanonicalSequence,
   FeaCapabilities,
+  FeaExecutionChoices,
+  FeaExecutionCandidate,
+  FeaExecutionDuration,
+  FeaExecutionMode,
+  FeaExecutionReadiness,
   FeaSourceCheckResult,
   FeaBrowseRequest,
   FeaBrowseOutcome,
@@ -399,6 +435,8 @@ export interface BrowserExecutionHostCapabilities {
   maxWorkers: number;
   /** Exact owned builtin route; successful launch responses and cancelOwned acknowledgments certify task settlement. */
   ownedBuiltinWork?: boolean;
+  /** Selected Direct/Graph route with an exact Runtime-owned retirement terminal. Rejection is not proof. */
+  selectedProgramWork?: boolean;
 }
 
 export interface BrowserProgramLaunchRequest {
@@ -409,13 +447,18 @@ export interface BrowserProgramLaunchRequest {
 
 export interface RunMatExecutionHost {
   capabilities: BrowserExecutionHostCapabilities;
+  /** Actual module/factory host+device inventory; required for selectedProgramWork. */
+  workerInventory?: RunMatProgramWorkerInventory;
   launch(request: BrowserProgramLaunchRequest): Promise<Record<string, unknown>>;
   cancel(taskId: string): void | Promise<void>;
-  /** Required when ownedBuiltinWork is true. Only this task-bound physical-exit acknowledgment releases retained work. */
+  /** Required only for ownedBuiltinWork: literal task-bound physical-exit proof. */
   cancelOwned?(taskId: string): Promise<{
     taskId: string;
     state: "terminated" | "notRunning";
   }>;
+  /** Required for selectedProgramWork. The terminal must preserve the actual assignment. */
+  launchProgram?(request: BrowserProgramLaunchRequest): Promise<RunMatProgramTaskTerminal>;
+  cancelProgram?(request: RunMatProgramTaskCancellation): Promise<RunMatProgramTaskTerminal>;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -639,8 +682,12 @@ export interface FigureImageOptions {
   textmark?: string;
 }
 
+/** Observation options are preserved through this JS wrapper and validated by WASM. */
+export const GEOMETRY_OBSERVATION_API_VERSION = 1;
+
 export interface GeometrySceneImageOptions {
   handle: number;
+  selectedRegionIds?: string[];
   width?: number;
   height?: number;
   view?: string | null;
@@ -793,6 +840,8 @@ export interface RunMatErrorDetails {
   message: string;
   identifier?: string;
   diagnostic: string;
+  /** Canonical meshing diagnostic, retained without translating its domain contract. */
+  meshingFailure?: unknown;
   span?: RunMatErrorSpan;
   sourceId?: number;
   sourceName?: string;
@@ -805,6 +854,7 @@ export class RunMatExecutionError extends Error {
   readonly kind: RunMatErrorKind;
   readonly identifier?: string;
   readonly diagnostic: string;
+  readonly meshingFailure?: unknown;
   readonly span?: RunMatErrorSpan;
   readonly sourceId?: number;
   readonly sourceName?: string;
@@ -818,6 +868,7 @@ export class RunMatExecutionError extends Error {
     this.kind = details.kind;
     this.identifier = details.identifier;
     this.diagnostic = details.diagnostic;
+    this.meshingFailure = details.meshingFailure;
     this.span = details.span;
     this.sourceId = details.sourceId;
     this.sourceName = details.sourceName;
@@ -1102,6 +1153,8 @@ export interface RunMatSessionHandle {
     geometrySceneHandle?: number | null,
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
+  planFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaExecutionChoices>;
+  runFeaSource(path: string, planId: string, inputManifest?: InputManifest): Promise<FeaRunResult>;
   checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
   checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult>;
   browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome>;
@@ -1203,6 +1256,8 @@ interface RunMatNativeSession {
     geometrySceneHandle?: number | null,
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
+  planFeaSource?: (path: string, inputManifest?: InputManifest) => FeaExecutionChoices | Promise<FeaExecutionChoices>;
+  runFeaSource?: (path: string, planId: string, inputManifest?: InputManifest) => FeaRunResult | Promise<FeaRunResult>;
   inspectFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
   reviewFeaChanges?: (request: FeaChangeSetReviewRequest) => FeaChangeSetReview | Promise<FeaChangeSetReview>;
   stageFeaChanges?: (request: FeaChangeSetRequest) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
@@ -1357,6 +1412,7 @@ export interface GeometrySceneRegionAnnotationState {
 }
 
 export type GeometrySceneAnnotationKind =
+  | "label"
   | "force"
   | "moment"
   | "pressure"
@@ -1428,9 +1484,14 @@ interface RunMatNativeModule {
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  executePreparedFeaStudy?: (json: string, memoryBytes: number) => string;
   executeWorkerProgram?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  createWorkerProgramInvocation?: (
+    request: Record<string, unknown>
+  ) => RunMatWorkerProgramInvocation;
+  workerProgramInventory?: () => RunMatProgramWorkerInventory;
   buildGitSnapshot?: (
     repository: string,
     subdir: string,
@@ -1538,6 +1599,11 @@ interface RunMatNativeModule {
     height: number,
     view?: string | null
   ) => Promise<Uint8Array>;
+  renderGeometrySceneObservationImage?: (
+    handle: number, width: number, height: number, view: string | null,
+    observation: Pick<GeometrySceneImageOptions, "visibility" | "section" | "selectedRegionIds">
+  ) => Promise<Uint8Array>;
+  measureGeometryScene?: (handle: number, kind: string, regionIds: string[]) => unknown;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
@@ -1650,6 +1716,12 @@ export async function executeProgramArtifact(
 }
 
 /** Execute a previously admitted worker request inside the worker realm. */
+export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput): Promise<string> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.executePreparedFeaStudy) throw new Error("Rebuild the browser numerical runtime assets.");
+  return native.executePreparedFeaStudy(json, memoryBytes);
+}
+
 export async function executeWorkerProgram(
   request: Record<string, unknown>,
   wasmModule?: WasmInitInput
@@ -1659,6 +1731,29 @@ export async function executeWorkerProgram(
     throw new Error("The loaded RunMat module does not support worker program execution.");
   }
   return native.executeWorkerProgram(request);
+}
+
+/** Construct one selected invocation inside an actual isolated CPU worker. */
+export async function createWorkerProgramInvocation(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<RunMatWorkerProgramInvocation> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.createWorkerProgramInvocation !== "function") {
+    throw new Error("The loaded RunMat module does not support controlled worker programs.");
+  }
+  return native.createWorkerProgramInvocation(request);
+}
+
+/** Describe the stock CPU worker factory from this exact loaded module. */
+export async function workerProgramInventory(
+  wasmModule?: WasmInitInput
+): Promise<RunMatProgramWorkerInventory> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.workerProgramInventory !== "function") {
+    throw new Error("The loaded RunMat module has no qualified worker factory inventory.");
+  }
+  return native.workerProgramInventory();
 }
 
 export async function fetchGitSnapshot(
@@ -2162,11 +2257,30 @@ export async function renderGeometrySceneImage(
   const height = options.height ?? 0;
   const view = options.view ?? null;
   try {
-    const bytes = await native.renderGeometrySceneImage?.(handle, width, height, view);
+    const observation = {visibility: options.visibility ?? null, section: options.section ?? null, selectedRegionIds: options.selectedRegionIds ?? []};
+    const needsObservation = Boolean(observation.selectedRegionIds.length || observation.section
+      || observation.visibility?.hidden_ids?.length || observation.visibility?.isolated_ids?.length
+      || observation.visibility?.mode && observation.visibility.mode !== "all");
+    if (needsObservation && typeof native.renderGeometrySceneObservationImage !== "function") {
+      throw new Error("The loaded runtime predates geometry observation support. Reload the latest runtime.");
+    }
+    const bytes = native.renderGeometrySceneObservationImage
+      ? await native.renderGeometrySceneObservationImage(handle, width, height, view, observation)
+      : await native.renderGeometrySceneImage?.(handle, width, height, view);
     if (bytes instanceof Uint8Array) {
       return bytes;
     }
     return new Uint8Array(bytes ?? []);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function measureGeometryScene(options: {handle: number; kind: string; regionIds: string[]}): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "measureGeometryScene");
+  try {
+    return await native.measureGeometryScene!(options.handle, options.kind, options.regionIds);
   } catch (error) {
     throw coerceFigureError(error);
   }
@@ -2343,7 +2457,7 @@ class WebRunMatSession implements RunMatSessionHandle {
     if (typeof this.native.previewGeometry !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose previewGeometry yet.");
     }
-    return this.native.previewGeometry(path, budget ?? null);
+    return normalizeWasmStructuredValue(await this.native.previewGeometry(path, budget ?? null)) as GeometryPreviewResult;
   }
 
   async disposeGeometryPreview(
@@ -2369,6 +2483,18 @@ class WebRunMatSession implements RunMatSessionHandle {
       throw new Error("The loaded runmat-wasm module does not expose feaCapabilities yet.");
     }
     return this.native.feaCapabilities();
+  }
+
+  async planFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaExecutionChoices> {
+    this.ensureActive();
+    if (!this.native.planFeaSource) throw new Error("Reload the current runtime to prepare simulation execution.");
+    return admitFeaExecutionChoices(await this.native.planFeaSource(path, inputManifest));
+  }
+
+  async runFeaSource(path: string, planId: string, inputManifest?: InputManifest): Promise<FeaRunResult> {
+    this.ensureActive();
+    if (!this.native.runFeaSource) throw new Error("Reload the current runtime to run this simulation.");
+    return this.native.runFeaSource(path, planId, inputManifest);
   }
 
   async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {
@@ -2761,6 +2887,8 @@ type RunMatErrorPayload = {
   message: string;
   identifier?: string;
   diagnostic: string;
+  /** Canonical meshing diagnostic, retained without translating its domain contract. */
+  meshingFailure?: unknown;
   span?: RunMatErrorSpan;
   sourceId?: number;
   sourceName?: string;
@@ -2788,6 +2916,7 @@ function coerceRunMatError(value: unknown): RunMatExecutionError {
       message: value.message,
       identifier: value.identifier,
       diagnostic: value.diagnostic,
+      meshingFailure: value.meshingFailure,
       span: value.span,
       sourceId: value.sourceId,
       sourceName: value.sourceName,
@@ -3049,3 +3178,16 @@ function isNativeSession(value: unknown): value is RunMatNativeSession {
 }
 
 export { readImmutableFilesystemResponse } from "./fs/immutable-input.js";
+
+/** Execution options are display/admission contracts, never editable solver inputs. */
+function admitFeaExecutionChoices(value: FeaExecutionChoices): FeaExecutionChoices {
+  const modes = new Set<string>();
+  if (!value || value.schemaVersion !== 1 || typeof value.planId !== "string" || !value.planId || !Array.isArray(value.revision) || value.revision.length !== 32 || value.revision.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255) || !Array.isArray(value.candidates) || value.candidates.length > 2) throw new Error("Invalid simulation execution options returned by the runtime.");
+  for (const candidate of value.candidates) {
+    if (!candidate || !["single_core", "multi_core"].includes(candidate.mode) || modes.has(candidate.mode) || (candidate.cores !== null && (!Number.isSafeInteger(candidate.cores) || candidate.cores < 1)) || !["ready", "desktop_required", "unavailable"].includes(candidate.readiness) || [candidate.memoryBytes, candidate.estimatedMillis].some(number => number !== null && (!Number.isSafeInteger(number) || number < 0))) throw new Error("Invalid simulation execution candidate returned by the runtime.");
+    const evidence = candidate.durationEvidence;
+    if (evidence != null && ([evidence.lowerMillis, evidence.upperMillis, evidence.sampleCount].some(number => !Number.isSafeInteger(number) || number < 1) || evidence.sampleCount < 3 || candidate.estimatedMillis == null || evidence.lowerMillis > candidate.estimatedMillis || evidence.upperMillis < candidate.estimatedMillis)) throw new Error("Invalid simulation duration evidence returned by the runtime.");
+    modes.add(candidate.mode);
+  }
+  return value;
+}

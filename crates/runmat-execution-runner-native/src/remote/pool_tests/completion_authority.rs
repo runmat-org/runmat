@@ -73,8 +73,9 @@ async fn shared_results_survive_distinct_task_pending_owners_and_commits() {
                 result: first_success.clone(),
             }
         } else {
-            AttemptReport::Lost {
-                message: "old attempt lost".into(),
+            AttemptReport::Failed {
+                kind: AttemptFailureKind::Infrastructure,
+                message: "old retired attempt failed".into(),
             }
         };
         fixture
@@ -419,8 +420,8 @@ async fn discarded_report_cannot_acknowledge_cancellation_of_a_live_attempt() {
             .unwrap()
             .contains_key(&fixture.attempt.task_id));
         let acknowledgement = if report_kind == 2 {
-            // A worker finishing successfully after cancellation is quiescent,
-            // but cannot turn the scheduler's cancelled task into success.
+            // An ordinary remote response is not an owning retirement proof,
+            // even if the operation itself finished successfully.
             AttemptReport::Succeeded {
                 result: success(&fixture.attempt, "too late"),
             }
@@ -434,7 +435,7 @@ async fn discarded_report_cannot_acknowledge_cancellation_of_a_live_attempt() {
         assert!(fixture.receiver.try_recv().unwrap().1.is_err());
         assert_eq!(
             fixture.pool.snapshot().tasks[&fixture.attempt.task_id].state,
-            TaskState::Cancelled
+            TaskState::Indeterminate
         );
     }
 }
@@ -585,11 +586,11 @@ async fn original_terminal_loss_diagnostic_survives_remote_delivery() {
         .unwrap();
     assert_eq!(
         evidence.attempts[0]
-            .terminal
+            .unverified_retirement
             .as_ref()
             .unwrap()
             .diagnostic
-            .as_deref(),
-        Some(message)
+            .as_str(),
+        message
     );
 }

@@ -59,6 +59,12 @@ fn visit_gpu_handles(
     visited_handles: &mut HashSet<usize>,
 ) -> Result<(), RuntimeError> {
     match value {
+        Value::ScopedFunctionHandle(_) => Err(crate::build_runtime_error(
+            "invocation-scoped callables cannot cross a spawn boundary",
+        )
+        .with_identifier("RunMat:ScopedCallable:NotPortable")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()),
         Value::GpuTensor(handle) => operation(handle),
         Value::Cell(cell) => visit_values(cell.data(), operation, visited_handles),
         Value::Struct(value) => {

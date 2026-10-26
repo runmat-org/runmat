@@ -3,8 +3,8 @@
 use super::super::{
     CallableOwner, CharacterEncoding, DurableDecompositionPayload, DurableNumericFactor,
     DurableObjectArray, DurablePlainObject, DurableStructArray, ElementType, ExceptionFrameSource,
-    ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField, ValueLimits,
-    ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
+    ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField, ValueLimitBudget,
+    ValueLimits, ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
 };
 use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 use std::{collections::HashSet, num::NonZeroUsize};
@@ -39,10 +39,7 @@ struct Budget<'a> {
     durable: bool,
     detached_frames: bool,
     sources: Sources<'a>,
-    nodes: u64,
-    bytes: u64,
-    elements: u64,
-    text: u64,
+    usage: ValueLimitBudget,
 }
 
 /// Incremental canonical validator for one aggregate of portable values.
@@ -193,10 +190,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
                 durable,
                 detached_frames,
                 sources,
-                nodes: 0,
-                bytes: 0,
-                elements: 0,
-                text: 0,
+                usage: ValueLimitBudget::new(limits),
             },
             tasks: vec![Task::Many(values, 0, 0)],
         }
@@ -378,6 +372,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
             InlineValue::Exception(x) => {
                 self.budget.add_text(&x.identifier)?;
                 self.budget.add_text(&x.message)?;
+                self.budget.add_elements(x.stack.len() as u64)?;
                 self.tasks.push(Task::ExceptionStack(x, 0, depth));
             }
             InlineValue::Callable(x) => {
@@ -409,6 +404,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         after: AfterShape<'a>,
     ) -> Result<(), ContractError> {
         if let Some(x) = shape.get(i) {
+            self.budget.add_bytes(8)?;
             let n = n
                 .checked_mul(*x)
                 .ok_or_else(|| invalid("shape", "element count overflow"))?;

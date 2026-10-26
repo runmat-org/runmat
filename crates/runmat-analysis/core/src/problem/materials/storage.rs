@@ -133,15 +133,13 @@ impl MaterialModel {
                     source_name,
                     source_entity_id: _,
                     representation_entity_id: _,
-                    dimension: _,
-                    value_si: _,
-                    source_value: _,
-                    source_unit,
+                    value,
                     specification,
                     environment,
                 } in adopted_properties
                 {
-                    for value in [source_property_id, source_name, source_unit] {
+                    add(&mut total, value.owned_buffer_bytes()?)?;
+                    for value in [source_property_id, source_name] {
                         add(&mut total, value.capacity())?;
                     }
                     optional(&mut total, specification)?;
@@ -151,16 +149,9 @@ impl MaterialModel {
                             .capacity()
                             .checked_mul(std::mem::size_of::<ImportedCadEnvironmentCondition>())?,
                     )?;
-                    for ImportedCadEnvironmentCondition {
-                        name,
-                        dimension: _,
-                        value_si: _,
-                        source_value: _,
-                        source_unit,
-                    } in environment
-                    {
+                    for ImportedCadEnvironmentCondition { name, value } in environment {
                         add(&mut total, name.capacity())?;
-                        add(&mut total, source_unit.capacity())?;
+                        add(&mut total, value.owned_buffer_bytes()?)?;
                     }
                 }
             }

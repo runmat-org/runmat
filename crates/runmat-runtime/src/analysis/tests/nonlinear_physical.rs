@@ -6,6 +6,7 @@ use runmat_analysis_core::{
     PrescribedValue, StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof,
     Traction, TranslationDofValue,
 };
+use runmat_types::physical::Quantity;
 
 fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifact) {
     // Exercise dimensional authored material lowering; the model/mesh below is a typed fixture.
@@ -28,8 +29,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
     assert_eq!(
         material.plastic,
         Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: 5.0,
-            isotropic_hardening_modulus_pa: 30.0,
+            yield_stress_pa: Quantity::new(5.0),
+            isotropic_hardening_modulus_pa: Quantity::new(30.0),
         })
     );
     let mut model = sample_solid_model();
@@ -64,7 +65,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                         .iter()
                         .find(|n| n.node_id == *id)
                         .unwrap()
-                        .coordinates_m[axis]
+                        .coordinates_m
+                        .canonical_value()[axis]
                         == 0.0
                 })
             })
@@ -97,7 +99,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                     .iter()
                     .find(|n| n.node_id == *id)
                     .unwrap()
-                    .coordinates_m;
+                    .coordinates_m
+                    .canonical_value();
                 (x.iter().sum::<f64>() - 1.0).abs() < 1e-14
             })
         })
@@ -205,6 +208,7 @@ fn physical_j2_tet4_tet10_history_survives_cold_filesystem_and_query() {
             .iter()
             .flat_map(|node| {
                 node.coordinates_m
+                    .canonical_value()
                     .into_iter()
                     .zip(strain)
                     .map(|(x, e)| x * e)

@@ -171,7 +171,7 @@ pub(crate) fn validate_exact_face_mesh_contract_with_cancellation(
             .joined_chart_cuts
             .iter()
             .any(|cut| cut.cut_id == StableDigest::ZERO || cut.piece_count == 0)
-        || mesh.maximum_chordal_deviation_m != maximum_chordal
+        || mesh.maximum_chordal_deviation_m.canonical_value() != maximum_chordal
         || mesh.maximum_normal_deviation_rad != maximum_normal
     {
         return Err(invalid(

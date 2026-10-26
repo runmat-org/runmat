@@ -4,15 +4,17 @@ use super::{dense::solve_square, ModalReducedSystem};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModalHarmonicLoad {
-    pub real: Vec<f64>,
-    pub imaginary: Vec<f64>,
+    pub real: runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<f64>>,
+    pub imaginary: runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<f64>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModalHarmonicResponse {
     pub angular_frequency_rad_s: f64,
-    pub displacement_real: Vec<f64>,
-    pub displacement_imaginary: Vec<f64>,
+    pub displacement_real:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
+    pub displacement_imaginary:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
     pub residual_norm: f64,
     pub relative_residual: f64,
 }
@@ -38,9 +40,9 @@ pub fn solve_modal_harmonic(
     solve_operators(
         DenseHarmonicOperators {
             size: system.mode_count(),
-            stiffness: system.stiffness(),
-            mass: system.mass(),
-            damping: system.damping(),
+            stiffness: system.stiffness().canonical_value(),
+            mass: system.mass().canonical_value(),
+            damping: system.damping().canonical_value(),
         },
         angular_frequency_rad_s,
         load,
@@ -61,7 +63,8 @@ fn solve_operators(
     load: &ModalHarmonicLoad,
 ) -> Result<ModalHarmonicResponse, ModalHarmonicError> {
     let size = operators.size;
-    if load.real.len() != size || load.imaginary.len() != size {
+    if load.real.canonical_values().len() != size || load.imaginary.canonical_values().len() != size
+    {
         return Err(ModalHarmonicError::DimensionMismatch);
     }
     let matrix_size = size
@@ -84,8 +87,9 @@ fn solve_operators(
             .any(|value| !value.is_finite())
         || load
             .real
+            .canonical_values()
             .iter()
-            .chain(&load.imaginary)
+            .chain(load.imaginary.canonical_values())
             .any(|value| !value.is_finite())
     {
         return Err(ModalHarmonicError::NonFinite);
@@ -108,8 +112,8 @@ fn solve_operators(
             block[(size + row) * block_size + size + column] = real;
         }
     }
-    let mut right_hand_side = load.real.clone();
-    right_hand_side.extend_from_slice(&load.imaginary);
+    let mut right_hand_side = load.real.canonical_values().clone();
+    right_hand_side.extend_from_slice(load.imaginary.canonical_values());
     let solution =
         solve_square(&block, &right_hand_side, block_size).map_err(|error| match error {
             super::dense::DenseSolveError::DimensionMismatch => {
@@ -124,8 +128,10 @@ fn solve_operators(
         residual_metrics(&block, &solution, &right_hand_side, block_size);
     Ok(ModalHarmonicResponse {
         angular_frequency_rad_s,
-        displacement_real,
-        displacement_imaginary,
+        displacement_real: runmat_types::physical::Quantity::try_new(displacement_real)
+            .map_err(|_| ModalHarmonicError::NonFinite)?,
+        displacement_imaginary: runmat_types::physical::Quantity::try_new(displacement_imaginary)
+            .map_err(|_| ModalHarmonicError::NonFinite)?,
         residual_norm,
         relative_residual,
     })
@@ -166,7 +172,7 @@ mod tests {
     ) -> ModalHarmonicResponse {
         solve_operators(
             DenseHarmonicOperators {
-                size: load.real.len(),
+                size: load.real.canonical_values().len(),
                 stiffness,
                 mass,
                 damping,
@@ -185,12 +191,12 @@ mod tests {
             &[0.5],
             2.0,
             ModalHarmonicLoad {
-                real: vec![1.0],
-                imaginary: vec![0.0],
+                real: runmat_types::physical::Quantity::new(vec![1.0]),
+                imaginary: runmat_types::physical::Quantity::new(vec![0.0]),
             },
         );
-        assert!(response.displacement_real[0].abs() <= 1.0e-14);
-        assert!((response.displacement_imaginary[0] + 1.0).abs() <= 1.0e-14);
+        assert!(response.displacement_real.canonical_values()[0].abs() <= 1.0e-14);
+        assert!((response.displacement_imaginary.canonical_values()[0] + 1.0).abs() <= 1.0e-14);
         assert!(response.relative_residual <= 1.0e-15);
     }
 
@@ -202,12 +208,12 @@ mod tests {
             &[0.2, 0.1, 0.1, 0.3],
             1.5,
             ModalHarmonicLoad {
-                real: vec![1.0, 0.0],
-                imaginary: vec![0.0, 0.0],
+                real: runmat_types::physical::Quantity::new(vec![1.0, 0.0]),
+                imaginary: runmat_types::physical::Quantity::new(vec![0.0, 0.0]),
             },
         );
-        assert!(response.displacement_real[1].abs() > 1.0e-4);
-        assert!(response.displacement_imaginary[1].abs() > 1.0e-4);
+        assert!(response.displacement_real.canonical_values()[1].abs() > 1.0e-4);
+        assert!(response.displacement_imaginary.canonical_values()[1].abs() > 1.0e-4);
         assert!(response.relative_residual <= 1.0e-14);
     }
 }

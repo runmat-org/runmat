@@ -5,7 +5,7 @@ use runmat_geometry_core::{
     Ap242Association, Ap242AssociationTarget, Ap242Capability, Ap242CapabilityDisposition,
     Ap242CapabilityRecord, Ap242EngineeringProperty, Ap242EngineeringPropertyKind,
     Ap242EnvironmentCondition, Ap242ExchangeInventory, Ap242MaterialCandidate, Ap242MaterialClass,
-    Ap242Measure, Ap242Parameter, Ap242ParameterAccess, Ap242PhysicalDimension,
+    Ap242Measure, Ap242Parameter, Ap242ParameterAccess, QuantityKind,
 };
 use support::{source_module, TestHost};
 
@@ -45,8 +45,8 @@ geometry copy {
         .unwrap();
     let parameter = &imported.cad_parameters[0];
     assert_eq!(parameter.source.parameter_id, "parameter-wall");
-    assert_eq!(parameter.source.value.value_si, 0.008);
-    assert_eq!(parameter.source.value.source_unit, "mm");
+    assert_eq!(parameter.source.value.canonical_value(), 0.008);
+    assert_eq!(parameter.source.value.source_symbol(), "mm");
     let copy = program
         .geometries
         .values()
@@ -196,9 +196,18 @@ material cad_steel from geometry.part.cad_material("material-steel") {
 
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let material = program.materials.values().next().unwrap();
-    assert_eq!(material.mass_density_kg_per_m3, Some(7850.0));
     assert_eq!(
-        material.require_mechanical().unwrap().youngs_modulus_pa,
+        material
+            .mass_density_kg_per_m3
+            .map(|quantity| quantity.canonical_value()),
+        Some(7850.0)
+    );
+    assert_eq!(
+        material
+            .require_mechanical()
+            .unwrap()
+            .youngs_modulus_pa
+            .canonical_value(),
         200e9
     );
     let runmat_analysis_core::MaterialProvenance::ImportedCad(provenance) = &material.provenance
@@ -263,6 +272,9 @@ fn check(source: &str, host: &TestHost) -> CheckedFeaProgram {
 
 fn parameterized_geometry_inspection() -> GeometryInspection {
     GeometryInspection {
+        preview_extent_m: None,
+        named_selections: None,
+        unit_evidence: Default::default(),
         content_digest: SourceDigest([8; 32]),
         topology_digest: SourceDigest([9; 32]),
         capabilities: vec![
@@ -302,12 +314,16 @@ fn parameterized_geometry_inspection() -> GeometryInspection {
                 representation_entity_id: 12,
                 owner_entity_ids: vec![14],
                 persistent_id: Some("parameter-wall".to_string()),
-                value: Ap242Measure {
-                    dimension: Ap242PhysicalDimension::Length,
-                    value_si: 0.008,
-                    source_value: 8.0,
-                    source_unit: "mm".to_string(),
-                },
+                value: Ap242Measure::try_new(
+                    QuantityKind::Length,
+                    8.0,
+                    *runmat_geometry_core::LengthUnit::Millimeter.definition(),
+                    "mm",
+                    runmat_geometry_core::physical::UnitAttribution::FileDeclaration {
+                        context: "fixture parameter #11".into(),
+                    },
+                )
+                .unwrap(),
                 minimum: None,
                 maximum: None,
                 access: Ap242ParameterAccess::ReadOnly,
@@ -316,21 +332,21 @@ fn parameterized_geometry_inspection() -> GeometryInspection {
                 material_property(
                     "density",
                     Ap242EngineeringPropertyKind::MassDensity,
-                    Ap242PhysicalDimension::MassDensity,
+                    QuantityKind::MassDensity,
                     7850.0,
                     37,
                 ),
                 material_property(
                     "youngs",
                     Ap242EngineeringPropertyKind::YoungsModulus,
-                    Ap242PhysicalDimension::Pressure,
+                    QuantityKind::Pressure,
                     200e9,
                     47,
                 ),
                 material_property(
                     "poisson",
                     Ap242EngineeringPropertyKind::PoissonRatio,
-                    Ap242PhysicalDimension::Dimensionless,
+                    QuantityKind::Dimensionless,
                     0.3,
                     57,
                 ),
@@ -380,12 +396,16 @@ fn conditioned_geometry_inspection() -> GeometryInspection {
     for property in &mut inspection.exchange.as_mut().unwrap().engineering_properties {
         property.environment.push(Ap242EnvironmentCondition {
             name: "temperature".to_string(),
-            value: Ap242Measure {
-                dimension: Ap242PhysicalDimension::Temperature,
-                value_si: 293.15,
-                source_value: 293.15,
-                source_unit: "K".to_string(),
-            },
+            value: Ap242Measure::try_new(
+                QuantityKind::Temperature,
+                293.15,
+                runmat_geometry_core::physical::parse_unit_expression("K").unwrap(),
+                "K",
+                runmat_geometry_core::physical::UnitAttribution::FileDeclaration {
+                    context: "fixture temperature".into(),
+                },
+            )
+            .unwrap(),
         });
     }
     inspection
@@ -394,7 +414,7 @@ fn conditioned_geometry_inspection() -> GeometryInspection {
 fn material_property(
     id: &str,
     kind: Ap242EngineeringPropertyKind,
-    dimension: Ap242PhysicalDimension,
+    dimension: QuantityKind,
     value: f64,
     entity: u64,
 ) -> Ap242EngineeringProperty {
@@ -404,12 +424,14 @@ fn material_property(
         name: id.to_string(),
         source_entity_id: entity,
         representation_entity_id: entity + 1,
-        value: Ap242Measure {
+        value: Ap242Measure::from_canonical(
             dimension,
-            value_si: value,
-            source_value: value,
-            source_unit: "SI".to_string(),
-        },
+            value,
+            runmat_geometry_core::physical::UnitAttribution::FileDeclaration {
+                context: format!("fixture property #{entity}"),
+            },
+        )
+        .unwrap(),
         specification: None,
         environment: Vec::new(),
     }

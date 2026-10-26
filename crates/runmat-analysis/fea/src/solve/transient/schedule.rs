@@ -14,7 +14,7 @@ enum TransientStepBoundaryKind {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct TransientStepBoundary {
-    time_s: f64,
+    time_s: runmat_types::physical::Time,
     kind: TransientStepBoundaryKind,
 }
 
@@ -63,16 +63,23 @@ pub(crate) fn canonical_transient_step_boundaries(
             if !time_s.is_finite() || time_s < start_time_s || time_s > end_time_s {
                 return Err(TransientStepBoundaryError::OutsideDomain);
             }
-            boundaries.push(TransientStepBoundary { time_s, kind });
+            boundaries.push(TransientStepBoundary {
+                time_s: runmat_types::physical::Time::new(time_s),
+                kind,
+            });
         }
     }
-    boundaries.sort_by(|left, right| left.time_s.total_cmp(&right.time_s));
+    boundaries.sort_by(|left, right| {
+        left.time_s
+            .canonical_value()
+            .total_cmp(&right.time_s.canonical_value())
+    });
     let mut canonical: Vec<TransientStepBoundary> = Vec::with_capacity(boundaries.len());
     for boundary in boundaries {
-        if let Some(previous) = canonical
-            .last_mut()
-            .filter(|previous| previous.time_s.to_bits() == boundary.time_s.to_bits())
-        {
+        if let Some(previous) = canonical.last_mut().filter(|previous| {
+            previous.time_s.canonical_value().to_bits()
+                == boundary.time_s.canonical_value().to_bits()
+        }) {
             if boundary.kind == TransientStepBoundaryKind::SignalDiscontinuity {
                 previous.kind = boundary.kind;
             }
@@ -106,9 +113,10 @@ pub(super) fn next_step_boundary(
         proposed_end.min(final_time_s)
     };
     match step_boundaries.iter().copied().find(|boundary| {
-        boundary.time_s > current_time_s && boundary.time_s <= proposed_end + endpoint_tolerance
+        boundary.time_s.canonical_value() > current_time_s
+            && boundary.time_s.canonical_value() <= proposed_end + endpoint_tolerance
     }) {
-        Some(boundary) => (boundary.time_s, boundary.approach()),
+        Some(boundary) => (boundary.time_s.canonical_value(), boundary.approach()),
         None => (proposed_end, SignalSampleApproach::At),
     }
 }
@@ -128,7 +136,7 @@ pub(crate) fn canonical_transient_schedule(
     }
     let nominal_time_step_s = (end_time_s - start_time_s) / interval_count as f64;
     let mut points = vec![StructuralTransientSchedulePoint {
-        time_s: start_time_s,
+        time_s: runmat_types::physical::Time::new(start_time_s),
         arrival: StructuralTransientScheduleArrival::Initial,
         continuation: StructuralTransientContinuationApproach::At,
     }];
@@ -154,7 +162,7 @@ pub(crate) fn canonical_transient_schedule(
             }
         };
         points.push(StructuralTransientSchedulePoint {
-            time_s: next_time_s,
+            time_s: runmat_types::physical::Time::new(next_time_s),
             arrival,
             continuation,
         });
@@ -235,7 +243,11 @@ mod tests {
             schedule
                 .points
                 .iter()
-                .map(|point| (point.time_s, point.arrival, point.continuation))
+                .map(|point| (
+                    point.time_s.canonical_value(),
+                    point.arrival,
+                    point.continuation
+                ))
                 .collect::<Vec<_>>(),
             vec![
                 (

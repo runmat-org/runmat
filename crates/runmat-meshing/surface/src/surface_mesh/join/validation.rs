@@ -78,7 +78,7 @@ pub(in crate::surface_mesh) fn validate(
     let mut triangle_ids = Vec::with_capacity(result.triangles.len());
     for face in faces() {
         checkpoint(control)?;
-        chord = chord.max(face.maximum_chordal_deviation_m);
+        chord = chord.max(face.maximum_chordal_deviation_m.canonical_value());
         normal = normal.max(face.maximum_normal_deviation_rad);
         for node in &face.nodes {
             checkpoint(control)?;
@@ -100,7 +100,7 @@ pub(in crate::surface_mesh) fn validate(
     }
     if triangles.next().is_some()
         || boundaries.next().is_some()
-        || chord != result.maximum_chordal_deviation_m
+        || chord != result.maximum_chordal_deviation_m.canonical_value()
         || normal != result.maximum_normal_deviation_rad
     {
         return Err(invalid(
@@ -148,7 +148,7 @@ pub(in crate::surface_mesh) fn validate(
             ));
         }
         let mut uses = actual.uses.iter();
-        let mut tolerance = options.coordinate_tolerance_m;
+        let mut tolerance = options.coordinate_tolerance_m.canonical_value();
         for (_, node) in &nodes[start..end] {
             checkpoint(control)?;
             tolerance = node
@@ -156,7 +156,7 @@ pub(in crate::surface_mesh) fn validate(
                 .iter()
                 .flat_map(|usage| &usage.exact_edge_parameters)
                 .filter_map(|parameter| tolerances.get(&parameter.source_edge_id))
-                .fold(tolerance, |value, local| value.max(*local));
+                .fold(tolerance, |value, local| value.max(local.canonical_value()));
             if distance(first.point_m, node.point_m) > tolerance {
                 return Err(invalid(
                     "original shared node coordinates exceed the admitted tolerance",

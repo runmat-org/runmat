@@ -50,6 +50,8 @@ pub struct FigureSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct FigureScene {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry_physical_context: Option<crate::geometry_scene::GeometryPhysicalContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry_overlay: Option<crate::geometry_scene::GeometrySceneOverlay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub geometry_lines: Vec<GeometryLines>,
@@ -726,7 +728,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 6;
+    pub const SCHEMA_VERSION: u32 = 7;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -739,6 +741,7 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
@@ -774,6 +777,7 @@ impl FigureScene {
         Ok(Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
@@ -801,6 +805,7 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: scene.overlay.clone(),
+            geometry_physical_context: scene.physical_context.clone(),
             geometry_lines: scene
                 .chunks
                 .iter()
@@ -900,6 +905,7 @@ impl FigureScene {
         let mut scene = crate::GeometryScene::new(scene_id, revision, chunks);
         scene.title = self.metadata.title;
         scene.overlay = self.geometry_overlay;
+        scene.physical_context = self.geometry_physical_context;
         scene.show_grid = self.metadata.grid_enabled;
         scene.axis_equal = self.metadata.axis_equal;
         Ok(scene)
@@ -4433,6 +4439,7 @@ mod tests {
         let scene = FigureScene {
             schema_version: FigureScene::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
@@ -5536,6 +5543,7 @@ mod tests {
         let scene = FigureScene {
             schema_version: FigureScene::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,

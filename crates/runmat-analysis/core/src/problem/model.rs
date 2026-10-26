@@ -1,4 +1,3 @@
-use runmat_geometry_core::UnitSystem;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -37,7 +36,8 @@ pub struct AnalysisModel {
     pub model_id: AnalysisModelId,
     pub geometry_id: String,
     pub geometry_revision: u32,
-    pub units: UnitSystem,
+    pub units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::CanonicalCoordinates>,
     pub frame: CoordinateFrame,
     pub materials: Vec<MaterialModel>,
     #[serde(default)]
@@ -105,7 +105,8 @@ pub struct SolverAnalysisModel<'a> {
     pub model_id: &'a AnalysisModelId,
     pub geometry_id: &'a str,
     pub geometry_revision: u32,
-    pub units: UnitSystem,
+    pub units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::CanonicalCoordinates>,
     pub frame: &'a CoordinateFrame,
     pub materials: SolverMaterials<'a>,
     pub material_assignments: SolverMaterialAssignments<'a>,

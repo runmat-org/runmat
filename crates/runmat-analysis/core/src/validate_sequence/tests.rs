@@ -1,5 +1,3 @@
-use runmat_geometry_core::UnitSystem;
-
 use super::validate_sequence;
 use crate::{
     ActivationLifecycle, AnalysisBoundary, AnalysisModel, AnalysisModelId, AnalysisProcedure,
@@ -21,7 +19,7 @@ fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
         model_id: AnalysisModelId("model".into()),
         geometry_id: "geometry".into(),
         geometry_revision: 1,
-        units: UnitSystem::Meter,
+        units: runmat_types::physical::CoordinateUnits::canonical(),
         frame: CoordinateFrame::Global,
         materials: Vec::new(),
         material_assignments: Vec::new(),
@@ -141,7 +139,7 @@ fn modal_response_requires_typed_existing_spectrum_ids() {
     let mut model = model_with_steps(vec![step.clone()]);
     model.response_spectra.push(ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("design".into()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![1.0, 10.0])),
         ordinates: crate::NumericalDataSource::authored(vec![1.0, 1.0], "sha256:design"),
         damping: SpectrumDamping::Ratio(0.05),
         response: SpectrumResponse::RelativeDisplacement,

@@ -4,6 +4,48 @@ use runmat_runtime::call::descriptor::CallableDescriptor;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+/// Private names belong to the actual calling definition, not the registry's
+/// global name index. Retained callers reuse that definition's existing lease.
+struct CallerNames<'a> {
+    registry: &'a FunctionRegistry,
+    caller: Option<runmat_hir::FunctionId>,
+}
+
+impl<'a> CallerNames<'a> {
+    fn capture(
+        runtime: &runmat_runtime::context::RuntimeContext,
+        registry: &'a FunctionRegistry,
+    ) -> Self {
+        let _scope = runtime.enter();
+        Self {
+            registry,
+            caller: runmat_runtime::user_functions::current_active_semantic_function()
+                .map(runmat_hir::FunctionId),
+        }
+    }
+}
+
+impl runmat_runtime::call::descriptor::FunctionNameResolver for CallerNames<'_> {
+    fn resolve_function(&self, name: &str) -> Option<runmat_types::FunctionId> {
+        self.caller
+            .and_then(|caller| self.registry.resolve_private_name_for_caller(caller, name))
+            .or_else(|| self.registry.resolve_name(name))
+    }
+
+    fn resolve_bound_function(&self, name: &str) -> Option<runmat_value::BoundFunctionBinding> {
+        self.caller.and_then(|caller| {
+            self.registry
+                .scoped_private_binding_for_caller(caller, name)
+        })
+    }
+
+    fn name_resolution_completeness(
+        &self,
+    ) -> runmat_runtime::call::descriptor::NameResolutionCompleteness {
+        runmat_runtime::call::descriptor::NameResolutionCompleteness::Complete
+    }
+}
+
 pub enum FevalDispatch {
     Completed(runmat_runtime::execution::RootedValueSequence),
 }
@@ -26,7 +68,7 @@ pub async fn execute_feval_retained(
         func_val,
         Vec::new(),
         requested_outputs,
-        function_registry,
+        &CallerNames::capture(runtime, function_registry),
     )
     .with_retained_arguments(args)?;
     Ok(FevalDispatch::Completed(
@@ -46,8 +88,12 @@ pub async fn execute_feval(
     function_registry: &FunctionRegistry,
 ) -> Result<FevalDispatch, RuntimeError> {
     let _roots = crate::call::root_values(args.iter().chain(std::iter::once(&func_val)))?;
-    let descriptor =
-        CallableDescriptor::from_feval_value(func_val, args, requested_outputs, function_registry);
+    let descriptor = CallableDescriptor::from_feval_value(
+        func_val,
+        args,
+        requested_outputs,
+        &CallerNames::capture(runtime, function_registry),
+    );
     Ok(FevalDispatch::Completed(
         execute_callable_descriptor(runtime, descriptor).await?,
     ))

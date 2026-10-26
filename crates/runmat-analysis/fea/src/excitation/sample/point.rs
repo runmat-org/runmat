@@ -80,7 +80,7 @@ pub(crate) fn initial_signal_sample_point<Q>(
     }
     match representation {
         SignalRepresentation::Tabulated(table) => match &table.domain {
-            TabulatedSignalDomain::StudyParameter { parameter_id }
+            TabulatedSignalDomain::StudyParameter { parameter_id, .. }
                 if !parameter_id.trim().is_empty() =>
             {
                 Ok(ExcitationSamplePoint::StudyParameter {

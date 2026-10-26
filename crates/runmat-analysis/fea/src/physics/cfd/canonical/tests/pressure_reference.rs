@@ -65,8 +65,11 @@ fn verify_original_pressure(acceleration: Option<crate::solve::fixed_point::Ande
     // The Fourier boundary solution is independent of this dimensional scaling.
     f.policy.fixed_point_acceleration = acceleration;
     let scale = 1e-5;
-    f.material.density.kilograms_per_cubic_meter *= scale;
-    f.material.dynamic_viscosity.pascal_seconds *= scale;
+    f.material.density =
+        runmat_types::physical::Quantity::new(f.material.density.canonical_value() * (scale));
+    f.material.dynamic_viscosity = runmat_types::physical::Quantity::new(
+        f.material.dynamic_viscosity.canonical_value() * (scale),
+    );
     let PhysicalSignal::BodyForceDensity(signal) = &mut f.signals[0] else {
         panic!("original duct force authority");
     };
@@ -91,20 +94,22 @@ fn verify_original_pressure(acceleration: Option<crate::solve::fixed_point::Ande
     let shifted = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let pressure = original
         .pressure_pa
+        .canonical_values()
         .iter()
         .map(|v| reference + v)
         .collect::<Vec<_>>();
     let lost = original
         .pressure_pa
+        .canonical_values()
         .iter()
         .zip(&pressure)
         .map(|(a, b)| (a - (b - reference)).abs())
         .fold(0.0, f64::max);
     let residual = recovery::evaluate(
         &shifted,
-        &original.velocity_m_per_s,
-        &original.pressure_fluctuation_pa,
-        &original.face_volume_flux_m3_per_s,
+        original.velocity_m_per_s.canonical_values(),
+        original.pressure_fluctuation_pa.canonical_values(),
+        original.face_volume_flux_m3_per_s.canonical_values(),
     )
     .unwrap();
     let worst =
@@ -113,7 +118,10 @@ fn verify_original_pressure(acceleration: Option<crate::solve::fixed_point::Ande
         worst(&baseline), worst(&residual), baseline.flux_constitutive_relative,
         residual.flux_constitutive_relative);
     assert!(lost > 0.0);
-    assert_eq!(residual.cell_momentum_n, baseline.cell_momentum_n);
+    assert_eq!(
+        residual.cell_momentum_n.canonical_values(),
+        baseline.cell_momentum_n.canonical_values()
+    );
     assert_eq!(
         residual.cell_momentum_relative,
         baseline.cell_momentum_relative
@@ -125,18 +133,21 @@ fn verify_original_pressure(acceleration: Option<crate::solve::fixed_point::Ande
     assert!(residual.accepted(f.policy.physical_relative_tolerance));
 
     let fresh = shifted.solve().unwrap();
-    assert_eq!(fresh.velocity_m_per_s, original.velocity_m_per_s);
     assert_eq!(
-        fresh.face_volume_flux_m3_per_s,
-        original.face_volume_flux_m3_per_s
+        fresh.velocity_m_per_s.canonical_values(),
+        original.velocity_m_per_s.canonical_values()
     );
     assert_eq!(
-        fresh.pressure_fluctuation_pa,
-        original.pressure_fluctuation_pa
+        fresh.face_volume_flux_m3_per_s.canonical_values(),
+        original.face_volume_flux_m3_per_s.canonical_values()
+    );
+    assert_eq!(
+        fresh.pressure_fluctuation_pa.canonical_values(),
+        original.pressure_fluctuation_pa.canonical_values()
     );
     assert_eq!(fresh.outer_iterations, original.outer_iterations);
     assert_eq!(fresh.linear_iterations, original.linear_iterations);
-    assert_eq!(fresh.pressure_pa, pressure);
+    assert_eq!(fresh.pressure_pa.canonical_values().as_slice(), pressure);
     let encoded = serde_json::to_vec(&fresh).unwrap();
     let cold: CanonicalFluidResult = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(cold, fresh);
@@ -145,10 +156,18 @@ fn verify_original_pressure(acceleration: Option<crate::solve::fixed_point::Ande
 
     // Rounding of the public absolute projection must never erase authority.
     let mut reconstructed = cold.clone();
-    reconstructed.pressure_fluctuation_pa = pressure.iter().map(|v| v - reference).collect();
+    reconstructed.pressure_fluctuation_pa = runmat_types::physical::Quantity::new(
+        pressure.iter().map(|v| v - reference).collect::<Vec<_>>(),
+    );
     assert!(shifted.recover(&reconstructed).is_err());
     let mut substituted = cold.clone();
-    substituted.pressure_pa[0] += 1.0;
+    substituted.pressure_pa = substituted
+        .pressure_pa
+        .try_map_canonical_storage(|mut values| {
+            values[0] += 1.0;
+            values
+        })
+        .unwrap();
     assert!(shifted.recover(&substituted).is_err());
     let mut missing = serde_json::to_value(&cold).unwrap();
     missing

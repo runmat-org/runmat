@@ -1,7 +1,7 @@
 //! Indexed triangle mesh plot primitive.
 
 use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
-use glam::{Vec3, Vec4};
+use glam::{DVec3, Vec3, Vec4};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -606,17 +606,19 @@ impl MeshPlot {
             match field.location {
                 MeshFieldLocation::Vertex => {
                     for (index, vector) in field.vectors.iter().enumerate().step_by(stride) {
-                        if vector.length_squared() <= f32::EPSILON {
+                        if !vector.is_finite() || *vector == Vec3::ZERO {
                             continue;
                         }
                         let start = vertices_source[index];
+                        let end = start + *vector * field.scale;
+                        if !start.is_finite() || !end.is_finite() { continue; }
                         vertices.push(Vertex::new(start, color));
-                        vertices.push(Vertex::new(start + *vector * field.scale, color));
+                        vertices.push(Vertex::new(end, color));
                     }
                 }
                 MeshFieldLocation::Triangle => {
                     for (index, vector) in field.vectors.iter().enumerate().step_by(stride) {
-                        if vector.length_squared() <= f32::EPSILON {
+                        if !vector.is_finite() || *vector == Vec3::ZERO {
                             continue;
                         }
                         let triangle = self.triangles[index];
@@ -624,8 +626,10 @@ impl MeshPlot {
                             + vertices_source[triangle[1] as usize]
                             + vertices_source[triangle[2] as usize])
                             / 3.0;
+                        let end = start + *vector * field.scale;
+                        if !start.is_finite() || !end.is_finite() { continue; }
                         vertices.push(Vertex::new(start, color));
-                        vertices.push(Vertex::new(start + *vector * field.scale, color));
+                        vertices.push(Vertex::new(end, color));
                     }
                 }
             }
@@ -1202,30 +1206,24 @@ fn colormap_color(name: &str, t: f32, alpha: f32) -> Vec4 {
 }
 
 fn vertex_normals(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<Vec3> {
-    let mut normals = vec![Vec3::ZERO; vertices.len()];
+    // Area weighting must not depend on the mesh's coordinate unit. Squared
+    // triangle areas in meters can be far below f32::EPSILON on valid CAD.
+    // Accumulate in f64 to retain tiny faces and avoid overflow on large ones.
+    let mut normals = vec![DVec3::ZERO; vertices.len()];
     for &[a, b, c] in triangles {
-        let ia = a as usize;
-        let ib = b as usize;
-        let ic = c as usize;
-        let edge_ab = vertices[ib] - vertices[ia];
-        let edge_ac = vertices[ic] - vertices[ia];
-        let normal = edge_ab.cross(edge_ac);
-        if normal.length_squared() > f32::EPSILON {
+        let [ia, ib, ic] = [a as usize, b as usize, c as usize];
+        let origin = vertices[ia].as_dvec3();
+        let normal = (vertices[ib].as_dvec3() - origin)
+            .cross(vertices[ic].as_dvec3() - origin);
+        if normal.is_finite() {
             normals[ia] += normal;
             normals[ib] += normal;
             normals[ic] += normal;
         }
     }
-    normals
-        .into_iter()
-        .map(|normal| {
-            if normal.length_squared() > f32::EPSILON {
-                normal.normalize()
-            } else {
-                Vec3::Z
-            }
-        })
-        .collect()
+    normals.into_iter().map(|normal| {
+        normal.try_normalize().map_or(Vec3::Z, |normal| normal.as_vec3())
+    }).collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1431,4 +1429,39 @@ mod tests {
         assert_eq!(render.indices.as_ref().unwrap().len(), 6);
         assert_eq!(render.vertices[2].color, [0.0, 0.0, 1.0, 1.0]);
     }
+    #[test]
+    fn vertex_normals_preserve_orientation_across_coordinate_scales() {
+        for scale in [1.0e-9, 1.0e-3, 1.0, 1.0e9] {
+            let vertices = [Vec3::ZERO, Vec3::Y * scale, Vec3::Z * scale];
+            for normal in vertex_normals(&vertices, &[[0, 1, 2]]) {
+                assert!((normal - Vec3::X).length() < 1.0e-6, "scale {scale}: {normal:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn vertex_normals_keep_area_weighting_and_finite_degenerate_fallback() {
+        let vertices = [Vec3::ZERO, Vec3::Y, Vec3::Z, Vec3::X * 2.0];
+        let normals = vertex_normals(&vertices, &[[0, 1, 2], [0, 2, 3], [0, 0, 0]]);
+        assert!((normals[0] - Vec3::new(1.0, 2.0, 0.0).normalize()).length() < 1.0e-6);
+        assert_eq!(vertex_normals(&[Vec3::ZERO], &[[0, 0, 0]]), vec![Vec3::Z]);
+    }
+
+    #[test]
+    fn small_vectors_remain_visible_after_display_scaling() {
+        for location in [MeshFieldLocation::Vertex, MeshFieldLocation::Triangle] {
+            let mut mesh = square_mesh();
+            let count = match location { MeshFieldLocation::Vertex => 4, MeshFieldLocation::Triangle => 2 };
+            let mut field = MeshVectorField::new("displacement", location, vec![Vec3::X * 1.0e-6; count]);
+            field.scale = 1.0e6;
+            mesh.set_vector_field(Some(field)).expect("valid vector field");
+            let data = mesh.vector_render_data().expect("small vectors must render");
+            assert_eq!(data.vertices.len(), count * 2);
+            for segment in data.vertices.chunks_exact(2) {
+                let displacement = Vec3::from_array(segment[1].position) - Vec3::from_array(segment[0].position);
+                assert!((displacement - Vec3::X).length() < 1.0e-6);
+            }
+        }
+    }
+
 }

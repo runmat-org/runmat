@@ -56,7 +56,8 @@ impl<'a> PreparedVertexRemoval<'a> {
         if self.topology.nodes.iter().enumerate().any(|(index, node)| {
             index != self.source_index
                 && (node.identity == replacement.identity
-                    || node.coordinates_m == replacement.coordinates_m)
+                    || node.coordinates_m.canonical_value()
+                        == replacement.coordinates_m.canonical_value())
         }) {
             return Ok(None);
         }
@@ -207,8 +208,11 @@ fn convex_delaunay_refill(
         .boundary_faces
         .iter()
         .map(|face| {
-            face.node_ids
-                .map(|index| topology.nodes[index as usize].coordinates_m)
+            face.node_ids.map(|index| {
+                topology.nodes[index as usize]
+                    .coordinates_m
+                    .canonical_value()
+            })
         })
         .collect::<Vec<_>>();
     let admitted = local
@@ -217,7 +221,7 @@ fn convex_delaunay_refill(
         .filter(|tetrahedron| {
             let points = tetrahedron
                 .vertex_indices
-                .map(|index| local.nodes[index as usize].coordinates_m);
+                .map(|index| local.nodes[index as usize].coordinates_m.canonical_value());
             point_in_closed_triangle_surface(
                 tetrahedron_centroid(points),
                 &boundary_triangles,

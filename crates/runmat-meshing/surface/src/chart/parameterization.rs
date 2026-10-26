@@ -207,7 +207,12 @@ pub(super) fn build_singular_parameterization(
             let derivatives = evaluator
                 .derivatives(evaluator_id, uv, control)
                 .map_err(|error| geometry_error(boundary, error))?;
-            if derivatives.point_m.iter().any(|value| !value.is_finite()) {
+            if derivatives
+                .point_m
+                .canonical_values()
+                .iter()
+                .any(|value| !value.is_finite())
+            {
                 return Err(invalid(
                     boundary,
                     "singular chart boundary point is not finite",
@@ -215,8 +220,9 @@ pub(super) fn build_singular_parameterization(
             }
             if is_singular(&derivatives) {
                 if singular_point.is_some_and(|point| {
-                    squared_distance(point, derivatives.point_m)
-                        > options.projection_tolerance_m * options.projection_tolerance_m
+                    squared_distance(point, *derivatives.point_m.canonical_values())
+                        > options.projection_tolerance_m.canonical_value()
+                            * options.projection_tolerance_m.canonical_value()
                 }) {
                     return Err(ExactFaceChartError::new(
                         ExactFaceChartErrorKind::RequiresMultipleCharts,
@@ -224,7 +230,7 @@ pub(super) fn build_singular_parameterization(
                         "one chart cannot contain multiple surface singularities",
                     ));
                 }
-                singular_point.get_or_insert(derivatives.point_m);
+                singular_point.get_or_insert(*derivatives.point_m.canonical_values());
                 singular_samples.push(uv);
             }
             samples.push(uv);
@@ -266,8 +272,9 @@ pub(super) fn build_singular_parameterization(
             segment.node_uv[endpoint] = if let Some((canonical_point, canonical_coordinates)) =
                 canonical_nodes.get(&node_id)
             {
-                if squared_distance(point, *canonical_point)
-                    > options.projection_tolerance_m * options.projection_tolerance_m
+                if squared_distance(point.canonical_value(), *canonical_point)
+                    > options.projection_tolerance_m.canonical_value()
+                        * options.projection_tolerance_m.canonical_value()
                 {
                     return Err(ExactFaceChartError::new(
                         ExactFaceChartErrorKind::InvalidInput,
@@ -277,7 +284,7 @@ pub(super) fn build_singular_parameterization(
                 }
                 *canonical_coordinates
             } else {
-                canonical_nodes.insert(node_id, (point, coordinates));
+                canonical_nodes.insert(node_id, (point.canonical_value(), coordinates));
                 coordinates
             };
         }
@@ -425,8 +432,23 @@ fn remove_collapsed_degenerate_segments(
 }
 
 pub(super) fn is_singular(derivatives: &SurfaceDerivatives) -> bool {
-    let area = norm(cross(derivatives.du_m, derivatives.dv_m));
-    let scale = norm(derivatives.du_m) * norm(derivatives.dv_m);
+    let area = norm(cross(
+        derivatives
+            .du_m
+            .with_canonical_storage(|values, _axes| *values),
+        derivatives
+            .dv_m
+            .with_canonical_storage(|values, _axes| *values),
+    ));
+    let scale = norm(
+        derivatives
+            .du_m
+            .with_canonical_storage(|values, _axes| *values),
+    ) * norm(
+        derivatives
+            .dv_m
+            .with_canonical_storage(|values, _axes| *values),
+    );
     area.is_finite() && area <= f64::EPSILON.sqrt() * scale.max(1.0)
 }
 

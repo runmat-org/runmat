@@ -1,3 +1,4 @@
+export * from "./physical.js";
 export * from "./generated/fea-analysis-contracts.js";
 export * from "./generated/fea-semantic-contracts.js";
 export * from "./generated/fea-workspace-contracts.js";

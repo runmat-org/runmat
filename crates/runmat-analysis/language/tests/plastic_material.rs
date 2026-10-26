@@ -25,8 +25,8 @@ fn authored_j2_lowers_dimensional_parameters_without_inference() {
     assert_eq!(
         program.materials.values().next().unwrap().plastic,
         Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: 250e6,
-            isotropic_hardening_modulus_pa: 1e9,
+            yield_stress_pa: runmat_types::physical::Quantity::<runmat_types::physical::kind::YieldStress,_>::new(250e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::Quantity::<runmat_types::physical::kind::HardeningModulus,_>::new(1e9),
         })
     );
     let perfect = check(&LAW.replace("1 GPa", "0 Pa"), ELASTIC);

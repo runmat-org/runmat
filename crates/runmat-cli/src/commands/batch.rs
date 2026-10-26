@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_program_batch,
-    execute_graph_batch, prepare_batch_driver, BatchDriverInvocation, BatchSubmission,
-    LocalJobRecord, LocalJobState, LocalSupervisorClient,
+    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_graph_batch,
+    execute_and_complete_program_batch, execute_graph_batch, prepare_batch_driver,
+    BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState, LocalSupervisorClient,
 };
 use runmat_execution_runner_native::WorkerResponse;
 use runmat_process_host::environment::EnvironmentPolicy;
@@ -144,6 +144,26 @@ pub async fn run_driver() -> std::process::ExitCode {
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
             );
             return if success {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::from(1)
+            };
+        }
+        BatchDriverInvocation::GraphTask {
+            attempt,
+            submission,
+            lease,
+            ..
+        } => {
+            let execution =
+                match execute_and_complete_graph_batch(*attempt, *submission, *lease).await {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        eprintln!("runmat Graph batch driver failed: {error}");
+                        return std::process::ExitCode::from(1);
+                    }
+                };
+            return if matches!(execution.response, WorkerResponse::GraphSuccess { .. }) {
                 std::process::ExitCode::SUCCESS
             } else {
                 std::process::ExitCode::from(1)

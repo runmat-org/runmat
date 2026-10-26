@@ -144,10 +144,12 @@ pub(in crate::cdt) fn recovered_segment_midpoint(
         .expect("validated segment chain");
     let first_coordinates = find_node(&recovery.topology, first.identity)
         .ok_or_else(|| invalid_segment_node(segment.constraint_index))?
-        .coordinates_m;
+        .coordinates_m
+        .canonical_value();
     let last_coordinates = find_node(&recovery.topology, last.identity)
         .ok_or_else(|| invalid_segment_node(segment.constraint_index))?
-        .coordinates_m;
+        .coordinates_m
+        .canonical_value();
     let context = SegmentContext {
         constraint_index: segment.constraint_index,
         first_identity: first.identity,
@@ -177,7 +179,14 @@ pub(in crate::cdt) fn recovered_segment_midpoint(
     Ok((
         DelaunayVolumeNode {
             identity,
-            coordinates_m: interpolate(first_coordinates, last_coordinates, midpoint.parameter()?),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(interpolate(
+                first_coordinates,
+                last_coordinates,
+                midpoint.parameter()?,
+            )),
             construction: Point3Construction::Segment {
                 endpoints: [first_coordinates, last_coordinates],
                 parameter_numerator: midpoint.numerator,
@@ -415,8 +424,8 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment(
         constraint_index,
         first_identity: first.identity,
         last_identity: last.identity,
-        first_coordinates: first.coordinates_m,
-        last_coordinates: last.coordinates_m,
+        first_coordinates: first.coordinates_m.canonical_value(),
+        last_coordinates: last.coordinates_m.canonical_value(),
     };
     let original_identities = topology
         .nodes

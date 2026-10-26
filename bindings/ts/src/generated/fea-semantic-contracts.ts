@@ -6,6 +6,10 @@ export interface Acceleration {
   meters_per_second_squared: number;
 }
 
+export interface AccelerationPowerSpectralDensity {
+  square_meters_per_cubic_second: number;
+}
+
 export type AccelerationSignalId = SignalId;
 
 export type AcceleratorPreference = "disabled"
@@ -61,6 +65,10 @@ export type AccuracyTolerance = { relative: number }
   canonical_value: number;
 } };
 
+export interface AcousticIntensity {
+  watts_per_square_meter: number;
+}
+
 export type ActivationLifecycle = "activate"
   | { continue: {
   from_step: ProcedureStepId;
@@ -93,8 +101,16 @@ export interface AnalysisSequence {
   branches: SequenceBranch[];
 }
 
+export interface Angle {
+  radians: number;
+}
+
 export interface AngularAcceleration {
   radians_per_second_squared: number;
+}
+
+export interface AngularFrequency {
+  radians_per_second: number;
 }
 
 export interface AngularVelocity {
@@ -194,12 +210,7 @@ export interface Ap242MaterialCandidate {
 export type Ap242MaterialClass = "physical"
   | "visual";
 
-export interface Ap242Measure {
-  dimension: Ap242PhysicalDimension;
-  value_si: number;
-  source_value: number;
-  source_unit: string;
-}
+export type Ap242Measure = SourceQuantity;
 
 export interface Ap242Parameter {
   parameter_id: string;
@@ -232,33 +243,18 @@ export type Ap242PersistentIdRole = "product"
   | "property"
   | "material";
 
-export type Ap242PhysicalDimension = "dimensionless"
-  | "length"
-  | "plane_angle"
-  | "area"
-  | "volume"
-  | "time"
-  | "mass"
-  | "mass_density"
-  | "temperature"
-  | "pressure"
-  | "force"
-  | "energy"
-  | "power"
-  | "thermal_conductivity"
-  | "specific_heat"
-  | "inverse_temperature"
-  | "electrical_conductivity"
-  | "acoustic_impedance"
-  | "dynamic_viscosity"
-  | "electric_potential"
-  | "electric_current"
-  | "magnetic_flux_density";
-
 export interface Ap242UnsupportedConcept {
   entity_type: string;
   entity_ids: number[];
   reason: string;
+}
+
+export interface ApparentPower {
+  volt_amperes: number;
+}
+
+export interface Area {
+  square_meters: number;
 }
 
 export type AssessmentEvidenceRequirement = "authored_samples"
@@ -284,10 +280,7 @@ export type AssessmentIssue = "invalid_definition"
   | "function_execution_unavailable"
   | "function_evidence_unavailable";
 
-export interface AssessmentQuantity {
-  value_si: number;
-  dimension: PhysicalDimension;
-}
+export type AssessmentQuantity = DimensionedScalar;
 
 export interface AssessmentResult {
   assessment_id: string;
@@ -601,7 +594,7 @@ export type AuthoredInputType = { kind: "boolean" }
   | { kind: "real" }
   | { kind: "complex" }
   | { kind: "string" }
-  | { kind: "quantity"; detail: QuantityDimension }
+  | { kind: "quantity"; detail: DynamicDimension }
   | { kind: "material" }
   | { kind: "region"; detail: GeometryRegionRole };
 
@@ -613,10 +606,7 @@ export type AuthoredInputValue = { kind: "boolean"; value: boolean }
   imaginary: number;
 } }
   | { kind: "string"; value: string }
-  | { kind: "quantity"; value: {
-  dimension: QuantityDimension;
-  value_si: number;
-} }
+  | { kind: "quantity"; value: DimensionedScalar }
   | { kind: "material"; value: AuthoredMaterialRef }
   | { kind: "region"; value: GeometryRegionRef };
 
@@ -730,6 +720,12 @@ export interface AuthoredNumericExpression {
 export type AuthoredNumericExpressionKind = {
   value: number;
 kind: "literal" }
+  | {
+  value: AuthoredNumericExpression;
+  unit: UnitDefinition;
+  semantic_kind?: QuantityKind;
+  source_unit_symbol: string;
+kind: "quantity" }
   | {
   input: AuthoredModelInputRef;
 kind: "model_input" }
@@ -1197,6 +1193,10 @@ export interface ComplexSpectralDensity {
   imaginary: number;
 }
 
+export interface Compressibility {
+  per_pascal: number;
+}
+
 export type CompressionPolicy = "lossless"
   | { error_bounded: {
   maximum_relative_error: number;
@@ -1234,8 +1234,16 @@ export interface CrossPowerSpectralDensity {
   values: ComplexSpectralDensity[];
 }
 
+export interface Curvature {
+  per_meter: number;
+}
+
 export interface Damping {
   newton_seconds_per_meter: number;
+}
+
+export interface DampingRatio {
+  ratio: number;
 }
 
 export interface DerivedGeometryDefinition {
@@ -1268,6 +1276,19 @@ export type DiagnosticSeverity = "info"
   | "warning"
   | "error";
 
+export interface DimensionedQuantityWire<S> {
+  dimension: PhysicalDimension;
+  angle_power?: number;
+  semantic_kind?: QuantityKind;
+  value_si: S;
+}
+
+export type DimensionedScalar = DimensionedQuantityWire<number>;
+
+export interface Dimensionless {
+  ratio: number;
+}
+
 export interface Direction {
   vector: [number, number, number];
 }
@@ -1281,6 +1302,12 @@ export type DirectionalCombination = "srss"
 
 export interface Displacement {
   meters: number;
+}
+
+export interface DynamicDimension {
+  dimension: PhysicalDimension;
+  angle_power?: number;
+  semantic_kind?: QuantityKind;
 }
 
 export interface DynamicViscosity {
@@ -1303,8 +1330,24 @@ export interface ElectricCurrentDensity {
   amperes_per_square_meter: number;
 }
 
+export interface ElectricDisplacement {
+  coulombs_per_square_meter: number;
+}
+
+export interface ElectricField {
+  volts_per_meter: number;
+}
+
+export interface ElectricPermittivity {
+  farads_per_meter: number;
+}
+
 export interface ElectricPotential {
   volts: number;
+}
+
+export interface ElectricalConductivity {
+  siemens_per_meter: number;
 }
 
 export type ElectromagneticDomain = { static: {
@@ -1319,6 +1362,14 @@ export type ElectromagneticDomain = { static: {
 
 export type ElementOrder = "tet4"
   | "tet10";
+
+export interface Energy {
+  joules: number;
+}
+
+export interface EnergyDensity {
+  joules_per_cubic_meter: number;
+}
 
 export type EntityDimension = "point"
   | "edge"
@@ -1451,6 +1502,12 @@ kind: "study" }
   sweep_id: string;
 kind: "sweep" };
 
+export interface FeaGeometryPreview {
+  modulePath: string;
+  geometryId: string;
+  sourcePath: string;
+}
+
 export type FeaModelMemberKind = "section"
   | "layup"
   | "orientation"
@@ -1562,6 +1619,7 @@ export interface FeaSourceCheckResult {
   rootModule: string;
   program: FeaSemanticProgram;
   sourceIndex: FeaSourceIndex;
+  geometryPreviews?: FeaGeometryPreview[];
   diagnostics: FeaDiagnostic[];
 }
 
@@ -1712,6 +1770,7 @@ export type GeneratorDomain = "time_seconds"
   | "frequency_hertz"
   | { study_parameter: {
   parameter_id: string;
+  quantity: DynamicDimension | null;
 } };
 
 export type GeneratorEffectPolicy = "pure"
@@ -1731,6 +1790,10 @@ export interface GeneratorProvenance {
   project_revision: string;
   callable_id: string;
   frozen_input_digest: string;
+}
+
+export interface GeometricVolumeSecondMoment {
+  meters_fifth: number;
 }
 
 export interface GeometryAuthoringCapabilities {
@@ -1861,6 +1924,12 @@ export interface GeometryFeatureRegionSelection {
   cardinality: GeometryRegionCardinality;
 }
 
+export interface GeometryNamedSelections {
+  schema_version: number;
+  source_digest: GeometryDigest;
+  regions: GeometryRegionDefinition[];
+}
+
 export interface GeometryParameterDefinition {
   parameter_id: string;
   parameter_type: GeometryParameterType;
@@ -1873,6 +1942,7 @@ export type GeometryParameterType = "boolean"
   | "length"
   | "angle"
   | "vector3"
+  | { quantity_vector3: DynamicDimension }
   | "text";
 
 export type GeometryRegionCardinality = "exactly_one"
@@ -1900,7 +1970,6 @@ export type GeometryRegionRole = "vertex"
 
 export type GeometryRegionSelector = { kind: "name"; value: string }
   | { kind: "tag"; value: string }
-  | { kind: "source_alias"; value: string }
   | { kind: "persistent_id"; value: string }
   | { kind: "result" }
   | { kind: "feature_result"; value: GeometryFeatureRef }
@@ -1911,8 +1980,24 @@ export type GeometryScalarExpression = {
   value: number;
 kind: "literal" }
   | {
+  value: DimensionedScalar;
+kind: "canonical" }
+  | {
+  value: GeometryScalarExpression;
+  unit: UnitDefinition;
+  source_unit_symbol: string;
+  semantic_kind: QuantityKind | null;
+kind: "quantity" }
+  | {
+  value: SourceQuantity;
+kind: "source_measure" }
+  | {
   name: string;
 kind: "parameter" }
+  | {
+  name: string;
+  component: number;
+kind: "parameter_component" }
   | {
   value: GeometryScalarExpression;
 kind: "negate" }
@@ -1935,6 +2020,14 @@ export type GeometrySourceFormat = "step"
   | "obj"
   | "ply"
   | "gltf";
+
+export interface HardeningModulus {
+  pascals: number;
+}
+
+export interface HeatCapacity {
+  joules_per_kelvin: number;
+}
 
 export interface HeatFlux {
   watts_per_square_meter: number;
@@ -1962,10 +2055,7 @@ export interface HomogeneousShellSection {
 
 export interface ImportedCadEnvironmentCondition {
   name: string;
-  dimension: PhysicalDimension;
-  value_si: number;
-  source_value: number;
-  source_unit: string;
+  value: SourceQuantity;
 }
 
 export interface ImportedCadMaterialAssociation {
@@ -1986,10 +2076,7 @@ export interface ImportedCadMaterialProperty {
   source_name: string;
   source_entity_id: number;
   representation_entity_id: number;
-  dimension: PhysicalDimension;
-  value_si: number;
-  source_value: number;
-  source_unit: string;
+  value: SourceQuantity;
   specification: string | null;
   environment: ImportedCadEnvironmentCondition[];
 }
@@ -2025,9 +2112,11 @@ export interface ImportedFunctionIdentity {
 }
 
 export interface ImportedGeometryDefinition {
+  named_selections?: GeometryNamedSelections;
   logical_path: string;
   format: GeometrySourceFormat;
-  units: UnitSystem;
+  unit_fallback: LengthUnit | null;
+  unit_evidence: LengthUnitEvidence;
   content_digest: GeometryDigest;
   topology_digest: GeometryDigest;
   capabilities: GeometryAuthoringCapabilities;
@@ -2106,8 +2195,59 @@ export type InitialValue<Q> = { uniform: Q }
 } }
   | { field_artifact: InitialFieldArtifactRef };
 
+export interface InverseTemperature {
+  per_kelvin: number;
+}
+
 export interface Length {
   meters: number;
+}
+
+export type LengthUnit = UnitDefinitionWire;
+
+export interface LengthUnitDeclaration {
+  context: string;
+  source_symbol: string;
+  unit: LengthUnit;
+}
+
+export type LengthUnitEvidence = {
+  reason: string;
+status: "missing" }
+  | {
+  contexts: LengthUnitDeclaration[];
+status: "declared" }
+  | {
+  contexts: string[];
+  reason: string;
+status: "unsupported" }
+  | {
+  contexts: LengthUnitDeclaration[];
+  reason: string;
+status: "conflicting" }
+  | {
+  format: string;
+  declaration: LengthUnitDeclaration;
+status: "format_convention" }
+  | {
+  declaration: LengthUnitDeclaration;
+  source: string;
+status: "explicit_fallback" };
+
+export interface MagneticFieldIntensity {
+  amperes_per_meter: number;
+}
+
+export interface MagneticFlux {
+  webers: number;
+}
+
+export interface MagneticFluxDensity {
+  teslas: number;
+}
+
+export interface MagneticPermeability {
+  henries_per_meter: number;
 }
 
 export interface MagneticVectorPotential {
@@ -2115,6 +2255,10 @@ export interface MagneticVectorPotential {
 }
 
 export type MagnetostaticFormulation = "magnetic_vector_potential";
+
+export interface Mass {
+  kilograms: number;
+}
 
 export interface MassDensity {
   kilograms_per_cubic_meter: number;
@@ -2499,29 +2643,7 @@ export interface PhysicalDimension {
   information: number;
 }
 
-export type PhysicalQuantityKind = "displacement"
-  | "rotation"
-  | "velocity"
-  | "acceleration"
-  | "angular_velocity"
-  | "angular_acceleration"
-  | "force"
-  | "moment"
-  | "traction"
-  | "pressure"
-  | "body_force_density"
-  | "temperature"
-  | "temperature_difference"
-  | "heat_flux"
-  | "heat_generation_density"
-  | "electric_potential"
-  | "electric_current"
-  | "electric_charge"
-  | "electric_current_density"
-  | "electric_charge_density"
-  | "magnetic_vector_potential"
-  | "mass_flow_rate"
-  | "volume_flow_rate";
+export type PhysicalQuantityKind = QuantityKind;
 
 export type PhysicalSignal = { displacement: Signal<Displacement> }
   | { rotation: Signal<Rotation> }
@@ -2563,8 +2685,16 @@ kind: "cluster" };
 export type PlyOrderDirection = "along_surface_normal"
   | "opposite_surface_normal";
 
+export interface PoissonRatio {
+  ratio: number;
+}
+
 export interface Position {
   meters: [number, number, number];
+}
+
+export interface Power {
+  watts: number;
 }
 
 export type PrescribedValue<T> = { constant: T }
@@ -2624,27 +2754,94 @@ export interface PublishedStudyReassessment {
   evidence_artifact_path: string;
 }
 
-export type QuantityDimension = "Dimensionless"
-  | "Length"
-  | "Area"
-  | "Volume"
-  | "Time"
-  | "Frequency"
-  | "Mass"
-  | "Density"
-  | "Temperature"
-  | "Velocity"
-  | "Acceleration"
-  | "Force"
-  | "Moment"
-  | "Pressure"
-  | "Energy"
-  | "Power"
-  | "HeatFlux"
-  | "ThermalConductivity"
-  | "ElectricPotential"
-  | "ElectricCurrent"
-  | "MagneticFluxDensity";
+export type QuantityKind = "length"
+  | "displacement"
+  | "position"
+  | "translation"
+  | "rotation"
+  | "complex_phase"
+  | "temperature"
+  | "temperature_difference"
+  | "pressure"
+  | "electric_potential"
+  | "electric_current"
+  | "electric_charge"
+  | "magnetic_vector_potential"
+  | "velocity"
+  | "acceleration_power_spectral_density"
+  | "acceleration"
+  | "angular_velocity"
+  | "angular_acceleration"
+  | "force"
+  | "moment"
+  | "traction"
+  | "body_force_density"
+  | "heat_flux"
+  | "heat_generation_density"
+  | "heat_transfer_coefficient"
+  | "surface_emissivity"
+  | "specific_acoustic_impedance"
+  | "mass_flow_rate"
+  | "volume_flow_rate"
+  | "electric_current_density"
+  | "electric_charge_density"
+  | "stiffness"
+  | "damping"
+  | "foundation_modulus"
+  | "rayleigh_mass_coefficient"
+  | "rayleigh_stiffness_coefficient"
+  | "thermal_contact_resistance"
+  | "friction_coefficient"
+  | "frequency"
+  | "angular_frequency"
+  | "mass_density"
+  | "dynamic_viscosity"
+  | "turbulence_intensity"
+  | "area"
+  | "volume"
+  | "second_moment_of_area"
+  | "geometric_volume_second_moment"
+  | "surface_energy_density"
+  | "traction_displacement_stiffness"
+  | "curvature"
+  | "time_derivative_rate"
+  | "time"
+  | "mass"
+  | "energy"
+  | "power"
+  | "thermal_conductivity"
+  | "specific_heat"
+  | "inverse_temperature"
+  | "electrical_conductivity"
+  | "electric_permittivity"
+  | "magnetic_permeability"
+  | "energy_density"
+  | "temperature_gradient"
+  | "volumetric_heat_capacity"
+  | "heat_capacity"
+  | "thermal_conductance"
+  | "electric_displacement"
+  | "magnetic_field_intensity"
+  | "magnetic_flux"
+  | "acoustic_intensity"
+  | "compressibility"
+  | "reactive_power"
+  | "apparent_power"
+  | "electric_field"
+  | "magnetic_flux_density"
+  | "dimensionless"
+  | "angle"
+  | "youngs_modulus"
+  | "poisson_ratio"
+  | "thermal_expansion"
+  | "speed_of_sound"
+  | "damping_ratio"
+  | "relative_permittivity"
+  | "relative_permeability"
+  | "yield_stress"
+  | "hardening_modulus"
+  | "shear_modulus"
+  | "shear_correction";
 
 export type RandomDistribution = "uniform"
   | "normal"
@@ -2689,6 +2886,10 @@ export interface RayleighMassCoefficient {
 
 export interface RayleighStiffnessCoefficient {
   seconds: number;
+}
+
+export interface ReactivePower {
+  vars: number;
 }
 
 export type RecoveredFieldSample = { domain: "final" }
@@ -2739,6 +2940,14 @@ export interface RegionTarget {
   entity_dimension: EntityDimension;
   expected_topology: ExpectedTopology;
   cardinality: TargetCardinality;
+}
+
+export interface RelativePermeability {
+  ratio: number;
+}
+
+export interface RelativePermittivity {
+  ratio: number;
 }
 
 export type RequiredAccuracyEvidence = "aposteriori_estimator"
@@ -2843,6 +3052,10 @@ export interface ScalarObservationEvidence {
   entity: ObservationEntity | null;
 }
 
+export interface SecondMomentOfArea {
+  meters_fourth: number;
+}
+
 export interface SequenceBranch {
   branch_id: SequenceBranchId;
   producer_step: ProcedureStepId;
@@ -2882,6 +3095,14 @@ export type SeriesReduction = "none"
 
 export type SeriesWeighting = "uniform_samples"
   | "trapezoidal_independent_domain";
+
+export interface ShearCorrection {
+  ratio: number;
+}
+
+export interface ShearModulus {
+  pascals: number;
+}
 
 export type ShellReferenceSurface = { kind: "mid_surface" }
   | { kind: "first_ply_surface" }
@@ -2925,6 +3146,7 @@ export type SignalArtifactDomain = "constant"
 } }
   | { study_parameter: {
   parameter_id: string;
+  quantity: DynamicDimension | null;
   start: number;
   end: number;
 } };
@@ -3043,6 +3265,21 @@ export type SolverObservationEvent = "first_yield"
 
 export type SourceDigest = [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
 
+export interface SourceMeasure<K> {
+  source_value: number;
+  source_unit_symbol: string;
+  source_unit: Unit<K>;
+  attribution: UnitAttribution;
+}
+
+export interface SourceQuantity {
+  kind: QuantityKind;
+  source_value: number;
+  source_unit: UnitDefinition;
+  source_symbol: string;
+  attribution: UnitAttribution;
+}
+
 export type SpatialReduction = "none"
   | "integral"
   | "average"
@@ -3057,6 +3294,10 @@ export type SpatialReduction = "none"
 
 export interface SpecificAcousticImpedance {
   pascal_seconds_per_meter: number;
+}
+
+export interface SpecificHeat {
+  joules_per_kilogram_kelvin: number;
 }
 
 export type SpectralDensityConvention = "one_sided_per_hertz";
@@ -3100,6 +3341,10 @@ export type SpectrumResponse = "relative_displacement"
   | "absolute_acceleration"
   | "pseudo_velocity"
   | "pseudo_acceleration";
+
+export interface SpeedOfSound {
+  meters_per_second: number;
+}
 
 export interface SphericalFrame {
   frame_id: string;
@@ -3250,6 +3495,10 @@ export interface SurfaceEmissivity {
   fraction: number;
 }
 
+export interface SurfaceEnergyDensity {
+  joules_per_square_meter: number;
+}
+
 export type SweepAxisCombination = "product"
   | "zip";
 
@@ -3267,6 +3516,7 @@ export type TabulatedSignalDomain = "time_seconds"
   | "frequency_hertz"
   | { study_parameter: {
   parameter_id: string;
+  quantity: DynamicDimension | null;
 } };
 
 export type TargetCardinality = "one"
@@ -3280,6 +3530,18 @@ export interface TemperatureDifference {
   kelvin: number;
 }
 
+export interface TemperatureGradient {
+  kelvin_per_meter: number;
+}
+
+export interface ThermalConductance {
+  watts_per_kelvin: number;
+}
+
+export interface ThermalConductivity {
+  watts_per_meter_kelvin: number;
+}
+
 export interface ThermalContactResistance {
   square_meter_kelvin_per_watt: number;
 }
@@ -3288,8 +3550,20 @@ export interface ThermalDomain {
   reference_temperature: Temperature;
 }
 
+export interface ThermalExpansion {
+  per_kelvin: number;
+}
+
 export interface ThermoMechanicalDomain {
   reference_temperature: Temperature;
+}
+
+export interface Time {
+  seconds: number;
+}
+
+export interface TimeDerivativeRate {
+  per_second: number;
 }
 
 export type TopologyTransitionPolicy = "require_identical"
@@ -3298,6 +3572,10 @@ export type TopologyTransitionPolicy = "require_identical"
 
 export interface Traction {
   pascals: number;
+}
+
+export interface TractionDisplacementStiffness {
+  pascals_per_meter: number;
 }
 
 export type TransitionId = string;
@@ -3317,18 +3595,58 @@ export interface TubularBeamSection {
   inner_radius_m: number;
 }
 
+export interface TurbulenceIntensity {
+  ratio: number;
+}
+
 export type UnavailableEvidencePolicy = "fail"
   | "mark_indeterminate_experimental";
 
-export type UnitSystem = "unspecified"
-  | "meter"
-  | "millimeter"
-  | "inch";
+export interface Unit<K> {
+  definition: UnitDefinition;
+}
+
+export type UnitAttribution = {
+  context: string;
+kind: "file_declaration" }
+  | {
+  source: string;
+kind: "authored" }
+  | {
+  source: string;
+  reason: string;
+kind: "explicit_override" }
+  | { kind: "canonical_computation" };
+
+export type UnitDefinition = UnitDefinitionWire;
+
+export interface UnitDefinitionWire {
+  dimension: PhysicalDimension;
+  scale: number;
+  offset: number;
+  angle_power?: number;
+}
 
 export interface Velocity {
   meters_per_second: number;
 }
 
+export interface Volume {
+  cubic_meters: number;
+}
+
 export interface VolumeFlowRate {
   cubic_meters_per_second: number;
+}
+
+export interface VolumetricHeatCapacity {
+  joules_per_cubic_meter_kelvin: number;
+}
+
+export interface YieldStress {
+  pascals: number;
+}
+
+export interface YoungsModulus {
+  pascals: number;
 }

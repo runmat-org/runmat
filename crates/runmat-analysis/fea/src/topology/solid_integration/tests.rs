@@ -88,7 +88,17 @@ fn changed_rule_mesh_or_decoded_inventory_is_rejected() {
     );
     let mut other_mesh = mesh.clone();
     for node in &mut other_mesh.topology.nodes {
-        node.coordinates_m[0] += 0.25;
+        {
+            let quantity_change = 0.25;
+            let quantity_index = 0;
+            let quantity_slot = &mut node.coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
     }
     other_mesh.seal_canonical_digest().unwrap();
     assert_eq!(

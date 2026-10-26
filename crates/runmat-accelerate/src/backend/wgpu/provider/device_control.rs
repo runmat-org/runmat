@@ -113,10 +113,7 @@ impl ProviderDeviceControl for WgpuProvider {
         // The bounded progress channel/job slot is provider-owned backing
         // present before the request; only these request allocations can
         // outlive readiness. Do not charge a second copy of shared state.
-        ExactShared::<Completion>::requested_bytes()
-            .checked_add(std::mem::size_of::<FundedCompletion>())?
-            .try_into()
-            .ok()
+        FundedCompletion::host_bytes()
     }
     fn reset_host_bytes(&self, scope: DeviceAllocationScope) -> Option<u64> {
         self.control_host_bytes()?
@@ -135,13 +132,11 @@ impl ProviderDeviceControl for WgpuProvider {
         }
     }
     fn control_host_bytes(&self) -> Option<u64> {
-        ExactShared::<Completion>::requested_bytes()
-            .checked_add(std::mem::size_of_val(&self.control_device(None, None)))?
-            // The progress owner retains this exact callback through physical
-            // completion, including when the awaiting future is cancelled.
-            .checked_add(std::mem::size_of::<FundedCompletion>())?
-            .try_into()
-            .ok()
+        // Completion retains the callback through physical exit, including
+        // cancellation. Quote that backing once, together with this future.
+        FundedCompletion::host_bytes()?.checked_add(
+            u64::try_from(std::mem::size_of_val(&self.control_device(None, None))).ok()?,
+        )
     }
     fn wait_for_device(
         &self,

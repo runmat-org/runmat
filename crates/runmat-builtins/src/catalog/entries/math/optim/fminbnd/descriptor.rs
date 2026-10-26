@@ -328,7 +328,7 @@ pub const FMINBND_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtens
     id: "fminbnd-resident-fallback",
     mode: BuiltinExtensionMode::RunMatOnly,
     description:
-        "fminbnd with provider-resident numeric input or callback output is a RunMat extension",
+        "fminbnd with explicitly GPU-resident numeric input or callback output is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:FminbndResidentExtension"),
 };
 pub const FMINBND_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [

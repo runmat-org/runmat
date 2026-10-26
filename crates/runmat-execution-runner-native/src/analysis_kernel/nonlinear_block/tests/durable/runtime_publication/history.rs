@@ -178,7 +178,7 @@ fn verify_layered(
         .nodes
         .iter()
         .flat_map(|n| {
-            let x = n.coordinates_m[0];
+            let x = n.coordinates_m.canonical_value()[0];
             [
                 references[0].0 * x.min(0.5) + references[1].0 * (x - 0.5).max(0.0),
                 0.0,

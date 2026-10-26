@@ -118,7 +118,8 @@ fn candidate(
         [ids[0], ids[1], StableDigest::ZERO, StableDigest::ZERO],
         &region,
     )?;
-    let points = [a, b, opposite[0], opposite[1]].map(|i| topology.nodes[i as usize].coordinates_m);
+    let points = [a, b, opposite[0], opposite[1]]
+        .map(|i| topology.nodes[i as usize].coordinates_m.canonical_value());
     let Some(upper) = math::edge_star_upper_bound(points, metric) else {
         return Ok(None);
     };

@@ -2,7 +2,7 @@ use crate::{
     resolve_logical_path, FeaDiagnostic, FunctionRequest, LogicalPathError, LogicalSourcePath,
     SourceDigest, SourceIdentityError, SourceModule, SourceSymbol,
 };
-use runmat_parser::fea::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
+use runmat_fea_syntax::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,6 +42,22 @@ impl FeaModuleGraph {
                 .into_iter()
                 .map(|request| request.module_path),
         );
+        for (module_path, module) in &self.modules {
+            for item in module.syntax.iter().flat_map(|s| &s.items) {
+                let FeaModuleItem::Declaration(decl) = item else { continue; };
+                if decl.kind != runmat_fea_syntax::FeaDeclarationKind::Geometry { continue; }
+                for statement in &decl.body.statements {
+                    let runmat_fea_syntax::FeaStatementKind::Assignment {target, value, ..} = &statement.kind else { continue; };
+                    if target.segments.len() != 1 || target.segments[0].text != "file" { continue; }
+                    let runmat_fea_syntax::FeaExpressionKind::String(relative) = &value.kind else { continue; };
+                    let cad = resolve_logical_path(&self.source_root, module_path, relative)?;
+                    if let Ok(metadata) = runmat_geometry_core::geometry_selection_metadata_path(cad.as_str()) {
+                        paths.insert(LogicalSourcePath::file(metadata)?);
+                    }
+                    paths.insert(cad);
+                }
+            }
+        }
         Ok(paths)
     }
     pub fn is_valid(&self) -> bool {

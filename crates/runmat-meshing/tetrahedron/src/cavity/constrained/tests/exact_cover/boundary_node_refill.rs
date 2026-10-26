@@ -10,23 +10,32 @@ fn boundary_node_exact_cover_supports_bounded_multi_ring_bipyramid() {
             let angle = std::f64::consts::TAU * node_id as f64 / ring_count as f64;
             ConstrainedCavityNode {
                 node_id,
-                coordinates_m: [angle.cos(), angle.sin(), 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([angle.cos(), angle.sin(), 0.0]),
             }
         })
         .collect::<Vec<_>>();
     nodes.push(ConstrainedCavityNode {
         node_id: top_node_id,
-        coordinates_m: [0.0, 0.0, 1.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.0, 0.0, 1.0,
+            ]),
     });
     nodes.push(ConstrainedCavityNode {
         node_id: bottom_node_id,
-        coordinates_m: [0.0, 0.0, -1.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.0, 0.0, -1.0,
+            ]),
     });
 
     let options = refill_options();
     let node_map = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut boundary_faces = Vec::<ConstrainedCavityBoundaryFace>::new();
     let mut expected_tetrahedra = Vec::<ConstrainedCavityRefillTetrahedron>::new();

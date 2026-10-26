@@ -37,7 +37,7 @@ fn local_cap_apex_candidates_include_optimized_normal_offsets() {
             nodes[&face[0]],
             nodes[&face[1]],
             nodes[&face[2]],
-            candidate.coordinates_m,
+            candidate.coordinates_m.canonical_value(),
         ])
     };
     let best_discrete_positive = candidates
@@ -87,11 +87,11 @@ fn local_cap_apex_candidates_include_inplane_inward_offsets() {
     assert!(!inplane_candidates.is_empty());
     assert!(!optimized_candidates.is_empty());
     assert!(inplane_candidates.iter().any(|candidate| {
-        candidate.coordinates_m[2] > surface_point[2]
-            && (candidate.coordinates_m[0] - surface_point[0]).abs() > 1.0e-6
+        candidate.coordinates_m.canonical_value()[2] > surface_point[2]
+            && (candidate.coordinates_m.canonical_value()[0] - surface_point[0]).abs() > 1.0e-6
     }));
     assert!(optimized_candidates.iter().any(|candidate| {
-        candidate.coordinates_m[2] > surface_point[2]
-            && (candidate.coordinates_m[0] - surface_point[0]).abs() > 1.0e-6
+        candidate.coordinates_m.canonical_value()[2] > surface_point[2]
+            && (candidate.coordinates_m.canonical_value()[0] - surface_point[0]).abs() > 1.0e-6
     }));
 }

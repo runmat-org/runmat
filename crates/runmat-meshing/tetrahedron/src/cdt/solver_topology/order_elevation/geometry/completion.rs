@@ -46,7 +46,7 @@ pub(super) fn complete_boundary_surface_parameters(
         let parameter = curve_parameter(node, id)?;
         for uv in pcurve_uvs(id, parameter, &usage, evaluation)? {
             let point = evaluate_surface(&usage, uv, evaluation, options)?;
-            require_matching_points(input, node.coordinates_m, point)?;
+            require_matching_points(input, node.coordinates_m.canonical_value(), point)?;
             insert_surface_parameter(node, &usage, uv, retained)?;
         }
     }
@@ -139,7 +139,7 @@ fn derive_surface_parameters(
     let source_nodes = &evaluation.sources.nodes;
     if source_nodes
         .get(&node.stable_identity)
-        .is_some_and(|source| source.point_m == node.coordinates_m)
+        .is_some_and(|source| source.point_m == node.coordinates_m.canonical_value())
         && node.exact_parameters.iter().any(|parameter| {
             matches!(parameter,
             SolverNodeExactParameter::Surface { source_face_id, chart_id, .. }
@@ -168,7 +168,7 @@ fn derive_surface_parameters(
         }))?;
     evaluation.sources.triangle_candidates(
         surface_use,
-        node.coordinates_m,
+        node.coordinates_m.canonical_value(),
         query_control,
         triangle_candidates,
     )?;
@@ -188,9 +188,18 @@ fn derive_surface_parameters(
             .request
             .tolerance
             .source_tolerance_m
-            .max(input.request.tolerance.absolute_floor_m)
-            .max(input.request.tolerance.maximum_healing_displacement_m);
-        let Some(weights) = triangle_coordinates(points, node.coordinates_m, tolerance_m) else {
+            .canonical_value()
+            .max(input.request.tolerance.absolute_floor_m.canonical_value())
+            .max(
+                input
+                    .request
+                    .tolerance
+                    .maximum_healing_displacement_m
+                    .canonical_value(),
+            );
+        let Some(weights) =
+            triangle_coordinates(points, node.coordinates_m.canonical_value(), tolerance_m)
+        else {
             continue;
         };
         let matching = |candidate: &&runmat_meshing_surface::ExactFaceMeshNodeUse| {

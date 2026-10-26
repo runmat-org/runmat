@@ -23,6 +23,42 @@ pub struct CheckedFeaSessionSource {
 }
 
 impl CheckedFeaSessionSource {
+    /// Canonical source/program identity shared by every execution host.
+    pub fn program_revision(&self) -> Result<runmat_execution::ProgramRevision, String> {
+        let (graph, source_digest) = match self.frozen_project() {
+            Some(project) => (
+                runmat_execution::Digest::from_bytes(*project.graph_digest().bytes()),
+                runmat_execution::Digest::from_bytes(*project.source_revision().bytes()),
+            ),
+            None => {
+                let mut graph = Vec::new();
+                for (path, digest) in self.program.bound.graph.source_digests() {
+                    graph.extend_from_slice(path.as_str().as_bytes());
+                    graph.push(0);
+                    graph.extend_from_slice(&digest.0);
+                }
+                graph.extend_from_slice(&self.check_result().revision.0);
+                let root = self
+                    .program
+                    .bound
+                    .graph
+                    .modules
+                    .get(&self.root_module)
+                    .ok_or_else(|| "checked root module is absent".to_string())?;
+                (
+                    runmat_execution::Digest::sha256(graph),
+                    runmat_execution::Digest::from_bytes(root.source.source_digest.0),
+                )
+            }
+        };
+        runmat_execution::ProgramRevision::new(
+            graph,
+            source_digest,
+            self.program_environment().clone(),
+        )
+        .map_err(|error| error.to_string())
+    }
+
     /// The complete immutable view used for candidate checking, when present.
     /// Materialization must not fall back to live files if a capture lacks a path.
     pub fn captured_sources(&self) -> Option<&std::collections::BTreeMap<PathBuf, Vec<u8>>> {
@@ -146,6 +182,14 @@ impl RunMatSession {
         };
         let requests = prepared.requests(functions.clone(), profiles.clone())?;
         for request in requests.geometry {
+            let metadata = runmat_geometry_core::geometry_selection_metadata_path(request.logical_path.as_str()).map_err(|e| e.to_string())?;
+            let logical = LogicalSourcePath::file(metadata).map_err(|e| e.to_string())?;
+            let path = runmat_runtime::analysis::physical_source_path(&source_root, &logical).map_err(|e| e.to_string())?;
+            match runmat_filesystem::read_async(&path).await {
+                Ok(bytes) => prepared.add_geometry(logical, bytes)?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => return Err(format!("Cannot read saved geometry selections: {e}")),
+            }
             let physical_path =
                 runmat_runtime::analysis::physical_source_path(&source_root, &request.logical_path)
                     .map_err(|error| error.to_string())?;

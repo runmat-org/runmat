@@ -519,14 +519,28 @@ pub fn resolve_object_index_protocol(
     op: ObjectIndexOp,
     caller_function_name: Option<&str>,
 ) -> Result<crate::object::protocol::ProtocolResolution, RuntimeError> {
+    resolve_object_index_protocol_with_access(base, op, caller_function_name, None)
+}
+
+pub(crate) fn resolve_object_index_protocol_with_access(
+    base: &Value,
+    op: ObjectIndexOp,
+    caller_function_name: Option<&str>,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
+) -> Result<crate::object::protocol::ProtocolResolution, RuntimeError> {
     let protocol = match op {
         ObjectIndexOp::Subsref => crate::object::protocol::ObjectProtocol::Subsref,
         ObjectIndexOp::Subsasgn => crate::object::protocol::ObjectProtocol::Subsasgn,
     };
-    let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
-        caller_function_name,
-    );
-    crate::object::protocol::resolve_object_protocol(base, protocol, &access)
+    match access {
+        Some(access) => crate::object::protocol::resolve_object_protocol(base, protocol, access),
+        None => {
+            let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
+                caller_function_name,
+            );
+            crate::object::protocol::resolve_object_protocol(base, protocol, &access)
+        }
+    }
 }
 
 pub async fn invoke_resolved_object_index_path_method(

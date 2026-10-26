@@ -129,7 +129,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             .acoustic
             .as_mut()
             .unwrap()
-            .damping_ratio = 0.01;
+            .damping_ratio = runmat_types::physical::DampingRatio::new(0.01);
         let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
             study: &fixture.study,
             geometry: &fixture.geometry,
@@ -263,10 +263,13 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
         random_excitations: Vec::new(),
         initial_conditions: Vec::new(),
     };
-    let source = GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+    let source = GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
+        preview_extent_m: None,
+        named_selections: None,
+        unit_evidence: geometry.source.unit_evidence.clone(),
         logical_path: "tests/acoustic-tetrahedron.step".into(),
         format: geometry.source.format,
-        units: geometry.source.source_units,
+        unit_fallback: geometry.source.unit_evidence.uniform_unit(),
         content_digest: geometry.source.content_digest,
         topology_digest: GeometryDigest::from_bytes([91; 32]),
         capabilities: GeometryAuthoringCapabilities {
@@ -275,7 +278,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
             ..Default::default()
         },
         exchange: None,
-    });
+    }));
     let study = RealizedStudy {
         module_path: MODULE.into(),
         study_id: "acoustic_cell".into(),
@@ -332,13 +335,13 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
             material_id: "fluid".into(),
             name: "Test fluid".into(),
             provenance: MaterialProvenance::Authored,
-            mass_density_kg_per_m3: Some(3.0),
+            mass_density_kg_per_m3: (Some(3.0)).map(runmat_types::physical::MassDensity::new),
             elasticity: None,
             damping: None,
             thermal: None,
             acoustic: Some(MaterialAcousticModel {
-                speed_of_sound_m_per_s: 2.0,
-                damping_ratio: 0.0,
+                speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+                damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
             }),
             electrical: None,
             plastic: None,

@@ -12,9 +12,8 @@ use super::{
 macro_rules! scalar_action {
     ($signal:expr, $variant:path, $field:ident, $sample:expr) => {
         match $signal {
-            $variant(signal) => {
-                sample_signal(signal, $sample, |value| value.$field).and_then(expect_scalar)
-            }
+            $variant(signal) => sample_signal(signal, $sample, |value| value.canonical_value())
+                .and_then(expect_scalar),
             _ => Err(quantity_mismatch()),
         }
     };
@@ -23,9 +22,8 @@ macro_rules! scalar_action {
 macro_rules! vector_action {
     ($signal:expr, $variant:path, $field:ident, $sample:expr) => {
         match $signal {
-            $variant(signal) => {
-                sample_signal(signal, $sample, |value| value.$field).and_then(expect_vector3)
-            }
+            $variant(signal) => sample_signal(signal, $sample, |value| value.canonical_value())
+                .and_then(expect_vector3),
             _ => Err(quantity_mismatch()),
         }
     };
@@ -34,11 +32,10 @@ macro_rules! vector_action {
 macro_rules! directional_vector_action {
     ($action:expr, $signal:expr, $variant:path, $field:ident, $sample:expr) => {
         match $signal {
-            $variant(signal) => {
-                sample_signal(signal, $sample, |value| value.$field).and_then(|value| {
+            $variant(signal) => sample_signal(signal, $sample, |value| value.canonical_value())
+                .and_then(|value| {
                     expect_vector3_or_direction(value, $action.excitation().direction)
-                })
-            }
+                }),
             _ => Err(quantity_mismatch()),
         }
     };
@@ -85,7 +82,7 @@ pub(super) fn realize_kind(
             RealizedExcitationKind::BodyForceField(super::field::NodalVectorField::sample(
                 signal,
                 sample,
-                |value| value.newtons_per_cubic_meter,
+                |value| value.canonical_value(),
             )?)
         }
         ExcitationAction::BodyForce(_) => RealizedExcitationKind::BodyForce(vector_action!(
@@ -114,7 +111,7 @@ pub(super) fn realize_kind(
             RealizedExcitationKind::HeatGenerationField(super::field::ElementScalarField::sample(
                 signal,
                 sample,
-                |value| value.watts_per_cubic_meter,
+                |value| value.canonical_value(),
             )?)
         }
         ExcitationAction::HeatGeneration(_) => {

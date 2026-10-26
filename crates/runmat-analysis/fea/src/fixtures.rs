@@ -20,7 +20,7 @@ use runmat_analysis_core::{
 };
 #[cfg(test)]
 use runmat_analysis_core::{ElectricPotential, Position, ReferencePoint, Temperature, Traction};
-use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind, UnitSystem};
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
 #[derive(Debug, Clone)]
 pub(crate) struct FixtureExcitation {
@@ -69,7 +69,10 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
         nodes: vec![
             StructuralNode {
                 node_id: 101,
-                coordinates_m: attached_coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(attached_coordinates_m),
                 solid_attachment: Some(ConformalSolidAttachment::GeometryVertex {
                     entity: PersistentEntityId {
                         kind: PersistentEntityKind::Vertex,
@@ -80,11 +83,14 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
             },
             StructuralNode {
                 node_id: 102,
-                coordinates_m: [
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([
                     attached_coordinates_m[0] + 1.0,
                     attached_coordinates_m[1],
                     attached_coordinates_m[2],
-                ],
+                ]),
                 solid_attachment: None,
             },
         ],
@@ -99,13 +105,33 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
         }],
         beam_sections: vec![BeamSectionModel {
             section_id: "rect".into(),
-            area_m2: 1.0e-4,
-            iy_m4: 1.0e-9,
-            iz_m4: 1.0e-9,
-            torsion_j_m4: 1.0e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.01,
-            torsion_outer_radius_m: 0.01,
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area, _>::new(
+                1.0e-4,
+            ),
+            iy_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(1.0e-9),
+            iz_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(1.0e-9),
+            torsion_j_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(1.0e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.01),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.01),
         }],
         shell_sections: Vec::new(),
     });
@@ -171,20 +197,26 @@ pub fn mixed_solid_beam_shell_model(attached_coordinates_m: [f64; 3]) -> Analysi
     structural.nodes.extend([
         StructuralNode {
             node_id: 103,
-            coordinates_m: [
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
                 attached_coordinates_m[0],
                 attached_coordinates_m[1] + 1.0,
                 attached_coordinates_m[2],
-            ],
+            ]),
             solid_attachment: None,
         },
         StructuralNode {
             node_id: 104,
-            coordinates_m: [
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
                 attached_coordinates_m[0],
                 attached_coordinates_m[1],
                 attached_coordinates_m[2] + 1.0,
-            ],
+            ]),
             solid_attachment: None,
         },
     ]);
@@ -202,7 +234,7 @@ pub fn mixed_solid_beam_shell_model(attached_coordinates_m: [f64; 3]) -> Analysi
         .push(ShellSectionModel::Homogeneous(
             HomogeneousShellSectionModel {
                 section_id: "skin_2mm".into(),
-                thickness_m: 0.002,
+                thickness_m: runmat_types::physical::Length::new(0.002),
                 reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                 shear_correction: 5.0 / 6.0,
             },
@@ -666,20 +698,24 @@ fn isotropic_material(
         material_id: material_id.to_string(),
         name: name.to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3: Some(mass_density_kg_per_m3),
+        mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(
+            mass_density_kg_per_m3,
+        )),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
-                youngs_modulus_pa,
-                poisson_ratio,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(youngs_modulus_pa),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(poisson_ratio),
             },
         )),
         damping: None,
         thermal: Some(MaterialThermalModel {
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k,
-            conductivity_w_per_mk: 45.0,
-            specific_heat_j_per_kgk: 500.0,
-            expansion_coefficient_per_k: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(
+                modulus_temp_coeff_per_k,
+            ),
+            conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(45.0),
+            specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(500.0),
+            expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(1.2e-5),
         }),
         acoustic: None,
         electrical: None,
@@ -692,7 +728,7 @@ fn cantilever_linear_static() -> AnalysisModel {
         model_id: AnalysisModelId("cantilever".to_string()),
         geometry_id: "geo:cantilever".to_string(),
         geometry_revision: 1,
-        units: UnitSystem::Meter,
+        units: runmat_types::physical::CoordinateUnits::canonical(),
         frame: CoordinateFrame::Global,
         materials: vec![isotropic_material(
             "mat_steel",
@@ -900,17 +936,26 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
         nodes: vec![
             StructuralNode {
                 node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
-                coordinates_m: [1.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([1.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 3,
-                coordinates_m: [0.0, 1.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 1.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -927,7 +972,10 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
         shell_sections: vec![ShellSectionModel::Homogeneous(
             HomogeneousShellSectionModel {
                 section_id: "panel_2mm".to_string(),
-                thickness_m: 0.002,
+                thickness_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.002),
                 reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                 shear_correction: 5.0 / 6.0,
             },
@@ -956,12 +1004,18 @@ fn structural_beam_reference_model(
         nodes: vec![
             StructuralNode {
                 node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
-                coordinates_m: [1.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([1.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -976,13 +1030,33 @@ fn structural_beam_reference_model(
         }],
         beam_sections: vec![BeamSectionModel {
             section_id: "rect".to_string(),
-            area_m2: 2.0e-4,
-            iy_m4: 1.6e-9,
-            iz_m4: 6.4e-9,
-            torsion_j_m4: 2.4e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.005,
-            torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area, _>::new(
+                2.0e-4,
+            ),
+            iy_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(1.6e-9),
+            iz_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(6.4e-9),
+            torsion_j_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.011_180_339_887_498_949),
         }],
         shell_sections: Vec::new(),
     });
@@ -1041,9 +1115,10 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
     else {
         unreachable!("cantilever fixture declares isotropic linear elasticity")
     };
-    mechanical.youngs_modulus_pa = 1.0e5;
-    mechanical.poisson_ratio = 0.25;
-    model.materials[0].mass_density_kg_per_m3 = Some(1_000.0);
+    mechanical.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(1.0e5);
+    mechanical.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
+    model.materials[0].mass_density_kg_per_m3 =
+        Some(runmat_types::physical::MassDensity::new(1_000.0));
     model.materials[0].damping = Some(MechanicalDampingModel::Rayleigh {
         mass_coefficient: RayleighMassCoefficient::new(0.2),
         stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),

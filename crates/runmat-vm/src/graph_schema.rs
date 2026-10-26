@@ -51,15 +51,7 @@ pub fn selected_graph_execution_required_schema(
 ) -> Result<GraphRequiredSchema, String> {
     let executable = match roots {
         GraphInvocationRoots::Callable { target, .. } => {
-            let Some(GraphNode::Callable(callable)) = graph.nodes.get(target.0 as usize) else {
-                return Err("graph callable root is absent".into());
-            };
-            match callable.owner {
-                GraphCallableOwner::Bound(owner) => bound_body(owner)?,
-                // An unbound function name can resolve to selected source only
-                // after runtime dispatch; V10 cannot certify that output.
-                _ => GraphRequiredSchema::SelectedValuesV11,
-            }
+            selected_callable_root_schema(graph, *target, &mut bound_body)?
         }
         GraphInvocationRoots::ParallelRegion { .. } => script()?,
         GraphInvocationRoots::Builtin { name, .. } => {
@@ -95,4 +87,34 @@ pub fn selected_graph_execution_required_schema(
         }
     };
     Ok(graph.required_schema().max(executable))
+}
+
+/// The same executable floor for each actual callable root in one portable
+/// capture graph. Shared activation nodes remain one graph, not per-call copies.
+pub fn selected_callable_capture_required_schema(
+    graph: &PayloadGraph,
+    mut bound_body: impl FnMut(GraphBoundOwner) -> Result<GraphRequiredSchema, String>,
+) -> Result<GraphRequiredSchema, String> {
+    graph
+        .roots
+        .iter()
+        .try_fold(graph.required_schema(), |floor, root| {
+            selected_callable_root_schema(graph, *root, &mut bound_body)
+                .map(|schema| floor.max(schema))
+        })
+}
+
+fn selected_callable_root_schema(
+    graph: &PayloadGraph,
+    target: runmat_execution::value::GraphNodeRef,
+    bound_body: &mut impl FnMut(GraphBoundOwner) -> Result<GraphRequiredSchema, String>,
+) -> Result<GraphRequiredSchema, String> {
+    let Some(GraphNode::Callable(callable)) = graph.nodes.get(target.0 as usize) else {
+        return Err("graph callable root is absent".into());
+    };
+    match callable.owner {
+        GraphCallableOwner::Bound(owner) => bound_body(owner),
+        // An unbound function name cannot certify selected source authority.
+        _ => Ok(GraphRequiredSchema::SelectedValuesV11),
+    }
 }

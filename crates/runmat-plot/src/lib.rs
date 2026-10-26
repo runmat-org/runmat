@@ -13,6 +13,7 @@ pub mod data;
 pub mod event;
 pub mod geometry;
 pub mod geometry_scene;
+pub mod geometry_observation;
 pub mod gpu;
 pub(crate) mod wgpu_compat;
 

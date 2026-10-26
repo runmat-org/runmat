@@ -84,7 +84,7 @@ fn evidence_profile(
     let loads = realize_step_excitations(
         &workload.model,
         step,
-        ExcitationSamplePoint::frequency(workload.frequency.hertz),
+        ExcitationSamplePoint::frequency(workload.frequency.canonical_value()),
     )
     .map_err(invalid)?;
     let mut total = SerializedCanonicalProfile {

@@ -478,6 +478,10 @@ pub(crate) async fn resolve_mat_object_class(
             format!("invalid serialized class identity: {error}"),
         )
     })?;
+    if class.is(runmat_types::standard::INTEGER_CONSTRAINT) {
+        let _entry = runtime.map(crate::context::RuntimeContext::enter);
+        crate::builtins::math::optim::integer_constraint::ensure_registered();
+    }
     let product = match runtime {
         Some(runtime) => runtime.resolve_current_object_class(&class).await?,
         None => crate::class_registry::issue_builtin_class_ordinary(&class)
@@ -695,7 +699,20 @@ pub(crate) fn reconcile_mat_object_product(
     class: &runmat_types::ClassIdentity,
     product: &crate::context::CurrentClassProductResolution,
     handle: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<RootedValue> {
+    let builtin_domain = class.is(runmat_types::standard::INTEGER_CONSTRAINT)
+        && matches!(
+            product,
+            crate::context::CurrentClassProductResolution::RegisteredBuiltin(_)
+        );
+    if handle && builtin_domain {
+        return Err(serialization_error(
+            LOADOBJ_METHOD.display_name(),
+            &SERIALIZATION_ERROR_ARGUMENT,
+            "IntegerConstraint is a value class, not a handle class",
+        ));
+    }
     value.try_map_owned(
         |value| match (value, handle) {
             (Value::Object(mut object), false) if object.class_name() == class => {
@@ -726,6 +743,10 @@ pub(crate) fn reconcile_mat_object_product(
                             ));
                         }
                     }
+                }
+                if builtin_domain {
+                    crate::builtins::math::optim::integer_constraint::schema::validate(&object,runtime)
+                        .map_err(|error|crate::builtins::math::optim::integer_constraint::validation_error(runtime,error))?;
                 }
                 Ok(Value::Object(object))
             }

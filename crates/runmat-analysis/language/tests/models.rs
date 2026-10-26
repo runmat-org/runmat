@@ -229,7 +229,7 @@ model airframe {
     assert_eq!(model.layups.len(), 1);
     assert_eq!(model.layups[0].plies.len(), 2);
     assert_eq!(
-        model.layups[0].plies[1].angle_rad,
+        model.layups[0].plies[1].angle_rad.canonical_value(),
         std::f64::consts::FRAC_PI_2
     );
     assert_eq!(model.property_assignments.len(), 3);
@@ -389,7 +389,7 @@ model multiphysics {
     else {
         panic!("expected thermal constraint");
     };
-    assert_eq!(value.kelvin, 293.15);
+    assert_eq!(value.canonical_value(), 293.15);
 }
 
 #[test]

@@ -9,9 +9,21 @@ use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use super::{errors, integer, NAME};
 
 #[async_recursion::async_recursion(?Send)]
-pub(super) async fn evaluate(lhs: Value, rhs: Value) -> crate::BuiltinResult<BuiltinResult<Value>> {
+pub(super) async fn evaluate(
+    context: Option<&crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<BuiltinResult<Value>> {
     use Value::*;
 
+    let character_runtime = if matches!(&lhs, CharArray(_)) || matches!(&rhs, CharArray(_)) {
+        context
+            .cloned()
+            .or_else(crate::context::legacy::active)
+            .map(crate::context::RuntimeContext::with_pinned_cancellation)
+    } else {
+        None
+    };
     let lhs = crate::dispatcher::gather_if_needed_async(&lhs).await?;
     let rhs = crate::dispatcher::gather_if_needed_async(&rhs).await?;
 
@@ -35,11 +47,31 @@ pub(super) async fn evaluate(lhs: Value, rhs: Value) -> crate::BuiltinResult<Bui
         }
     }
 
+    // Normalize only after exact integer admission; character codes are double,
+    // not integer storage, and must reach scalar/dense/CSC selection together.
+    let normalize = |value: Value| -> crate::BuiltinResult<BuiltinResult<Value>> {
+        let Value::CharArray(chars) = value else {
+            return Ok(Ok(value));
+        };
+        match tensor::character_numeric::to_double(character_runtime.as_ref(), &chars) {
+            Ok(value) => Ok(Ok(Value::Tensor(value))),
+            Err(tensor::character_numeric::CharacterNumericError::InvalidLayout(message)) => {
+                Ok(Err(errors::invalid_input(message)))
+            }
+            Err(tensor::character_numeric::CharacterNumericError::Runtime(error)) => Err(*error),
+        }
+    };
+    let lhs = product_try!(normalize(lhs)?);
+    let rhs = product_try!(normalize(rhs)?);
+
     if is_scalar(&lhs) || is_scalar(&rhs) {
         return crate::builtins::math::elementwise::binary_arithmetic::times::times_host(lhs, rhs)
             .map(Ok);
     }
 
+    if matches!(lhs, SparseTensor(_)) || matches!(rhs, SparseTensor(_)) {
+        return super::sparse::evaluate(context, &lhs, &rhs).await;
+    }
     let single = [&lhs, &rhs].iter().any(|value| match value {
         Tensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
         ComplexTensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
@@ -49,15 +81,15 @@ pub(super) async fn evaluate(lhs: Value, rhs: Value) -> crate::BuiltinResult<Bui
         (LogicalArray(lhs), other) => {
             let tensor =
                 product_try!(tensor::logical_to_tensor(&lhs).map_err(errors::invalid_input));
-            evaluate(Value::Tensor(tensor), other).await?
+            evaluate(context, Value::Tensor(tensor), other).await?
         }
         (other, LogicalArray(rhs)) => {
             let tensor =
                 product_try!(tensor::logical_to_tensor(&rhs).map_err(errors::invalid_input));
-            evaluate(other, Value::Tensor(tensor)).await?
+            evaluate(context, other, Value::Tensor(tensor)).await?
         }
-        (Bool(value), other) => evaluate(Value::Num(f64::from(value)), other).await?,
-        (other, Bool(value)) => evaluate(other, Value::Num(f64::from(value))).await?,
+        (Bool(value), other) => evaluate(context, Value::Num(f64::from(value)), other).await?,
+        (other, Bool(value)) => evaluate(context, other, Value::Num(f64::from(value))).await?,
         (Complex(ar, ai), Complex(br, bi)) => Ok(Complex(ar * br - ai * bi, ar * bi + ai * br)),
         (Complex(ar, ai), Num(scalar)) => Ok(Complex(ar * scalar, ai * scalar)),
         (Num(scalar), Complex(br, bi)) => Ok(Complex(scalar * br, scalar * bi)),
@@ -124,6 +156,7 @@ fn is_scalar(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::ComplexTensor(tensor) => tensor::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
+        Value::SparseTensor(sparse) => sparse.rows == 1 && sparse.cols == 1,
         Value::GpuTensor(handle) => crate::builtins::common::shape::is_scalar_shape(handle.shape()),
         _ => false,
     }

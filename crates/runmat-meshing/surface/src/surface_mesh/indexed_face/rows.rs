@@ -9,7 +9,7 @@ pub(super) struct MeshRows<'a> {
     pub triangles: &'a [ExactFaceMeshTriangle],
     pub boundary_segments: &'a [ExactFaceMeshBoundarySegment],
     pub joined_chart_cuts: &'a [ExactFaceMeshJoinedCut],
-    pub maximum_chordal_deviation_m: f64,
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_normal_deviation_rad: f64,
 }
 impl<'a> MeshRows<'a> {
@@ -21,7 +21,9 @@ impl<'a> MeshRows<'a> {
             triangles: &mesh.triangles,
             boundary_segments: &mesh.boundary_segments,
             joined_chart_cuts: &mesh.joined_chart_cuts,
-            maximum_chordal_deviation_m: mesh.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                mesh.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_normal_deviation_rad: mesh.maximum_normal_deviation_rad,
         }
     }
@@ -36,7 +38,9 @@ impl<'a> MeshRows<'a> {
             triangles: &mesh.triangles,
             boundary_segments: &mesh.boundary_segments,
             joined_chart_cuts: &[],
-            maximum_chordal_deviation_m: mesh.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                mesh.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_normal_deviation_rad: mesh.maximum_normal_deviation_rad,
         })
     }

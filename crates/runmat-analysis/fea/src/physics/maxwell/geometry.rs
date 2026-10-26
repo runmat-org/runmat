@@ -18,9 +18,15 @@ pub(super) fn spaces(
             .into_iter()
             .enumerate()
         {
-            let middle = projection.nodes[element.node_indices[4 + midside]].coordinates_m;
-            let left = projection.nodes[element.node_indices[a]].coordinates_m;
-            let right = projection.nodes[element.node_indices[b]].coordinates_m;
+            let middle = projection.nodes[element.node_indices[4 + midside]]
+                .coordinates_m
+                .canonical_value();
+            let left = projection.nodes[element.node_indices[a]]
+                .coordinates_m
+                .canonical_value();
+            let right = projection.nodes[element.node_indices[b]]
+                .coordinates_m
+                .canonical_value();
             if (0..3).any(|axis| {
                 (middle[axis] - 0.5 * (left[axis] + right[axis])).abs()
                     > 64.0 * f64::EPSILON * length

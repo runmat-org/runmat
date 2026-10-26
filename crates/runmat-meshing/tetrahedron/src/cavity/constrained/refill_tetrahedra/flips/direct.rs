@@ -123,7 +123,7 @@ fn refill_component_node_map(
 ) -> Result<BTreeMap<u32, Point3>, ConstrainedCavityRefillTetrahedronFlipError> {
     let node_map = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for tetrahedron in tetrahedra {
         for node_id in tetrahedron.node_ids {

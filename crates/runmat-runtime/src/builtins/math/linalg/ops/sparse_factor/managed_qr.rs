@@ -70,3 +70,8 @@ pub(in crate::builtins::math::linalg) struct SparseCompleteQr<T: SparseQrScalar>
     cod: Option<Qr<T>>,
     fence: Option<HostAllocationReceipt>,
 }
+impl<T: SparseQrScalar> SparseCompleteQr<T> {
+    pub(in crate::builtins::math::linalg) fn rank(&self) -> usize {
+        self.first.rank
+    }
+}

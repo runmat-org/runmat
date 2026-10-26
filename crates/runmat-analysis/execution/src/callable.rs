@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 mod capture;
+pub(crate) mod graph;
 pub(crate) mod executable;
 
 use capture::validate_capture_contract;
@@ -26,22 +27,54 @@ use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
 use crate::named_callable::CompiledCallableBinding;
 
-const ADMISSION_PREFIX: &[u8] = b"runmat-analysis-generator-admission/v2\0";
+const ADMISSION_PREFIX: &[u8] = b"runmat-analysis-generator-admission/v3\0";
 const ADMISSION_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 65_536, 4096, 32);
+
+/// Exactly one frozen callable input authority. A shared activation cannot be
+/// represented simultaneously by an independent flat capture vector.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum FrozenGeneratorInputs {
+    DirectCaptures(Vec<ValuePayload>),
+    Graph(Box<runmat_execution_artifact::GraphExecutionRequest>),
+}
+impl FrozenGeneratorInputs {
+    /// The direct executable ABI prefix. Graph targets own their captures and
+    /// receive only actual function arguments, so this prefix is empty there.
+    pub fn direct_captures(&self) -> &[ValuePayload] {
+        match self {
+            Self::DirectCaptures(values) => values,
+            Self::Graph(_) => &[],
+        }
+    }
+    pub fn graph(&self) -> Option<&runmat_execution_artifact::GraphExecutionRequest> {
+        match self {
+            Self::DirectCaptures(_) => None,
+            Self::Graph(graph) => Some(graph),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedSignalGenerator {
+    pub schema_version: u16,
     pub value_layout: crate::CanonicalGeneratorValueLayout,
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
     pub executable_source_digest: Digest,
     pub compiled_binding: CompiledCallableBinding,
     pub function: runmat_types::ProgramFunctionId,
-    pub captures: Vec<ValuePayload>,
+    pub frozen_inputs: FrozenGeneratorInputs,
     pub generator_identity: GeneratorIdentity,
     pub materialization_identity: SignalMaterializationIdentity,
-    pub sample_points: Vec<f64>,
+    pub sample_points:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
     pub required_capabilities: BTreeSet<CapabilityRequirement>,
     pub provenance: GeneratorProvenance,
 }
@@ -54,7 +87,7 @@ pub struct AdmittedGeneratorInvocation {
     pub executable_source_digest: Digest,
     pub compiled_binding: CompiledCallableBinding,
     pub function: runmat_types::ProgramFunctionId,
-    pub captures: Vec<ValuePayload>,
+    pub frozen_inputs: FrozenGeneratorInputs,
     pub generator_identity: GeneratorIdentity,
     pub required_capabilities: BTreeSet<CapabilityRequirement>,
     pub provenance: GeneratorProvenance,
@@ -75,10 +108,12 @@ pub enum NumericalGeneratorKind {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedNumericalGenerator {
+    pub schema_version: u16,
     pub invocation: AdmittedGeneratorInvocation,
     pub materialization_identity: NumericalMaterializationIdentity,
     pub kind: NumericalGeneratorKind,
-    pub sample_points: Vec<f64>,
+    pub sample_points:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,10 +135,17 @@ impl GeneratorOutputDomain {
     }
 }
 
-#[derive(Default)]
 struct FrozenCallableBinding {
-    captures: Vec<ValuePayload>,
+    inputs: FrozenGeneratorInputs,
     callable_value_digest: Option<Digest>,
+}
+impl Default for FrozenCallableBinding {
+    fn default() -> Self {
+        Self {
+            inputs: FrozenGeneratorInputs::DirectCaptures(Vec::new()),
+            callable_value_digest: None,
+        }
+    }
 }
 
 struct CallableAdmission<'a> {
@@ -118,6 +160,7 @@ struct CallableAdmission<'a> {
 struct NumericalGeneratorAdmission<'a> {
     output_domain: GeneratorOutputDomain,
     sample_points: &'a [f64],
+    axis: runmat_types::physical::DynamicDimension,
     kind: NumericalGeneratorKind,
     authored_contract_digest: Digest,
 }
@@ -217,7 +260,7 @@ pub fn admit_callable_signal_generator(
             available_capabilities,
         },
         FrozenCallableBinding {
-            captures: frozen_callable.captures,
+            inputs: FrozenGeneratorInputs::DirectCaptures(frozen_callable.captures),
             callable_value_digest: Some(callable_value_digest),
         },
     )
@@ -248,6 +291,7 @@ pub fn admit_named_response_spectrum_generator(
         NumericalGeneratorAdmission {
             output_domain: GeneratorOutputDomain::Real,
             sample_points: spectrum_axis(&spectrum.abscissa),
+            axis: spectrum_axis_descriptor(&spectrum.abscissa)?,
             kind: NumericalGeneratorKind::ResponseSpectrum {
                 spectrum_id: spectrum.spectrum_id.clone(),
             },
@@ -298,7 +342,10 @@ pub fn admit_named_random_spectrum_generator(
         },
         NumericalGeneratorAdmission {
             output_domain: GeneratorOutputDomain::RealOrComplex,
-            sample_points: &spectrum.frequencies_hz,
+            sample_points: spectrum.frequencies_hz.canonical_values(),
+            axis: runmat_analysis_core::GeneratorDomain::FrequencyHertz
+                .axis_descriptor(None)
+                .map_err(AnalysisBridgeError::Invalid)?,
             kind: NumericalGeneratorKind::RandomSpectrum {
                 excitation_id: spectrum.excitation_id.clone(),
                 channel_count: spectrum.channels.len(),
@@ -307,7 +354,7 @@ pub fn admit_named_random_spectrum_generator(
                 "random-spectrum-materialization-contract",
                 &(
                     &spectrum.excitation_id,
-                    &spectrum.frequencies_hz,
+                    spectrum.frequencies_hz.canonical_values(),
                     &spectrum.channels,
                     spectrum.convention,
                     spectrum.interpolation,
@@ -345,18 +392,35 @@ fn admit_named_numerical_generator(
         invocation.generator_identity,
     )?;
     Ok(AdmittedNumericalGenerator {
+        schema_version: 2,
         invocation,
         materialization_identity,
         kind: numerical.kind,
-        sample_points: numerical.sample_points.to_vec(),
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            numerical.axis,
+            numerical.sample_points.to_vec(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     })
 }
 
-fn spectrum_axis(axis: &runmat_analysis_core::SpectrumAbscissa) -> &[f64] {
+pub(crate) fn spectrum_axis(axis: &runmat_analysis_core::SpectrumAbscissa) -> &[f64] {
+    axis.canonical_points()
+}
+
+pub(crate) fn spectrum_axis_descriptor(
+    axis: &runmat_analysis_core::SpectrumAbscissa,
+) -> AnalysisBridgeResult<runmat_types::physical::DynamicDimension> {
     match axis {
-        runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(values)
-        | runmat_analysis_core::SpectrumAbscissa::PeriodSeconds(values) => values,
+        runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(_) => {
+            runmat_analysis_core::GeneratorDomain::FrequencyHertz
+        }
+        runmat_analysis_core::SpectrumAbscissa::PeriodSeconds(_) => {
+            runmat_analysis_core::GeneratorDomain::TimeSeconds
+        }
     }
+    .axis_descriptor(None)
+    .map_err(AnalysisBridgeError::Invalid)
 }
 
 fn validate_canonical_points(points: &[f64]) -> AnalysisBridgeResult<()> {
@@ -413,16 +477,24 @@ fn admit_signal_generator(
         realization_policy_digest,
     )?;
     Ok(AdmittedSignalGenerator {
+        schema_version: 2,
         value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: admitted.program_revision,
         callable: admitted.callable,
         executable_source_digest: admitted.executable_source_digest,
         compiled_binding: admitted.compiled_binding,
         function: admitted.function,
-        captures: admitted.captures,
+        frozen_inputs: admitted.frozen_inputs,
         generator_identity: admitted.generator_identity,
         materialization_identity,
-        sample_points: sample_points(&generator.sampling)?,
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            generator
+                .domain
+                .axis_descriptor(None)
+                .map_err(AnalysisBridgeError::Invalid)?,
+            sample_points(&generator.sampling)?,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         required_capabilities: admitted.required_capabilities,
         provenance: admitted.provenance,
     })
@@ -443,9 +515,10 @@ fn admit_generator_invocation(
         available_capabilities,
     } = callable;
     let FrozenCallableBinding {
-        captures,
+        inputs,
         callable_value_digest,
     } = binding;
+    let captures = inputs.direct_captures();
     program_revision.validate()?;
     compiled_binding.validate_admission(&callable, function.function, executable_source_digest)?;
     if callable.owner_identity.trim().is_empty()
@@ -455,14 +528,37 @@ fn admit_generator_invocation(
             "resolved callable differs from the authored generator",
         ));
     }
+    let graph_captures = inputs
+        .graph()
+        .map(|graph| graph::captures(graph, &program_revision, function))
+        .transpose()?;
     validate_static_contract(
         invocation,
         function,
-        captures.len(),
+        graph_captures.as_ref().map_or(captures.len(), Vec::len),
         output_domain,
         available_capabilities,
     )?;
-    validate_capture_contract(&captures, &function.callable.captures)?;
+    if let Some(graph_captures) = graph_captures.as_ref() {
+        if !captures.is_empty() {
+            return Err(AnalysisBridgeError::Identity(
+                "graph callable has a redundant flat capture ABI",
+            ));
+        }
+        capture::validate_capture_contract_iter(
+            graph_captures.iter().copied(),
+            &function.callable.captures,
+        )?;
+    } else {
+        if function
+            .captures
+            .iter()
+            .any(|capture| capture.source != runmat_mir::analysis::FunctionCaptureSource::ByValue)
+        {
+            return Err(AnalysisBridgeError::Invalid("callable requires canonical shared activation or unavailable capture source evidence".into()));
+        }
+        validate_capture_contract(captures, &function.callable.captures)?;
+    }
     for argument in &invocation.arguments {
         if let GeneratorArgument::Artifact(artifact) = argument {
             artifact
@@ -485,12 +581,22 @@ fn admit_generator_invocation(
             callable_value_digest,
         ),
     )?;
-    let capture_digest = contract_digest("captures", &captures)?;
+    let capture_digest = match graph_captures.as_ref() {
+        Some(values) => contract_digest("captures", values)?,
+        None => contract_digest("captures", &captures)?,
+    };
+    drop(graph_captures);
     let invocation_digest = contract_digest("generator-invocation", invocation)?;
     let generator_identity =
         GeneratorIdentity::new(callable_digest, capture_digest, invocation_digest)?;
-    let frozen_input_digest =
-        contract_digest("frozen-inputs", &(&captures, &invocation.arguments))?;
+    let frozen_input_digest = if let Some(graph) = inputs.graph() {
+        contract_digest(
+            "frozen-graph-inputs",
+            &(graph, &captures, &invocation.arguments),
+        )?
+    } else {
+        contract_digest("frozen-inputs", &(&captures, &invocation.arguments))?
+    };
 
     Ok(AdmittedGeneratorInvocation {
         program_revision: program_revision.clone(),
@@ -498,7 +604,7 @@ fn admit_generator_invocation(
         executable_source_digest,
         compiled_binding,
         function: function.function,
-        captures,
+        frozen_inputs: inputs,
         generator_identity,
         required_capabilities: function.capabilities.0.clone(),
         provenance: GeneratorProvenance {
@@ -517,6 +623,17 @@ fn validate_static_contract(
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<()> {
     let callable = &function.callable;
+    if function.captures.len() != callable.captures.len()
+        || function
+            .captures
+            .iter()
+            .zip(&callable.captures)
+            .any(|(capture, value)| capture.value != *value)
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "generator capture facts lack one consistent ordered compiler source contract".into(),
+        ));
+    }
     let expected_inputs =
         invocation
             .arguments
@@ -782,6 +899,33 @@ mod tests {
         fact
     }
 
+    #[test]
+    fn logical_array_capture_checks_logical_class_and_actual_dimensions() {
+        let capture = ValuePayload::Inline(Box::new(InlineValue::Dense(
+            runmat_execution::value::DenseValue {
+                element_type: runmat_execution::value::ElementType::Logical,
+                shape: vec![2, 1],
+                little_endian_data: vec![1, 0],
+            },
+        )));
+        let mut fact = ValueFact::scalar(ValueKindFact::Logical);
+        fact.shape = ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(2), DimensionFact::Known(1)],
+        };
+        assert!(validate_capture_contract(
+            std::slice::from_ref(&capture),
+            std::slice::from_ref(&fact)
+        )
+        .is_ok());
+        fact.shape = ShapeFact::Scalar;
+        assert!(validate_capture_contract(
+            std::slice::from_ref(&capture),
+            std::slice::from_ref(&fact)
+        )
+        .is_err());
+        assert!(validate_capture_contract(&[capture], &[numeric()]).is_err());
+    }
+
     fn signal() -> PhysicalSignal {
         PhysicalSignal::Force(Signal::<Force> {
             signal_id: SignalId("pulse".into()),
@@ -827,6 +971,7 @@ mod tests {
         let output = numeric();
         FunctionAnalysis {
             function: ProgramFunctionId(7),
+            captures: Vec::new(),
             callable: CallableFact {
                 capabilities: CapabilitySet::default(),
                 identity: None,
@@ -878,7 +1023,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first, second);
-        assert_eq!(first.sample_points, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(
+            first.sample_points.canonical_values(),
+            &vec![0.0, 0.25, 0.5, 0.75, 1.0]
+        );
         assert_eq!(first.function, ProgramFunctionId(7));
     }
 
@@ -1067,6 +1215,10 @@ mod tests {
     fn admits_only_semantically_bound_portable_closures_and_hashes_capture_values() {
         let mut facts = analysis();
         facts.callable.captures = vec![numeric()];
+        facts.captures = vec![runmat_mir::analysis::FunctionCaptureAnalysis {
+            source: runmat_mir::analysis::FunctionCaptureSource::ByValue,
+            value: numeric(),
+        }];
         let mut bound_signal = signal();
         let PhysicalSignal::Force(signal) = &mut bound_signal else {
             unreachable!()
@@ -1134,7 +1286,10 @@ mod tests {
             &BTreeSet::new(),
         )
         .unwrap();
-        assert_eq!(first.captures, frozen(2.0).captures);
+        assert_eq!(
+            first.frozen_inputs,
+            FrozenGeneratorInputs::DirectCaptures(frozen(2.0).captures)
+        );
         assert_ne!(first.generator_identity, changed_capture.generator_identity);
         assert_ne!(
             first.materialization_identity,

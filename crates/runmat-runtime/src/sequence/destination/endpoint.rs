@@ -29,7 +29,7 @@ impl SequenceEndpointSpec {
         };
         components.iter().filter_map(|component| match component {
             ObjectIndexComponent::Value(value) => Some(value),
-            ObjectIndexComponent::Colon => None,
+            ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
         })
     }
     pub(super) fn validate_fixed_mutation(&self) -> Result<(), RuntimeError> {
@@ -81,7 +81,16 @@ impl PreparedSequenceEndpoint {
         base: &Value,
         spec: SequenceEndpointSpec,
     ) -> Result<Self, RuntimeError> {
-        Self::prepare_with_cardinality(context, base, spec, None).await
+        Self::prepare_with_cardinality(context, base, spec, None, None).await
+    }
+
+    pub(super) async fn prepare_with_access(
+        context: Option<&crate::context::RuntimeContext>,
+        base: &Value,
+        spec: SequenceEndpointSpec,
+        access: Option<&crate::object::protocol::ObjectAccessContext>,
+    ) -> Result<Self, RuntimeError> {
+        Self::prepare_with_cardinality(context, base, spec, None, access).await
     }
 
     pub(super) async fn prepare_with_cardinality(
@@ -91,6 +100,7 @@ impl PreparedSequenceEndpoint {
         prepared: Option<
             crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
         >,
+        access: Option<&crate::object::protocol::ObjectAccessContext>,
     ) -> Result<Self, RuntimeError> {
         spec.validate_fixed_mutation()?;
         if prepared
@@ -129,6 +139,7 @@ impl PreparedSequenceEndpoint {
                         context,
                         base,
                         ObjectSubscript::member_retained(member.clone()),
+                        access,
                     )
                     .await?
                 }
@@ -140,7 +151,7 @@ impl PreparedSequenceEndpoint {
                     let step = ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
                         components: indices.clone(),
                     });
-                    assignment_cardinality_for_step(context, base, step).await?
+                    assignment_cardinality_for_step(context, base, step, access).await?
                 }
             }
             SequenceEndpointSpec::Fixed { step, mutation } => {
@@ -228,7 +239,7 @@ impl PreparedSequenceEndpoint {
         values: runmat_value::ValueSequence,
         caller: Option<&'a str>,
     ) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
-        self.assign_sequence_with_scope(OrdinaryMemberScope, base, values, caller)
+        self.assign_sequence_with_scope(OrdinaryMemberScope, base, values, caller, None)
     }
 
     pub(crate) fn assign_sequence_in_context<'a>(
@@ -238,7 +249,7 @@ impl PreparedSequenceEndpoint {
         values: runmat_value::ValueSequence,
         caller: Option<&'a str>,
     ) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
-        self.assign_sequence_with_scope(ContextualMemberScope(context), base, values, caller)
+        self.assign_sequence_with_scope(ContextualMemberScope(context), base, values, caller, None)
     }
 
     pub(crate) async fn assign_sequence_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
@@ -247,6 +258,7 @@ impl PreparedSequenceEndpoint {
         base: Value,
         values: runmat_value::ValueSequence,
         caller_function_name: Option<&'a str>,
+        access: Option<&'a crate::object::protocol::ObjectAccessContext>,
     ) -> Result<RootedValue, RuntimeError> {
         let context = scope.runtime();
         let Self {
@@ -299,12 +311,13 @@ impl PreparedSequenceEndpoint {
                         RootedValue::in_optional_context(value, context)
                     }
                     super::AssignmentStepSpec::Member(member) => {
-                        crate::object::resolve::store_member_text_with_scope(
+                        crate::object::resolve::store_member_text_with_optional_access_scope(
                             scope,
                             base,
                             member,
                             rhs,
                             caller_function_name,
+                            access,
                             runmat_gc::gc_record_write,
                         )
                         .await
@@ -356,17 +369,18 @@ impl PreparedSequenceEndpoint {
                 }
             }
             SequenceEndpointSpec::Member(field) => {
-                crate::object::resolve::store_member_sequence_values_with_scope(
+                crate::object::resolve::store_member_sequence_values_with_optional_access_scope(
                     scope,
                     base,
                     field,
                     values,
                     caller_function_name,
+                    access,
                 )
                 .await
             }
             SequenceEndpointSpec::CellContents(indices) => {
-                assign_cell_contents_with_context(context, base, indices, values).await
+                assign_cell_contents_with_access(context, base, indices, values, access).await
             }
         }
     }
@@ -402,16 +416,10 @@ async fn assignment_cardinality_for_step(
     context: Option<&crate::context::RuntimeContext>,
     base: &Value,
     step: ObjectSubscript,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
 ) -> Result<usize, RuntimeError> {
     let path = ObjectSubscriptPath::single_in_context(context, step)?;
-    let prepared = match context {
-        Some(context) => crate::builtins::introspection::object_indexing::object_path_assignment_cardinality_in_context(
-            context, base, &path,
-        ).await?,
-        None => crate::builtins::introspection::object_indexing::object_path_assignment_cardinality(
-            base, &path,
-        ).await?,
-    };
+    let prepared = crate::builtins::introspection::object_indexing::object_path_assignment_cardinality_with_access(context, base, &path, access).await?;
     Ok(prepared.count)
 }
 
@@ -421,75 +429,5 @@ impl Trace for SequenceEndpointSpec {
     }
 }
 
-pub(crate) async fn assign_cell_contents_with_context(
-    context: Option<&crate::context::RuntimeContext>,
-    base: Value,
-    indices: runmat_value::ExactArrayStorage<ObjectIndexComponent>,
-    values: runmat_value::ValueSequence,
-) -> Result<RootedValue, RuntimeError> {
-    let input_values =
-        std::iter::once(&base)
-            .chain(values.iter())
-            .chain(indices.iter().filter_map(|component| match component {
-                ObjectIndexComponent::Value(value) => Some(value),
-                ObjectIndexComponent::Colon => None,
-            }));
-    let _inputs = match context {
-        Some(context) => RootedValueLease::for_values_iterator_in_context(input_values, context)?,
-        None => RootedValueLease::for_values(input_values)
-            .map_err(|source| source.into_runtime_error())?,
-    };
-    match base {
-        Value::Cell(cell) => {
-            let positions = crate::object::cell::resolve_cell_assignment_components_in_context(
-                context, &cell, &indices,
-            )?;
-            crate::object::cell::assign_cell_value_multi_in_context(
-                context,
-                cell,
-                &positions,
-                values.as_slice(),
-                runmat_gc::gc_record_write,
-            )
-            .and_then(|value| RootedValue::in_optional_context(value, context))
-        }
-        base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-            let resolution = crate::object::dispatch::resolve_object_index_protocol(
-                &base,
-                crate::object::indexing::ObjectIndexOp::Subsasgn,
-                None,
-            )?;
-            let Some(method) = resolution else {
-                return Err(semantic_error(
-                    "MissingObjectProtocol",
-                    "brace assignment object does not define subsasgn",
-                ));
-            };
-            let step = ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
-                components: indices,
-            });
-            let path = match context {
-                Some(context) => ObjectSubscriptPath::single_in_context(Some(context), step)?,
-                None => ObjectSubscriptPath::single(step),
-            };
-            match context {
-                Some(context) => {
-                    crate::object::protocol::invoke_resolved_object_assignment_sequence_in_context(
-                        context, &method, base, path, values,
-                    )
-                    .await
-                }
-                None => {
-                    crate::object::protocol::invoke_resolved_object_assignment_sequence(
-                        &method, base, path, values,
-                    )
-                    .await
-                }
-            }
-        }
-        _ => Err(semantic_error(
-            "CellAssignmentOnNonCell",
-            "brace sequence assignment requires a cell array or indexing object",
-        )),
-    }
-}
+mod cell;
+pub(crate) use cell::{assign_cell_contents_with_access, assign_cell_contents_with_context};

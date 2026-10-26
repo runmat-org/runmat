@@ -16,13 +16,13 @@ pub use solver_mesh::{
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
-    UnitSystem,
 };
 
 pub fn through_hole_plate_geometry() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo_root_meshing_through_hole_plate".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/fixtures/generic_through_hole_plate.step".to_string(),
             sha256: "generic-through-hole-plate".to_string(),
             importer_version: "test".to_string(),
@@ -35,7 +35,7 @@ pub fn through_hole_plate_geometry() -> GeometryAsset {
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "through_hole_plate_surface".to_string(),

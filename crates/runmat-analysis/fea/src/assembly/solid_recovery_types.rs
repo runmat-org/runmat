@@ -9,7 +9,8 @@ pub struct SolidRecoveryElementSummary {
     pub region_id: String,
     pub material: SolidMaterial,
     pub thermal_eigenstrain: Option<f64>,
-    pub prescribed_temperature_k: Option<f64>,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
+    pub prescribed_temperature_k: Option<runmat_types::physical::Temperature>,
     pub solved_thermal_quadrature: Option<SolvedThermalRecoveryQuadrature>,
     pub geometry: SolidRecoveryGeometry,
 }
@@ -17,11 +18,17 @@ pub struct SolidRecoveryElementSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolvedThermalRecoveryQuadrature {
     /// Complete local nodal solution, retained for higher-order energy integration.
-    pub nodal_temperature_k: Vec<f64>,
-    pub expansion_coefficient_per_k: f64,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub nodal_temperature_k:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     /// Interpolated retained nodal solution in the shared four-point recovery rule's order.
-    pub temperature_k: [f64; 4],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub temperature_k:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, [f64; 4]>,
     /// Material-owned isotropic thermal strain α(T − Tref) at those same points.
     pub eigenstrain: [f64; 4],
 }
@@ -31,11 +38,17 @@ pub struct SolvedThermalRecoveryQuadrature {
 pub enum SolidRecoveryGeometry {
     Tetrahedron4 {
         node_indices: [usize; 4],
-        coordinates_m: [[f64; 3]; 4],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        coordinates_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [[f64; 3]; 4]>,
     },
     Tetrahedron10 {
         node_indices: [usize; 10],
-        coordinates_m: [[f64; 3]; 10],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        coordinates_m: runmat_types::physical::Quantity<
+            runmat_types::physical::kind::Position,
+            [[f64; 3]; 10],
+        >,
     },
 }
 
@@ -53,12 +66,12 @@ impl SolidRecoveryGeometry {
 
         match self {
             Self::Tetrahedron4 { coordinates_m, .. } => Tetrahedron4ElementGeometry {
-                nodes_m: *coordinates_m,
+                nodes_m: coordinates_m.canonical_value(),
             }
             .volume_m3()
             .map_err(|source| source.to_string()),
             Self::Tetrahedron10 { coordinates_m, .. } => Tetrahedron10ElementGeometry {
-                nodes_m: *coordinates_m,
+                nodes_m: coordinates_m.canonical_value(),
             }
             .volume_m3()
             .map_err(|source| source.to_string()),

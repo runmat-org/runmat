@@ -255,6 +255,10 @@ fn prepare_callable(
                 ))
             }
         }
+        Value::ScopedFunctionHandle(handle) => Ok(TimeitCallable {
+            handle: Value::ScopedFunctionHandle(handle),
+            num_outputs,
+        }),
         Value::FunctionHandle(name) => {
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {

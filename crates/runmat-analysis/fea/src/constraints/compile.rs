@@ -80,7 +80,7 @@ pub(super) fn compile_constraint(
                 );
                 targets.push(resolved);
             }
-            let right_hand_side = equation.right_hand_side.meters;
+            let right_hand_side = equation.right_hand_side.canonical_value();
             if !right_hand_side.is_finite() {
                 return Err(ConstraintPlanError::NonFiniteValue {
                     constraint_id: constraint.constraint_id.clone(),
@@ -365,7 +365,7 @@ fn compile_coupling(
     let target = prepared.take(&coupling.target)?.0;
     let identity = reference_point_identity(
         &coupling.reference_point.reference_point_id,
-        coupling.reference_point.position.meters,
+        coupling.reference_point.position.canonical_value(),
     )?;
     let (rows, evidence) = compile_reference_coupling(
         mesh,
@@ -393,7 +393,7 @@ pub(super) fn study_constant_displacement(
         .ok_or_else(|| ConstraintPlanError::ScheduledValue {
             constraint_id: constraint_id.into(),
         })?
-        .meters;
+        .canonical_value();
     if !value.is_finite() {
         return Err(ConstraintPlanError::NonFiniteValue {
             constraint_id: constraint_id.into(),

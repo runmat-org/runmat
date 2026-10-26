@@ -80,7 +80,7 @@ pub struct FiniteVolumeFace {
     pub corner_identities: [StableDigest; 3],
     pub centroid_m: [f64; 3],
     pub owner_area_vector_m2: [f64; 3],
-    pub area_m2: f64,
+    pub area_m2: runmat_types::physical::Area,
     pub owner: usize,
     pub neighbor: Option<usize>,
     /// Original canonical face, including interface roles when present. Exterior is mandatory.

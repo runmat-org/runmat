@@ -300,6 +300,7 @@ pub(super) fn default_path_num_arguments(
         ObjectIndexSelector::IndexValues { components } => {
             selection_count(components.len(), |dim| match &components[dim] {
                 ObjectIndexComponent::Colon => target_colon_extent(target, dim, components.len()),
+                ObjectIndexComponent::End => Err(crate::object::indexing::unresolved_end()),
                 ObjectIndexComponent::Value(value) => {
                     single_subscript_count(target, value, dim, components.len())
                 }

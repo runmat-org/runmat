@@ -58,7 +58,10 @@ pub(super) fn coupling_diagnostics(
 
 fn closure_diagnostic(closure: &FsiInterfaceClosure, options: FsiCouplingOptions) -> FeaDiagnostic {
     let severity = if closure.force_balance_ratio <= 1.0e-9
-        && closure.max_displacement_transfer_residual_m <= 1.0e-12
+        && closure
+            .max_displacement_transfer_residual_m
+            .canonical_value()
+            <= 1.0e-12
         && closure.max_pressure_feedback_residual_ratio <= options.tolerance
         && closure.max_two_way_interface_residual_ratio <= options.tolerance
         && closure.max_structural_traction_update_residual_ratio <= options.tolerance
@@ -82,25 +85,25 @@ fn closure_diagnostic(closure: &FsiInterfaceClosure, options: FsiCouplingOptions
             closure.interface_face_count,
             closure.max_interface_residual,
             closure.force_balance_ratio,
-            closure.max_displacement_transfer_residual_m,
-            closure.max_interface_displacement_m,
-            closure.mean_interface_pressure_pa,
-            closure.max_traction_magnitude_pa,
+            closure.max_displacement_transfer_residual_m.canonical_value(),
+            closure.max_interface_displacement_m.canonical_value(),
+            closure.mean_interface_pressure_pa.canonical_value(),
+            closure.max_traction_magnitude_pa.canonical_value(),
             closure.max_coupling_iteration_count,
             closure.max_pressure_feedback_residual_ratio,
             closure.max_two_way_interface_residual_ratio,
             closure.max_structural_traction_update_residual_ratio,
             closure.max_pressure_displacement_law_residual_ratio,
             closure.max_structural_solve_residual_ratio,
-            closure.max_interface_work_j_per_m2,
-            closure.max_structural_strain_energy_j_per_m2,
+            closure.max_interface_work_j_per_m2.canonical_value(),
+            closure.max_structural_strain_energy_j_per_m2.canonical_value(),
             closure.max_interface_work_energy_residual_ratio,
             closure.structural_coupling_edge_count,
             closure.interface_connectivity_coverage_ratio,
             closure.mesh_backed_interface_connectivity_ratio,
             closure.full_topology_edge_count,
             closure.full_topology_element_count,
-            closure.interface_stiffness_pa_per_m,
+            closure.interface_stiffness_pa_per_m.canonical_value(),
         ),
     }
 }
@@ -108,14 +111,26 @@ fn closure_diagnostic(closure: &FsiInterfaceClosure, options: FsiCouplingOptions
 fn known_answer_diagnostic(closure: &FsiInterfaceClosure, tolerance: f64) -> FeaDiagnostic {
     let known_answer_coverage_ratio = if closure.interface_node_count > 0
         && closure.interface_face_count > 0
-        && closure.mean_interface_pressure_pa.is_finite()
-        && closure.mean_interface_pressure_pa > 0.0
-        && closure.max_traction_magnitude_pa.is_finite()
-        && closure.max_traction_magnitude_pa > 0.0
-        && closure.max_interface_displacement_m.is_finite()
-        && closure.max_interface_displacement_m > 0.0
-        && closure.interface_stiffness_pa_per_m.is_finite()
-        && closure.interface_stiffness_pa_per_m > 0.0
+        && closure
+            .mean_interface_pressure_pa
+            .canonical_value()
+            .is_finite()
+        && closure.mean_interface_pressure_pa.canonical_value() > 0.0
+        && closure
+            .max_traction_magnitude_pa
+            .canonical_value()
+            .is_finite()
+        && closure.max_traction_magnitude_pa.canonical_value() > 0.0
+        && closure
+            .max_interface_displacement_m
+            .canonical_value()
+            .is_finite()
+        && closure.max_interface_displacement_m.canonical_value() > 0.0
+        && closure
+            .interface_stiffness_pa_per_m
+            .canonical_value()
+            .is_finite()
+        && closure.interface_stiffness_pa_per_m.canonical_value() > 0.0
         && closure.structural_coupling_edge_count > 0
         && closure.interface_connectivity_coverage_ratio >= 1.0
     {
@@ -125,7 +140,10 @@ fn known_answer_diagnostic(closure: &FsiInterfaceClosure, tolerance: f64) -> Fea
     };
     let severity = if closure.max_pressure_displacement_law_residual_ratio <= tolerance
         && closure.force_balance_ratio <= 1.0e-9
-        && closure.max_displacement_transfer_residual_m <= 1.0e-12
+        && closure
+            .max_displacement_transfer_residual_m
+            .canonical_value()
+            <= 1.0e-12
         && closure.max_pressure_feedback_residual_ratio <= tolerance
         && closure.max_two_way_interface_residual_ratio <= tolerance
         && closure.max_structural_traction_update_residual_ratio <= tolerance
@@ -145,7 +163,7 @@ fn known_answer_diagnostic(closure: &FsiInterfaceClosure, tolerance: f64) -> Fea
             "basis=pressure_loaded_wall_partitioned pressure_loaded_wall_displacement_law_residual_ratio={} interface_traction_balance_residual_ratio={} interface_displacement_transfer_residual_m={} partitioned_pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} structural_solve_residual_ratio={} interface_work_energy_residual_ratio={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} known_answer_coverage_ratio={}",
             closure.max_pressure_displacement_law_residual_ratio,
             closure.force_balance_ratio,
-            closure.max_displacement_transfer_residual_m,
+            closure.max_displacement_transfer_residual_m.canonical_value(),
             closure.max_pressure_feedback_residual_ratio,
             closure.max_two_way_interface_residual_ratio,
             closure.max_structural_traction_update_residual_ratio,

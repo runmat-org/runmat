@@ -11,12 +11,16 @@ fn spectral_density_scaling_is_linear_in_variance_and_square_root_in_rms() {
     let base = constant_spectrum(
         bounds,
         channels.clone(),
-        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.0e-4]),
+        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+            &runmat_types::physical::Quantity::new([2.0e-4]),
+        ),
     );
     let scaled = constant_spectrum(
         bounds,
         channels,
-        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[1.8e-3]),
+        runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+            &runmat_types::physical::Quantity::new([1.8e-3]),
+        ),
     );
     let policy = converged_policy(0.999_999_999);
     let base_result = solve_modal_random_response(&summary, &basis, &base, policy).unwrap();

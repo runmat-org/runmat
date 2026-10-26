@@ -127,7 +127,10 @@ fn build_nodes(
         nodes.push(SolverMeshNode {
             node_id: index as u64 + 1,
             stable_identity: node.identity,
-            coordinates_m: node.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
             provenance,
             exact_parameters,
         });
@@ -221,8 +224,11 @@ fn solver_vertices(
     input: &ProjectionInput<'_>,
     mut vertices: [u32; 4],
 ) -> Result<([u32; 4], [usize; 4]), DelaunaySolverTopologyError> {
-    let points =
-        vertices.map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].coordinates_m);
+    let points = vertices.map(|vertex| {
+        input.volume_mesh.topology.nodes[vertex as usize]
+            .coordinates_m
+            .canonical_value()
+    });
     let signed_volume = tetrahedron_signed_volume(points);
     if !signed_volume.is_finite() || signed_volume == 0.0 {
         return Err(invalid_mesh(

@@ -51,7 +51,14 @@ impl Drop for DisplayFormatSelectionGuard {
 /// Select the owner itself, not a copied mode. Setters remain visible to every
 /// nested invocation sharing that owner and survive suspension of this poll.
 pub fn select_display_format_owner(owner: &DisplayFormatOwner) -> DisplayFormatSelectionGuard {
-    let previous = SELECTED_OWNER.with(|slot| slot.replace(Some(owner.clone())));
+    select_optional_display_format_owner(Some(owner))
+}
+
+/// Explicitly select the bare fallback without inheriting a foreign session.
+pub fn select_optional_display_format_owner(
+    owner: Option<&DisplayFormatOwner>,
+) -> DisplayFormatSelectionGuard {
+    let previous = SELECTED_OWNER.with(|slot| slot.replace(owner.cloned()));
     DisplayFormatSelectionGuard { previous }
 }
 

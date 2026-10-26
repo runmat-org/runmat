@@ -26,14 +26,15 @@ fn both_affine_orders_preserve_exact_compiled_model_properties_and_complex_sourc
         )
         .unwrap();
         assert_eq!(
-            physical.angular_frequency_rad_per_s,
+            physical.angular_frequency_rad_per_s.canonical_value(),
             std::f64::consts::TAU * 1e8
         );
-        assert!(physical
-            .source_current
-            .iter()
-            .all(|sample| sample.current_density_a_per_m2[1].real == 0.6
-                && sample.current_density_a_per_m2[1].imaginary == 0.8));
+        assert!(physical.source_current.iter().all(|sample| sample
+            .current_density_a_per_m2
+            .canonical_value()[1]
+            .real
+            == 0.6
+            && sample.current_density_a_per_m2.canonical_value()[1].imaginary == 0.8));
         product.compiled.validate_against(&mesh).unwrap();
     }
 }
@@ -52,7 +53,15 @@ fn foreign_mesh_and_stale_property_ownership_fail_before_product() {
             .electrical
             .as_mut()
             .unwrap()
-            .relative_permittivity *= 2.0;
+            .relative_permittivity = runmat_types::physical::Quantity::new(
+            changed.model.materials[0]
+                .electrical
+                .as_mut()
+                .unwrap()
+                .relative_permittivity
+                .canonical_value()
+                * (2.0),
+        );
         assert!(matches!(
             plan_maxwell_study_product(changed, &original, policy()),
             Err(MaxwellStudyProductError::Compilation(_))
@@ -74,7 +83,7 @@ fn explicit_pec_positive_loss_and_original_current_are_not_inferred() {
         .electrical
         .as_mut()
         .unwrap()
-        .conductivity_s_per_m = 0.0;
+        .conductivity_s_per_m = runmat_types::physical::ElectricalConductivity::new(0.0);
     let mut foreign_source = original.clone();
     let ExcitationAction::MagneticVolumeCurrentDensity(source) = &mut foreign_source.excitations[0]
     else {

@@ -22,7 +22,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "A call with no assigned output still runs the solver and its objective callback; it publishes no result value.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The solver runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands and callback results use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access.",
+            "The solver runs on the host and has no provider-native solver kernel or tall-array execution. Authenticated automatic placement can be gathered transparently under either language compatibility mode. Explicit GPU operands and callback results require the RunMat resident-fallback extension; strict MATLAB mode rejects them before provider access. Device operands with unproven placement require an explicit gather. Compatibility, cancellation and provider authority come from the original invocation.",
             "Fusion: not elementwise; not a reduction. The callback solver executes on the host.",
         ] },
     ],

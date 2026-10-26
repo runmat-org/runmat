@@ -18,12 +18,12 @@ const SOURCE: &str = r#"
 geometry part {
  file = "./box.brep"; units = m
  region bulk : cell { select result; expect exactly_one }
- region outlet : face { select id "face_000002"; expect exactly_one }
- region lid : face { select id "face_000001"; expect exactly_one }
- region wall3 : face { select id "face_000003"; expect exactly_one }
- region wall4 : face { select id "face_000004"; expect exactly_one }
- region wall5 : face { select id "face_000005"; expect exactly_one }
- region wall6 : face { select id "face_000006"; expect exactly_one }
+ region outlet : face { select persistent_id "FACE_2_ID"; expect exactly_one }
+ region lid : face { select persistent_id "FACE_1_ID"; expect exactly_one }
+ region wall3 : face { select persistent_id "FACE_3_ID"; expect exactly_one }
+ region wall4 : face { select persistent_id "FACE_4_ID"; expect exactly_one }
+ region wall5 : face { select persistent_id "FACE_5_ID"; expect exactly_one }
+ region wall6 : face { select persistent_id "FACE_6_ID"; expect exactly_one }
 }
 mesh volume on geometry.part { tetrahedra { order = linear; target_size = 1.5 m; maximum_deviation = 0.02 m } }
 material liquid { mass_density = 1 kg/m^3; fluid { law = incompressible_newtonian; dynamic_viscosity = 1 Pa*s } }
@@ -74,7 +74,7 @@ pub(super) async fn run() {
             include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
         )
         .unwrap();
-        let source = SOURCE
+        let mut source = SOURCE
             .replace(
                 "BOUNDARY_VALUE",
                 if moving {
@@ -84,6 +84,15 @@ pub(super) async fn run() {
                 },
             )
             .replace("BOUNDARY", if moving { "velocity" } else { "no_slip_wall" });
+        let imported = runmat_geometry_io::import_exact_cad(
+            "box.brep", include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
+            runmat_geometry_io::GeometryFormat::Brep,
+            &runmat_geometry_io::ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..Default::default() },
+            &runmat_geometry_io::GeometryImportContext::new(),
+        ).unwrap();
+        for (index, face) in &imported.source_face_ids {
+            source = source.replace(&format!("FACE_{}_ID", index + 1), &face.analysis_selection_id().unwrap());
+        }
         std::fs::write(&path, source).unwrap();
         let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
         let checked = session.load_and_check_fea_source_path(&path).await.unwrap();
@@ -320,7 +329,7 @@ pub(super) async fn run() {
             let flux_scale = topology
                 .faces
                 .iter()
-                .map(|f| 0.001 * f.area_m2)
+                .map(|f| 0.001 * f.area_m2.canonical_value())
                 .fold(0.0, f64::max);
             let mut outlet_faces = 0;
             for (face, q) in topology

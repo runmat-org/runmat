@@ -2,16 +2,17 @@ use runmat_analysis_core::{AnalysisModel, BoundaryOperator};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AcousticMaterialSummary {
-    pub density_kg_per_m3: f64,
-    pub speed_of_sound_m_per_s: f64,
-    pub damping_ratio: f64,
+    pub density_kg_per_m3: runmat_types::physical::MassDensity,
+    pub speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound,
+    pub damping_ratio: runmat_types::physical::DampingRatio,
     pub explicit_material_count: usize,
     pub coverage_ratio: f64,
 }
 
 impl AcousticMaterialSummary {
     pub(super) fn characteristic_impedance_pa_s_per_m(self) -> f64 {
-        (self.density_kg_per_m3 * self.speed_of_sound_m_per_s).max(1.0)
+        (self.density_kg_per_m3.canonical_value() * self.speed_of_sound_m_per_s.canonical_value())
+            .max(1.0)
     }
 }
 
@@ -27,29 +28,38 @@ pub(super) fn material_summary(
         let Some(acoustic) = &material.acoustic else {
             continue;
         };
-        let Some(density_kg_per_m3) = material.mass_density_kg_per_m3 else {
+        let Some(density_kg_per_m3) = material
+            .mass_density_kg_per_m3
+            .map(|quantity| quantity.canonical_value())
+        else {
             continue;
         };
         density_sum += density_kg_per_m3.max(1.0e-9);
-        speed_sum += acoustic.speed_of_sound_m_per_s.max(1.0);
-        damping_sum += acoustic.damping_ratio.max(0.0);
+        speed_sum += acoustic.speed_of_sound_m_per_s.canonical_value().max(1.0);
+        damping_sum += acoustic.damping_ratio.canonical_value().max(0.0);
         explicit_material_count += 1;
     }
     if explicit_material_count == 0 {
         let reference_temperature_k = reference_temperature_k(model);
         return AcousticMaterialSummary {
-            density_kg_per_m3: 1.225 * (293.15 / reference_temperature_k.max(1.0)),
-            speed_of_sound_m_per_s: 331.3 * (reference_temperature_k / 273.15).sqrt(),
-            damping_ratio: 0.02 + 0.002 * mode_count.saturating_sub(1).min(12) as f64,
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(
+                1.225 * (293.15 / reference_temperature_k.max(1.0)),
+            ),
+            speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(
+                331.3 * (reference_temperature_k / 273.15).sqrt(),
+            ),
+            damping_ratio: runmat_types::physical::DampingRatio::new(
+                0.02 + 0.002 * mode_count.saturating_sub(1).min(12) as f64,
+            ),
             explicit_material_count,
             coverage_ratio: 0.0,
         };
     }
     let inv_count = 1.0 / explicit_material_count as f64;
     AcousticMaterialSummary {
-        density_kg_per_m3: density_sum * inv_count,
-        speed_of_sound_m_per_s: speed_sum * inv_count,
-        damping_ratio: damping_sum * inv_count,
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(density_sum * inv_count),
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(speed_sum * inv_count),
+        damping_ratio: runmat_types::physical::DampingRatio::new(damping_sum * inv_count),
         explicit_material_count,
         coverage_ratio: explicit_material_count as f64 / model.materials.len().max(1) as f64,
     }
@@ -87,7 +97,7 @@ pub(super) fn boundary_summary(
             BoundaryOperator::AcousticRadiation => radiation_boundary_count += 1,
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance_boundary_count += 1;
-                impedance_sum += impedance.pascal_seconds_per_meter.max(1.0);
+                impedance_sum += impedance.canonical_value().max(1.0);
             }
             _ => {}
         }
@@ -120,7 +130,7 @@ fn reference_temperature_k(model: &AnalysisModel) -> f64 {
         .materials
         .iter()
         .filter_map(|material| material.thermal.as_ref())
-        .map(|thermal| thermal.reference_temperature_k.max(1.0))
+        .map(|thermal| thermal.reference_temperature_k.canonical_value().max(1.0))
         .fold((0.0, 0_usize), |(sum, count), value| {
             (sum + value, count + 1)
         });

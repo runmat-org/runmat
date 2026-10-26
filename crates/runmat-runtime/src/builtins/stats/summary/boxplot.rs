@@ -291,7 +291,7 @@ pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     .await
 }
 
-async fn boxplot_in_runtime(
+pub(super) async fn boxplot_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {

@@ -45,7 +45,7 @@ pub(super) fn apply_projected_explicit_structural_loads(
     let canonical_node_coordinates_m = topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let projection_digest = topology.identity.discretization_digest();
     if canonical_node_indices.len() != structural.nodes.len() {
@@ -66,7 +66,10 @@ pub(super) fn apply_projected_explicit_structural_loads(
         topology,
         authored_node_indices: &authored_node_indices,
         layout,
-        coordinates_m: &canonical_node_coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                &canonical_node_coordinates_m,
+            ),
     };
     let mut direct_rotational_moment_count = 0;
     let mut moment_projection = Vec::new();
@@ -303,22 +306,23 @@ fn apply_explicit_shell_surface_load(
         .triangles
         .iter()
         .fold([0.0; 3], |mut total, triangle| {
-            let centroid = triangle_centroid(triangle.coordinates_m);
+            let centroid = triangle_centroid(triangle.coordinates_m.canonical_value());
             for (component, value) in total.iter_mut().zip(centroid) {
-                *component += value * triangle.area_m2 / surface.area_m2;
+                *component +=
+                    value * triangle.area_m2.canonical_value() / surface.area_m2.canonical_value();
             }
             total
         });
     let mut evidence = SpatialProjectionAccumulator::for_explicit_topology(
         load,
         domain.topology.identity.discretization_digest(),
-        domain.coordinates_m,
+        domain.coordinates_m.canonical_value(),
         SpatialIntegrationRule::ExplicitConsistentElement,
         surface.triangles.len(),
         reference_point_m,
     );
     for triangle in &surface.triangles {
-        let point = triangle_centroid(triangle.coordinates_m);
+        let point = triangle_centroid(triangle.coordinates_m.canonical_value());
         let normal = unit_vector(triangle.oriented_area_vector_m2).map_err(|_| {
             StructuralAssemblyError::InvalidLoadPlan(format!(
                 "shell element `{}` has no oriented normal",
@@ -331,7 +335,7 @@ fn apply_explicit_shell_surface_load(
                 .map(|component| component * value),
             ExplicitSurfaceLoad::Traction(components) => {
                 resolve_vector(load, components, point, Some(normal))?
-                    .map(|component| component * triangle.area_m2)
+                    .map(|component| component * triangle.area_m2.canonical_value())
             }
         };
         evidence.add_requested_force(point, integrated);
@@ -403,19 +407,19 @@ fn apply_explicit_body_force(
                     .properties
                     .beam_property(identity)
                     .ok_or_else(|| missing_property(&element.element_id, identity))?;
-                let from = domain.coordinates_m[explicit_node_index(
+                let from = domain.coordinates_m.canonical_value()[explicit_node_index(
                     domain.authored_node_indices,
                     beam.node_ids[0],
                     &element.element_id,
                 )?];
-                let to = domain.coordinates_m[explicit_node_index(
+                let to = domain.coordinates_m.canonical_value()[explicit_node_index(
                     domain.authored_node_indices,
                     beam.node_ids[1],
                     &element.element_id,
                 )?];
                 (
                     beam.node_ids.to_vec(),
-                    segment_length(from, to) * property.section.area_m2,
+                    segment_length(from, to) * property.section.area_m2.canonical_value(),
                 )
             }
             StructuralElementKind::Shell(shell) => {
@@ -425,7 +429,7 @@ fn apply_explicit_body_force(
                     .ok_or_else(|| missing_property(&element.element_id, identity))?;
                 let mut points = [[0.0; 3]; 3];
                 for (point, node_id) in points.iter_mut().zip(shell.node_ids) {
-                    *point = domain.coordinates_m[explicit_node_index(
+                    *point = domain.coordinates_m.canonical_value()[explicit_node_index(
                         domain.authored_node_indices,
                         node_id,
                         &element.element_id,
@@ -449,7 +453,7 @@ fn apply_explicit_body_force(
                 explicit_node_index(domain.authored_node_indices, *node_id, &element.element_id)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let centroid = target_centroid(domain.coordinates_m, &indices);
+        let centroid = target_centroid(domain.coordinates_m.canonical_value(), &indices);
         measures.push((indices, centroid, measure_m3));
     }
     let total_measure = measures.iter().map(|(_, _, measure)| measure).sum::<f64>();
@@ -464,7 +468,7 @@ fn apply_explicit_body_force(
     let mut evidence = SpatialProjectionAccumulator::for_explicit_topology(
         load,
         domain.topology.identity.discretization_digest(),
-        domain.coordinates_m,
+        domain.coordinates_m.canonical_value(),
         SpatialIntegrationRule::ExplicitConsistentElement,
         measures.len(),
         reference_point_m,
@@ -484,10 +488,13 @@ fn apply_explicit_body_force(
 
 fn shell_thickness(property: &crate::properties::CompiledShellProperty) -> f64 {
     match &property.owner {
-        CompiledShellPropertyOwner::Homogeneous { section, .. } => section.thickness_m,
-        CompiledShellPropertyOwner::Laminate { plies, .. } => {
-            plies.iter().map(|ply| ply.definition.thickness_m).sum()
+        CompiledShellPropertyOwner::Homogeneous { section, .. } => {
+            section.thickness_m.canonical_value()
         }
+        CompiledShellPropertyOwner::Laminate { plies, .. } => plies
+            .iter()
+            .map(|ply| ply.definition.thickness_m.canonical_value())
+            .sum(),
     }
 }
 

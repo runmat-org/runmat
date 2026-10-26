@@ -30,7 +30,7 @@ pub fn validate_canonical_input<'a>(
     let frequency_matches = matches!(&step.independent_domain,
         IndependentDomain::FrequencyHertz(values) if values.len() == 1
             && values[0].is_finite() && values[0] > 0.0
-            && values[0].to_bits() == reference_frequency.hertz.to_bits());
+            && values[0].to_bits() == reference_frequency.canonical_value().to_bits());
     if !frequency_matches {
         return Err(MaxwellError::Unsupported(
             "one exact step/domain harmonic frequency required; sweeps are not admitted".into(),

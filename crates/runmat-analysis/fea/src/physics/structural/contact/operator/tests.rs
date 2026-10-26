@@ -18,8 +18,15 @@ impl Fixture {
         let mut mesh = fixtures::three_region_tetrahedron_solver_mesh_with_order(order);
         for node in &mut mesh.topology.nodes {
             if (100..200).contains(&node.node_id) {
-                let [x, y, z] = node.coordinates_m;
-                node.coordinates_m = [0.2 + 0.2 * (x - 2.), 0.4 - 0.2 * y, -0.05 - 0.2 * z];
+                let [x, y, z] = node.coordinates_m.canonical_value();
+                node.coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([
+                    0.2 + 0.2 * (x - 2.),
+                    0.4 - 0.2 * y,
+                    -0.05 - 0.2 * z,
+                ]);
             }
         }
         for (id, name) in [
@@ -100,7 +107,11 @@ impl Fixture {
                 },
             }),
         }];
-        let positions = projection.nodes.iter().map(|n| n.coordinates_m).collect();
+        let positions = projection
+            .nodes
+            .iter()
+            .map(|n| n.coordinates_m.canonical_value())
+            .collect();
         let rows = (0..projection.nodes.len())
             .map(|n| [3 * n, 3 * n + 1, 3 * n + 2])
             .collect();

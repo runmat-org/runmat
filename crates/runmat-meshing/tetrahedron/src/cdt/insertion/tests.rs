@@ -131,21 +131,26 @@ fn point_set_preserves_a_strong_edge_from_an_exact_segment_midpoint() {
     let mut nodes = torus_nodes(72);
     let endpoints = [nodes[33], nodes[40]];
     let coordinates_m = std::array::from_fn(|axis| {
-        endpoints[0].coordinates_m[axis] * 0.5 + endpoints[1].coordinates_m[axis] * 0.5
+        endpoints[0].coordinates_m.canonical_value()[axis] * 0.5
+            + endpoints[1].coordinates_m.canonical_value()[axis] * 0.5
     });
     let midpoint = DelaunayVolumeNode {
         identity: StableDigest::from_bytes([
             218, 103, 220, 161, 211, 32, 103, 189, 211, 173, 228, 197, 173, 232, 205, 167, 71, 149,
             126, 172, 50, 144, 28, 177, 163, 151, 195, 224, 218, 82, 154, 70,
         ]),
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         construction: Point3Construction::Segment {
-            endpoints: endpoints.map(|node| node.coordinates_m),
+            endpoints: endpoints.map(|node| node.coordinates_m.canonical_value()),
             parameter_numerator: 1,
             parameter_exponent: 1,
         },
     };
-    let explicit_midpoint = DelaunayVolumeNode::explicit(midpoint.identity, midpoint.coordinates_m);
+    let explicit_midpoint =
+        DelaunayVolumeNode::explicit(midpoint.identity, midpoint.coordinates_m.canonical_value());
     let mut explicit_nodes = torus_nodes(72);
     explicit_nodes.push(explicit_midpoint);
     let explicit_topology = build_delaunay_volume_point_set(
@@ -333,7 +338,7 @@ fn insertion_rejects_outside_repeated_and_tampered_inputs() {
     assert_eq!(
         insert_delaunay_volume_node(
             topology.clone(),
-            node(25, topology.nodes[0].coordinates_m),
+            node(25, topology.nodes[0].coordinates_m.canonical_value()),
             DelaunayInsertionOptions::default(),
             &NeverCancelled,
         )

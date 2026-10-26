@@ -265,6 +265,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
+      - name: Set macOS deployment baseline before native builds and cache restore
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          printf '%s\n' 'MACOSX_DEPLOYMENT_TARGET=11.0' 'CMAKE_OSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
+
       - name: Install macOS native dependencies
         if: runner.os == 'macOS'
         run: bash scripts/ci-install-macos-cross-dependencies.sh "${{ matrix.platform.target }}"
@@ -277,6 +283,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          # The prefix is also part of restore keys: never reuse pre-policy
+          # Darwin C/CMake objects whose build scripts do not track this env.
+          prefix-key: ${{ runner.os == 'macOS' && 'v1-rust-macos-min11-cmake11' || 'v0-rust' }}
+          env-vars: MACOSX_DEPLOYMENT_TARGET CMAKE_OSX_DEPLOYMENT_TARGET
           cache-workspace-crates: true
 
       - name: Restore Windows native dependency cache

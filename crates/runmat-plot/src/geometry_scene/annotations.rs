@@ -1,6 +1,29 @@
 use super::*;
 
 impl GeometryScene {
+    /// The overlay reserves the same shaft/head geometry the symbol draws,
+    /// including a head-on vector whose projected shaft has no length.
+    #[cfg(feature = "egui-overlay")]
+    pub(crate) fn annotation_vector_points(
+        &self,
+        region_id: &str,
+        direction: [f32; 3],
+    ) -> Option<[Vec3; 4]> {
+        let direction = normalized_annotation_direction(direction)?;
+        let length = annotation_arrow_length(self.bounds);
+        self.chunks
+            .iter()
+            .filter(|chunk| chunk.visible)
+            .find_map(|chunk| {
+                let frame = chunk.region_annotation_frame(region_id)?;
+                let start = surface_arrow_start(frame.anchor, frame.normal, direction, length);
+                let end = start + direction * length;
+                let side = perpendicular_unit(direction);
+                let base = end - direction * (length * 0.28);
+                let wing = side * (length * 0.16);
+                Some([start, end, base + wing, base - wing])
+            })
+    }
     pub(super) fn topology_selection_nodes(
         &self,
         presentation: &GeometryScenePresentation,
@@ -91,6 +114,9 @@ impl GeometryScene {
         let mut stroke_vertices = Vec::new();
         let arrow_length = annotation_arrow_length(self.bounds);
         for annotation in &presentation.region_annotations {
+            if annotation.kind == GeometrySceneAnnotationKind::Label {
+                continue;
+            }
             for chunk in &self.chunks {
                 if !chunk.visible || chunk.render_data.pipeline_type != PipelineType::Triangles {
                     continue;
@@ -486,6 +512,7 @@ fn surface_arrow_start(anchor: Vec3, normal: Vec3, direction: Vec3, length: f32)
 
 fn annotation_color(kind: GeometrySceneAnnotationKind) -> [f32; 4] {
     match kind {
+        GeometrySceneAnnotationKind::Label => [0.35, 0.65, 0.95, 1.0],
         GeometrySceneAnnotationKind::FixedSupport
         | GeometrySceneAnnotationKind::SymmetrySupport
         | GeometrySceneAnnotationKind::PrescribedMotion
@@ -565,6 +592,17 @@ fn append_arrow_with_visibility(
     let side = perpendicular_unit(direction);
     let wing_base = end - direction * (length * 0.28);
     let wing_size = length * 0.16;
+    // Fill the head in the same annotation plane and unlit stroke pipeline.
+    // Closely spaced rays keep the tip solid at the CAD marker's screen scale.
+    for step in -3..=3 {
+        append_stroke(
+            vertices,
+            end,
+            wing_base + side * (wing_size * step as f32 / 4.0),
+            color,
+            optional_face_span,
+        );
+    }
     append_stroke(
         vertices,
         end,

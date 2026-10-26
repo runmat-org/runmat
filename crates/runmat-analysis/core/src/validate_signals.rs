@@ -17,6 +17,12 @@ use generator::validate_generator;
 pub(crate) use generator::validate_generator_invocation;
 
 pub(crate) fn validate_signals(signals: &[PhysicalSignal]) -> Result<(), AnalysisValidationError> {
+    validate_signals_with_inputs(signals, None)
+}
+pub(crate) fn validate_signals_with_inputs(
+    signals: &[PhysicalSignal],
+    inputs: Option<&[crate::AuthoredInputDefinition]>,
+) -> Result<(), AnalysisValidationError> {
     let mut ids = HashSet::new();
     for signal in signals {
         let id = &signal.signal_id().0;
@@ -24,33 +30,33 @@ pub(crate) fn validate_signals(signals: &[PhysicalSignal]) -> Result<(), Analysi
             return invalid(id, "signal ids must be non-empty and unique");
         }
         let result = match signal {
-            PhysicalSignal::Displacement(value) => validate_signal(value),
-            PhysicalSignal::Rotation(value) => validate_signal(value),
-            PhysicalSignal::Velocity(value) => validate_signal(value),
-            PhysicalSignal::Acceleration(value) => validate_signal(value),
-            PhysicalSignal::AngularVelocity(value) => validate_signal(value),
-            PhysicalSignal::AngularAcceleration(value) => validate_signal(value),
-            PhysicalSignal::Force(value) => validate_signal(value),
-            PhysicalSignal::Moment(value) => validate_signal(value),
-            PhysicalSignal::Traction(value) => validate_signal(value),
-            PhysicalSignal::Pressure(value) => validate_signal(value),
-            PhysicalSignal::BodyForceDensity(value) => validate_signal(value),
-            PhysicalSignal::Temperature(value) => validate_signal(value),
-            PhysicalSignal::TemperatureDifference(value) => validate_signal(value),
-            PhysicalSignal::HeatFlux(value) => validate_signal(value),
-            PhysicalSignal::HeatGenerationDensity(value) => validate_signal(value),
-            PhysicalSignal::ElectricPotential(value) => validate_signal(value),
-            PhysicalSignal::ElectricCurrent(value) => validate_signal(value),
-            PhysicalSignal::ElectricCharge(value) => validate_signal(value),
-            PhysicalSignal::ElectricCurrentDensity(value) => validate_signal(value),
-            PhysicalSignal::ElectricChargeDensity(value) => validate_signal(value),
-            PhysicalSignal::MagneticVectorPotential(value) => validate_signal(value),
-            PhysicalSignal::MassFlowRate(value) => validate_signal(value),
+            PhysicalSignal::Displacement(value) => validate_signal(value, inputs),
+            PhysicalSignal::Rotation(value) => validate_signal(value, inputs),
+            PhysicalSignal::Velocity(value) => validate_signal(value, inputs),
+            PhysicalSignal::Acceleration(value) => validate_signal(value, inputs),
+            PhysicalSignal::AngularVelocity(value) => validate_signal(value, inputs),
+            PhysicalSignal::AngularAcceleration(value) => validate_signal(value, inputs),
+            PhysicalSignal::Force(value) => validate_signal(value, inputs),
+            PhysicalSignal::Moment(value) => validate_signal(value, inputs),
+            PhysicalSignal::Traction(value) => validate_signal(value, inputs),
+            PhysicalSignal::Pressure(value) => validate_signal(value, inputs),
+            PhysicalSignal::BodyForceDensity(value) => validate_signal(value, inputs),
+            PhysicalSignal::Temperature(value) => validate_signal(value, inputs),
+            PhysicalSignal::TemperatureDifference(value) => validate_signal(value, inputs),
+            PhysicalSignal::HeatFlux(value) => validate_signal(value, inputs),
+            PhysicalSignal::HeatGenerationDensity(value) => validate_signal(value, inputs),
+            PhysicalSignal::ElectricPotential(value) => validate_signal(value, inputs),
+            PhysicalSignal::ElectricCurrent(value) => validate_signal(value, inputs),
+            PhysicalSignal::ElectricCharge(value) => validate_signal(value, inputs),
+            PhysicalSignal::ElectricCurrentDensity(value) => validate_signal(value, inputs),
+            PhysicalSignal::ElectricChargeDensity(value) => validate_signal(value, inputs),
+            PhysicalSignal::MagneticVectorPotential(value) => validate_signal(value, inputs),
+            PhysicalSignal::MassFlowRate(value) => validate_signal(value, inputs),
             PhysicalSignal::VolumeFlowRate(value) => {
                 if value.shape != SignalShape::Scalar {
                     Err("volume-flow-rate signals require scalar shape".into())
                 } else {
-                    validate_signal(value)
+                    validate_signal(value, inputs)
                 }
             }
         };
@@ -74,7 +80,10 @@ fn invalid<T>(signal_id: &str, detail: impl Into<String>) -> Result<T, AnalysisV
     })
 }
 
-fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> {
+fn validate_signal<Q: FiniteQuantity>(
+    signal: &Signal<Q>,
+    inputs: Option<&[crate::AuthoredInputDefinition]>,
+) -> Result<(), String> {
     if matches!(signal.shape, SignalShape::DeferredTopologyField { .. })
         && (!matches!(signal.representation, SignalRepresentation::Generator(_))
             || !matches!(signal.provenance, SignalProvenance::Authored))
@@ -119,7 +128,7 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
         }
         SignalRepresentation::Tabulated(table) => {
             validate_sample_count(&signal.evidence, table.knots.len())?;
-            validate_table(table, signal.precision, &expected_shape)
+            validate_table(table, signal.precision, &expected_shape, inputs)
         }
         SignalRepresentation::Waveform(waveform) => {
             validate_real_precision(signal.precision)?;
@@ -128,7 +137,7 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
         }
         SignalRepresentation::Artifact(artifact) => {
             validate_sample_count(&signal.evidence, artifact.sample_count)?;
-            validate_artifact(artifact)?;
+            validate_artifact_with_inputs(artifact, inputs)?;
             match (&signal.shape, &artifact.topology_digest) {
                 (SignalShape::TopologyField { topology_id, .. }, Some(digest))
                     if topology_id == digest =>
@@ -152,7 +161,7 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
                         .to_string(),
                 );
             }
-            validate_generator(generator)
+            validate_generator(generator, inputs)
         }
     }
 }
@@ -308,8 +317,10 @@ fn validate_table<Q: FiniteQuantity>(
     table: &TabulatedSignal<Q>,
     precision: SignalPrecision,
     declared_shape: &[usize],
+    inputs: Option<&[crate::AuthoredInputDefinition]>,
 ) -> Result<(), String> {
-    if let TabulatedSignalDomain::StudyParameter { parameter_id } = &table.domain {
+    table.coordinate_field(inputs)?;
+    if let TabulatedSignalDomain::StudyParameter { parameter_id, .. } = &table.domain {
         if parameter_id.trim().is_empty() {
             return Err("study-parameter axis requires a parameter id".to_string());
         }
@@ -400,13 +411,15 @@ fn validate_waveform<Q: FiniteQuantity>(
             return Err("waveform amplitude and offset must have identical shape".to_string());
         }
     }
-    if !waveform.start_seconds.is_finite()
-        || !waveform.phase_radians.is_finite()
+    if !waveform.start_seconds.canonical_value().is_finite()
+        || !waveform.phase_radians.canonical_value().is_finite()
         || waveform
             .duration_seconds
+            .map(|quantity| quantity.canonical_value())
             .is_some_and(|value| !value.is_finite() || value <= 0.0)
         || waveform
             .frequency_hz
+            .map(|quantity| quantity.canonical_value())
             .is_some_and(|value| !value.is_finite() || value <= 0.0)
         || waveform
             .duty_cycle
@@ -416,26 +429,48 @@ fn validate_waveform<Q: FiniteQuantity>(
     }
     let valid_parameters = match waveform.kind {
         StandardWaveformKind::Step => {
-            waveform.duration_seconds.is_none()
-                && waveform.frequency_hz.is_none()
-                && waveform.phase_radians == 0.0
+            waveform
+                .duration_seconds
+                .map(|quantity| quantity.canonical_value())
+                .is_none()
+                && waveform
+                    .frequency_hz
+                    .map(|quantity| quantity.canonical_value())
+                    .is_none()
+                && waveform.phase_radians.canonical_value() == 0.0
                 && waveform.duty_cycle.is_none()
         }
         StandardWaveformKind::Ramp
         | StandardWaveformKind::HalfSinePulse
         | StandardWaveformKind::TriangularPulse => {
-            waveform.duration_seconds.is_some()
-                && waveform.frequency_hz.is_none()
-                && waveform.phase_radians == 0.0
+            waveform
+                .duration_seconds
+                .map(|quantity| quantity.canonical_value())
+                .is_some()
+                && waveform
+                    .frequency_hz
+                    .map(|quantity| quantity.canonical_value())
+                    .is_none()
+                && waveform.phase_radians.canonical_value() == 0.0
                 && waveform.duty_cycle.is_none()
         }
         StandardWaveformKind::Sine => {
-            waveform.frequency_hz.is_some() && waveform.duty_cycle.is_none()
+            waveform
+                .frequency_hz
+                .map(|quantity| quantity.canonical_value())
+                .is_some()
+                && waveform.duty_cycle.is_none()
         }
         StandardWaveformKind::RectangularPulse => {
-            waveform.duration_seconds.is_some()
-                && waveform.frequency_hz.is_none()
-                && waveform.phase_radians == 0.0
+            waveform
+                .duration_seconds
+                .map(|quantity| quantity.canonical_value())
+                .is_some()
+                && waveform
+                    .frequency_hz
+                    .map(|quantity| quantity.canonical_value())
+                    .is_none()
+                && waveform.phase_radians.canonical_value() == 0.0
                 && waveform.duty_cycle.is_some()
         }
     };
@@ -446,6 +481,13 @@ fn validate_waveform<Q: FiniteQuantity>(
 }
 
 fn validate_artifact(artifact: &SignalArtifactRef) -> Result<(), String> {
+    validate_artifact_with_inputs(artifact, None)
+}
+fn validate_artifact_with_inputs(
+    artifact: &SignalArtifactRef,
+    inputs: Option<&[crate::AuthoredInputDefinition]>,
+) -> Result<(), String> {
+    artifact.domain.axis_descriptor(inputs)?;
     if artifact.artifact_id.trim().is_empty()
         || artifact.content_digest.trim().is_empty()
         || artifact.schema.trim().is_empty()
@@ -467,6 +509,7 @@ fn validate_artifact(artifact: &SignalArtifactRef) -> Result<(), String> {
             parameter_id,
             start,
             end,
+            ..
         } => !parameter_id.trim().is_empty() && start.is_finite() && end.is_finite() && start < end,
     };
     if valid_domain {

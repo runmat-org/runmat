@@ -53,7 +53,38 @@ const OLD_PAIRS: [BuiltinParamDescriptor; 3] = [
         description: "Option value(s) and additional name/value pairs.",
     },
 ];
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "options = optimset('fminsearch')",
+        inputs: &[BuiltinParamDescriptor {
+            name: "solver",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Supported solver name or handle (fminsearch).",
+        }],
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "options = optimset(oldopts, newopts)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "oldopts",
+                ty: BuiltinParamType::Any,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Existing structure or [].",
+            },
+            BuiltinParamDescriptor {
+                name: "newopts",
+                ty: BuiltinParamType::Any,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Structure of nonempty replacement values.",
+            },
+        ],
+        outputs: &OUTPUT,
+    },
     BuiltinSignatureDescriptor {
         label: "options = optimset()",
         inputs: &[],

@@ -35,6 +35,7 @@ fn revision() -> ProgramRevision {
 
 fn admitted() -> AdmittedSignalGenerator {
     AdmittedSignalGenerator {
+        schema_version: 2,
         value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: revision(),
         callable: BundleCallable {
@@ -50,7 +51,7 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("executable-source"),
         ),
         function: ProgramFunctionId(3),
-        captures: Vec::new(),
+        frozen_inputs: crate::FrozenGeneratorInputs::DirectCaptures(Vec::new()),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),
             digest("captures"),
@@ -63,7 +64,13 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("sampling"),
         )
         .unwrap(),
-        sample_points: vec![0.0, 1.0],
+        sample_points: runmat_types::physical::Quantity::try_from_descriptor(
+            runmat_analysis_core::GeneratorDomain::TimeSeconds
+                .axis_descriptor(None)
+                .unwrap(),
+            vec![0.0, 1.0],
+        )
+        .unwrap(),
         required_capabilities: BTreeSet::new(),
         provenance: GeneratorProvenance {
             project_revision: "project".into(),
@@ -223,11 +230,15 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
         prepare_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     assert_eq!(prepared.chunks.len(), 1);
     assert_eq!(
-        prepared.chunks[0].request.callable.semantic_function(),
+        prepared.chunks[0]
+            .direct_request()
+            .unwrap()
+            .callable
+            .semantic_function(),
         Some(ProgramFunctionId(3))
     );
     assert_eq!(
-        prepared.chunks[0].request.arguments,
+        prepared.chunks[0].direct_request().unwrap().arguments,
         prepared.chunks[0].plan.arguments
     );
     assert_eq!(

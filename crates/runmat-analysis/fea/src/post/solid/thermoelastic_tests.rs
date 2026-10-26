@@ -17,17 +17,29 @@ fn quadratic_tet10_temperature_energy_matches_exact_simplex_moment() {
         .topology
         .nodes
         .iter()
-        .map(|node| thermal.reference_temperature_k + 100.0 * node.coordinates_m[0].powi(2))
+        .map(|node| {
+            thermal.reference_temperature_k.canonical_value()
+                + 100.0 * node.coordinates_m.canonical_value()[0].powi(2)
+        })
         .collect::<Vec<_>>();
     let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-    let mut elements =
-        solid_recovery::build(&mesh, &properties, None, Some(&temperatures)).unwrap();
+    let mut elements = solid_recovery::build(
+        &mesh,
+        &properties,
+        None,
+        Some(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Temperature,
+            _,
+        >::new(temperatures.as_slice())),
+    )
+    .unwrap();
     let fixed =
         recover_solid_fields_with_plan(&elements, &[0.0; 30], LocalExecutionPlan::serial(), true)
             .unwrap();
     // On the unit tetrahedron <x^4> = (4!/7!) / (1/6) = 1/35.
-    let expected = 1.5 * mechanical.youngs_modulus_pa / (1.0 - 2.0 * mechanical.poisson_ratio)
-        * (100.0 * thermal.expansion_coefficient_per_k).powi(2)
+    let expected = 1.5 * mechanical.youngs_modulus_pa.canonical_value()
+        / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value())
+        * (100.0 * thermal.expansion_coefficient_per_k.canonical_value()).powi(2)
         / 35.0;
     assert!(
         (fixed.strain_energy_density[0] / expected - 1.0).abs() < 1.0e-12,
@@ -35,12 +47,17 @@ fn quadratic_tet10_temperature_energy_matches_exact_simplex_moment() {
         fixed.strain_energy_density[0]
     );
     // Four valid output samples cannot substitute for missing retained nodal data.
-    elements[0]
+    let nodal = &mut elements[0]
         .solved_thermal_quadrature
         .as_mut()
         .unwrap()
-        .nodal_temperature_k
-        .pop();
+        .nodal_temperature_k;
+    nodal
+        .try_resize(
+            nodal.canonical_values().len() - 1,
+            runmat_types::physical::Temperature::new(0.0),
+        )
+        .unwrap();
     assert!(recover_solid_fields_with_plan(
         &elements,
         &[0.0; 30],
@@ -65,32 +82,50 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
         .topology
         .nodes
         .iter()
-        .map(|node| thermal.reference_temperature_k + 100.0 * node.coordinates_m[0].powi(2))
+        .map(|node| {
+            thermal.reference_temperature_k.canonical_value()
+                + 100.0 * node.coordinates_m.canonical_value()[0].powi(2)
+        })
         .collect::<Vec<_>>();
     let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-    let mut elements =
-        solid_recovery::build(&mesh, &properties, None, Some(&temperatures)).unwrap();
+    let mut elements = solid_recovery::build(
+        &mesh,
+        &properties,
+        None,
+        Some(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Temperature,
+            _,
+        >::new(temperatures.as_slice())),
+    )
+    .unwrap();
     // Isoparametric map x = ξ + c ξη, y = η, z = ζ; det(J) = 1 + cη.
     let c = 0.4;
     let SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } = &mut elements[0].geometry
     else {
         unreachable!()
     };
-    coordinates_m[5][0] += c / 4.0;
+    *coordinates_m = coordinates_m
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[5][0] += c / 4.0;
+            values
+        })
+        .unwrap();
     let coordinates = *coordinates_m;
     let volume = 1.0 / 6.0 + c / 24.0;
     let mean_x2 = (1.0 / 60.0 + c / 360.0) / volume;
     let mean_x4 = (1.0 / 210.0 + c / 1680.0) / volume;
-    let e = material.youngs_modulus_pa;
-    let nu = material.poisson_ratio;
+    let e = material.youngs_modulus_pa.canonical_value();
+    let nu = material.poisson_ratio.canonical_value();
     let h = e / (1.0 - 2.0 * nu);
     let mu = e / (2.0 * (1.0 + nu));
     let lambda = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
-    let a = 100.0 * thermal.expansion_coefficient_per_k;
+    let a = 100.0 * thermal.expansion_coefficient_per_k.canonical_value();
     for b in [0.0, 2.0e-4] {
         let gamma = b * 2.0;
         let delta = b * 3.0;
         let displacement = coordinates
+            .canonical_values()
             .iter()
             .flat_map(|[x, y, z]| [b * x + gamma * y, delta * z, 0.0])
             .collect::<Vec<_>>();
@@ -124,12 +159,18 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
     else {
         unreachable!()
     };
-    coordinates_m[5][0] = 0.5 - 0.9999 / 4.0;
+    *coordinates_m = coordinates_m
+        .clone()
+        .try_map_canonical_storage(|mut values| {
+            values[5][0] = 0.5 - 0.9999 / 4.0;
+            values
+        })
+        .unwrap();
     let displacement = mesh
         .topology
         .nodes
         .iter()
-        .flat_map(|node| [1.0e-4 * node.coordinates_m[0], 0.0, 0.0])
+        .flat_map(|node| [1.0e-4 * node.coordinates_m.canonical_value()[0], 0.0, 0.0])
         .collect::<Vec<_>>();
     assert!(matches!(
         recover_solid_fields_with_plan(
@@ -154,20 +195,29 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         let alpha = 1.0e-5;
         let thermal = model.materials[0].thermal.as_mut().unwrap();
-        thermal.expansion_coefficient_per_k = alpha;
-        let reference = thermal.reference_temperature_k;
+        thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(alpha);
+        let reference = thermal.reference_temperature_k.canonical_value();
         let mechanical = model.materials[0].require_mechanical().unwrap();
-        let coefficient = mechanical.youngs_modulus_pa / (1.0 - 2.0 * mechanical.poisson_ratio);
+        let coefficient = mechanical.youngs_modulus_pa.canonical_value()
+            / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
         let temperatures = mesh
             .topology
             .nodes
             .iter()
-            .map(|node| reference + 10.0 + 20.0 * node.coordinates_m[0])
+            .map(|node| reference + 10.0 + 20.0 * node.coordinates_m.canonical_value()[0])
             .collect::<Vec<_>>();
         let retained = temperatures.clone();
-        let elements =
-            solid_recovery::build(&mesh, &properties, None, Some(&temperatures)).unwrap();
+        let elements = solid_recovery::build(
+            &mesh,
+            &properties,
+            None,
+            Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Temperature,
+                _,
+            >::new(temperatures.as_slice())),
+        )
+        .unwrap();
         assert_eq!(temperatures, retained);
         let fixed = recover_solid_fields_with_plan(
             &elements,
@@ -198,7 +248,7 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
                 .nodes
                 .iter()
                 .flat_map(|node| {
-                    let [x, y, z] = node.coordinates_m;
+                    let [x, y, z] = node.coordinates_m.canonical_value();
                     [
                         alpha * (10.0 * x + 10.0 * x * x - 10.0 * y * y - 10.0 * z * z),
                         alpha * (10.0 * y + 20.0 * x * y),
@@ -219,10 +269,28 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
                 .all(|value| value.abs() < 1.0e-5));
             assert!(free.strain_energy_density[0].abs() < 1.0e-16);
         }
-        assert!(solid_recovery::build(&mesh, &properties, None, Some(&temperatures[..1])).is_err());
+        assert!(solid_recovery::build(
+            &mesh,
+            &properties,
+            None,
+            Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Temperature,
+                _,
+            >::new(&temperatures[..1]))
+        )
+        .is_err());
         let mut invalid = temperatures.clone();
         invalid[0] = f64::NAN;
-        assert!(solid_recovery::build(&mesh, &properties, None, Some(&invalid)).is_err());
+        assert!(solid_recovery::build(
+            &mesh,
+            &properties,
+            None,
+            Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Temperature,
+                _,
+            >::new(invalid.as_slice()))
+        )
+        .is_err());
     }
 }
 
@@ -230,9 +298,9 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
 fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressive_when_fixed() {
     let eigenstrain = 1.0e-4;
     let material = SolidMaterial {
-        youngs_modulus_pa: 200.0e9,
-        poisson_ratio: 0.3,
-        density_kg_per_m3: 7850.0,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(7850.0),
     };
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
@@ -240,16 +308,26 @@ fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressiv
             .topology
             .nodes
             .iter()
-            .map(|node| node.coordinates_m)
+            .map(|node| node.coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         let geometry = match order {
             ElementOrder::Tet4 => SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices: [0, 1, 2, 3],
-                coordinates_m: std::array::from_fn(|index| coordinates[index]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(std::array::from_fn(|index| {
+                    coordinates[index]
+                })),
             },
             ElementOrder::Tet10 => SolidRecoveryGeometry::Tetrahedron10 {
                 node_indices: std::array::from_fn(|index| index),
-                coordinates_m: std::array::from_fn(|index| coordinates[index]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(std::array::from_fn(|index| {
+                    coordinates[index]
+                })),
             },
         };
         let element = SolidRecoveryElementSummary {
@@ -257,7 +335,10 @@ fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressiv
             region_id: "body".into(),
             material,
             thermal_eigenstrain: Some(eigenstrain),
-            prescribed_temperature_k: Some(303.15),
+            prescribed_temperature_k: Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Temperature,
+                _,
+            >::new(303.15)),
             solved_thermal_quadrature: None,
             geometry,
         };
@@ -289,8 +370,8 @@ fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressiv
             false,
         )
         .unwrap();
-        let expected_stress =
-            -material.youngs_modulus_pa * eigenstrain / (1.0 - 2.0 * material.poisson_ratio);
+        let expected_stress = -material.youngs_modulus_pa.canonical_value() * eigenstrain
+            / (1.0 - 2.0 * material.poisson_ratio.canonical_value());
         for normal_stress in &fixed.stress[..3] {
             assert!((normal_stress - expected_stress).abs() < 1.0e-5);
         }

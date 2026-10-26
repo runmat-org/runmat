@@ -33,17 +33,26 @@ use super::resources::{
 };
 use super::state::{FutureState, State, TaskRecord};
 
+mod worker_batch;
+mod program_preparation;
+pub(super) use worker_batch::PhysicalCallback;
+mod physical_exit;
 mod owned_builtin;
+mod timer;
+mod reporting;
 use owned_builtin::OwnedTask;
 
 pub(crate) struct BrowserExecutionService {
+    clock: timer::DriverClock,
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
     host: Option<BrowserExecutionHost>,
     capabilities: BrowserExecutionCapabilities,
     state: RefCell<State>,
     owned: RefCell<HashMap<TaskId, OwnedTask>>,
+    callback_waiters: RefCell<HashMap<TaskId, worker_batch::TaskWake>>,
     self_weak: RefCell<Weak<Self>>,
+    driver_timer: RefCell<Option<timer::DriverTimer>>,
 }
 
 /// Keep the deferred source graph visible to GC while an arbitrary VM graph
@@ -118,6 +127,7 @@ impl BrowserExecutionService {
     pub(crate) fn new(
         host: Option<BrowserExecutionHost>,
     ) -> Result<Rc<Self>, ExecutionServiceError> {
+        let clock = timer::DriverClock::new();
         let capabilities = host
             .as_ref()
             .map(BrowserExecutionHost::capabilities)
@@ -125,9 +135,18 @@ impl BrowserExecutionService {
         let session_nonce = uuid::Uuid::new_v4();
         let scope_id = ExecutionScopeId::derive(&[b"browser-session", session_nonce.as_bytes()]);
         let pool_id = PoolId::derive(&[scope_id.bytes(), b"browser"]);
-        let accelerators = browser_accelerators()?;
+        let qualified = host
+            .as_ref()
+            .and_then(BrowserExecutionHost::worker_inventory);
+        let accelerators = match qualified {
+            Some(inventory) => inventory.accelerators.clone(),
+            None => browser_accelerators()?,
+        };
         let resources = browser_inventory(capabilities, accelerators.clone());
-        let execution_host = browser_execution_host_inventory(&accelerators)?;
+        let execution_host = match qualified {
+            Some(inventory) => inventory.host.clone(),
+            None => browser_execution_host_inventory(&accelerators)?,
+        };
         let mut driver = Driver::new(DriverConfig::default(), 1)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         driver
@@ -153,9 +172,9 @@ impl BrowserExecutionService {
             .map_err(driver_error)?;
         for index in 0..capabilities.max_workers {
             let worker_id = WorkerId::derive(&[pool_id.bytes(), &index.to_be_bytes()]);
-            // Browser workers share one process-local WebGPU device. A single
-            // scheduler worker owns its physical allocation domain so the
-            // pool cannot lease provider views of that device concurrently.
+            // Only qualified worker devices enter placement. In particular a
+            // CPU worker's explicit empty inventory cannot borrow UI devices.
+            // Keep one owner per physical allocation domain as before.
             let worker_accelerators = if index == 0 {
                 accelerators.clone()
             } else {
@@ -170,7 +189,13 @@ impl BrowserExecutionService {
                 }))
                 .map_err(driver_error)?;
         }
+        driver
+            .handle(DriverCommand::Tick {
+                now_millis: clock.now_millis(),
+            })
+            .map_err(driver_error)?;
         let service = Rc::new(Self {
+            clock,
             scope_id,
             pool_id,
             host,
@@ -188,9 +213,14 @@ impl BrowserExecutionService {
                 pool_open: false,
             }),
             owned: RefCell::new(HashMap::new()),
+            callback_waiters: RefCell::new(HashMap::new()),
             self_weak: RefCell::new(Weak::new()),
+            driver_timer: RefCell::new(None),
         });
         service.self_weak.replace(Rc::downgrade(&service));
+        service
+            .driver_timer
+            .replace(Some(timer::DriverTimer::new(Rc::downgrade(&service))?));
         Ok(service)
     }
 
@@ -280,9 +310,47 @@ impl BrowserExecutionService {
                 | DriverAction::GarbageCollectResults { .. } => {}
             }
         }
+        self.refresh_driver_timer();
     }
 
     fn launch(&self, attempt: AttemptRequest) {
+        let eligible = self
+            .state
+            .borrow()
+            .driver
+            .snapshot_ref()
+            .attempts
+            .get(&attempt.id)
+            .is_some_and(|record| {
+                record.state == runmat_execution::state::AttemptState::Assigned
+                    && record.terminal.is_none()
+            });
+        if !eligible {
+            return;
+        }
+        // Admission may have waited behind other work or a browser task turn.
+        // Apply real deadlines before acquiring any new physical worker.
+        let actions = {
+            let mut state = self.state.borrow_mut();
+            let now_millis = self.clock.now_millis().max(state.driver.now_millis());
+            state
+                .driver
+                .handle(DriverCommand::Tick { now_millis })
+                .unwrap_or_default()
+        };
+        self.dispatch(actions);
+        let cancelled_before_launch = self
+            .state
+            .borrow()
+            .driver
+            .snapshot_ref()
+            .attempts
+            .get(&attempt.id)
+            .is_some_and(|record| record.cancellation_requested_at.is_some());
+        if cancelled_before_launch {
+            self.retire_unlaunched_attempt(&attempt);
+            return;
+        }
         let program = {
             let mut state = self.state.borrow_mut();
             let started = BackendReport::for_request(&attempt, AttemptReport::Started);
@@ -317,16 +385,55 @@ impl BrowserExecutionService {
             BrowserWorkerRequest::Graph(request) => request.assignment = Some(assignment),
             BrowserWorkerRequest::OwnedBuiltin(request) => request.assignment = Some(assignment),
         }
+        let callback = {
+            let mut state = self.state.borrow_mut();
+            state.tasks.get_mut(&attempt.task_id).is_some_and(|task| {
+                if self.capabilities.selected_program_work
+                    && !matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_))
+                {
+                    // Public Direct/Graph Futures keep their existing shapes
+                    // and refetch policy, but use the SAME retirement owner
+                    // on a qualified host. No legacy unqualified slot reuse.
+                    task.callback_exit
+                        .get_or_insert_with(PhysicalCallback::default);
+                }
+                task.callback_exit.is_some()
+            })
+        };
         if matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_)) {
             self.mark_owned_launched(&attempt, selected_assignment);
+        } else if callback {
+            self.mark_callback_launched(&attempt, selected_assignment);
         }
         let weak = self.self_weak.borrow().clone();
-        let retained_service = matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_))
-            .then(|| weak.upgrade())
-            .flatten();
+        let retained_service = (callback
+            || matches!(
+                &program,
+                BrowserWorkerRequest::OwnedBuiltin(_) | BrowserWorkerRequest::Graph(_)
+            ))
+        .then(|| weak.upgrade())
+        .flatten();
         let host = self.host.clone();
-        let started_millis = js_sys::Date::now();
+        let started = runmat_time::Instant::now();
         wasm_bindgen_futures::spawn_local(async move {
+            if callback {
+                let terminal = match host.as_ref() {
+                    Some(host) => {
+                        host.launch_program(
+                            &attempt.task_id.to_string(),
+                            &attempt.worker_id.to_string(),
+                            &program,
+                        )
+                        .await
+                    }
+                    None => Err("selected callback lost its isolated program host".into()),
+                };
+                if let Some(service) = retained_service.or_else(|| weak.upgrade()) {
+                    let wall_millis = timer::duration_millis(started.elapsed()).max(1);
+                    service.finish_program_attempt(attempt, terminal, wall_millis);
+                }
+                return;
+            }
             let response = match host {
                 Some(host) => {
                     host.launch(
@@ -356,7 +463,7 @@ impl BrowserExecutionService {
                 },
             };
             if let Some(service) = retained_service.or_else(|| weak.upgrade()) {
-                let wall_millis = (js_sys::Date::now() - started_millis).max(1.0) as u64;
+                let wall_millis = timer::duration_millis(started.elapsed()).max(1);
                 service.finish_attempt(attempt, response, wall_millis);
             }
         });
@@ -372,6 +479,13 @@ impl BrowserExecutionService {
             self.finish_owned_attempt(attempt, response, wall_millis);
             return;
         }
+        if response.is_err() && self.callback_needs_exit(attempt.task_id) {
+            self.callback_launch_failed(attempt, response.expect_err("failed callback launch"));
+            return;
+        }
+        let unverified_host_launch = response.is_err() && self.host.is_some();
+        self.advance_driver_now()
+            .unwrap_or_else(|error| self.deadline_timer_failed(error));
         let (selected_request, graph_receipt) = {
             let state = self.state.borrow();
             let selected_request = state.requests.get(&attempt.task_id).cloned();
@@ -381,6 +495,8 @@ impl BrowserExecutionService {
                 .and_then(|task| state.futures.get(&task.future_id))
                 .and_then(|future| match future {
                     FutureState::Scheduled { receipt, .. } => receipt.clone(),
+                    FutureState::CancellingCallback { receipt, .. }
+                    | FutureState::UnsettledCallback { receipt, .. } => receipt.clone(),
                     _ => None,
                 });
             (selected_request, receipt)
@@ -397,7 +513,7 @@ impl BrowserExecutionService {
             .map_err(|error| error.to_string())?;
             Ok(response)
         });
-        let (future_id, completion, report) = match response {
+        let (future_id, mut completion, mut report) = match response {
             Ok(ProgramExecutionResponse::Success { outputs }) => {
                 let decoded = outputs
                     .iter()
@@ -409,10 +525,14 @@ impl BrowserExecutionService {
                             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
                     })
                     .and_then(runmat_runtime::execution::RootedValueSequence::new);
-                let report = AttemptReport::Succeeded {
-                    result: AttemptSuccess::new(&attempt, outputs, Vec::new(), wall_millis, 0, 0)
-                        .expect("browser attempt resource accounting must remain bounded"),
-                };
+                let report =
+                    match AttemptSuccess::new(&attempt, outputs, Vec::new(), wall_millis, 0, 0) {
+                        Ok(result) => AttemptReport::Succeeded { result },
+                        Err(message) => AttemptReport::Failed {
+                            kind: AttemptFailureKind::Rejected,
+                            message,
+                        },
+                    };
                 (
                     self.future_id(attempt.task_id),
                     FutureState::Completed(decoded),
@@ -421,11 +541,15 @@ impl BrowserExecutionService {
             }
             Ok(ProgramExecutionResponse::GraphSuccess { graph }) => {
                 if let Some(receipt) = graph_receipt {
-                    let report = AttemptReport::Succeeded {
-                        result: AttemptSuccess::Graph {
-                            graph: graph.clone(),
-                        },
-                    };
+                    let report =
+                        match AttemptSuccess::new_graph(&attempt, graph.clone(), wall_millis, 0, 0)
+                        {
+                            Ok(result) => AttemptReport::Succeeded { result },
+                            Err(message) => AttemptReport::Failed {
+                                kind: AttemptFailureKind::Rejected,
+                                message,
+                            },
+                        };
                     (
                         self.future_id(attempt.task_id),
                         FutureState::GraphCompleted {
@@ -517,23 +641,106 @@ impl BrowserExecutionService {
                 )
             }
         };
+        let mut unsuccessful_resources = None;
+        if unverified_host_launch {
+            if let AttemptReport::Failed { message, .. } = report {
+                report = AttemptReport::RetirementUnverified { message };
+            }
+        }
+        if let AttemptReport::Succeeded { result } = &report {
+            if let Err(message) = result.validate_against(&attempt) {
+                unsuccessful_resources = result
+                    .resources()
+                    .filter(|resources| resources.validate_against(&attempt).is_ok())
+                    .cloned()
+                    .map(Box::new);
+                report = AttemptReport::Failed {
+                    kind: AttemptFailureKind::Rejected,
+                    message,
+                };
+            }
+        }
+        if let AttemptReport::Failed { message, .. } = &report {
+            if matches!(
+                &completion,
+                FutureState::Completed(Ok(_)) | FutureState::GraphCompleted { .. }
+            ) {
+                completion = FutureState::Completed(Err(ExecutionServiceError::Infrastructure(
+                    message.clone(),
+                )));
+            }
+        }
+        let certified = self
+            .state
+            .borrow()
+            .tasks
+            .get(&attempt.task_id)
+            .and_then(|task| task.callback_exit.as_ref())
+            .is_some_and(PhysicalCallback::retirement_certified);
+        let mut backend_report = BackendReport::for_request(&attempt, report);
+        backend_report.unsuccessful_resources = unsuccessful_resources;
+        let actions = self.apply_browser_report(backend_report, certified);
+        let (task_state, unresolved) = {
+            let state = self.state.borrow();
+            let task_state = state
+                .driver
+                .task_record(attempt.task_id)
+                .ok()
+                .map(|task| task.state);
+            let unresolved = state
+                .driver
+                .snapshot_ref()
+                .attempts
+                .get(&attempt.id)
+                .and_then(|record| record.unverified_retirement.as_ref())
+                .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none());
+            (task_state, unresolved)
+        };
+        if unresolved {
+            if let Some(owner) = self.self_weak.borrow().upgrade() {
+                // Legacy program hosts cannot prove a rejected or cancelled
+                // invocation retired. Reuse the SAME physical retention table;
+                // no replacement source/claim owner is invented.
+                physical_exit::retain_until_physical_exit(attempt.task_id, owner);
+            }
+        }
+        if task_state == Some(runmat_execution::state::TaskState::Cancelled) {
+            completion = FutureState::Cancelled;
+        } else if task_state != Some(runmat_execution::state::TaskState::Succeeded) {
+            let error = ExecutionServiceError::WorkerLost(
+                "browser operation has no accepted successful scheduler outcome".into(),
+            );
+            completion = match completion {
+                FutureState::Completed(Ok(_)) => FutureState::UnsettledCallback {
+                    task_id: attempt.task_id,
+                    receipt: None,
+                    error,
+                },
+                FutureState::GraphCompleted { receipt, .. } => FutureState::UnsettledCallback {
+                    task_id: attempt.task_id,
+                    receipt: Some(receipt),
+                    error,
+                },
+                other => other,
+            };
+        }
         let mut state = self.state.borrow_mut();
         let mut retired = None;
         if let Some(future_id) = future_id {
-            if !matches!(state.futures.get(&future_id), Some(FutureState::Cancelled)) {
+            if !matches!(state.futures.get(&future_id), Some(FutureState::Cancelled))
+                || task_state == Some(runmat_execution::state::TaskState::Indeterminate)
+            {
                 retired = state.futures.insert(future_id, completion);
                 record_browser_completion(&mut state, attempt.task_id);
             }
         }
-        state.requests.remove(&attempt.task_id);
-        let actions = state
-            .driver
-            .handle(DriverCommand::BackendReport(BackendReport::for_request(
-                &attempt, report,
-            )))
-            .unwrap_or_default();
+        if !unresolved {
+            state.requests.remove(&attempt.task_id);
+        }
         drop(state);
         drop(retired);
+        self.wake_callback(attempt.task_id);
+        self.retire_released_callback(attempt.task_id);
         self.dispatch(actions);
     }
 
@@ -548,6 +755,15 @@ impl BrowserExecutionService {
     fn cancel_attempt(&self, attempt: &AttemptRequest) -> Result<(), ExecutionServiceError> {
         if self.owned.borrow().contains_key(&attempt.task_id) {
             return self.cancel_owned_attempt(attempt);
+        }
+        if self
+            .state
+            .borrow()
+            .tasks
+            .get(&attempt.task_id)
+            .is_some_and(|t| t.callback_exit.is_some())
+        {
+            return self.cancel_callback_physical(attempt.task_id);
         }
         if let Some(host) = &self.host {
             host.cancel(&attempt.task_id.to_string())
@@ -590,6 +806,8 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 // requests contain serialized payloads, not local Value handles.
                 FutureState::ExecutingInCaller
                 | FutureState::Scheduled { .. }
+                | FutureState::CancellingCallback { .. }
+                | FutureState::UnsettledCallback { .. }
                 | FutureState::GraphCompleted { .. }
                 | FutureState::GraphFailed { .. }
                 | FutureState::GraphResolved { result: Err(_), .. }
@@ -674,6 +892,64 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         true
     }
 
+    fn supports_callback_batches(&self) -> bool {
+        self.host.is_some()
+            && self.capabilities.selected_program_work
+            && self.capabilities.has_worker_isolation()
+    }
+    fn submit_callback_batch(
+        &self,
+        calls: Vec<DeferredCall>,
+        pool: &PoolHandle,
+        cancellation: runmat_execution::cancellation::CancellationToken,
+    ) -> Result<Vec<TaskHandle>, ExecutionServiceError> {
+        self.submit_selected_callbacks(calls, pool, cancellation)
+    }
+    fn release_callback_batch(&self, tasks: &[TaskHandle]) -> Result<(), ExecutionServiceError> {
+        self.release_callbacks(tasks)
+    }
+    fn wait_task_change(
+        &self,
+        task: &TaskHandle,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        self.wait_callback(task)
+    }
+    fn wait_pending(
+        &self,
+        value: &Value,
+    ) -> Option<runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>>
+    {
+        let waiting = (|| {
+            let future = self
+                .future_for_value(value.clone())?
+                .map_err(|_| ExecutionServiceError::UnknownHandle)?;
+            self.validate_scope(future.scope_id)?;
+            let state = self.state.borrow();
+            let task_id = match state.futures.get(&future.id) {
+                Some(
+                    FutureState::Scheduled { task_id, .. }
+                    | FutureState::CancellingCallback { task_id, .. },
+                ) => *task_id,
+                Some(_) => return Ok(None),
+                None => return Err(ExecutionServiceError::UnknownHandle),
+            };
+            self.callback_waiters
+                .borrow()
+                .get(&task_id)
+                .map(|wake| Some(wake.receiver.clone()))
+                .ok_or_else(|| {
+                    ExecutionServiceError::Infrastructure(
+                        "scheduled browser task has no completion event".into(),
+                    )
+                })
+        })();
+        Some(Box::pin(async move {
+            if let Some(waiting) = waiting? {
+                waiting.await?;
+            }
+            Ok(())
+        }))
+    }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
         let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
@@ -695,36 +971,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
     }
 
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError> {
-        self.validate_scope(future.scope_id)?;
-        let (reservation_id, call) = {
-            let mut state = self.state.borrow_mut();
-            let call = match state.futures.get(&future.id) {
-                Some(FutureState::Deferred(call)) => Rc::clone(call),
-                Some(_) => {
-                    return Err(ExecutionServiceError::Failed(
-                        "future has already been scheduled".into(),
-                    ));
-                }
-                None => return Err(ExecutionServiceError::UnknownHandle),
-            };
-            let id = state.next_materialization;
-            state.next_materialization = id.checked_add(1).ok_or_else(|| {
-                ExecutionServiceError::Infrastructure(
-                    "browser materialization identity exhausted".into(),
-                )
-            })?;
-            let retired = state.futures.insert(
-                future.id,
-                FutureState::Materializing {
-                    id,
-                    call: Rc::clone(&call),
-                    cancelled: false,
-                },
-            );
-            drop(state);
-            drop(retired);
-            (id, call)
-        };
+        let (reservation_id, call) = self.reserve_worker_materialization(future)?;
         let mut guard = MaterializationGuard {
             service: self,
             future_id: future.id,
@@ -733,38 +980,13 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         };
         // This can traverse managed values and call source/GC observers. It
         // must never run under the service's RefCell mutable borrow.
-        let (callable, invocation_context, recipe, artifact, arguments) =
-            runmat_vm::materialize_deferred_call(
-                &call,
-                future.outputs.clone(),
-                runmat_execution_artifact::ProgramTarget::portable(
-                    "wasm32-browser-interpreter-bytecode-v2",
-                ),
-            )?;
-        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-        let mut resources = browser_request(self.capabilities, recipe.accelerators.clone());
-        let context_bytes =
-            runmat_execution::console::invocation_memory_bytes(&call.environment, call.console)
-                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-        resources.memory_bytes = resources
-            .memory_bytes
-            .checked_add(context_bytes)
-            .ok_or_else(|| {
-                ExecutionServiceError::Failed("invocation memory reservation overflow".into())
-            })?;
-        recipe
-            .validate_resource_request(&resources)
-            .map_err(|error| {
-                ExecutionServiceError::Failed(format!(
-                    "browser scheduler resources do not satisfy the program: {error}"
-                ))
-            })?;
-        let host = artifact
-            .execution_host_requirement(
-                &recipe,
-                BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
-            )
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        let prepared = program_preparation::PreparedProgram::prepare(
+            &call,
+            future.outputs.clone(),
+            self.capabilities,
+        )?;
+        self.advance_driver_now()?;
+        prepared.admit_registered_worker(self)?;
         let mut state = self.state.borrow_mut();
         match state.futures.get(&future.id) {
             Some(FutureState::Materializing {
@@ -791,58 +1013,29 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 parent: Some(self.scope_id),
             })
             .map_err(driver_error)?;
-        let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-            recipe: recipe.clone(),
-            artifact: artifact.clone(),
-            callable: callable.clone(),
-            context: invocation_context.clone(),
-            assignment: None,
-            job_id: None,
-            arguments: arguments.clone(),
-            requested_outputs: future.outputs.requested_outputs,
-            environment: call.environment.clone(),
-            console: call.console,
-        };
+        let (submission, request, receipt) = prepared.into_submission(
+            task_id,
+            task_scope_id,
+            self.pool_id,
+            future.outputs.clone(),
+            call.retry,
+        );
         let generation = 1;
         let actions = match state
             .driver
-            .handle(DriverCommand::Submit(Box::new(TaskSubmission {
-                request: TaskRequest {
-                    id: task_id,
-                    scope_id: task_scope_id,
-                    pool_id: self.pool_id,
-                    schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
-                    executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
-                        artifact_id,
-                    ),
-                    callable: Callable::for_program("browser-session", &callable),
-                    invocation_context,
-                    inputs: arguments,
-                    environment: call.environment.clone(),
-                    console: call.console,
-                    outputs: future.outputs.clone(),
-                    resources,
-                    host,
-                    retry: call.retry,
-                    deadline_unix_millis: None,
-                },
-                dependencies: BTreeSet::new(),
-                priority: 0,
-            }))) {
+            .handle(DriverCommand::Submit(Box::new(submission)))
+        {
             Ok(actions) => actions,
             Err(error) => {
                 let _ = state.driver.handle(DriverCommand::CancelScope {
                     scope_id: task_scope_id,
                     reason: CancellationReason::DependencyFailed,
-                    now_millis: js_sys::Date::now() as u64,
+                    now_millis: self.clock.now_millis(),
                 });
                 return Err(driver_error(error));
             }
         };
-        state
-            .requests
-            .insert(task_id, BrowserWorkerRequest::Direct(request));
+        state.requests.insert(task_id, request);
         state.tasks.insert(
             task_id,
             TaskRecord {
@@ -852,18 +1045,19 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 read: false,
                 claimed: false,
                 completion_order: None,
+                retention: runmat_runtime::execution::TaskRetention::Refetchable,
+                callback_exit: None,
             },
         );
-        let retired = state.futures.insert(
-            future.id,
-            FutureState::Scheduled {
-                task_id,
-                receipt: None,
-            },
-        );
+        let retired = state
+            .futures
+            .insert(future.id, FutureState::Scheduled { task_id, receipt });
         drop(state);
         drop(retired);
         guard.armed = false;
+        self.callback_waiters
+            .borrow_mut()
+            .insert(task_id, worker_batch::TaskWake::new());
         self.dispatch(actions);
         Ok(TaskHandle {
             id: task_id,
@@ -1008,9 +1202,10 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             FutureState::Materializing {
                 cancelled: true, ..
             } => Err(ExecutionServiceError::Cancelled),
-            FutureState::Scheduled { .. } | FutureState::Materializing { .. } => {
-                Ok(AwaitAction::Pending(original))
-            }
+            FutureState::Scheduled { .. }
+            | FutureState::CancellingCallback { .. }
+            | FutureState::Materializing { .. } => Ok(AwaitAction::Pending(original)),
+            FutureState::UnsettledCallback { error, .. } => Err(error.clone()),
             FutureState::ExecutingInCaller => Err(ExecutionServiceError::Failed(
                 "future is already executing in its caller".into(),
             )),
@@ -1039,6 +1234,23 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         self.validate_scope(future.scope_id)?;
         let (graph, receipt) = {
             let state = self.state.borrow();
+            if let Some(FutureState::UnsettledCallback {
+                error: ExecutionServiceError::RuntimeFailure(failure),
+                receipt: Some(receipt),
+                ..
+            }) = state.futures.get(&future.id)
+            {
+                let failure = failure.clone();
+                let receipt = receipt.clone();
+                drop(state);
+                receipt.check_issuing_context(runtime)?;
+                // Preserve the issuing source while the same request/grant
+                // remains quarantined; decoding an error is not retirement.
+                return Err(receipt
+                    .decode_failure_in_context(runtime, &failure)
+                    .map(|error| ExecutionServiceError::LocalizedRuntimeFailure(error.into()))
+                    .unwrap_or_else(|error| error));
+            }
             if let Some(FutureState::GraphFailed { failure, receipt }) =
                 state.futures.get(&future.id)
             {
@@ -1178,7 +1390,11 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.borrow();
                 let scheduled_task = match state.futures.get(&handle.id) {
-                    Some(FutureState::Scheduled { task_id, .. }) => Some(*task_id),
+                    Some(
+                        FutureState::Scheduled { task_id, .. }
+                        | FutureState::CancellingCallback { task_id, .. }
+                        | FutureState::UnsettledCallback { task_id, .. },
+                    ) => Some(*task_id),
                     _ => None,
                 };
                 let task_scope = scheduled_task
@@ -1193,17 +1409,41 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     .tasks
                     .get(&handle.id)
                     .ok_or(ExecutionServiceError::UnknownHandle)?;
+                if task.generation != handle.generation {
+                    return Err(ExecutionServiceError::UnknownHandle);
+                }
                 (task.future_id, Some(handle.id), Some(task.scope_id))
             }
             _ => return Err(ExecutionServiceError::UnknownHandle),
         };
         let retired = {
             let mut state = self.state.borrow_mut();
-            let retired = state.futures.insert(future_id, FutureState::Cancelled);
-            if let Some(task_id) = task_id {
-                record_browser_completion(&mut state, task_id);
+            let protected = task_id
+                .and_then(|id| state.tasks.get(&id))
+                .is_some_and(|task| task.callback_exit.is_some());
+            if matches!(
+                state.futures.get(&future_id),
+                Some(FutureState::UnsettledCallback { .. })
+            ) {
+                None
+            } else {
+                let next = match state.futures.get(&future_id) {
+                    Some(
+                        FutureState::Scheduled { task_id, receipt }
+                        | FutureState::CancellingCallback { task_id, receipt },
+                    ) if protected => FutureState::CancellingCallback {
+                        task_id: *task_id,
+                        receipt: receipt.clone(),
+                    },
+                    _ => FutureState::Cancelled,
+                };
+                let pending_retirement = matches!(next, FutureState::CancellingCallback { .. });
+                let retired = state.futures.insert(future_id, next);
+                if let Some(task_id) = task_id.filter(|_| !pending_retirement) {
+                    record_browser_completion(&mut state, task_id);
+                }
+                retired
             }
-            retired
         };
         drop(retired);
         let actions = if let Some(scope_id) = cancellation_scope {
@@ -1213,15 +1453,34 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 .handle(DriverCommand::CancelScope {
                     scope_id,
                     reason,
-                    now_millis: js_sys::Date::now() as u64,
+                    now_millis: self.clock.now_millis(),
                 })
                 .map_err(driver_error)?
         } else {
             Vec::new()
         };
         if let Some(task_id) = task_id {
-            self.state.borrow_mut().requests.remove(&task_id);
+            let retained = {
+                let state = self.state.borrow();
+                matches!(
+                    state.futures.get(&future_id),
+                    Some(
+                        FutureState::CancellingCallback { .. }
+                            | FutureState::UnsettledCallback { .. }
+                    )
+                ) || state
+                    .driver
+                    .task_record(task_id)
+                    .is_ok_and(|task| task.active_attempt.is_some())
+            };
+            if !retained {
+                self.state.borrow_mut().requests.remove(&task_id);
+                self.wake_callback(task_id);
+            } else if let Some(owner) = self.self_weak.borrow().upgrade() {
+                physical_exit::retain_until_physical_exit(task_id, owner);
+            }
         }
+        self.settle_callback_cancellations();
         self.dispatch(actions);
         Ok(())
     }
@@ -1234,26 +1493,48 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .handle(DriverCommand::CancelScope {
                 scope_id: self.scope_id,
                 reason,
-                now_millis: js_sys::Date::now() as u64,
+                now_millis: self.clock.now_millis(),
             })
             .unwrap_or_default();
         let mut state = self.state.borrow_mut();
-        for future in state.futures.values_mut() {
+        let protected = state
+            .tasks
+            .values()
+            .filter(|task| task.callback_exit.is_some())
+            .map(|task| task.future_id)
+            .collect::<std::collections::HashSet<_>>();
+        for (future_id, future) in &mut state.futures {
             match future {
                 FutureState::Completed(_)
                 | FutureState::GraphCompleted { .. }
                 | FutureState::GraphFailed { .. }
                 | FutureState::GraphResolved { .. } => {}
+                FutureState::Scheduled { task_id, receipt } if protected.contains(future_id) => {
+                    *future = FutureState::CancellingCallback {
+                        task_id: *task_id,
+                        receipt: receipt.clone(),
+                    }
+                }
+                FutureState::CancellingCallback { .. } => {}
+                FutureState::UnsettledCallback { .. } => {}
                 FutureState::Materializing { cancelled, .. } => *cancelled = true,
                 _ => *future = FutureState::Cancelled,
             }
         }
         let task_ids = state.tasks.keys().copied().collect::<Vec<_>>();
         for task_id in task_ids {
-            record_browser_completion(&mut state, task_id);
+            if !state
+                .tasks
+                .get(&task_id)
+                .and_then(|t| state.futures.get(&t.future_id))
+                .is_some_and(|f| matches!(f, FutureState::CancellingCallback { .. }))
+            {
+                record_browser_completion(&mut state, task_id);
+            }
         }
-        self.retain_launched_owned_requests(&mut state);
+        self.retain_pending_requests(&mut state);
         drop(state);
+        self.settle_callback_cancellations();
         self.dispatch(actions);
     }
 }
@@ -1283,7 +1564,9 @@ fn browser_future_state(state: &FutureState) -> ExecutionHandleState {
         } => ExecutionHandleState::Cancelled,
         FutureState::ExecutingInCaller
         | FutureState::Materializing { .. }
-        | FutureState::Scheduled { .. } => ExecutionHandleState::Running,
+        | FutureState::Scheduled { .. }
+        | FutureState::CancellingCallback { .. } => ExecutionHandleState::Running,
+        FutureState::UnsettledCallback { .. } => ExecutionHandleState::Failed,
         FutureState::GraphCompleted { .. } => ExecutionHandleState::Finished,
         FutureState::GraphFailed { .. } => ExecutionHandleState::Failed,
         FutureState::GraphResolved { result: Ok(_), .. } => ExecutionHandleState::Finished,
@@ -1296,7 +1579,6 @@ fn browser_future_state(state: &FutureState) -> ExecutionHandleState {
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution_artifact::{ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3};
     use wasm_bindgen_test::*;
 
     use runmat_execution::task::RetryPolicy;
@@ -1325,14 +1607,46 @@ mod tests {
         }
     }
 
+    fn original_deferred_failure() -> DeferredCall {
+        runmat_runtime::builtins::wasm_registry::register_all();
+        let program =
+            runmat_vm::encode_interpreter_program_v2(&runmat_vm::FunctionRegistry::default())
+                .expect("encode the actual builtin worker registry");
+        let mut call = deferred_test_call(program);
+        let digest = runmat_execution::Digest::sha256(match &call.program {
+            runmat_runtime::execution::DeferredProgram::InterpreterV2(bytes) => bytes.as_ref(),
+            _ => unreachable!("the fixture encoded an interpreter program"),
+        });
+        call.program_revision = Some(
+            runmat_execution::ProgramRevision::new(
+                digest,
+                digest,
+                runmat_core::program_environment(runmat_core::CompatMode::RunMat),
+            )
+            .expect("bind the fixture to its actual browser host environment"),
+        );
+        call.invocation = runmat_runtime::execution::DeferredInvocation::callable(
+            runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                runmat_hir::CallableIdentity::Builtin(runmat_hir::BuiltinId("error".into())),
+                vec![Value::String("original browser worker failure".into())],
+                1,
+                runmat_hir::CallableFallbackPolicy::None,
+                runmat_runtime::call::descriptor::CallableCallKind::Direct,
+            ),
+        );
+        call
+    }
+
     #[wasm_bindgen_test(async)]
     async fn serial_fallback_schedules_through_the_portable_driver() {
         let service = BrowserExecutionService::new(None).unwrap();
         assert_eq!(service.capabilities.max_workers, 1);
         assert!(!service.capabilities.has_worker_isolation());
-        let future = service
-            .create_future(deferred_test_call(b"invalid registry".to_vec()))
-            .unwrap();
+        assert!(
+            service.state.borrow().driver.now_millis()
+                >= service.clock.now_millis().saturating_sub(1_000)
+        );
+        let future = service.create_future(original_deferred_failure()).unwrap();
         let task = service.spawn(&future).unwrap();
         assert!(matches!(
             service
@@ -1340,20 +1654,16 @@ mod tests {
                 .unwrap(),
             AwaitAction::Pending(_)
         ));
-        for _ in 0..8 {
-            wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(
-                &wasm_bindgen::JsValue::UNDEFINED,
-            ))
-            .await
-            .unwrap();
-            if service
-                .begin_await(Value::Task(task.clone().into()))
-                .is_err()
-            {
-                return;
-            }
-        }
-        panic!("serial browser execution did not report its worker failure");
+        let value = Value::Task(task.into());
+        let first = service.wait_pending(&value).expect("actual task event");
+        let second = service.wait_pending(&value).expect("shared task event");
+        let (first, second) = futures::join!(first, second);
+        first.unwrap();
+        second.unwrap();
+        assert!(service.begin_await(value.clone()).is_err());
+        // A later fetch observes the stored outcome, not a consumed event.
+        service.wait_pending(&value).unwrap().await.unwrap();
+        assert!(service.begin_await(value).is_err());
     }
 
     #[wasm_bindgen_test]
@@ -1366,12 +1676,10 @@ mod tests {
         assert!(service.state.borrow().requests.is_empty());
     }
 
-    #[wasm_bindgen_test(async)]
-    async fn cancelling_a_scheduled_future_cancels_its_child_task() {
+    #[wasm_bindgen_test]
+    fn cancelling_a_scheduled_future_cancels_its_child_task() {
         let service = BrowserExecutionService::new(None).unwrap();
-        let future = service
-            .create_future(original_deferred_failure().await)
-            .unwrap();
+        let future = service.create_future(original_deferred_failure()).unwrap();
         let task = service.spawn(&future).unwrap();
         service
             .cancel(
@@ -1388,6 +1696,8 @@ mod tests {
     #[wasm_bindgen_test]
     fn browser_pool_lifecycle_reports_exact_topology_and_fences_stale_handles() {
         let service = BrowserExecutionService::new(None).unwrap();
+        assert!(service.current_pool().unwrap().is_none());
+        service.ensure_pool(PoolRequest::automatic()).unwrap();
         let first = service.current_pool().unwrap().expect("browser pool");
         assert_eq!(first.backend, PoolBackend::Serial);
         assert_eq!(first.workers, 1);

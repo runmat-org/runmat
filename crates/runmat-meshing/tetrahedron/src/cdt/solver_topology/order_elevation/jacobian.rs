@@ -200,7 +200,7 @@ fn element_coordinates_from_topology(
             .nodes
             .binary_search_by_key(node_id, |node| node.node_id)
             .map_err(|_| invalid("Tet10 Jacobian references an absent node"))?;
-        *coordinate = topology.nodes[index].coordinates_m;
+        *coordinate = topology.nodes[index].coordinates_m.canonical_value();
     }
     Ok(coordinates)
 }

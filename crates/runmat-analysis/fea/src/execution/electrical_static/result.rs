@@ -10,7 +10,7 @@ use runmat_analysis_core::{AnalysisProcedure, PhysicsFamily, SolutionSpace};
 mod integrals;
 mod sources;
 mod terminals;
-const PREFIX: &[u8] = b"runmat-electrical-static-result/v1\0";
+const PREFIX: &[u8] = b"runmat-electrical-static-result/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -69,6 +69,22 @@ impl ElectricalStaticSolverResult {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let d = &self.data;
         let r = &d.response;
+        r.nodal_outward_flux
+            .require_kind(r.equation.conjugate_flux_kind())
+            .map_err(invalid)?;
+        for terminal in &r.terminals {
+            terminal
+                .outward_flux
+                .require_kind(r.equation.conjugate_flux_kind())
+                .map_err(invalid)?;
+        }
+        r.volume_source_work
+            .require_kind(r.equation.work_kind())
+            .map_err(invalid)?;
+        r.terminal_work
+            .require_kind(r.equation.work_kind())
+            .map_err(invalid)?;
+
         let tolerance = d.relative_residual_target;
         if let Some(declaration) = &d.publication_declaration {
             crate::execution::SemanticStatePublicationRequest::new(
@@ -112,16 +128,18 @@ impl ElectricalStaticSolverResult {
         let elements = r.ordered_element_ids.len();
         if !unique(&r.ordered_node_ids)
             || !unique(&r.ordered_element_ids)
-            || r.potential_v.len() != nodes
-            || r.potential_increment_v.len() != nodes
-            || r.nodal_outward_flux.len() != nodes
-            || r.element_electric_field_v_per_m.len() != elements
+            || r.potential_v.canonical_values().len() != nodes
+            || r.potential_increment_v.canonical_values().len() != nodes
+            || r.nodal_outward_flux.canonical_values().len() != nodes
+            || r.element_electric_field_v_per_m.canonical_values().len() != elements
             || r.potential_v
+                .canonical_values()
                 .iter()
-                .chain(&r.nodal_outward_flux)
-                .chain(&r.potential_increment_v)
+                .chain(r.nodal_outward_flux.canonical_values())
+                .chain(r.potential_increment_v.canonical_values())
                 .any(|x| !x.is_finite())
             || r.element_electric_field_v_per_m
+                .canonical_values()
                 .iter()
                 .flatten()
                 .any(|x| !x.is_finite())
@@ -139,9 +157,9 @@ impl ElectricalStaticSolverResult {
                     total_energy_j,
                 },
             ) => (
-                displacement_c_per_m2,
-                energy_density_j_per_m3,
-                total_energy_j,
+                displacement_c_per_m2.canonical_values(),
+                energy_density_j_per_m3.canonical_values(),
+                total_energy_j.canonical_values(),
             ),
             (
                 StaticElectricalEquation::SteadyConduction,
@@ -151,9 +169,9 @@ impl ElectricalStaticSolverResult {
                     total_joule_power_w,
                 },
             ) => (
-                current_density_a_per_m2,
-                joule_density_w_per_m3,
-                total_joule_power_w,
+                current_density_a_per_m2.canonical_values(),
+                joule_density_w_per_m3.canonical_values(),
+                total_joule_power_w.canonical_values(),
             ),
             _ => {
                 return Err(invalid(

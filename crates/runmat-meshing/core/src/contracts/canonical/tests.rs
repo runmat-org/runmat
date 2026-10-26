@@ -23,11 +23,11 @@ fn request() -> MeshingRequest {
         deterministic_seed: 7,
         algorithms: algorithms(),
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
@@ -47,7 +47,7 @@ fn request() -> MeshingRequest {
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.5,
@@ -56,7 +56,7 @@ fn request() -> MeshingRequest {
                 minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -99,7 +99,7 @@ fn canonical_request_round_trips_and_rejects_unknown_fields() {
 #[test]
 fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     let mut invalid = request();
-    invalid.tolerance.source_tolerance_m = f64::NAN;
+    invalid.tolerance.source_tolerance_m = runmat_types::physical::Length::new(f64::NAN);
     assert_eq!(invalid.validate().unwrap_err().field, "source_tolerance_m");
 
     let mut invalid = request();
@@ -219,6 +219,10 @@ fn metric_contributions_are_typed_unique_and_canonical() {
 #[test]
 fn geometry_revision_and_persistent_identity_are_bounded() {
     GeometryRevisionRef {
+        source_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+            runmat_geometry_core::LengthUnit::Meter,
+            "canonical solver fixture",
+        ),
         source_digest: digest(3),
         geometry_revision: 4,
         persistent_mapping_version: 2,
@@ -226,6 +230,10 @@ fn geometry_revision_and_persistent_identity_are_bounded() {
     .validate()
     .unwrap();
     assert!(GeometryRevisionRef {
+        source_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+            runmat_geometry_core::LengthUnit::Meter,
+            "canonical solver fixture"
+        ),
         source_digest: StableDigest::ZERO,
         geometry_revision: 4,
         persistent_mapping_version: 2,
@@ -254,7 +262,10 @@ fn typed_failure_round_trips_and_requires_canonical_diagnostics() {
             assembly_path: vec!["root".into()],
         }],
         witnesses: vec![GeometricWitness::Point {
-            coordinates_m: [0.0, 1.0, 2.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0, 2.0]),
         }],
         request_values: vec![MeshingDiagnosticEntry {
             name: "minimum_scaled_jacobian".into(),

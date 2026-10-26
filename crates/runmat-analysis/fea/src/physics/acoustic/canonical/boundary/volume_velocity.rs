@@ -12,6 +12,7 @@ impl AcousticAssembly {
         flow: ComplexScalar,
         faces: Vec<ProjectedBoundaryFace>,
     ) -> Result<(), AcousticHarmonicError> {
+        let mut source_error = None;
         if load.policy.distribution != ExcitationDistribution::PreserveResultant {
             return Err(AcousticHarmonicError::Unsupported(
                 "volume velocity requires total-resultant distribution".into(),
@@ -69,11 +70,22 @@ impl AcousticAssembly {
                         let imaginary = velocity[1] * weight;
                         evidence.add_projected(node, real, imaginary);
                         // exp(+i omega t): b=-i omega integral(N_i v_n).
-                        self.source[node].real += self.omega * imaginary;
-                        self.source[node].imaginary -= self.omega * real;
+                        if let Err(error) =
+                            crate::physics::acoustic::canonical::quantity_layout::accumulate_source(
+                                &mut self.source,
+                                node,
+                                self.derivative_rate.canonical_value() * imaginary,
+                                -(self.derivative_rate.canonical_value() * real),
+                            )
+                        {
+                            source_error = Some(error);
+                        }
                     }
                 })
                 .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
+        }
+        if let Some(error) = source_error {
+            return Err(error);
         }
         let evidence = evidence.finish();
         evidence

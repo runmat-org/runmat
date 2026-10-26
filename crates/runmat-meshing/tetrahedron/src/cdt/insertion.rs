@@ -329,7 +329,7 @@ fn prepare_insertion_at_coordinates(
                 DelaunayInsertionErrorKind::PointOutsideTopology,
                 format!(
                     "node {:?} is not contained by the admitted tetrahedron complex (nodes={}, slots={}, bounds={:?})",
-                    node.coordinates_m,
+                    node.coordinates_m.canonical_value(),
                     topology.nodes().len(),
                     topology.tetrahedron_slot_count(),
                     topology_bounds(topology),
@@ -382,8 +382,8 @@ pub(super) fn topology_bounds(topology: &impl TetrahedralTopology) -> [[f64; 3];
     let mut maximum = [f64::NEG_INFINITY; 3];
     for node in topology.nodes() {
         for axis in 0..3 {
-            minimum[axis] = minimum[axis].min(node.coordinates_m[axis]);
-            maximum[axis] = maximum[axis].max(node.coordinates_m[axis]);
+            minimum[axis] = minimum[axis].min(node.coordinates_m.canonical_value()[axis]);
+            maximum[axis] = maximum[axis].max(node.coordinates_m.canonical_value()[axis]);
         }
     }
     [minimum, maximum]
@@ -564,7 +564,7 @@ fn validate_new_node(
 ) -> Result<(), DelaunayInsertionError> {
     validate_node_values(node)?;
     if topology.node_index(node.identity).is_some()
-        || topology.contains_position(node.coordinates_m)
+        || topology.contains_position(node.coordinates_m.canonical_value())
     {
         return Err(error(
             DelaunayInsertionErrorKind::InvalidNode,
@@ -578,6 +578,7 @@ fn validate_node_values(node: DelaunayVolumeNode) -> Result<(), DelaunayInsertio
     if node.identity == runmat_meshing_core::StableDigest::ZERO
         || node
             .coordinates_m
+            .canonical_value()
             .iter()
             .any(|coordinate| !coordinate.is_finite())
     {

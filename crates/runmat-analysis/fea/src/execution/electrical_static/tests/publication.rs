@@ -72,7 +72,7 @@ fn electrical_native_fields_state_and_borrowed_profiles_roundtrip_all_equations_
                 .iter()
                 .zip(&projection.nodes)
             {
-                assert!((potential - 2.0 * node.coordinates_m[0]).abs() < 1e-8);
+                assert!((potential - 2.0 * node.coordinates_m.canonical_value()[0]).abs() < 1e-8);
             }
             for field in cold.fields()[1]
                 .storage()
@@ -86,7 +86,7 @@ fn electrical_native_fields_state_and_borrowed_profiles_roundtrip_all_equations_
             }
             let coefficient = match equation {
                 StaticElectricalEquation::Electrostatics => {
-                    4.0 * crate::physics::electrical::VACUUM_PERMITTIVITY_F_PER_M
+                    4.0 * crate::physics::electrical::VACUUM_PERMITTIVITY_F_PER_M.canonical_value()
                 }
                 StaticElectricalEquation::SteadyConduction => 3.0,
             };

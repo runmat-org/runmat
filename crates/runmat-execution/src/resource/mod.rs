@@ -7,8 +7,10 @@ mod accelerator;
 mod accounting;
 mod capability;
 mod exact_shared;
+mod interval;
 mod matching;
 mod request;
+mod requested_usage;
 mod registration_slots;
 mod reservation;
 mod usage;
@@ -133,4 +135,5 @@ pub use matching::{
     accelerator_requests_satisfy_requirements, select_accelerator_devices,
 };
 pub use request::{ResourceAssignment, ResourceInventory, ResourceRequest};
+pub use requested_usage::{RequestedAcceleratorUsage, RequestedResourceUsage};
 pub use usage::{AcceleratorUsage, ResourceUsage};

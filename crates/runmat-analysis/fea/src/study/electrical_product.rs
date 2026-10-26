@@ -65,12 +65,16 @@ fn validate_materials(
             .require_electrical()
             .map_err(|_| ElectricalStudyProductError::UnsupportedMaterial)?;
         let coefficient = match equation {
-            StaticElectricalEquation::Electrostatics => electrical.relative_permittivity,
-            StaticElectricalEquation::SteadyConduction => electrical.conductivity_s_per_m,
+            StaticElectricalEquation::Electrostatics => {
+                electrical.relative_permittivity.canonical_value()
+            }
+            StaticElectricalEquation::SteadyConduction => {
+                electrical.conductivity_s_per_m.canonical_value()
+            }
         };
         if !coefficient.is_finite()
             || coefficient <= 0.0
-            || electrical.resistive_heating_coefficient != 0.0
+            || electrical.resistive_heating_coefficient.canonical_value() != 0.0
             || !electrical.conductivity_frequency_response.is_empty()
         {
             return Err(ElectricalStudyProductError::UnsupportedMaterial);

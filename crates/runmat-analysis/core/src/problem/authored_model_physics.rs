@@ -123,25 +123,25 @@ impl AuthoredBoundary {
                 coefficient,
             } => {
                 temperature.is_finite()
-                    && temperature.kelvin >= 0.0
+                    && temperature.canonical_value() >= 0.0
                     && coefficient.is_finite()
-                    && coefficient.watts_per_square_meter_kelvin >= 0.0
+                    && coefficient.canonical_value() >= 0.0
             }
             AuthoredBoundaryKind::ThermalRadiation {
                 ambient_temperature,
                 emissivity,
             } => {
                 emissivity.is_finite()
-                    && (0.0..=1.0).contains(&emissivity.fraction)
+                    && (0.0..=1.0).contains(&emissivity.canonical_value())
                     && match ambient_temperature {
                         PrescribedValue::Constant(value) => {
-                            value.is_finite() && value.kelvin >= 0.0
+                            value.is_finite() && value.canonical_value() >= 0.0
                         }
                         PrescribedValue::Signal(_) => true,
                     }
             }
             AuthoredBoundaryKind::AcousticImpedance { impedance } => {
-                impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
+                impedance.is_finite() && impedance.canonical_value() > 0.0
             }
             _ => true,
         };
@@ -161,7 +161,7 @@ impl AuthoredConnector {
                 stiffness,
             } => {
                 require_distinct_vertices(primary, secondary)?;
-                finite_nonnegative(stiffness.newtons_per_meter)?;
+                finite_nonnegative(stiffness.canonical_value())?;
             }
             AuthoredConnectorKind::AxialDashpot {
                 primary,
@@ -169,15 +169,15 @@ impl AuthoredConnector {
                 damping,
             } => {
                 require_distinct_vertices(primary, secondary)?;
-                finite_nonnegative(damping.newton_seconds_per_meter)?;
+                finite_nonnegative(damping.canonical_value())?;
             }
             AuthoredConnectorKind::IsotropicGroundSpring { target, stiffness } => {
                 require_role(target, &[GeometryRegionRole::Vertex])?;
-                finite_nonnegative(stiffness.newtons_per_meter)?;
+                finite_nonnegative(stiffness.canonical_value())?;
             }
             AuthoredConnectorKind::SurfaceNormalFoundation { target, modulus } => {
                 require_role(target, &[GeometryRegionRole::Face])?;
-                finite_nonnegative(modulus.newtons_per_cubic_meter)?;
+                finite_nonnegative(modulus.canonical_value())?;
             }
         }
         Ok(())
@@ -240,13 +240,13 @@ impl AuthoredInterface {
         }
         match self.kind {
             AuthoredInterfaceKind::ContactCoulomb { coefficient } => {
-                finite_positive(coefficient.ratio)?
+                finite_positive(coefficient.canonical_value())?
             }
             AuthoredInterfaceKind::ConjugateHeatTransferConductance { coefficient } => {
-                finite_positive(coefficient.watts_per_square_meter_kelvin)?
+                finite_positive(coefficient.canonical_value())?
             }
             AuthoredInterfaceKind::ConjugateHeatTransferResistance { resistance } => {
-                finite_positive(resistance.square_meter_kelvin_per_watt)?
+                finite_positive(resistance.canonical_value())?
             }
             _ => {}
         }

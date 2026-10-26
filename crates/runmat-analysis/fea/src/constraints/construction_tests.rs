@@ -89,9 +89,10 @@ fn both_order_surface_weights_normals_and_coupling_rows_match_independent_geomet
                                     .iter()
                                     .find(|n| n.stable_identity == id)
                                     .unwrap()
-                                    .coordinates_m;
+                                    .coordinates_m
+                                    .canonical_value();
                                 let arm = std::array::from_fn::<_, 3, _>(|i| {
-                                    p[i] - reference.position.meters[i]
+                                    p[i] - reference.position.canonical_value()[i]
                                 });
                                 let cross = [
                                     rotation[1] * arm[2] - rotation[2] * arm[1],

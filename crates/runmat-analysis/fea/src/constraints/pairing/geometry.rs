@@ -5,16 +5,16 @@ use runmat_analysis_core::PeriodicTransform;
 pub(super) fn transform_position(transform: &PeriodicTransform, point: [f64; 3]) -> [f64; 3] {
     match transform {
         PeriodicTransform::Identity => point,
-        PeriodicTransform::Translation(value) => add(point, value.meters),
+        PeriodicTransform::Translation(value) => add(point, value.canonical_value()),
         PeriodicTransform::Rotation {
             origin,
             axis,
             angle,
         } => add(
-            origin.meters,
+            origin.canonical_value(),
             matrix_vector(
-                rotation_matrix(*axis, angle.radians),
-                subtract(point, origin.meters),
+                rotation_matrix(*axis, angle.canonical_value()),
+                subtract(point, origin.canonical_value()),
             ),
         ),
     }

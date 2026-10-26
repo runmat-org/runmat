@@ -48,7 +48,9 @@ fn acoustic_frequency_fan_in_preserves_independent_wave_fields_and_cold_identity
             // reference uses neither the computed operator nor a recovered field.
             let mut pressure_error = 0.0;
             for (node, pressure) in mesh.topology.nodes.iter().zip(result.pressure_pa()) {
-                let phase = std::f64::consts::PI * result.frequency().hertz * node.coordinates_m[0];
+                let phase = std::f64::consts::PI
+                    * result.frequency().canonical_value()
+                    * node.coordinates_m.canonical_value()[0];
                 pressure_error += (pressure.real - phase.cos()).powi(2)
                     + (pressure.imaginary + phase.sin()).powi(2);
             }
@@ -82,7 +84,17 @@ fn acoustic_frequency_fan_in_preserves_independent_wave_fields_and_cold_identity
         assert!(AcousticFrequencyResult::assemble(cold.clone(), &mesh, substituted).is_err());
         let mut other_mesh = mesh.clone();
         for node in &mut other_mesh.topology.nodes {
-            node.coordinates_m[0] += 1.0;
+            {
+                let quantity_change = 1.0;
+                let quantity_index = 0;
+                let quantity_slot = &mut node.coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
         }
         other_mesh.seal_canonical_digest().unwrap();
         assert!(ordered.validate_for(&cold, &other_mesh).is_err());

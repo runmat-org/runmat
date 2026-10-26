@@ -18,6 +18,8 @@ use crate::builtins::math::optim::common::{
     call_scalar_function, call_scalar_function_with_precision, optim_error, ScalarCooperation,
 };
 use crate::BuiltinResult;
+mod zero;
+pub(crate) use zero::{zero_with_receipts, ZeroFunction, ZeroResult};
 
 /// Result of a successful (or terminated) bounded scalar minimization.
 #[derive(Debug, Clone)]
@@ -90,160 +92,54 @@ pub(crate) enum BrentZeroStepKind {
 /// `bracket` must have opposite-sign endpoint values unless an endpoint is
 /// already zero (in which case that endpoint is returned). The evaluation counter
 /// tracks calls performed by the caller while constructing the bracket.
-pub(crate) async fn brent_zero(
-    name: &str,
-    cooperation: &mut ScalarCooperation,
-    function: &Value,
+pub(crate) fn brent_zero<'a>(
+    name: &'a str,
+    cooperation: &'a mut ScalarCooperation,
+    function: &'a Value,
     bracket: BrentZeroBracket,
     params: BrentParams,
     single: bool,
-    mut observer: Option<&mut dyn BrentZeroObserver>,
-) -> BuiltinResult<BrentZeroResult> {
-    cooperation.completed(0).await?;
-    if bracket.fa == 0.0 {
-        return Ok(BrentZeroResult {
-            x: bracket.a,
-            fval: bracket.fa,
-            iterations: 0,
-            func_count: bracket.evals,
-            converged: true,
-        });
-    }
-    if bracket.fb == 0.0 {
-        return Ok(BrentZeroResult {
-            x: bracket.b,
-            fval: bracket.fb,
-            iterations: 0,
-            func_count: bracket.evals,
-            converged: true,
-        });
-    }
-    if bracket.fa.signum() == bracket.fb.signum() {
-        return Err(optim_error(
+    observer: Option<&'a mut dyn BrentZeroObserver>,
+) -> impl std::future::Future<Output = BuiltinResult<BrentZeroResult>> + 'a {
+    use futures::FutureExt;
+    zero_with_receipts(
+        name,
+        cooperation,
+        RawZero {
             name,
-            format!("{name}: invalid bracket; endpoint function values must have opposite signs"),
-        ));
+            function,
+            single,
+        },
+        bracket,
+        ((), ()),
+        params,
+        observer,
+    )
+    .map(|result| result.map(|value| value.result))
+}
+struct RawZero<'a> {
+    name: &'a str,
+    function: &'a Value,
+    single: bool,
+}
+impl ZeroFunction for RawZero<'_> {
+    type Receipt = ();
+    async fn evaluate(
+        &mut self,
+        x: f64,
+        cooperation: &mut ScalarCooperation,
+    ) -> BuiltinResult<(f64, ())> {
+        let value = call_scalar_function_with_precision(
+            self.name,
+            OptimSolver::Fzero,
+            self.function,
+            x,
+            self.single,
+            cooperation,
+        )
+        .await?;
+        Ok((value, ()))
     }
-
-    let mut a = bracket.a;
-    let mut b = bracket.b;
-    let mut c = a;
-    let mut fa = bracket.fa;
-    let mut fb = bracket.fb;
-    let mut fc = fa;
-    let mut d = b - a;
-    let mut e = d;
-    let mut evals = bracket.evals;
-
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_iteration(0, evals, b, fb, BrentZeroStepKind::Initial)?;
-    }
-
-    for iter in 1..=params.max_iter {
-        cooperation.completed(1).await?;
-        if fb.signum() == fc.signum() {
-            c = a;
-            fc = fa;
-            d = b - a;
-            e = d;
-        }
-        if fc.abs() < fb.abs() {
-            let old_b = b;
-            let old_fb = fb;
-            a = b;
-            fa = fb;
-            b = c;
-            fb = fc;
-            c = old_b;
-            fc = old_fb;
-        }
-
-        let tol = 2.0 * f64::EPSILON * b.abs() + 0.5 * params.tol_x;
-        let midpoint = half_difference(c, b);
-        if midpoint.abs() <= tol || fb == 0.0 {
-            return Ok(BrentZeroResult {
-                x: b,
-                fval: fb,
-                iterations: iter - 1,
-                func_count: evals,
-                converged: true,
-            });
-        }
-        if evals >= params.max_fun_evals {
-            return Ok(BrentZeroResult {
-                x: b,
-                fval: fb,
-                iterations: iter - 1,
-                func_count: evals,
-                converged: false,
-            });
-        }
-
-        let mut step_kind = BrentZeroStepKind::Bisection;
-        if e.abs() >= tol && fa.abs() > fb.abs() {
-            let s = fb / fa;
-            let (mut p, mut q) = if a == c {
-                (2.0 * midpoint * s, 1.0 - s)
-            } else {
-                let q = fa / fc;
-                let r = fb / fc;
-                (
-                    s * (2.0 * midpoint * q * (q - r) - (b - a) * (r - 1.0)),
-                    (q - 1.0) * (r - 1.0) * (s - 1.0),
-                )
-            };
-            if p > 0.0 {
-                q = -q;
-            }
-            p = p.abs();
-            if interpolation_step_accepted(p, q, midpoint, tol, e) {
-                e = d;
-                d = p / q;
-                step_kind = BrentZeroStepKind::Interpolation;
-            } else {
-                d = midpoint;
-                e = d;
-            }
-        } else {
-            d = midpoint;
-            e = d;
-        }
-
-        a = b;
-        fa = fb;
-        b += if d.abs() > tol {
-            d
-        } else if midpoint >= 0.0 {
-            tol
-        } else {
-            -tol
-        };
-        fb = call_scalar_function_with_precision(name, OptimSolver::Fzero, function, b, single)
-            .await?;
-        cooperation.completed(0).await?;
-        evals += 1;
-
-        if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(iter, evals, b, fb, step_kind)?;
-        }
-        if fb == 0.0 {
-            return Ok(BrentZeroResult {
-                x: b,
-                fval: fb,
-                iterations: iter,
-                func_count: evals,
-                converged: true,
-            });
-        }
-    }
-
-    Ok(BrentZeroResult {
-        x: b,
-        fval: fb,
-        iterations: params.max_iter,
-        func_count: evals,
-        converged: false,
-    })
 }
 
 /// Bracket consumed by [`brent_zero`].
@@ -310,7 +206,7 @@ pub(crate) async fn brent_min(
     let scale = a.abs().max(b.abs()).max(1.0);
     if width.abs() <= f64::EPSILON * scale {
         let x = a + width * 0.5;
-        let fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
+        let fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x, cooperation).await?;
         cooperation.completed(0).await?;
         if let Some(observer) = observer.as_deref_mut() {
             observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial)?;
@@ -327,7 +223,7 @@ pub(crate) async fn brent_min(
     let mut x = interval_point(a, b, CGOLD);
     let mut w = x;
     let mut v = x;
-    let mut fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
+    let mut fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x, cooperation).await?;
     cooperation.completed(0).await?;
     let mut fw = fx;
     let mut fv = fx;
@@ -403,7 +299,7 @@ pub(crate) async fn brent_min(
                 converged: false,
             });
         }
-        let fu = call_scalar_function(name, OptimSolver::Fminbnd, function, u).await?;
+        let fu = call_scalar_function(name, OptimSolver::Fminbnd, function, u, cooperation).await?;
         cooperation.completed(0).await?;
         func_count += 1;
 
@@ -463,206 +359,4 @@ pub(crate) fn brent_min_tolerance(x: f64, params: BrentParams) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn active_brent_iteration_observes_invocation_cancellation_before_callback() {
-        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-        use runmat_execution::cancellation::CancellationSource;
-        use runmat_execution::CancellationReason;
-        use std::num::NonZeroU64;
-        use std::rc::Rc;
-
-        let source = Rc::new(CancellationSource::new());
-        let cancel_on_turn = source.clone();
-        let budget = CpuCooperationBudget::with_test_turn(
-            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
-            source.token(),
-            move || {
-                cancel_on_turn.cancel(CancellationReason::User);
-                Box::pin(async { Ok(()) })
-            },
-        );
-        let mut cooperation = ScalarCooperation::with_budget(OptimSolver::Fzero, budget);
-        let error = futures::executor::block_on(brent_zero(
-            "fzero",
-            &mut cooperation,
-            &Value::FunctionHandle("sin".into()),
-            BrentZeroBracket {
-                a: -1.0,
-                b: 1.0,
-                fa: -1.0,
-                fb: 1.0,
-                evals: 2,
-            },
-            BrentParams {
-                tol_x: 1.0e-8,
-                max_iter: 8,
-                max_fun_evals: 8,
-            },
-            false,
-            None,
-        ))
-        .expect_err("active iteration must observe cancellation");
-        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
-        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
-        assert!(matches!(
-                error.source.as_deref().and_then(|source| source
-                    .downcast_ref::<crate::execution::ExecutionServiceError>(
-                )),
-                Some(crate::execution::ExecutionServiceError::Cancelled)
-            ));
-    }
-
-    #[test]
-    fn tiny_opposite_sign_values_remain_a_valid_bracket() {
-        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
-        let positive = f64::MIN_POSITIVE;
-        let negative = -positive;
-        assert_eq!(positive * negative, -0.0);
-        assert_ne!(positive.signum(), negative.signum());
-        let result = futures::executor::block_on(brent_zero(
-            "fzero",
-            &mut cooperation,
-            &Value::FunctionHandle("sin".into()),
-            BrentZeroBracket {
-                a: -1.0,
-                b: 1.0,
-                fa: negative,
-                fb: positive,
-                evals: 2,
-            },
-            BrentParams {
-                tol_x: 1.0e-6,
-                max_iter: 8,
-                max_fun_evals: 8,
-            },
-            false,
-            None,
-        ));
-        assert!(result.is_ok(), "tiny signed values form a valid bracket");
-    }
-
-    #[test]
-    fn opposite_extreme_finite_root_bracket_keeps_midpoint_finite() {
-        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
-        let result = futures::executor::block_on(brent_zero(
-            "fzero",
-            &mut cooperation,
-            &Value::FunctionHandle("sign".into()),
-            BrentZeroBracket {
-                a: -f64::MAX,
-                b: f64::MAX,
-                fa: -1.0,
-                fb: 1.0,
-                evals: 2,
-            },
-            BrentParams {
-                tol_x: 1.0e-8,
-                max_iter: 16,
-                max_fun_evals: 16,
-            },
-            false,
-            None,
-        ))
-        .unwrap();
-        assert!(result.converged);
-        assert_eq!(result.x, 0.0);
-        assert_eq!(result.fval, 0.0);
-    }
-
-    #[test]
-    fn bounded_minimum_on_opposite_extreme_finite_bounds_stays_finite() {
-        let mut cooperation = ScalarCooperation::new(OptimSolver::Fminbnd, None);
-        let result = futures::executor::block_on(brent_min(
-            "fminbnd",
-            &mut cooperation,
-            &Value::FunctionHandle("abs".into()),
-            -f64::MAX,
-            f64::MAX,
-            BrentParams {
-                tol_x: 1.0e-4,
-                max_iter: 2000,
-                max_fun_evals: 2000,
-            },
-            None,
-        ))
-        .unwrap();
-        assert!(result.converged);
-        assert!(result.x.is_finite());
-        assert!(result.fval.is_finite());
-        assert!(result.fval <= 1.0e-4, "{}", result.fval);
-    }
-
-    #[test]
-    fn large_same_sign_finite_bounds_do_not_overflow_tolerance_or_stop_after_one_sample() {
-        let lower = 0.5 * f64::MAX;
-        let upper = 0.75 * f64::MAX;
-        let params = BrentParams {
-            tol_x: 1.0e-4,
-            max_iter: 2000,
-            max_fun_evals: 2000,
-        };
-        assert!(brent_min_tolerance(upper, params).is_finite());
-        let mut cooperation = ScalarCooperation::new(OptimSolver::Fminbnd, None);
-        let result = futures::executor::block_on(brent_min(
-            "fminbnd",
-            &mut cooperation,
-            &Value::FunctionHandle("abs".into()),
-            lower,
-            upper,
-            params,
-            None,
-        ))
-        .unwrap();
-        assert!(result.converged);
-        assert!(
-            result.func_count > 1,
-            "the initial golden point is not the minimum"
-        );
-        assert!(result.x.is_finite() && result.fval.is_finite());
-        assert!(result.x >= lower && result.x <= lower * (1.0 + 1.0e-6));
-        assert_eq!(result.fval, result.x);
-    }
-
-    #[test]
-    fn interpolation_acceptance_uses_signed_q() {
-        assert!(!interpolation_step_accepted(1.0, -2.0, 1.0, 0.1, 10.0));
-        assert!(interpolation_step_accepted(1.0, -2.0, -1.0, 0.1, 10.0));
-    }
-
-    #[test]
-    fn brent_zero_rejects_nonzero_collapsed_bracket() {
-        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
-        let err = futures::executor::block_on(brent_zero(
-            "fzero",
-            &mut cooperation,
-            &Value::FunctionHandle("sin".into()),
-            BrentZeroBracket {
-                a: 1.0,
-                b: 1.0,
-                fa: 1.0,
-                fb: 1.0,
-                evals: 0,
-            },
-            BrentParams {
-                tol_x: 1.0e-6,
-                max_iter: 10,
-                max_fun_evals: 10,
-            },
-            false,
-            None,
-        ))
-        .unwrap_err();
-        assert!(err.message().contains("invalid bracket"));
-    }
-
-    #[test]
-    fn with_sign_matches_fortran_semantics() {
-        assert_eq!(with_sign(1.0, 0.5), 1.0);
-        assert_eq!(with_sign(1.0, -0.5), -1.0);
-        assert_eq!(with_sign(1.0, 0.0), 1.0);
-        assert_eq!(with_sign(-1.0, -1.0), -1.0);
-    }
-}
+mod tests;

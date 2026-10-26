@@ -7,8 +7,14 @@ use crate::{Bytecode, FunctionRegistry, VmAssemblyLayout};
 mod entrypoint;
 #[path = "unit_admission/graph_codec.rs"]
 mod graph_codec;
+#[path = "unit_admission/graph_static.rs"]
+mod graph_static;
+#[path = "unit_admission/retained_code.rs"]
+mod retained_code;
 #[path = "unit_admission/retained_source_owner.rs"]
 mod retained_source_owner;
+pub(super) use retained_code::RetainedExecutableUnit;
+use retained_code::UnitAdmissionIdentity;
 #[path = "unit_admission/selected_interop.rs"]
 mod selected_interop;
 #[path = "unit_admission/static_import.rs"]
@@ -36,10 +42,12 @@ pub struct AdmittedExecutableUnit {
     linked_native_imports: Vec<runmat_execution::executable::LinkedNativeStaticImport>,
 }
 
-/// Executable unit bound to one exact runtime source owner. The runtime must
-/// stay with the registry: its source leases are part of executable authority.
+/// Active executable unit bound to one exact runtime source owner. Admission
+/// and execution keep that runtime with the registry. Checked retention moves
+/// the admitted code and actual source owner, never the invocation's grants.
 #[derive(Debug)]
 pub struct RuntimeBoundExecutableUnit {
+    admission: Option<UnitAdmissionIdentity>,
     canonical_v3: Option<Arc<[u8]>>,
     selected_source_map: Option<runmat_execution::ExecutableSourceMapV2>,
     selected_source_owner: Option<runmat_runtime::source_context::SelectedProgramSourceOwner>,
@@ -287,6 +295,10 @@ impl AdmittedExecutableUnit {
         };
         Ok((
             RuntimeBoundExecutableUnit {
+                admission: Some(UnitAdmissionIdentity {
+                    revision: self.envelope.manifest.identity.program,
+                    interop: self.envelope.manifest.interop,
+                }),
                 canonical_v3: Some(self.canonical_v3),
                 selected_source_map: Some(self.source_map),
                 selected_source_owner: Some(source_owner),
@@ -465,6 +477,7 @@ impl RuntimeBoundExecutableUnit {
     ) -> Self {
         Self {
             canonical_v3: None,
+            admission: None,
             selected_source_map: None,
             selected_source_owner: None,
             bytecode: Bytecode::with_instructions(Vec::new(), 0),

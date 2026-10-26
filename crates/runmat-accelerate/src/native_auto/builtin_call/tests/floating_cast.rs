@@ -30,7 +30,12 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
     }))
     .unwrap();
     let Value::GpuTensor(resident_output) = output.value() else {
-        panic!("actual resident output");
+        panic!(
+            "expected resident output, got {:?}; selected graphs={}, feedback={}",
+            output.value(),
+            probe.requests.borrow().len(),
+            probe.feedback.borrow().len()
+        );
     };
     assert_eq!(
         resident_output.descriptor().element_type,

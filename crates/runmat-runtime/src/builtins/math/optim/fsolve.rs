@@ -10,13 +10,17 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{StructValue, Value};
 
 use crate::builtins::math::optim::common::{
-    call_function, value_to_real_vector_with_cooperation, vector_to_value,
+    call_function_in_context, value_to_real_vector_with_cooperation, vector_to_value,
 };
 use crate::builtins::math::optim::least_squares::{
     solve_least_squares, LeastSquaresBounds, LeastSquaresEvaluator, LeastSquaresOptions,
     LeastSquaresResult, ResidualFuture,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+pub(in crate::builtins::math::optim) mod compiled;
+mod jacobian;
+mod sparse_jacobian;
 
 const NAME: &str = "fsolve";
 const DEFAULT_TOL_X: f64 = 1.0e-6;
@@ -80,6 +84,7 @@ async fn fsolve_in_runtime(
     x0: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    crate::context::host_allocation::require_unbounded_workspace(runtime, NAME, "finite host-memory execution is unsupported; this optimizer has no complete workspace and factorization bound")?;
     crate::output_count::validate_bounded_outputs(
         &FSOLVE_DESCRIPTOR,
         &FSOLVE_ERROR_INVALID_ARGUMENT,
@@ -145,12 +150,14 @@ fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct FsolveOptions {
     tol_x: f64,
     tol_fun: f64,
     max_iter: usize,
     max_fun_evals: usize,
+    specify_objective_gradient: bool,
+    scaling: crate::builtins::math::optim::common::derivative_scaling::DerivativeScaling,
 }
 
 impl FsolveOptions {
@@ -183,26 +190,33 @@ impl FsolveOptions {
                 "options TolX and TolFun must be positive",
             ));
         }
-        let max_iter = fields
-            .count(
-                NAME,
-                runmat_builtins::OptimOptionField::MaxIter,
-                DEFAULT_MAX_ITER,
-            )?
-            .max(1);
-        let max_fun_evals = fields
-            .count_product_default(
-                NAME,
-                runmat_builtins::OptimOptionField::MaxFunEvals,
-                100,
-                max_iter,
-            )?
-            .max(1);
+        let max_iter = fields.count(
+            NAME,
+            runmat_builtins::OptimOptionField::MaxIter,
+            DEFAULT_MAX_ITER,
+        )?;
+        let max_fun_evals = fields.count_product_default(
+            NAME,
+            runmat_builtins::OptimOptionField::MaxFunEvals,
+            100,
+            max_iter.max(1),
+        )?;
+        if max_fun_evals == 0 {
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_ARGUMENT,
+                "MaxFunEvals must be positive",
+            ));
+        }
         Ok(Self {
             tol_x,
             tol_fun,
             max_iter,
             max_fun_evals,
+            scaling: crate::builtins::math::optim::common::derivative_scaling::DerivativeScaling::from_fields(NAME,&fields,!fields.switch(NAME,runmat_builtins::OptimOptionField::SpecifyObjectiveGradient)?)?,
+            specify_objective_gradient: fields.switch(
+                NAME,
+                runmat_builtins::OptimOptionField::SpecifyObjectiveGradient,
+            )?,
         })
     }
 }
@@ -215,6 +229,8 @@ async fn solve(
     options: &FsolveOptions,
     cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
 ) -> BuiltinResult<FsolveOutcome> {
+    let final_jacobian =
+        crate::output_count::current_output_count().is_some_and(|count| count >= 5);
     let mut evaluator = FsolveEvaluator {
         cooperation,
         function,
@@ -222,6 +238,9 @@ async fn solve(
         scalar,
         residual_shape: None,
         residual_scalar: false,
+        specify_objective_gradient: options.specify_objective_gradient,
+        jacobian: None,
+        accepted_jacobian: None,
     };
     let variable_len = x.len();
     let mut result = solve_least_squares(
@@ -230,27 +249,23 @@ async fn solve(
         x,
         &LeastSquaresBounds::unbounded(variable_len),
         &LeastSquaresOptions {
+            criteria: None,
             tol_x: options.tol_x,
             tol_fun: options.tol_fun,
             max_iter: options.max_iter,
             max_fun_evals: options.max_fun_evals,
-            final_jacobian: true,
+            final_gradient: final_jacobian,
+            final_jacobian,
+            scaling: options.scaling.clone(),
         },
     )
     .await?;
-    if result.exitflag > 0
-        && crate::builtins::math::optim::least_squares::residual_norm_inf(
-            &result.residual,
-            Some(&mut *evaluator.cooperation),
-        )
-        .await?
-            > options.tol_fun
-    {
-        result.exitflag = -2;
-        result.message =
-            "Equation not solved. The solver converged to a point with a nonzero residual."
-                .to_string();
-    }
+    crate::builtins::math::optim::least_squares::equation::require_root(
+        &mut result,
+        options.tol_fun,
+        Some(&mut *evaluator.cooperation),
+    )
+    .await?;
     Ok(FsolveOutcome {
         result,
         residual_shape: evaluator.residual_shape.unwrap_or_else(|| vec![1, 1]),
@@ -271,6 +286,9 @@ struct FsolveEvaluator<'a> {
     scalar: bool,
     residual_shape: Option<Vec<usize>>,
     residual_scalar: bool,
+    specify_objective_gradient: bool,
+    jacobian: Option<Vec<f64>>,
+    accepted_jacobian: Option<Vec<f64>>,
 }
 
 impl FsolveEvaluator<'_> {
@@ -294,6 +312,17 @@ impl FsolveEvaluator<'_> {
 }
 
 impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
+    fn accept_residual(&mut self) {
+        self.accepted_jacobian = self.jacobian.take();
+    }
+    fn take_analytic_jacobian(&mut self) -> Option<Vec<f64>> {
+        self.accepted_jacobian.take()
+    }
+
+    fn analytic_jacobian(&self) -> Option<&[f64]> {
+        self.accepted_jacobian.as_deref()
+    }
+
     fn cooperation(
         &mut self,
     ) -> Option<&mut crate::builtins::math::optim::common::ScalarCooperation> {
@@ -301,6 +330,9 @@ impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
     }
     fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a> {
         Box::pin(async move {
+            if self.specify_objective_gradient {
+                return self.residual_with_jacobian(x).await;
+            }
             let arg = if self.scalar {
                 Value::Num(x[0])
             } else {
@@ -309,7 +341,9 @@ impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
                         .map_err(|e| fsolve_error_with_detail(&FSOLVE_ERROR_INVALID_INPUT, e))?,
                 )
             };
-            let value = call_function(self.function, vec![arg]).await?;
+            let value =
+                call_function_in_context(self.cooperation.runtime(), self.function, [arg], 1)
+                    .await?;
             let cooperation = &mut *self.cooperation;
             let (shape, scalar, residual) = value
                 .with_owned_async(|value| async move {
@@ -376,14 +410,7 @@ async fn finalize(
         outputs.push(Value::Num(result.exitflag as f64));
     }
     if requested >= 4 {
-        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
-        fields.insert("iterations", Value::Num(result.iterations as f64));
-        fields.insert("funcCount", Value::Num(result.func_count as f64));
-        fields.insert("algorithm", Value::from("levenberg-marquardt"));
-        fields.insert("firstorderopt", Value::Num(result.first_order_optimality));
-        fields.insert("stepsize", Value::Num(result.step_size));
-        fields.insert("message", Value::from(result.message.clone()));
-        outputs.push(Value::Struct(fields.finish()));
+        outputs.push(information(&result));
     }
     if requested >= 5 {
         outputs.push(
@@ -396,5 +423,20 @@ async fn finalize(
     ))
 }
 
+fn information(result: &LeastSquaresResult) -> Value {
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    fields.insert("iterations", Value::Num(result.iterations as f64));
+    fields.insert("funcCount", Value::Num(result.func_count as f64));
+    fields.insert("algorithm", Value::from("levenberg-marquardt"));
+    fields.insert("firstorderopt", Value::Num(result.first_order_optimality));
+    fields.insert("stepsize", Value::Num(result.step_size));
+    fields.insert("message", Value::from(result.message.clone()));
+    Value::Struct(fields.finish())
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "fsolve/jacobian_tests.rs"]
+mod jacobian_tests;

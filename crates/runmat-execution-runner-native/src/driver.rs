@@ -22,12 +22,12 @@ use runmat_execution_runner::{
 };
 
 pub(crate) mod collective;
-mod process;
+pub(crate) mod process;
 
 mod clock;
 mod completion;
 mod persistence;
-pub(crate) use completion::{next_task_completion_order, TaskCompletion};
+pub(crate) use completion::{next_task_completion_order, GraphAttemptAuthority, TaskCompletion};
 
 use crate::local_store::{prepare_session_root, ArtifactStore, CheckpointStore};
 use crate::protocol::{StoredDirectProgram, StoredProgram};
@@ -76,10 +76,16 @@ pub(crate) struct LocalProgramSubmission {
     pub(crate) console: Option<runmat_execution::console::ConsoleLimits>,
 }
 
+pub(crate) enum LocalWorkerSubmission {
+    Direct(Box<LocalProgramSubmission>),
+    Graph(Box<LocalGraphSubmission>),
+}
+
 pub(crate) struct LocalGraphSubmission {
     pub(crate) task_id: TaskId,
     pub(crate) request: GraphExecutionRequest,
     pub(crate) retry: RetryPolicy,
+    pub(crate) task: Option<TaskSubmission>,
 }
 
 pub(crate) struct LocalDriver {
@@ -238,6 +244,14 @@ impl LocalDriver {
         self: &Arc<Self>,
         submission: LocalProgramSubmission,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        let (task, recipe, artifact) = self.local_program_submission(submission)?;
+        self.submit_task(task, recipe, artifact)
+    }
+
+    fn local_program_submission(
+        &self,
+        submission: LocalProgramSubmission,
+    ) -> NativeExecutionResult<(TaskSubmission, ProgramBuildRecipe, ProgramArtifact)> {
         let LocalProgramSubmission {
             task_id,
             callable,
@@ -293,7 +307,7 @@ impl LocalDriver {
             retry,
             deadline_unix_millis: None,
         };
-        self.submit_task(
+        Ok((
             TaskSubmission {
                 request,
                 dependencies: BTreeSet::new(),
@@ -301,7 +315,7 @@ impl LocalDriver {
             },
             recipe,
             artifact,
-        )
+        ))
     }
 
     pub(crate) fn submit_task(
@@ -325,35 +339,111 @@ impl LocalDriver {
         self.ensure_no_graph_quarantine()?;
         let mut registrations = Vec::with_capacity(tasks.len());
         for (submission, recipe, artifact) in tasks {
-            ProgramExecutionDescriptor {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-                recipe: recipe.clone(),
-                artifact: artifact.clone(),
-                callable: submission.request.callable.program.clone(),
-                requested_outputs: submission.request.outputs.requested_outputs,
-                environment: submission.request.environment.clone(),
-                console: submission.request.console,
-            }
-            .validate_for_portable_host()
-            .map_err(|error| {
-                NativeExecutionError::Protocol(format!(
-                    "local program descriptor failed validation: {error}"
-                ))
-            })?;
-            let stored_program =
-                StoredProgram::Direct(Box::new(StoredDirectProgram { recipe, artifact }));
-            let encoded = serde_json::to_vec(&stored_program)
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-            self.stage_stored_task(&submission, &stored_program, &encoded)?;
-            registrations.push((submission, Arc::new(TaskCompletion::new())));
+            registrations.push(self.prepare_task(submission, recipe, artifact)?);
         }
         self.publish_submissions(registrations)
+    }
+
+    fn prepare_task(
+        &self,
+        submission: TaskSubmission,
+        recipe: ProgramBuildRecipe,
+        artifact: ProgramArtifact,
+    ) -> NativeExecutionResult<(TaskSubmission, Arc<TaskCompletion>)> {
+        ProgramExecutionDescriptor {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            recipe: recipe.clone(),
+            artifact: artifact.clone(),
+            callable: submission.request.callable.program.clone(),
+            requested_outputs: submission.request.outputs.requested_outputs,
+            environment: submission.request.environment.clone(),
+            console: submission.request.console,
+        }
+        .validate_for_portable_host()
+        .map_err(|error| {
+            NativeExecutionError::Protocol(format!(
+                "local program descriptor failed validation: {error}"
+            ))
+        })?;
+        let stored_program =
+            StoredProgram::Direct(Box::new(StoredDirectProgram { recipe, artifact }));
+        let encoded = serde_json::to_vec(&stored_program)
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        self.stage_stored_task(&submission, &stored_program, &encoded)?;
+        Ok((submission, Arc::new(TaskCompletion::new())))
+    }
+
+    /// Same staged registration and atomic publication owner as submit_workers,
+    /// without building a redundant request/argument copy for local producers.
+    pub(crate) fn submit_local_workers(
+        self: &Arc<Self>,
+        tasks: Vec<LocalWorkerSubmission>,
+    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
+        self.ensure_no_graph_quarantine()?;
+        let mut prepared = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            prepared.push(match task {
+                LocalWorkerSubmission::Direct(task) => {
+                    let (task, recipe, artifact) = self.local_program_submission(*task)?;
+                    self.prepare_task(task, recipe, artifact)?
+                }
+                LocalWorkerSubmission::Graph(graph) => self.prepare_graph(*graph)?,
+            });
+        }
+        self.publish_submissions(prepared)
+    }
+
+    pub(crate) fn submit_workers(
+        self: &Arc<Self>,
+        tasks: Vec<(
+            runmat_execution_artifact::WorkerProgramRequest,
+            TaskSubmission,
+        )>,
+    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
+        self.ensure_no_graph_quarantine()?;
+        let mut prepared = Vec::with_capacity(tasks.len());
+        for (request, submission) in tasks {
+            prepared.push(match request {
+                runmat_execution_artifact::WorkerProgramRequest::Direct(request) => {
+                    self.prepare_task(submission, request.recipe, request.artifact)?
+                }
+                runmat_execution_artifact::WorkerProgramRequest::Graph(request) => self
+                    .prepare_graph(LocalGraphSubmission {
+                        task_id: submission.request.id,
+                        retry: submission.request.retry,
+                        request,
+                        task: Some(submission),
+                    })?,
+            });
+        }
+        self.publish_submissions(prepared)
     }
 
     pub(crate) fn submit_graph(
         self: &Arc<Self>,
         graph: LocalGraphSubmission,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        self.submit_graphs(vec![graph])?.pop().ok_or_else(|| {
+            NativeExecutionError::Protocol("local Graph admission returned no completion".into())
+        })
+    }
+    /// Stage the whole selected callback wave before any dispatch.
+    pub(crate) fn submit_graphs(
+        self: &Arc<Self>,
+        graphs: Vec<LocalGraphSubmission>,
+    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
+        self.ensure_no_graph_quarantine()?;
+        let mut prepared = Vec::with_capacity(graphs.len());
+        for graph in graphs {
+            prepared.push(self.prepare_graph(graph)?);
+        }
+        self.publish_submissions(prepared)
+    }
+
+    fn prepare_graph(
+        &self,
+        graph: LocalGraphSubmission,
+    ) -> NativeExecutionResult<(TaskSubmission, Arc<TaskCompletion>)> {
         self.ensure_no_graph_quarantine()?;
         let admitted = graph
             .request
@@ -364,6 +454,19 @@ impl LocalDriver {
             return Err(NativeExecutionError::Protocol(
                 "worker graph assignment is owned by placement".into(),
             ));
+        }
+        if let Some(original) = &graph.task {
+            crate::graph_submission::validate_original(selected, original)?;
+            if original.request.id != graph.task_id
+                || original.request.scope_id != self.scope_id
+                || original.request.pool_id != self.pool_id
+                || original.request.retry != graph.retry
+            {
+                return Err(NativeExecutionError::Protocol(
+                    "Graph task differs from its original local execution context or retry policy"
+                        .into(),
+                ));
+            }
         }
         let callable = selected
             .scheduler_callable()
@@ -404,35 +507,48 @@ impl LocalDriver {
         if let Some(capability) = selected_schema.required_capability() {
             required_capabilities.insert(capability);
         }
-        let request = TaskRequest {
-            id: graph.task_id,
-            scope_id: self.scope_id,
-            pool_id: self.pool_id,
-            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
-            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
-            callable: Callable::for_program("local-session", &callable),
-            host,
-            invocation_context: invocation_context.clone(),
-            inputs: Vec::new(),
-            environment: runmat_execution::EnvironmentSnapshot::default(),
-            console: None,
-            outputs: recipe.outputs.clone(),
-            resources: ResourceRequest {
-                cpu_millicores: 1000,
-                memory_bytes,
-                scratch_bytes,
-                max_wall_millis: self
-                    .remote_graph_max_wall_millis
-                    .unwrap_or(24 * 60 * 60 * 1000),
-                max_artifact_bytes: stored.length,
-                max_egress_bytes: 0,
-                max_relay_bytes: 0,
-                accelerators: recipe.accelerators.clone(),
-                required_capabilities,
-            },
-            retry: graph.retry,
-            deadline_unix_millis: None,
+        let submission = if let Some(original) = graph.task {
+            crate::graph_submission::validate_floor(selected, &original, stored.length)?;
+            crate::graph_submission::validate_scratch(&admitted, &original)?;
+            original
+        } else {
+            TaskSubmission {
+                request: TaskRequest {
+                    id: graph.task_id,
+                    scope_id: self.scope_id,
+                    pool_id: self.pool_id,
+                    schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                    executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                        artifact_id,
+                    ),
+                    callable: Callable::for_program("local-session", &callable),
+                    host,
+                    invocation_context: invocation_context.clone(),
+                    inputs: Vec::new(),
+                    environment: runmat_execution::EnvironmentSnapshot::default(),
+                    console: None,
+                    outputs: recipe.outputs.clone(),
+                    resources: ResourceRequest {
+                        cpu_millicores: 1000,
+                        memory_bytes,
+                        scratch_bytes,
+                        max_wall_millis: self
+                            .remote_graph_max_wall_millis
+                            .unwrap_or(24 * 60 * 60 * 1000),
+                        max_artifact_bytes: stored.length,
+                        max_egress_bytes: 0,
+                        max_relay_bytes: 0,
+                        accelerators: recipe.accelerators.clone(),
+                        required_capabilities,
+                    },
+                    retry: graph.retry,
+                    deadline_unix_millis: None,
+                },
+                dependencies: BTreeSet::new(),
+                priority: 0,
+            }
         };
+        let request = &submission.request;
         if let Some(inventory) = &self.remote_graph_inventory {
             if request.resources.cpu_millicores > inventory.cpu_millicores
                 || request.resources.memory_bytes > inventory.memory_bytes
@@ -442,6 +558,14 @@ impl LocalDriver {
                     "graph exceeds the authenticated remote driver allocation".into(),
                 ));
             }
+        }
+        if self
+            .remote_graph_max_wall_millis
+            .is_some_and(|maximum| request.resources.max_wall_millis > maximum)
+        {
+            return Err(NativeExecutionError::Protocol(
+                "Graph wall-time ceiling exceeds its authenticated remote allocation".into(),
+            ));
         }
         request
             .callable
@@ -457,23 +581,17 @@ impl LocalDriver {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let completion = Arc::new(TaskCompletion::new_graph(
             stored,
+            request.program_artifact_id().ok_or_else(|| {
+                NativeExecutionError::Protocol(
+                    "Graph task lacks its authenticated source artifact identity".into(),
+                )
+            })?,
             invocation_context,
             requested_outputs,
             callable,
             response_authority,
         ));
-        self.publish_submissions(vec![(
-            TaskSubmission {
-                request,
-                dependencies: BTreeSet::new(),
-                priority: 0,
-            },
-            completion,
-        )])?
-        .pop()
-        .ok_or_else(|| {
-            NativeExecutionError::Protocol("local graph admission returned no completion".into())
-        })
+        Ok((submission, completion))
     }
 
     /// Validate one stored program against its placement and stage its bytes.
@@ -672,6 +790,39 @@ impl LocalDriver {
         }
     }
 
+    /// The service's internal-result retention owner calls this only after
+    /// decode or verified cancellation. Scheduler/checkpoint history remains;
+    /// the redundant live completion/response source-map cache does not.
+    #[cfg(test)]
+    pub(crate) fn settled_callback_completion_for_test() -> Arc<TaskCompletion> {
+        let completion = Arc::new(TaskCompletion::new());
+        completion.complete(
+            completion::CompletedTask {
+                result: Err(TransferFailure::Cancelled),
+                evidence: None,
+            },
+            crate::NativeCheckpointEvidence::Durable,
+        );
+        completion
+    }
+
+    pub(crate) fn release_completed_callback(&self, task_id: TaskId) {
+        let mut completions = self
+            .completions
+            .lock()
+            .expect("completion registry poisoned");
+        let retired = if completions
+            .get(&task_id)
+            .is_some_and(|c| c.verified_terminal() == Some(true))
+        {
+            completions.remove(&task_id)
+        } else {
+            None
+        };
+        drop(completions);
+        drop(retired);
+    }
+
     /// Cancel a single accepted task, including an attempt that raced ahead of
     /// publication of its service-level TaskHandle. Unknown task IDs were not
     /// admitted and require no scheduler cancellation.
@@ -791,7 +942,24 @@ impl LocalDriver {
                         .get(&request.task_id)
                         .cloned();
                     if let Some(completion) = completion {
-                        completion.cancel();
+                        let cause = this
+                            .driver
+                            .lock()
+                            .expect("local driver poisoned")
+                            .task_record(request.task_id)
+                            .ok()
+                            .and_then(|task| task.cancellation.map(|c| c.cause));
+                        let selected = cause
+                            .ok_or_else(|| {
+                                "scheduler stop has no original cancellation cause".to_string()
+                            })
+                            .and_then(|cause| {
+                                crate::process_provider::cancellation::reason(&request, cause)
+                            });
+                        match selected {
+                            Ok(reason) => completion.cancel_with_reason(reason),
+                            Err(message) => completion.fail_control(message),
+                        }
                     }
                 }
                 DriverAction::Checkpoint => {
@@ -833,30 +1001,71 @@ impl LocalDriver {
                 _ => None,
             };
             let observed = process::execute_attempt(&this, &request, &completion);
-            // Only this process owner can certify that a cancelled Graph
+            // Only this process owner can certify that a cancelled
             // attempt has no live worker tree or foreign callback. Every
             // non-unverified result from execute_attempt has passed the
             // bounded tree-retirement path (or failed before spawn).
-            let graph_cancel_registered = completion.graph_authority.is_some()
-                && this
-                    .driver
-                    .lock()
-                    .expect("local driver poisoned")
-                    .snapshot()
-                    .attempts
-                    .get(&request.id)
-                    .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
-            let verified_graph_cancel = graph_cancel_registered
-                && !matches!(
-                    &observed.result,
-                    Err(TransferFailure::RetirementUnverified(_))
-                );
-            let (result, report) = observed.into_backend_report(&request, verified_graph_cancel);
+            let cancel_registered = this
+                .driver
+                .lock()
+                .expect("local driver poisoned")
+                .snapshot_ref()
+                .attempts
+                .get(&request.id)
+                .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
+            let retired = !matches!(
+                &observed.result,
+                Err(TransferFailure::RetirementUnverified(_))
+            );
+            let verified_cancel = retired
+                && cancel_registered
+                && matches!(&observed.result, Err(TransferFailure::Cancelled));
+            let (result, report) = observed.into_backend_report(&request, verified_cancel);
+            let mut retirement_report =
+                BackendReport::for_request(&request, AttemptReport::Retired);
+            retirement_report.unsuccessful_resources = report
+                .unsuccessful_resources
+                .clone()
+                .or_else(|| match &report.report {
+                    AttemptReport::Succeeded { result } => result
+                        .resources()
+                        .filter(|resources| {
+                            resources.validate_against(&request).is_ok()
+                                && report.execution.as_ref().is_none_or(|execution| {
+                                    resources.resources.usage.wall_millis == execution.wall_millis
+                                })
+                        })
+                        .cloned()
+                        .map(Box::new),
+                    _ => None,
+                });
+            retirement_report.execution = report.execution.clone();
+            retirement_report.console = report.console.clone();
             let (actions, snapshot, checkpoint) = {
                 let mut driver = this.driver.lock().expect("local driver poisoned");
-                let actions = driver
+                let mut actions = driver
                     .handle(DriverCommand::BackendReport(report))
                     .unwrap_or_default();
+                if retired
+                    && driver
+                        .snapshot_ref()
+                        .attempts
+                        .get(&request.id)
+                        .is_some_and(|attempt| {
+                            attempt
+                                .unverified_retirement
+                                .as_ref()
+                                .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none())
+                        })
+                {
+                    // Preserve the original operation failure above; only this
+                    // physical owner can now settle its retained reservation.
+                    actions.extend(
+                        driver
+                            .handle(DriverCommand::BackendReport(retirement_report))
+                            .unwrap_or_default(),
+                    );
+                }
                 let snapshot = driver.snapshot();
                 let checkpoint = this.persist_observed_snapshot(&snapshot);
                 (actions, snapshot, checkpoint)

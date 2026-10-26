@@ -54,7 +54,7 @@ pub(super) fn compile(
                 return Err(Error::Invalid("bodyforce unit direction"));
             }
         }
-        let sampled = crate::excitation::sample_signal(s, sample, |v| v.newtons_per_cubic_meter)
+        let sampled = crate::excitation::sample_signal(s, sample, |v| v.canonical_value())
             .map_err(|e| Error::InputRealization(e.to_string()))?;
         let v = crate::excitation::expect_vector3_or_direction(sampled, a.direction)
             .map_err(|e| Error::InputRealization(e.to_string()))?;

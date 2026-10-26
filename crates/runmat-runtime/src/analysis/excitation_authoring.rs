@@ -16,7 +16,7 @@ pub(crate) enum ConstantExcitation {
     ElectricCurrent {
         real_amperes: f64,
         imaginary_amperes: f64,
-        frequency_hz: Option<f64>,
+        frequency_hz: Option<runmat_types::physical::Frequency>,
     },
 }
 
@@ -132,7 +132,7 @@ fn append_complex_scalar<Q>(
     target: ExcitationTarget,
     real: Q,
     imaginary: Q,
-    frequency_hz: Option<f64>,
+    frequency_hz: Option<runmat_types::physical::Frequency>,
     distribution: ExcitationDistribution,
     signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
     action: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
@@ -141,7 +141,7 @@ fn append_complex_scalar<Q>(
         Some(frequency_hz) => SignalRepresentation::Tabulated(TabulatedSignal {
             domain: TabulatedSignalDomain::FrequencyHertz,
             knots: vec![SignalKnot::continuous(
-                frequency_hz,
+                frequency_hz.canonical_value(),
                 SignalOrdinate::Complex {
                     real: SignalValue::Scalar(real),
                     imaginary: SignalValue::Scalar(imaginary),

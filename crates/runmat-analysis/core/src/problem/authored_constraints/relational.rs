@@ -140,7 +140,7 @@ pub(super) fn validate(value: &AuthoredConstraint) -> Result<(), AuthoredConstra
         AuthoredConstraintKind::MagneticPhaseShiftedPeriodic(periodic)
         | AuthoredConstraintKind::AcousticPhaseShiftedPeriodic(periodic) => {
             validate_periodic(&periodic.periodic)?;
-            finite(periodic.phase.radians)
+            finite(periodic.phase.canonical_value())
         }
         AuthoredConstraintKind::StructuralEquation(equation) => validate_equation(equation),
         _ => Ok(()),
@@ -159,7 +159,7 @@ fn validate_dofs(value: &AuthoredStructuralDofs) -> Result<(), AuthoredConstrain
             return Err(AuthoredConstraintError::DuplicateDof);
         }
         if let PrescribedValue::Constant(value) = entry.value {
-            finite(value.meters)?;
+            finite(value.canonical_value())?;
         }
     }
     let mut rotations = BTreeSet::new();
@@ -168,7 +168,7 @@ fn validate_dofs(value: &AuthoredStructuralDofs) -> Result<(), AuthoredConstrain
             return Err(AuthoredConstraintError::DuplicateDof);
         }
         if let PrescribedValue::Constant(value) = entry.value {
-            finite(value.radians)?;
+            finite(value.canonical_value())?;
         }
     }
     Ok(())
@@ -180,7 +180,7 @@ fn validate_pair(value: &AuthoredPairedConstraint) -> Result<(), AuthoredConstra
     }
     match value.pairing {
         AuthoredPairingPolicy::Matching => Ok(()),
-        AuthoredPairingPolicy::GeometricTolerance(value) => nonnegative(value.meters),
+        AuthoredPairingPolicy::GeometricTolerance(value) => nonnegative(value.canonical_value()),
     }
 }
 
@@ -189,19 +189,19 @@ fn validate_periodic(value: &AuthoredPeriodicConstraint) -> Result<(), AuthoredC
     match value.transform {
         AuthoredPeriodicTransform::Identity => Ok(()),
         AuthoredPeriodicTransform::Translation(value) => {
-            value.meters.into_iter().try_for_each(finite)
+            value.canonical_value().into_iter().try_for_each(finite)
         }
         AuthoredPeriodicTransform::Rotation {
             origin,
             axis,
             angle,
         } => {
-            origin.meters.into_iter().try_for_each(finite)?;
+            origin.canonical_value().into_iter().try_for_each(finite)?;
             axis.into_iter().try_for_each(finite)?;
             if axis.into_iter().all(|value| value == 0.0) {
                 return Err(AuthoredConstraintError::InvalidTransform);
             }
-            finite(angle.radians)
+            finite(angle.canonical_value())
         }
     }
 }
@@ -212,7 +212,7 @@ fn validate_equation(
     if value.terms.is_empty() {
         return Err(AuthoredConstraintError::MissingTerms);
     }
-    finite(value.right_hand_side.meters)?;
+    finite(value.right_hand_side.canonical_value())?;
     for term in &value.terms {
         finite(term.coefficient)?;
         if term.coefficient == 0.0 {

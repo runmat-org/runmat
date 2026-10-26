@@ -62,7 +62,7 @@ pub fn bind_retained_joule_heat(
             .iter()
             .filter_map(|m| m.electrical.as_ref())
             .any(|m| {
-                m.resistive_heating_coefficient != 0.0
+                m.resistive_heating_coefficient.canonical_value() != 0.0
                     || !m.conductivity_frequency_response.is_empty()
             })
     {
@@ -140,13 +140,16 @@ pub fn execute_steady_electrothermal_from_retained(
     }
     let balance = thermal.energy_balances[0];
     balance.validate().map_err(invalid)?;
-    let scale = transfer.power_w().abs().max(balance.applied_power_w.abs());
+    let scale = transfer
+        .power_w()
+        .abs()
+        .max(balance.applied_power_w.canonical_value().abs());
     let relative = if scale == 0.0 {
         0.0
     } else {
-        (transfer.power_w() - balance.applied_power_w).abs() / scale
+        (transfer.power_w() - balance.applied_power_w.canonical_value()).abs() / scale
     };
-    if (scale == 0.0 && balance.applied_power_w != transfer.power_w())
+    if (scale == 0.0 && balance.applied_power_w.canonical_value() != transfer.power_w())
         || relative > bound.residual_target.max(1e-10) * 10.0
         || balance.relative_residual > bound.residual_target.max(1e-10) * 10.0
     {

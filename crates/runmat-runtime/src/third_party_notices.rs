@@ -13,6 +13,8 @@ pub fn bytes() -> &'static [u8] {
         include_str!("../licenses/CLARABEL-LICENSE.txt"),
         "\n",
         include_str!("../licenses/CLARABEL-DEPENDENCIES-NOTICES.txt"),
+        "\n",
+        include_str!("../licenses/SOBOL-NOTICES.txt"),
     )
     .as_bytes()
 }

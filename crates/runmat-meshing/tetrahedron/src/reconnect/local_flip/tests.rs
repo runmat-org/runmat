@@ -372,7 +372,10 @@ fn two_tetrahedron_mesh(coordinates: [[f64; 3]; 5]) -> TetrahedronMesh {
             .enumerate()
             .map(|(index, coordinates_m)| TetrahedronMeshNode {
                 node_id: entity(index),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         elements: vec![
@@ -411,7 +414,10 @@ fn two_reconnection_pair_mesh() -> TetrahedronMesh {
             .enumerate()
             .map(|(index, coordinates_m)| TetrahedronMeshNode {
                 node_id: entity(node_offset + index),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             }),
     );
     mesh.elements.extend([

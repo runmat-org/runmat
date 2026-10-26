@@ -56,7 +56,10 @@ fn authenticated_constraints() -> DelaunayConstraints {
             .into_iter()
             .map(|(id, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes(id),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 source_vertex_id: None,
             })
             .collect(),

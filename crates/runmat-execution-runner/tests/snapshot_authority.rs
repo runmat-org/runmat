@@ -151,7 +151,7 @@ fn restored_reverse_graph_index_cannot_be_substituted() {
 }
 
 #[test]
-fn cancelled_live_attempt_remains_cancelled_after_recovery() {
+fn cancelled_live_attempt_retains_reservation_and_original_cause_after_recovery() {
     let mut fixture = common::fixture(1, 1);
     let task = common::task(
         "cancelled-recovery",
@@ -169,11 +169,14 @@ fn cancelled_live_attempt_remains_cancelled_after_recovery() {
         })
         .unwrap();
     let snapshot = fixture.driver.snapshot();
-    assert_eq!(snapshot.tasks[&request.task_id].state, TaskState::Cancelled);
+    assert_eq!(snapshot.tasks[&request.task_id].state, TaskState::Assigned);
     assert_eq!(snapshot.attempts[&request.id].state, AttemptState::Assigned);
     let restored = reconcile_snapshot(snapshot).unwrap().snapshot();
-    assert_eq!(restored.tasks[&request.task_id].state, TaskState::Cancelled);
-    assert_eq!(restored.attempts[&request.id].state, AttemptState::Lost);
+    assert_eq!(
+        restored.tasks[&request.task_id].state,
+        TaskState::Indeterminate
+    );
+    assert_eq!(restored.attempts[&request.id].state, AttemptState::Assigned);
     assert!(restored.tasks[&request.task_id].committed.is_none());
 }
 
@@ -191,8 +194,9 @@ fn completed_retry_preserves_both_attempts_without_resetting_budget() {
         .driver
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &first,
-            AttemptReport::Lost {
-                message: "lost first attempt".into(),
+            AttemptReport::Failed {
+                kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
+                message: "retired first attempt failed".into(),
             },
         )))
         .unwrap()
@@ -222,7 +226,7 @@ fn completed_retry_preserves_both_attempts_without_resetting_budget() {
             .attempt_id,
         second.id
     );
-    assert_eq!(restored.attempts[&first.id].state, AttemptState::Lost);
+    assert_eq!(restored.attempts[&first.id].state, AttemptState::Completed);
 }
 
 #[test]

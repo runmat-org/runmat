@@ -20,7 +20,12 @@ fn recovered_complex_flux_has_normal_continuity_and_pec_boundary_closure() {
         let field: BTreeMap<_, _> = result
             .samples
             .iter()
-            .map(|sample| (sample.element_identity, sample.flux_density_t))
+            .map(|sample| {
+                (
+                    sample.element_identity,
+                    sample.flux_density_t.canonical_value(),
+                )
+            })
             .collect();
         let mut faces = BTreeMap::<[usize; 3], Vec<ComplexVector3>>::new();
         for element in &projection.elements {
@@ -34,9 +39,9 @@ fn recovered_complex_flux_has_normal_continuity_and_pec_boundary_closure() {
             }
         }
         for (nodes, fluxes) in faces.iter().filter(|(_, fields)| fields.len() == 2) {
-            let a = projection.nodes[nodes[0]].coordinates_m;
-            let b = projection.nodes[nodes[1]].coordinates_m;
-            let c = projection.nodes[nodes[2]].coordinates_m;
+            let a = projection.nodes[nodes[0]].coordinates_m.canonical_value();
+            let b = projection.nodes[nodes[1]].coordinates_m.canonical_value();
+            let c = projection.nodes[nodes[2]].coordinates_m.canonical_value();
             let u: [f64; 3] = std::array::from_fn(|axis| b[axis] - a[axis]);
             let v: [f64; 3] = std::array::from_fn(|axis| c[axis] - a[axis]);
             let normal = [

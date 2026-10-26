@@ -1,3 +1,4 @@
+mod class_sources;
 mod dependency;
 mod function;
 mod program_point;

@@ -72,7 +72,7 @@ impl ObjectSubscript {
                 components
                     .iter()
                     .map(ObjectIndexComponent::protocol_value)
-                    .collect(),
+                    .collect::<Result<Vec<_>, _>>()?,
             ),
             ObjectIndexSelector::Member(name) => Ok(Value::String(name.clone())),
         }
@@ -94,7 +94,7 @@ impl ObjectSubscriptPath {
             };
             components.iter().filter_map(|component| match component {
                 ObjectIndexComponent::Value(value) => Some(value),
-                ObjectIndexComponent::Colon => None,
+                ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
             })
         });
         let _source_roots = crate::execution::RootedValueLease::for_values_iterator_in_context(

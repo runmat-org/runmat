@@ -24,7 +24,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 
     sections: &[BuiltinDocumentationSection {
  heading: "Behavior and supported forms",
- paragraphs: &["The model callback is evaluated as `fun(x, xdata)` and must return a finite real scalar or array with the same shape as `ydata`.",
+ paragraphs: &["FiniteDifferenceStepSize (legacy FinDiffRelStep) accepts a finite strictly positive real floating scalar or vector; a scalar factor expands to every variable. TypicalX must be a finite strictly positive real floating vector with one element per original variable (a scalar for a scalar problem).",
+"Omitted or empty controls resolve to sqrt(eps) for forward differences, eps^(1/3) for existing central-difference routes, and unit TypicalX. Forward offsets use sign(x), with sign(0)=1, times the factor and max(abs(x),TypicalX); central offsets omit that sign. Actual representable bound-feasible offsets own the denominators. Nominal underflow uses adjacent representable feasible points; unusable actual offsets or an overflowing central span refuse before probe callbacks. These controls do not add objective calls or bypass existing evaluation budgets. Fully supplied derivative paths leave these operands dormant, without validating or gathering them. This least-squares implementation remains forward-difference only; FiniteDifferenceType='central' remains rejected, not accepted and ignored.",
+"The model callback is evaluated as `fun(x, xdata)` and must return a finite real scalar or array with the same shape as `ydata`.",
 "Unbounded problems use finite-difference Levenberg-Marquardt iterations.",
 "Bounded problems project trial points into `[lb, ub]` and estimate finite-difference Jacobians without stepping outside finite bounds.",
 "`lb` and `ub` may be empty, scalar, or arrays with the same number of elements as `x0`; scalar bounds are broadcast to every parameter.",

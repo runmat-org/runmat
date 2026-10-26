@@ -226,6 +226,7 @@ impl SequenceState {
         root: &Value,
         absent_root: Option<Value>,
         root_creation: runmat_mir::SequenceRootCreation,
+        bytecode: &crate::bytecode::Bytecode,
     ) -> Result<(), RuntimeError> {
         if self.destination_builder.is_some() {
             return Err(crate::interpreter::errors::mex(
@@ -235,6 +236,13 @@ impl SequenceState {
         }
         let builder =
             runmat_runtime::sequence::SequenceDestinationBuilder::new_in_context(context, root)?;
+        let builder = if bytecode.active_class_method_owner.is_some() {
+            builder.with_method_frame_factory_in_context(context, || {
+                object::frame_access(bytecode, context)
+            })?
+        } else {
+            builder
+        };
         let builder = match root_creation {
             runmat_mir::SequenceRootCreation::Ordinary(creation) => {
                 builder.with_assignment_creation(creation)

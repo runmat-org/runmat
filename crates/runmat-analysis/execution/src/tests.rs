@@ -3702,17 +3702,17 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
     .unwrap();
     let schedule = StructuralTransientSchedule::new(vec![
         StructuralTransientSchedulePoint {
-            time_s: 0.0,
+            time_s: runmat_types::physical::Time::new(0.0),
             arrival: StructuralTransientScheduleArrival::Initial,
             continuation: StructuralTransientContinuationApproach::At,
         },
         StructuralTransientSchedulePoint {
-            time_s: 0.5,
+            time_s: runmat_types::physical::Time::new(0.5),
             arrival: StructuralTransientScheduleArrival::LeftLimit,
             continuation: StructuralTransientContinuationApproach::RightLimit,
         },
         StructuralTransientSchedulePoint {
-            time_s: 1.0,
+            time_s: runmat_types::physical::Time::new(1.0),
             arrival: StructuralTransientScheduleArrival::Continuous,
             continuation: StructuralTransientContinuationApproach::At,
         },
@@ -3754,7 +3754,7 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             block_ordinal: 0,
             continuation: StructuralTransientContinuationPoint {
                 schedule_ordinal: 2,
-                time_s: 1.0,
+                time_s: runmat_types::physical::Time::new(1.0),
                 approach: StructuralTransientContinuationApproach::At,
             },
             state: StructuralTransientContinuationState {
@@ -3765,10 +3765,10 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             numerical_state:
                 runmat_analysis_fea::execution::StructuralTransientNumericalState::Direct,
             balance: StructuralTransientBalanceAccumulator {
-                initial_mechanical_energy_j: 1.0,
-                applied_load_work_j: 2.0,
-                support_work_j: -0.5,
-                damping_dissipation_j: 0.2,
+                initial_mechanical_energy_j: runmat_types::physical::Energy::new(1.0),
+                applied_load_work_j: runmat_types::physical::Energy::new(2.0),
+                support_work_j: runmat_types::physical::Energy::new(-0.5),
+                damping_dissipation_j: runmat_types::physical::Energy::new(0.2),
             },
             counters: StructuralTransientSolverCounters {
                 host_sync_count: 2,
@@ -3784,8 +3784,8 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             &request,
             StructuralTransientSegmentSampleInput {
                 schedule_ordinal: ordinal,
-                time_s: ordinal as f64 * 0.5,
-                accepted_time_step_s: 0.5,
+                time_s: runmat_types::physical::Time::new(ordinal as f64 * 0.5),
+                accepted_time_step_s: runmat_types::physical::Time::new(0.5),
                 state: StructuralTransientContinuationState {
                     displacement: vec![ordinal as f64, 0.0],
                     velocity: vec![0.5, 0.0],
@@ -3793,12 +3793,12 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
                 },
                 projected_residual_norm: 1.0e-12,
                 reaction: vec![2.0, 0.0],
-                strain_energy_j: 0.6,
-                kinetic_energy_j: 0.4,
-                applied_load_work_j: ordinal as f64,
-                support_work_j: -0.25 * ordinal as f64,
-                damping_dissipation_j: 0.1 * ordinal as f64,
-                energy_balance_residual_j: 0.0,
+                strain_energy_j: runmat_types::physical::Energy::new(0.6),
+                kinetic_energy_j: runmat_types::physical::Energy::new(0.4),
+                applied_load_work_j: runmat_types::physical::Energy::new(ordinal as f64),
+                support_work_j: runmat_types::physical::Energy::new(-0.25 * ordinal as f64),
+                damping_dissipation_j: runmat_types::physical::Energy::new(0.1 * ordinal as f64),
+                energy_balance_residual_j: runmat_types::physical::Energy::new(0.0),
                 relative_energy_balance_error: 0.0,
                 dynamic_balance: StructuralDynamicBalanceSnapshot {
                     applied_load: vec![1.0, 0.0],
@@ -3815,7 +3815,7 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
         &request.scope,
         StructuralTransientPhysicalSampleInput {
             schedule_ordinal: 0,
-            time_s: 0.0,
+            time_s: runmat_types::physical::Time::new(0.0),
             step: StructuralTransientSampleStep::Initial,
             state: StructuralTransientContinuationState {
                 displacement: vec![0.0, 0.0],
@@ -3824,12 +3824,12 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             },
             projected_residual_norm: 0.0,
             reaction: vec![0.0, 0.0],
-            strain_energy_j: 0.0,
-            kinetic_energy_j: 0.0,
-            applied_load_work_j: 0.0,
-            support_work_j: 0.0,
-            damping_dissipation_j: 0.0,
-            energy_balance_residual_j: 0.0,
+            strain_energy_j: runmat_types::physical::Energy::new(0.0),
+            kinetic_energy_j: runmat_types::physical::Energy::new(0.0),
+            applied_load_work_j: runmat_types::physical::Energy::new(0.0),
+            support_work_j: runmat_types::physical::Energy::new(0.0),
+            damping_dissipation_j: runmat_types::physical::Energy::new(0.0),
+            energy_balance_residual_j: runmat_types::physical::Energy::new(0.0),
             relative_energy_balance_error: 0.0,
             dynamic_balance: StructuralDynamicBalanceSnapshot {
                 applied_load: vec![0.0, 0.0],

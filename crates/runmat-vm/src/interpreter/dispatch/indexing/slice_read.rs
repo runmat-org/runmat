@@ -110,7 +110,8 @@ pub(super) async fn dispatch(
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
                 | Value::BoundFunctionHandle(_)
-                | Value::Closure(_) => {
+                | Value::Closure(_)
+                | Value::ScopedFunctionHandle(_) => {
                     if *colon_mask != 0 || *end_mask != 0 {
                         return Err(crate::interpreter::errors::mex(
                             "UnsupportedFunctionHandleSelector",

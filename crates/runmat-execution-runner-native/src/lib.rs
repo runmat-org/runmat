@@ -53,6 +53,7 @@ mod checkpoint_evidence;
 mod config;
 pub use checkpoint_evidence::NativeCheckpointEvidence;
 mod driver;
+mod graph_submission;
 mod durable;
 mod error;
 mod exact_geometry_admission;
@@ -93,6 +94,7 @@ pub use task_outcome::NativeTaskQuiescence;
 mod program_workload;
 mod test_workload;
 mod typed_fea;
+pub use typed_fea::{plan_checked_fea_locally, plan_checked_fea_locally_with_timing};
 mod worker;
 
 pub use analysis_buckling::{
@@ -238,8 +240,8 @@ pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
     run_remote_worker_quic, run_remote_worker_quic_ready_v1, run_remote_worker_relay,
     QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
-    RemoteMeshingWorkerQuicRequest, RemoteObjectReceipt, RemotePoolCheckpoint, RemotePoolDriver,
-    RemotePoolRestoreAuthority, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
+    RemoteGraphTransfer, RemoteMeshingWorkerQuicRequest, RemoteObjectReceipt, RemotePoolCheckpoint,
+    RemotePoolDriver, RemotePoolRestoreAuthority, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
     RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
     RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
 };
@@ -273,7 +275,7 @@ pub use typed_fea::{
     PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, execute_prepared_fea_study_locally,
+    execute_checked_fea_locally, execute_checked_fea_locally_with_timing, execute_prepared_fea_study_locally,
     CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
     CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,

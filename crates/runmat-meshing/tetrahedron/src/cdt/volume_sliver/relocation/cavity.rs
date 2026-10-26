@@ -33,7 +33,11 @@ pub(super) fn candidate<'ctx>(
         if !vertices.contains(&primary) {
             continue;
         }
-        let start = state.topology().node(primary).coordinates_m;
+        let start = state
+            .topology()
+            .node(primary)
+            .coordinates_m
+            .canonical_value();
         let mut points = Vec::new();
         let mut face = source
             .node_identities
@@ -48,6 +52,7 @@ pub(super) fn candidate<'ctx>(
                     .topology()
                     .node(state.topology().node_index(id).expect("face point"))
                     .coordinates_m
+                    .canonical_value()
             });
             points.extend(
                 super::super::offcenter::points_for_face(

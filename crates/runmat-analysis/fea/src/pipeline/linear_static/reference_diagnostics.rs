@@ -100,11 +100,12 @@ pub(super) fn structural_beam_closed_form_diagnostic(
     let section = structural.beam_sections.first()?;
     let material = model.materials.first()?;
     let mechanical = material.require_mechanical().ok()?;
-    let youngs_modulus_pa = mechanical.youngs_modulus_pa;
-    let shear_modulus_pa = youngs_modulus_pa / (2.0 * (1.0 + mechanical.poisson_ratio)).max(1.0e-9);
+    let youngs_modulus_pa = mechanical.youngs_modulus_pa.canonical_value();
+    let shear_modulus_pa =
+        youngs_modulus_pa / (2.0 * (1.0 + mechanical.poisson_ratio.canonical_value())).max(1.0e-9);
     let length_m = distance3(
-        structural.nodes[0].coordinates_m,
-        structural.nodes[1].coordinates_m,
+        structural.nodes[0].coordinates_m.canonical_value(),
+        structural.nodes[1].coordinates_m.canonical_value(),
     );
     if length_m <= 0.0 {
         return None;
@@ -129,8 +130,8 @@ pub(super) fn structural_beam_closed_form_diagnostic(
         }
     }
 
-    let eiz = youngs_modulus_pa * section.iz_m4;
-    let gj = shear_modulus_pa * section.torsion_j_m4;
+    let eiz = youngs_modulus_pa * section.iz_m4.canonical_value();
+    let gj = shear_modulus_pa * section.torsion_j_m4.canonical_value();
     if eiz <= 0.0 || gj <= 0.0 {
         return None;
     }
@@ -277,7 +278,12 @@ fn structural_force_moment_about_reaction_origin(
             let target = constraint.kind.target()?;
             structural_node_coordinates(structural, &target.region_id)
         })
-        .or_else(|| structural.nodes.first().map(|node| node.coordinates_m))?;
+        .or_else(|| {
+            structural
+                .nodes
+                .first()
+                .map(|node| node.coordinates_m.canonical_value())
+        })?;
     let target = structural_node_coordinates(structural, region_id)?;
     let r = [
         target[0] - origin[0],
@@ -300,7 +306,7 @@ fn structural_node_coordinates(
         .nodes
         .iter()
         .find(|node| node.node_id == node_id)
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
 }
 
 fn vector3_sum(values: &[f64]) -> [f64; 3] {

@@ -57,6 +57,7 @@ fn validate_browser_owned_builtin_admission(
         topology: BrowserWorkerTopology::Coordinator,
         max_workers: 1,
         owned_builtin_work: true,
+        selected_program_work: false,
     };
     let inventory = browser_inventory(isolated_worker, Vec::new());
     if !runmat_execution_runner::scheduler::fits(
@@ -69,8 +70,15 @@ fn validate_browser_owned_builtin_admission(
     Ok(())
 }
 
-fn validate_browser_graph_admission(
+pub(super) fn validate_browser_graph_admission(
     request: &runmat_execution_artifact::GraphExecutionRequest,
+) -> Result<(), String> {
+    validate_browser_graph_admission_profile(request, None)
+}
+
+fn validate_browser_graph_admission_profile(
+    request: &runmat_execution_artifact::GraphExecutionRequest,
+    qualified: Option<&runmat_execution_artifact::ProgramWorkerInventory>,
 ) -> Result<(), String> {
     request
         .validate()
@@ -78,10 +86,7 @@ fn validate_browser_graph_admission(
     let host_requirement = request
         .execution_host_requirement([ExecutionTrustTier::CustomerTrusted].into_iter().collect())
         .map_err(|error| format!("browser host rejected invalid graph contract: {error}"))?;
-    let accelerators = browser_accelerators()
-        .map_err(|error| format!("browser accelerator inventory is unavailable: {error}"))?;
-    let host = browser_execution_host_inventory(&accelerators)
-        .map_err(|error| format!("browser host inventory is unavailable: {error}"))?;
+    let (host, accelerators) = host_inventory(qualified)?;
     host_requirement.is_satisfied_by(&host).map_err(|error| {
         format!("browser host rejected unavailable graph capabilities: {error}")
     })?;
@@ -121,7 +126,14 @@ pub(crate) async fn execute_local_program(
     runmat_vm::execute_program_request(request).await
 }
 
-fn validate_browser_admission(request: &ProgramExecutionRequest) -> Result<(), String> {
+pub(super) fn validate_browser_admission(request: &ProgramExecutionRequest) -> Result<(), String> {
+    validate_browser_admission_profile(request, None)
+}
+
+fn validate_browser_admission_profile(
+    request: &ProgramExecutionRequest,
+    qualified: Option<&runmat_execution_artifact::ProgramWorkerInventory>,
+) -> Result<(), String> {
     request
         .validate_for_portable_host()
         .map_err(|error| format!("browser host rejected invalid program artifact: {error}"))?;
@@ -135,10 +147,7 @@ fn validate_browser_admission(request: &ProgramExecutionRequest) -> Result<(), S
     // Take one provider snapshot and use it for both semantic host admission
     // and physical resource placement. This keeps the two contracts aligned
     // even if the process-local provider registry changes between requests.
-    let accelerators = browser_accelerators()
-        .map_err(|error| format!("browser accelerator inventory is unavailable: {error}"))?;
-    let host = browser_execution_host_inventory(&accelerators)
-        .map_err(|error| format!("browser host inventory is unavailable: {error}"))?;
+    let (host, accelerators) = host_inventory(qualified)?;
     host_requirement.is_satisfied_by(&host).map_err(|error| {
         let detail = request
             .artifact
@@ -170,6 +179,44 @@ fn validate_browser_admission(request: &ProgramExecutionRequest) -> Result<(), S
         return Err("browser host rejected unavailable execution resources".into());
     }
     Ok(())
+}
+
+pub(super) fn validate_selected_worker_admission(
+    request: &BrowserWorkerRequest,
+    inventory: &runmat_execution_artifact::ProgramWorkerInventory,
+) -> Result<(), String> {
+    inventory.validate().map_err(|error| error.to_string())?;
+    match request {
+        BrowserWorkerRequest::Direct(request) => {
+            validate_browser_admission_profile(request, Some(inventory))
+        }
+        BrowserWorkerRequest::Graph(request) => {
+            validate_browser_graph_admission_profile(request, Some(inventory))
+        }
+        BrowserWorkerRequest::OwnedBuiltin(_) => {
+            Err("owned builtin work requires its existing physical-exit protocol".into())
+        }
+    }
+}
+
+fn host_inventory(
+    qualified: Option<&runmat_execution_artifact::ProgramWorkerInventory>,
+) -> Result<
+    (
+        runmat_execution::host::ExecutionHostInventory,
+        Vec<runmat_execution::resource::AcceleratorDevice>,
+    ),
+    String,
+> {
+    if let Some(inventory) = qualified {
+        return Ok((inventory.host.clone(), inventory.accelerators.clone()));
+    }
+    // Preserve the legacy/UI route's existing actual provider snapshot.
+    let accelerators = browser_accelerators()
+        .map_err(|error| format!("browser accelerator inventory is unavailable: {error}"))?;
+    let host = browser_execution_host_inventory(&accelerators)
+        .map_err(|error| format!("browser host inventory is unavailable: {error}"))?;
+    Ok((host, accelerators))
 }
 
 fn rejection_message(manifest: &runmat_execution::ExecutableUnitManifest, error: &str) -> String {

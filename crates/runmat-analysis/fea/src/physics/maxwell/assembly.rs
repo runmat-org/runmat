@@ -11,6 +11,9 @@ use crate::{
     topology::{AnalysisProjection, TetrahedralEdgeSpace},
 };
 use runmat_meshing_core::SolverMeshArtifact;
+use runmat_types::physical::{
+    kind, DynamicDimension, Quantity, QuantityKind, QuantityLinearOperator, UniformQuantityLayout,
+};
 use std::collections::BTreeMap;
 
 pub(super) struct MaxwellAssembly<'a> {
@@ -20,8 +23,12 @@ pub(super) struct MaxwellAssembly<'a> {
     pub input: &'a MaxwellInput,
     pub volumes: Vec<MaxwellVolumeData>,
     /// [Re E free edges, Im E free edges], physical SI operator, no damping.
-    pub block: RealSparseMatrix,
-    pub rhs: Vec<f64>,
+    pub block: QuantityLinearOperator<
+        UniformQuantityLayout<kind::ElectricPotential>,
+        UniformQuantityLayout<DynamicDimension>,
+        RealSparseMatrix,
+    >,
+    pub rhs: Quantity<DynamicDimension, Vec<f64>>,
 }
 impl<'a> MaxwellAssembly<'a> {
     pub fn assemble(
@@ -57,7 +64,10 @@ impl<'a> MaxwellAssembly<'a> {
             free.checked_mul(2)
                 .ok_or_else(|| invalid("Maxwell dimension overflow"))?
         ];
-        let omega = input.angular_frequency_rad_per_s;
+        // exp(i phase) differentiates with respect to phase before time: the
+        // inverse-radian generator cancels nominal radians explicitly.
+        let derivative_rate = input.angular_frequency_rad_per_s.phasor_derivative_rate();
+        let omega = derivative_rate.canonical_value();
         for (index, data) in volumes.iter().enumerate() {
             let moments = edge_space
                 .element_moments(&projection, index)
@@ -71,9 +81,15 @@ impl<'a> MaxwellAssembly<'a> {
                 };
                 for (j, other) in indices.iter().enumerate() {
                     if let Some(&column) = rows.get(other) {
-                        let real = moments.curl_curl[i][j] / data.permeability_h_per_m
-                            - omega * omega * data.permittivity_f_per_m * moments.mass[i][j];
-                        let imaginary = omega * data.conductivity_s_per_m * moments.mass[i][j];
+                        let real = moments.curl_curl[i][j]
+                            / data.permeability_h_per_m.canonical_value()
+                            - omega
+                                * omega
+                                * data.permittivity_f_per_m.canonical_value()
+                                * moments.mass[i][j];
+                        let imaginary = omega
+                            * data.conductivity_s_per_m.canonical_value()
+                            * moments.mass[i][j];
                         // A=Ar+iAi -> [[Ar,-Ai],[Ai,Ar]], NOT an SPD operator.
                         block.add(row, column, real);
                         block.add(row, column + free, -imaginary);
@@ -95,8 +111,10 @@ impl<'a> MaxwellAssembly<'a> {
                         for axis in 0..3 {
                             let load = point.volume_weight_m3 * point.values[i][axis] * omega;
                             // -iωJ: real=+ω Im J, imaginary=-ω Re J.
-                            rhs[row] += load * source.current_density_a_per_m2[axis].imaginary;
-                            rhs[row + free] -= load * source.current_density_a_per_m2[axis].real;
+                            rhs[row] += load
+                                * source.current_density_a_per_m2.canonical_value()[axis].imaginary;
+                            rhs[row + free] -=
+                                load * source.current_density_a_per_m2.canonical_value()[axis].real;
                         }
                     }
                 })
@@ -108,13 +126,30 @@ impl<'a> MaxwellAssembly<'a> {
         if rhs.iter().any(|v| !v.is_finite()) {
             return Err(invalid("nonfinite Maxwell integrated source"));
         }
+        let forcing = DynamicDimension::try_new(
+            QuantityKind::ElectricCurrent.dimension(),
+            Some(QuantityKind::ElectricCurrent),
+        )
+        .expect("static current")
+        .divide(
+            DynamicDimension::try_new(QuantityKind::Time.dimension(), Some(QuantityKind::Time))
+                .expect("static time"),
+        )
+        .expect("current time derivative descriptor");
+        let block = QuantityLinearOperator::try_new(
+            UniformQuantityLayout::new(rhs.len()),
+            UniformQuantityLayout::from_descriptor(rhs.len(), forcing),
+            block.finish().map_err(operator)?,
+        )
+        .map_err(operator)?;
+        let rhs = Quantity::try_from_descriptor(forcing, rhs).map_err(invalid)?;
         Ok(Self {
             projection,
             edge_space,
             plan,
             input,
             volumes,
-            block: block.finish().map_err(operator)?,
+            block,
             rhs,
         })
     }

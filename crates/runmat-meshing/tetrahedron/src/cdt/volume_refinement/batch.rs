@@ -184,11 +184,13 @@ pub(super) fn insert_independent_refinement_batch(
                 overlap_rejections += 1;
                 continue 'sources;
             }
-            let location =
-                candidate
-                    .node
-                    .coordinates_m
-                    .map(|value| if value == 0.0 { 0 } else { value.to_bits() });
+            let location = candidate.node.coordinates_m.canonical_value().map(|value| {
+                if value == 0.0 {
+                    0
+                } else {
+                    value.to_bits()
+                }
+            });
             if !candidate_locations.insert(location) {
                 excluded_node_identities.insert(candidate.node.identity);
                 continue;

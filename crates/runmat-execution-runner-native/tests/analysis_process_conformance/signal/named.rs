@@ -14,6 +14,7 @@ impl SignalFixture {
         let source = format!("function y = pulse(t)\narguments\n t (:,1) double\nend\nscale = [{}];\ny = reshape(t * scale, numel(t), {nodes}, {width});\nend\n",
             scale.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
         let compilation::CompiledSignalFixture {
+            session: _session,
             project_root,
             project,
             revision,
@@ -60,7 +61,17 @@ impl SignalFixture {
             frozen.admitted().generator_identity
         );
         let mut foreign = mesh.clone();
-        foreign.topology.nodes[0].coordinates_m[0] += 1.0;
+        {
+            let quantity_change = 1.0;
+            let quantity_index = 0;
+            let quantity_slot = &mut foreign.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert!(reopened.resolve(&foreign).is_err());
         let other_order = if mesh.topology.nodes.len() == 4 {
             runmat_meshing_core::ElementOrder::Tet10

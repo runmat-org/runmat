@@ -78,7 +78,8 @@ pub struct FeaThermalRunResult {
     pub residual_target: f64,
     /// One global power balance per solve (no initial-only transient sample).
     pub energy_balances: Vec<ThermalEnergyBalance>,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub initial_state: ThermalInitialStateEvidence,
 }
 
@@ -86,12 +87,15 @@ pub struct FeaThermalRunResult {
 #[serde(deny_unknown_fields)]
 pub struct ThermalInitialStateEvidence {
     pub procedure_step_id: String,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub applied_initial_condition_ids: Vec<String>,
     pub authored_node_count: usize,
     pub prescribed_node_count: usize,
     pub authored_and_prescribed_node_count: usize,
     pub reference_node_count: usize,
-    pub minimum_temperature_k: f64,
-    pub maximum_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub minimum_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_temperature_k: runmat_types::physical::Temperature,
 }

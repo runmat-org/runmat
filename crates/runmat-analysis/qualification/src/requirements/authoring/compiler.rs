@@ -972,10 +972,10 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
     witnesses: &[Witness {
         id: "FEA-WITNESS-LANGUAGE-RECOVERY",
         locator: WitnessLocator::CargoTest {
-            package: "runmat-parser",
+            package: "runmat-fea-syntax",
             target: CargoTarget::Library,
-            name: "recovers_at_the_next_top_level_declaration",
-            source: "crates/runmat-parser/src/fea/tests.rs",
+            name: "tests::recovers_at_the_next_top_level_declaration",
+            source: "crates/runmat-fea-syntax/src/tests.rs",
         },
         claims: &[CoverageClaim {
             obligation: "syntax_pass",

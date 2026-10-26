@@ -1,5 +1,7 @@
 //! Scoped synchronous access shares the native workspace journal and recovery fence.
 mod resource;
+mod transaction;
+pub use transaction::WorkspaceTransaction;
 use crate::workspace::{
     WorkspaceCaptureRequest, WorkspacePublicationOutcome, WorkspacePublicationRequest,
     WorkspaceSnapshot,

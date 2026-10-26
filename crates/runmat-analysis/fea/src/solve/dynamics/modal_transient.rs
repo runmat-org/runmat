@@ -25,9 +25,9 @@ pub fn solve_modal_transient(
     integrate_initial(
         DenseSecondOrderOperators {
             size: system.mode_count(),
-            stiffness: system.stiffness(),
-            mass: system.mass(),
-            damping: system.damping(),
+            stiffness: system.stiffness().canonical_value(),
+            mass: system.mass().canonical_value(),
+            damping: system.damping().canonical_value(),
         },
         time_points_s,
         projected_loads,
@@ -48,9 +48,9 @@ pub fn continue_modal_transient(
     integrate_continuation(
         DenseSecondOrderOperators {
             size: system.mode_count(),
-            stiffness: system.stiffness(),
-            mass: system.mass(),
-            damping: system.damping(),
+            stiffness: system.stiffness().canonical_value(),
+            mass: system.mass().canonical_value(),
+            damping: system.damping().canonical_value(),
         },
         time_points_s,
         projected_loads,
@@ -66,17 +66,18 @@ pub fn initialize_modal_transient_state(
 ) -> Result<ModalTransientStep, ModalTransientError> {
     let operators = operators(system);
     validate_operators_and_load(operators, projected_load)?;
-    if initial.displacement.len() != operators.size
-        || initial.velocity.len() != operators.size
+    if initial.displacement.canonical_values().len() != operators.size
+        || initial.velocity.canonical_values().len() != operators.size
         || initial
             .displacement
+            .canonical_values()
             .iter()
-            .chain(&initial.velocity)
+            .chain(initial.velocity.canonical_values())
             .any(|value| !value.is_finite())
     {
         return Err(
-            if initial.displacement.len() == operators.size
-                && initial.velocity.len() == operators.size
+            if initial.displacement.canonical_values().len() == operators.size
+                && initial.velocity.canonical_values().len() == operators.size
             {
                 ModalTransientError::NonFinite
             } else {
@@ -87,8 +88,8 @@ pub fn initialize_modal_transient_state(
     refresh_modal_transient_state(
         system,
         projected_load,
-        initial.displacement,
-        initial.velocity,
+        initial.displacement.into_canonical_values(),
+        initial.velocity.into_canonical_values(),
     )
 }
 
@@ -124,16 +125,25 @@ pub fn refresh_modal_transient_state(
     let acceleration = solve_square(operators.mass, &right_hand_side, operators.size)
         .map_err(|_| ModalTransientError::Singular)?;
     let coordinates = ModalTransientCoordinateState {
-        displacement,
-        velocity,
-        acceleration,
+        displacement: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Displacement,
+            _,
+        >::new(displacement),
+        velocity:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                velocity,
+            ),
+        acceleration: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Acceleration,
+            _,
+        >::new(acceleration),
     };
     Ok(ModalTransientStep {
         relative_residual: relative_residual(
             operators,
-            &coordinates.displacement,
-            &coordinates.velocity,
-            &coordinates.acceleration,
+            coordinates.displacement.canonical_values(),
+            coordinates.velocity.canonical_values(),
+            coordinates.acceleration.canonical_values(),
             projected_load,
         ),
         coordinates,
@@ -162,9 +172,9 @@ pub fn advance_modal_transient_state(
 fn operators(system: &ModalReducedSystem) -> DenseSecondOrderOperators<'_> {
     DenseSecondOrderOperators {
         size: system.mode_count(),
-        stiffness: system.stiffness(),
-        mass: system.mass(),
-        damping: system.damping(),
+        stiffness: system.stiffness().canonical_value(),
+        mass: system.mass().canonical_value(),
+        damping: system.damping().canonical_value(),
     }
 }
 
@@ -204,17 +214,18 @@ fn integrate_initial(
     initial: ModalTransientInitialState,
 ) -> Result<ModalTransientHistory, ModalTransientError> {
     validate_common_inputs(operators, time_points_s, loads)?;
-    if initial.displacement.len() != operators.size
-        || initial.velocity.len() != operators.size
+    if initial.displacement.canonical_values().len() != operators.size
+        || initial.velocity.canonical_values().len() != operators.size
         || initial
             .displacement
+            .canonical_values()
             .iter()
-            .chain(&initial.velocity)
+            .chain(initial.velocity.canonical_values())
             .any(|value| !value.is_finite())
     {
         return Err(
-            if initial.displacement.len() == operators.size
-                && initial.velocity.len() == operators.size
+            if initial.displacement.canonical_values().len() == operators.size
+                && initial.velocity.canonical_values().len() == operators.size
             {
                 ModalTransientError::NonFinite
             } else {
@@ -222,8 +233,8 @@ fn integrate_initial(
             },
         );
     }
-    let displacement = initial.displacement;
-    let velocity = initial.velocity;
+    let displacement = initial.displacement.into_canonical_values();
+    let velocity = initial.velocity.into_canonical_values();
     let initial_right_hand_side = subtract_three(
         &loads[0],
         &multiply(operators.damping, operators.size, &velocity),
@@ -236,9 +247,18 @@ fn integrate_initial(
         time_points_s,
         loads,
         ModalTransientCoordinateState {
-            displacement,
-            velocity,
-            acceleration,
+            displacement: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Displacement,
+                _,
+            >::new(displacement),
+            velocity:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                    velocity,
+                ),
+            acceleration: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Acceleration,
+                _,
+            >::new(acceleration),
         },
     )
 }
@@ -263,13 +283,13 @@ fn integrate_from_state(
     let mut coordinates = initial;
     let mut history = ModalTransientHistory {
         samples: vec![ModalTransientSample {
-            time_s: time_points_s[0],
+            time_s: runmat_types::physical::Time::new(time_points_s[0]),
             coordinates: coordinates.clone(),
             relative_residual: relative_residual(
                 operators,
-                &coordinates.displacement,
-                &coordinates.velocity,
-                &coordinates.acceleration,
+                coordinates.displacement.canonical_values(),
+                coordinates.velocity.canonical_values(),
+                coordinates.acceleration.canonical_values(),
                 &loads[0],
             ),
         }],
@@ -287,7 +307,7 @@ fn integrate_from_state(
         )?;
         coordinates = step.coordinates;
         history.samples.push(ModalTransientSample {
-            time_s: time_points_s[index],
+            time_s: runmat_types::physical::Time::new(time_points_s[index]),
             coordinates: coordinates.clone(),
             relative_residual: step.relative_residual,
         });
@@ -303,15 +323,17 @@ fn advance_dense_modal_state(
 ) -> Result<ModalTransientStep, ModalTransientError> {
     let predicted_displacement = (0..operators.size)
         .map(|row| {
-            continuation.displacement[row]
-                + time_step_s * continuation.velocity[row]
-                + time_step_s.powi(2) * (0.5 - BETA) * continuation.acceleration[row]
+            continuation.displacement.canonical_values()[row]
+                + time_step_s * continuation.velocity.canonical_values()[row]
+                + time_step_s.powi(2)
+                    * (0.5 - BETA)
+                    * continuation.acceleration.canonical_values()[row]
         })
         .collect::<Vec<_>>();
     let predicted_velocity = (0..operators.size)
         .map(|row| {
-            continuation.velocity[row]
-                + time_step_s * (1.0 - GAMMA) * continuation.acceleration[row]
+            continuation.velocity.canonical_values()[row]
+                + time_step_s * (1.0 - GAMMA) * continuation.acceleration.canonical_values()[row]
         })
         .collect::<Vec<_>>();
     let right_hand_side = subtract_three(
@@ -339,16 +361,25 @@ fn advance_dense_modal_state(
         .map(|(predicted, acceleration)| predicted + GAMMA * time_step_s * acceleration)
         .collect::<Vec<_>>();
     let coordinates = ModalTransientCoordinateState {
-        displacement,
-        velocity,
-        acceleration,
+        displacement: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Displacement,
+            _,
+        >::new(displacement),
+        velocity:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                velocity,
+            ),
+        acceleration: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Acceleration,
+            _,
+        >::new(acceleration),
     };
     Ok(ModalTransientStep {
         relative_residual: relative_residual(
             operators,
-            &coordinates.displacement,
-            &coordinates.velocity,
-            &coordinates.acceleration,
+            coordinates.displacement.canonical_values(),
+            coordinates.velocity.canonical_values(),
+            coordinates.acceleration.canonical_values(),
             projected_load,
         ),
         coordinates,
@@ -396,17 +427,18 @@ fn validate_coordinate_state(
     size: usize,
     state: &ModalTransientCoordinateState,
 ) -> Result<(), ModalTransientError> {
-    if state.displacement.len() != size
-        || state.velocity.len() != size
-        || state.acceleration.len() != size
+    if state.displacement.canonical_values().len() != size
+        || state.velocity.canonical_values().len() != size
+        || state.acceleration.canonical_values().len() != size
     {
         return Err(ModalTransientError::DimensionMismatch);
     }
     if state
         .displacement
+        .canonical_values()
         .iter()
-        .chain(&state.velocity)
-        .chain(&state.acceleration)
+        .chain(state.velocity.canonical_values())
+        .chain(state.acceleration.canonical_values())
         .any(|value| !value.is_finite())
     {
         return Err(ModalTransientError::NonFinite);
@@ -434,8 +466,14 @@ mod tests {
             &times,
             &vec![vec![0.0]; times.len()],
             ModalTransientInitialState {
-                displacement: vec![1.0],
-                velocity: vec![0.0],
+                displacement: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Displacement,
+                    _,
+                >::new(vec![1.0]),
+                velocity: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(vec![0.0]),
             },
         )
         .unwrap()
@@ -446,7 +484,15 @@ mod tests {
         let exact = 2.0_f64.cos();
         let error = |interval_count| {
             let history = free_oscillator(interval_count);
-            (history.samples.last().unwrap().coordinates.displacement[0] - exact).abs()
+            (history
+                .samples
+                .last()
+                .unwrap()
+                .coordinates
+                .displacement
+                .canonical_values()[0]
+                - exact)
+                .abs()
         };
         let coarse = error(10);
         let medium = error(20);
@@ -472,12 +518,24 @@ mod tests {
             &[0.0, 0.1, 0.2],
             &[vec![1.0, 0.0], vec![1.0, 0.0], vec![1.0, 0.0]],
             ModalTransientInitialState {
-                displacement: vec![0.0; 2],
-                velocity: vec![0.0; 2],
+                displacement: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Displacement,
+                    _,
+                >::new(vec![0.0; 2]),
+                velocity: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(vec![0.0; 2]),
             },
         )
         .unwrap();
-        assert_ne!(history.samples[1].coordinates.displacement[1], 0.0);
+        assert_ne!(
+            history.samples[1]
+                .coordinates
+                .displacement
+                .canonical_values()[1],
+            0.0
+        );
         assert!(history
             .samples
             .iter()
@@ -501,8 +559,14 @@ mod tests {
             vec![-0.2, 0.0],
         ];
         let initial = ModalTransientInitialState {
-            displacement: vec![0.0; 2],
-            velocity: vec![0.0; 2],
+            displacement: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Displacement,
+                _,
+            >::new(vec![0.0; 2]),
+            velocity:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                    vec![0.0; 2],
+                ),
         };
         let uninterrupted = integrate_initial(operators, &times, &loads, initial.clone()).unwrap();
         let first = integrate_initial(operators, &times[..=2], &loads[..=2], initial).unwrap();
@@ -528,9 +592,18 @@ mod tests {
             damping: &[0.0],
         };
         let invalid_shape = ModalTransientCoordinateState {
-            displacement: vec![],
-            velocity: vec![0.0],
-            acceleration: vec![0.0],
+            displacement: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Displacement,
+                _,
+            >::new(vec![]),
+            velocity:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                    vec![0.0],
+                ),
+            acceleration: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Acceleration,
+                _,
+            >::new(vec![0.0]),
         };
         assert_eq!(
             integrate_continuation(
@@ -542,9 +615,18 @@ mod tests {
             Err(ModalTransientError::DimensionMismatch)
         );
         let invalid_value = ModalTransientCoordinateState {
-            displacement: vec![0.0],
-            velocity: vec![0.0],
-            acceleration: vec![f64::NAN],
+            displacement: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Displacement,
+                _,
+            >::new(vec![0.0]),
+            velocity:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Velocity, _>::new(
+                    vec![0.0],
+                ),
+            acceleration: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Acceleration,
+                _,
+            >::new(vec![f64::NAN]),
         };
         assert_eq!(
             integrate_continuation(

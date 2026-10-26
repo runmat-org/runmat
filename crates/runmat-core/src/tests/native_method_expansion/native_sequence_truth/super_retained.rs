@@ -20,6 +20,56 @@ fn compiled_derived_constructor_keeps_base_body_for_interpreted_and_native_entri
             None,
         ))
         .expect("compile derived product");
+        let primary = unit.bytecode().source_id.unwrap().program().unwrap();
+        assert_eq!(unit.mir().classes.len(), 2);
+        assert!(unit
+            .mir()
+            .classes
+            .iter()
+            .all(|class| class.source != primary));
+        assert!(
+            unit.primary_declaration_only_class(primary)
+                .unwrap()
+                .is_none(),
+            "companion registration prologues cannot publish a primary declaration"
+        );
+        let envelope = unit
+            .portable_envelope()
+            .expect("source-owned portable function");
+        let cold = crate::ExecutableUnit::from_portable_envelope(&envelope)
+            .expect("cold class-source round trip");
+        assert_eq!(cold.mir(), unit.mir());
+        source_bound_constructor_owners(&unit, session.runtime_context());
+        let mut rebound = unit.mir().clone();
+        let remap = rebound
+            .functions
+            .keys()
+            .map(|function| {
+                (
+                    *function,
+                    runmat_hir::FunctionId(function.0.checked_add(1000).unwrap()),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        runmat_mir::remap_closed_function_ids(&mut rebound, &remap).expect("closed function remap");
+        assert!(rebound
+            .classes
+            .iter()
+            .zip(&unit.mir().classes)
+            .all(|(rebound, original)| rebound.source == original.source));
+        rebound
+            .validate_class_sources(|source| {
+                unit.source_map()
+                    .entries()
+                    .iter()
+                    .any(|entry| entry.source_id == source)
+            })
+            .unwrap();
+        unit.analysis()
+            .rebind_closed_functions(&remap)
+            .unwrap()
+            .validate_class_sources(&rebound)
+            .unwrap();
         let registry = unit.bytecode().function_registry();
         let caller = registry
             .functions
@@ -78,6 +128,72 @@ fn compiled_derived_constructor_keeps_base_body_for_interpreted_and_native_entri
             );
         }
     });
+}
+
+fn source_bound_constructor_owners(
+    unit: &crate::ExecutableUnit,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) {
+    use std::sync::Arc;
+    let mut issued = 0;
+    for owner in std::iter::once(unit).chain(
+        unit.original_dependencies()
+            .values()
+            .map(|unit| unit.as_ref()),
+    ) {
+        let program = owner.revision().program_revision.identity_digest().unwrap();
+        let selected_runtime = owner.bind_runtime_sources(runtime.clone()).unwrap();
+        let mut first = owner.runtime_bytecode(&selected_runtime).unwrap();
+        let _first_admission = owner
+            .materialize_runtime_constructor_definitions(
+                &mut first.function_registry,
+                Some(&mut first.bound_functions),
+            )
+            .unwrap();
+        let mut second = owner.runtime_bytecode(&selected_runtime).unwrap();
+        let _second_admission = owner
+            .materialize_runtime_constructor_definitions(
+                &mut second.function_registry,
+                Some(&mut second.bound_functions),
+            )
+            .unwrap();
+        for (id, original) in &owner.functions().functions {
+            let a = first.function_registry.get_current(*id).unwrap();
+            let b = second.function_registry.get_current(*id).unwrap();
+            let newly_issued = original
+                .binding_origin
+                .is_some_and(|origin| origin.program == program)
+                && original.class_method_owner.as_ref().is_some_and(|method| {
+                    method.role == runmat_types::ClassMethodRole::Constructor && !method.is_static
+                })
+                && original
+                    .source_id
+                    .is_some_and(|source| source.program().is_some());
+            if newly_issued {
+                issued += 1;
+                assert!(!Arc::ptr_eq(
+                    &original.definition_owner,
+                    &a.definition_owner
+                ));
+                assert!(!Arc::ptr_eq(&a.definition_owner, &b.definition_owner));
+                assert!(Arc::ptr_eq(
+                    &a.definition_owner,
+                    &first.bound_functions[id].definition_owner
+                ));
+                assert!(original
+                    .definition_owner
+                    .selected_receiver_declarations()
+                    .is_none());
+            } else {
+                assert!(Arc::ptr_eq(&original.definition_owner, &a.definition_owner));
+                assert!(Arc::ptr_eq(&original.definition_owner, &b.definition_owner));
+            }
+        }
+    }
+    assert!(
+        issued >= 2,
+        "both original class constructors must be source-materialized"
+    );
 }
 
 #[test]

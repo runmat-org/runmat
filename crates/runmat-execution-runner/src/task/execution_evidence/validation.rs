@@ -55,10 +55,14 @@ pub(crate) fn validate_history(
                 })?;
             if attempt.terminal.is_some()
                 || attempt.request.ordinal != task.attempt_count
-                || !matches!(
+                || !(matches!(
                     task.state,
                     TaskState::Assigned | TaskState::Running | TaskState::Committing
-                )
+                ) || (task.state == TaskState::Indeterminate
+                    && attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none())))
             {
                 return Err(RunnerError::Invalid(
                     "active attempt differs from the original task lifecycle".into(),
@@ -75,6 +79,13 @@ pub(crate) fn validate_history(
             ));
         }
         None => {}
+    }
+    if history.iter().any(|attempt| {
+        attempt.terminal.is_none() && task.active_attempt != Some(attempt.request.id)
+    }) {
+        return Err(RunnerError::Invalid(
+            "live physical attempt lacks its original task reservation".into(),
+        ));
     }
     super::super::cancellation::validate_cancellation(task, history, now_millis)?;
     validate_commit(task, history)

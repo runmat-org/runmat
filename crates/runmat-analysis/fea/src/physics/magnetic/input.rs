@@ -216,7 +216,7 @@ pub(crate) fn compile_canonical_input(
         // No frequency/thermal/conductive coefficient is silently interpreted as
         // a magnetic constitutive law. Linear isotropic permeability is explicit.
         if !law.conductivity_frequency_response.is_empty()
-            || law.resistive_heating_coefficient != 0.0
+            || law.resistive_heating_coefficient.canonical_value() != 0.0
         {
             return Err(MagnetostaticError::Unsupported(
                 "frequency/thermal magnetic material dependence".into(),
@@ -224,8 +224,14 @@ pub(crate) fn compile_canonical_input(
         }
         volumes.push(MagneticVolumeData {
             element_identity: element.stable_identity,
-            permeability_h_per_m: VACUUM_PERMEABILITY_H_PER_M * law.relative_permeability,
-            current_density_a_per_m2: [0.0; 3],
+            permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(
+                VACUUM_PERMEABILITY_H_PER_M.canonical_value()
+                    * law.relative_permeability.canonical_value(),
+            ),
+            current_density_a_per_m2: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ElectricCurrentDensity,
+                _,
+            >::new([0.0; 3]),
         });
     }
     let loads = realize_step_excitations(model, step, ExcitationSamplePoint::Static)
@@ -273,9 +279,14 @@ pub(crate) fn compile_canonical_input(
             };
             if selected {
                 matched += 1;
-                for (a, b) in volume.current_density_a_per_m2.iter_mut().zip(value.real) {
-                    *a += b;
-                }
+                volume.current_density_a_per_m2 = volume.current_density_a_per_m2
+                    .try_map_canonical_storage(|mut components| {
+                        for (component, contribution) in components.iter_mut().zip(value.real) {
+                            *component += contribution;
+                        }
+                        components
+                    })
+                    .map_err(|error| MagnetostaticError::InvalidInput(error.to_string()))?;
             }
         }
         if matched == 0 {

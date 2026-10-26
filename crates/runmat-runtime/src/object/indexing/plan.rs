@@ -109,12 +109,48 @@ pub(crate) fn plan_for_components_with_context<'a, S: AsRef<[usize]> + 'a>(
         },
     )
 }
-async fn plan_for_mode<S: AsRef<[usize]>>(
+pub(crate) fn plan_for_virtual_components_with_context<'a, S: AsRef<[usize]> + 'a>(
+    context: Option<&'a RuntimeContext>,
+    shape: S,
+    components: &'a [ObjectIndexComponent],
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan<usize>, RuntimeError>> + 'a
+{
+    plan_for_mode_with_output(
+        context,
+        shape,
+        components,
+        PlanMode::Read,
+        |context, selectors, dims, shape, _| {
+            crate::indexing::plan::build_virtual_index_plan_with_context(
+                context, selectors, dims, shape,
+            )
+        },
+    )
+}
+
+fn plan_for_mode<'a, S: AsRef<[usize]> + 'a>(
+    context: Option<&'a RuntimeContext>,
+    shape: S,
+    components: &'a [ObjectIndexComponent],
+    mode: PlanMode,
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan, RuntimeError>> + 'a
+{
+    plan_for_mode_with_output(context, shape, components, mode, physical_plan)
+}
+
+async fn plan_for_mode_with_output<S: AsRef<[usize]>, I>(
     context: Option<&RuntimeContext>,
     shape: S,
     components: &[ObjectIndexComponent],
     mode: PlanMode,
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    output: impl FnOnce(
+        Option<&RuntimeContext>,
+        &[crate::indexing::selectors::SliceSelector],
+        usize,
+        &[usize],
+        bool,
+    ) -> Result<crate::indexing::plan::IndexPlan<I>, RuntimeError>,
+) -> Result<crate::indexing::plan::IndexPlan<I>, RuntimeError> {
     // Own either the caller's borrowed dimensions or its existing inline
     // scalar/sparse shape in this original planner, not a forwarding future.
     let shape = shape.as_ref();
@@ -130,28 +166,27 @@ async fn plan_for_mode<S: AsRef<[usize]>>(
         )
         .await??;
     let assignment = matches!(mode, PlanMode::Assignment | PlanMode::FixedAssignment);
-    let plan = match (context, assignment) {
-        (Some(context), true) => crate::indexing::plan::build_assignment_plan_in_context(
-            context,
-            &selectors,
-            components.len(),
-            shape,
-        )?,
-        (Some(context), false) => crate::indexing::plan::build_index_plan_in_context(
-            context,
-            &selectors,
-            components.len(),
-            shape,
-        )?,
-        (None, true) => {
-            crate::indexing::plan::build_assignment_plan(&selectors, components.len(), shape)?
-        }
-        (None, false) => {
-            crate::indexing::plan::build_index_plan(&selectors, components.len(), shape)?
-        }
-    };
+    let plan = output(context, &selectors, components.len(), shape, assignment)?;
     owner.check()?;
     Ok(plan)
+}
+fn physical_plan(
+    context: Option<&RuntimeContext>,
+    selectors: &[crate::indexing::selectors::SliceSelector],
+    dims: usize,
+    shape: &[usize],
+    assignment: bool,
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    match (context, assignment) {
+        (Some(context), true) => {
+            crate::indexing::plan::build_assignment_plan_in_context(context, selectors, dims, shape)
+        }
+        (Some(context), false) => {
+            crate::indexing::plan::build_index_plan_in_context(context, selectors, dims, shape)
+        }
+        (None, true) => crate::indexing::plan::build_assignment_plan(selectors, dims, shape),
+        (None, false) => crate::indexing::plan::build_index_plan(selectors, dims, shape),
+    }
 }
 
 #[cfg(test)]

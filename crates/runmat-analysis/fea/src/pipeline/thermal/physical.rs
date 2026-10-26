@@ -19,6 +19,9 @@ use crate::{
     },
 };
 
+type ThermalDeparture =
+    runmat_types::physical::Quantity<runmat_types::physical::kind::TemperatureDifference, Vec<f64>>;
+type ThermalSolveResult = LinearSolveResult<ThermalDeparture>;
 mod backend_evidence;
 mod residual;
 use residual::linear_residual;
@@ -92,8 +95,8 @@ pub(super) fn run(
         &active_model,
         &initial_assembly.projection,
         thermal_step.step_id.as_str(),
-        domain.reference_temperature.kelvin,
-        &initial_assembly.prescribed_temperature_k,
+        domain.reference_temperature.canonical_value(),
+        initial_assembly.prescribed_temperature_k.canonical_values(),
         &options.initial_fields,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
@@ -130,7 +133,7 @@ pub(super) fn run(
             assembly: &initial_assembly,
             model: &active_model,
             sample: initial_sample,
-            initial_temperature_k: &initial.temperature_k,
+            initial_temperature_k: initial.temperature_k.canonical_values(),
             time_origin_s,
             requested_solver_backend,
             algebra: algebra.as_ref(),
@@ -143,7 +146,7 @@ pub(super) fn run(
             mesh,
             step: thermal_step,
             initial_assembly: &initial_assembly,
-            initial_temperature_k: &initial.temperature_k,
+            initial_temperature_k: initial.temperature_k.canonical_values(),
             schedule,
             facts,
             requested_solver_backend,
@@ -246,7 +249,9 @@ pub(super) fn run(
         residual_target: options.residual_target,
         energy_balances: outcome.energy_balances,
         nonlinear_evidence: outcome.nonlinear_evidence,
-        reference_temperature_k: domain.reference_temperature.kelvin,
+        reference_temperature_k: runmat_types::physical::Temperature::new(
+            domain.reference_temperature.canonical_value(),
+        ),
         initial_state: initial.evidence,
     };
     result
@@ -269,7 +274,7 @@ struct ProcedureOutcome {
     energy_balances: Vec<ThermalEnergyBalance>,
     nonlinear_evidence: Vec<crate::contracts::ThermalNonlinearSampleEvidence>,
     source_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
-    last_solve: LinearSolveResult,
+    last_solve: LinearSolveResult<()>,
     host_sync_count: u32,
     device_apply_count: u32,
     device_apply_attempt_count: u32,
@@ -312,18 +317,24 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     // A homogeneous anchored increment system has the exact zero solution. Starting it at
     // zero avoids introducing a spurious heat flow by iterating an unrelated warm guess.
     // This chooses the solver's initial state, never rewrites a computed solution.
-    let initial_increment = (!operator.load().iter().all(|&value| value == 0.0)).then(|| {
+    let has_forcing = operator
+        .rhs_field()
+        .map_err(|error| FeaRunError::Solve(error.into()))?
+        .with_canonical_storage(|values| values.iter().any(|&value| value != 0.0));
+    let initial_increment = has_forcing.then(|| {
         initial_temperature_k
             .iter()
             .zip(&reference_temperature_k)
             .map(|(value, reference)| value - reference)
             .collect::<Vec<_>>()
     });
-    let mut solve = solve_checked(
+    let solve = solve_checked(
         &operator,
         requested_solver_backend,
         algebra,
-        initial_increment.as_deref(),
+        initial_increment
+            .as_deref()
+            .map(runmat_types::physical::Quantity::new),
         &facts.operators,
         residual_target,
     )?;
@@ -331,21 +342,39 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     // zero damping carrier before allocating the complete recovered fields.
     drop(initial_increment);
     drop(operator);
-    for ((temperature, prescribed), reference) in solve
-        .solution
-        .iter_mut()
-        .zip(&assembly.prescribed_temperature_k)
-        .zip(&reference_temperature_k)
-    {
-        // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
-        // round trip when their magnitude differs greatly from the reference.
-        *temperature = prescribed.unwrap_or(*temperature + reference);
-    }
+    let mut solve = solve.try_map_solution(|departure| {
+        let mut values = departure.into_canonical_values();
+        for ((temperature, prescribed), reference) in values
+            .iter_mut()
+            .zip(assembly.prescribed_temperature_k.canonical_values())
+            .zip(&reference_temperature_k)
+        {
+            *temperature = prescribed.unwrap_or(*temperature + reference);
+        }
+        runmat_types::physical::Quantity::<runmat_types::physical::kind::Temperature, _>::try_new(
+            values,
+        )
+        .map_err(|error| FeaRunError::Solve(error.to_string()))
+    })?;
     drop(reference_temperature_k);
     let mut recovered = RecoveredSnapshots::with_capacity(1);
-    push_recovered_snapshot(assembly, &solve.solution, None, 1.0, 0.0, &mut recovered)?;
+    push_recovered_snapshot(
+        assembly,
+        solve.solution.canonical_values(),
+        None,
+        1.0,
+        0.0,
+        &mut recovered,
+    )?;
     let energy_balance = assembly
-        .energy_balance(model, sample, &solve.solution, &solve.solution, 1.0, 0.0)
+        .energy_balance(
+            model,
+            sample,
+            solve.solution.canonical_values(),
+            solve.solution.canonical_values(),
+            1.0,
+            0.0,
+        )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let mut accelerator_evidence = Vec::new();
     backend_evidence::retain(
@@ -364,18 +393,25 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         device_apply_count: solve.device_apply_k_count,
         device_apply_attempt_count: solve.device_apply_k_attempt_count,
         accelerator_evidence,
-        last_solve: solve,
+        last_solve: solve.map_solution(|_state| ()),
     })
 }
 
 fn solve_checked(
-    operator: &crate::algebra::AssembledRealSystem,
+    operator: &crate::algebra::PhysicalScalarSystem<
+        runmat_types::physical::kind::TemperatureDifference,
+    >,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
-    initial_guess: Option<&[f64]>,
+    initial_guess: Option<
+        runmat_types::physical::Quantity<
+            runmat_types::physical::kind::TemperatureDifference,
+            &[f64],
+        >,
+    >,
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
-) -> Result<LinearSolveResult, FeaRunError> {
+) -> Result<ThermalSolveResult, FeaRunError> {
     for matrix in [
         operator.operators().stiffness(),
         operator.operators().mass(),
@@ -383,6 +419,17 @@ fn solve_checked(
     ] {
         facts.verify_matrix(matrix)?;
     }
+    let power = runmat_types::physical::DynamicDimension::quantity_type(
+        runmat_types::physical::QuantityKind::Power,
+    )
+    .with_semantic_kind(Some(runmat_types::physical::QuantityKind::Power))
+    .expect("thermal equation");
+    operator
+        .require_equation(power)
+        .map_err(|error| FeaRunError::Solve(error.into()))?;
+    operator
+        .physical_operator()
+        .map_err(|error| FeaRunError::Solve(error.to_string()))?;
     // The authored acceptance target may tighten, but must not relax, the shared numerical
     // stopping policy. Linear residual normalization alone does not bound global energy error.
     let mut settings = ScopedLinearSolveSettings::with_default_tolerance(
@@ -390,17 +437,22 @@ fn solve_checked(
         Some(facts.solver_admission()),
     );
     settings.relative_tolerance = settings.relative_tolerance.min(residual_target);
-    let solve = solve_operator_system_scoped(
-        operator,
-        SpdPreconditionerKind::Jacobi,
-        requested_solver_backend,
-        algebra,
-        initial_guess,
-        settings,
-    )
-    .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+    let solve = operator
+        .with_canonical_system(|numerical| {
+            solve_operator_system_scoped(
+                numerical,
+                SpdPreconditionerKind::Jacobi,
+                requested_solver_backend,
+                algebra,
+                initial_guess.map(|quantity| quantity.canonical_value()),
+                settings,
+            )
+        })
+        .map_err(|error| FeaRunError::Solve(error.to_string()))?;
     if solve.converged {
-        Ok(solve)
+        operator
+            .admit_solution(solve)
+            .map_err(|error| FeaRunError::Solve(error.into()))
     } else {
         Err(FeaRunError::Assembly(format!(
             "physical thermal solve did not converge: residual_norm={}",
@@ -474,7 +526,7 @@ fn push_recovered_snapshot(
             .iter()
             .enumerate()
             .map(|(node, temperature)| {
-                assembly.prescribed_temperature_k[node]
+                assembly.prescribed_temperature_k.canonical_values()[node]
                     .unwrap_or(temperature + reference_temperature_k)
             })
             .collect(),

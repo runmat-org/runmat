@@ -383,8 +383,9 @@ pub(super) fn report(
                 None => Err("remote result egress accounting overflowed".into()),
             }
         }
-        // Graph and SPMD results carry no per-attempt scheduler accounting.
-        ProgramExecutionResponse::GraphSuccess { graph } => Ok(AttemptSuccess::Graph { graph }),
+        ProgramExecutionResponse::GraphSuccess { graph } => {
+            AttemptSuccess::new_graph_for_remote_transfer(request, graph, wall_millis)
+        }
         ProgramExecutionResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
         ProgramExecutionResponse::Failure { message } => {
             return AttemptReport::Failed {
@@ -521,5 +522,64 @@ mod tests {
         let encoded = serde_json::to_vec(&report).unwrap();
         let decoded: AttemptReport = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, report);
+        let logical_digest = runmat_execution::Digest::sha256(b"remote-graph-result");
+        let encryption_context = runmat_execution::Digest::sha256(b"remote-graph-scope");
+        let reference = runmat_execution::value::ValueRef {
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
+            id: runmat_execution::value::artifact_object_value_id(
+                logical_digest,
+                encryption_context,
+                "remote-graph-scope",
+            ),
+            logical_digest,
+            encryption_context,
+            encoded_length: 23,
+            media_type: "application/vnd.runmat.test".into(),
+            value_schema: "runmat.test".into(),
+            kind: runmat_execution::value::ValueRefKind::ResultObject,
+            authorization_scope: "remote-graph-scope".into(),
+            resident_fence: None,
+        };
+        for external in [false, true] {
+            let value = if external {
+                runmat_execution::value::ValuePayload::Object(Box::new(reference.clone()))
+            } else {
+                runmat_execution::value::ValuePayload::Inline(Box::new(
+                    runmat_execution::value::InlineValue::Null,
+                ))
+            };
+            let graph = runmat_execution::value::PayloadGraph {
+                roots: vec![runmat_execution::value::GraphNodeRef(0)],
+                nodes: vec![
+                    runmat_execution::value::GraphNode::Leaf {
+                        value: value.clone(),
+                    },
+                    runmat_execution::value::GraphNode::Leaf { value },
+                ],
+            };
+            let graph_report = super::report(
+                &request,
+                ProgramExecutionResponse::GraphSuccess { graph },
+                3,
+            );
+            let AttemptReport::Succeeded { result } = &graph_report else {
+                panic!("metered Graph success");
+            };
+            result.validate_against(&request).unwrap();
+            let accounting = &result.resources().unwrap().resources;
+            let bytes = if external { 23 } else { 0 };
+            assert_eq!(accounting.artifact_bytes, bytes);
+            assert_eq!(accounting.usage.egress_bytes, bytes);
+            assert_eq!(accounting.usage.relay_bytes, 0);
+            assert_eq!(accounting.usage.wall_millis, 3);
+            assert_eq!(result.result_objects().len(), usize::from(external));
+            assert_eq!(
+                serde_json::from_slice::<AttemptReport>(
+                    &serde_json::to_vec(&graph_report).unwrap()
+                )
+                .unwrap(),
+                graph_report
+            );
+        }
     }
 }

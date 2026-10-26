@@ -149,7 +149,7 @@ pub fn prepare_geometry_materialization_request(
 ) -> AnalysisBridgeResult<GeometryMaterializationRequest> {
     match &definition.source {
         GeometryDefinitionSource::Imported(imported) => {
-            preparation.import_options.source_units = imported.units;
+            preparation.import_options.source_units = imported.unit_fallback;
         }
         GeometryDefinitionSource::Constructed(_) | GeometryDefinitionSource::Derived(_) => {}
         GeometryDefinitionSource::Generated(_) => {}

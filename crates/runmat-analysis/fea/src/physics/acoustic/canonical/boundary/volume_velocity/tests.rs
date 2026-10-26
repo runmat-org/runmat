@@ -22,8 +22,12 @@ fn assembly(quadratic: bool) -> AcousticAssembly {
     let mut model = crate::physics::acoustic::canonical::tests::model();
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
     let properties = compile_solid_property_map(&model, &mesh).unwrap();
-    AcousticAssembly::assemble(AnalysisProjection::derive(&mesh).unwrap(), &properties, 1.0)
-        .unwrap()
+    AcousticAssembly::assemble(
+        AnalysisProjection::derive(&mesh).unwrap(),
+        &properties,
+        runmat_types::physical::AngularFrequency::new(1.0),
+    )
+    .unwrap()
 }
 
 fn load(flow: ComplexScalar) -> RealizedExcitation {
@@ -52,8 +56,11 @@ fn load(flow: ComplexScalar) -> RealizedExcitation {
 }
 
 fn triangle_area(assembly: &AcousticAssembly, face: &ProjectedBoundaryFace) -> f64 {
-    let corners: [[f64; 3]; 3] =
-        std::array::from_fn(|i| assembly.projection.nodes[face.node_indices[i]].coordinates_m);
+    let corners: [[f64; 3]; 3] = std::array::from_fn(|i| {
+        assembly.projection.nodes[face.node_indices[i]]
+            .coordinates_m
+            .canonical_value()
+    });
     let a: [f64; 3] = std::array::from_fn(|i| corners[1][i] - corners[0][i]);
     let b: [f64; 3] = std::array::from_fn(|i| corners[2][i] - corners[0][i]);
     let cross = [
@@ -93,9 +100,17 @@ fn total_flow_normalizes_once_over_union_with_exact_tri3_tri6_moments() {
                 imaginary: -0.2,
             };
             a.add_volume_velocity(&load(flow), flow, faces).unwrap();
-            for (source, weight) in a.source.iter().zip(expected) {
-                assert!((source.real - a.omega * flow.imaginary * weight).abs() < 1e-13);
-                assert!((source.imaginary + a.omega * flow.real * weight).abs() < 1e-13);
+            for (source, weight) in a.source.canonical_values().iter().zip(expected) {
+                assert!(
+                    (source.real - a.derivative_rate.canonical_value() * flow.imaginary * weight)
+                        .abs()
+                        < 1e-13
+                );
+                assert!(
+                    (source.imaginary + a.derivative_rate.canonical_value() * flow.real * weight)
+                        .abs()
+                        < 1e-13
+                );
             }
             assert_eq!(a.source_evidence.len(), 1);
             assert!(a.source_evidence[0].accepted);

@@ -31,10 +31,18 @@ fn vector(count: usize) -> Repeated<[f64; 3]> {
 
 #[derive(Serialize)]
 struct FaceForcesProfile {
-    advective_momentum_n: Repeated<[f64; 3]>,
-    viscous_traction_n: Repeated<[f64; 3]>,
-    pressure_traction_n: Repeated<[f64; 3]>,
-    pressure_fluctuation_traction_n: Repeated<[f64; 3]>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    advective_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    viscous_traction_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_traction_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_fluctuation_traction_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
 }
 struct BoundaryProfiles<I>(I);
 impl<'a, I: Iterator<Item = &'a str> + Clone> Serialize for BoundaryProfiles<I> {
@@ -43,13 +51,31 @@ impl<'a, I: Iterator<Item = &'a str> + Clone> Serialize for BoundaryProfiles<I> 
             crate::physics::cfd::canonical::CanonicalFluidBoundaryBalance {
                 authority_id: authority_id.to_owned(),
                 face_count: 0,
-                area_m2: 0.0,
-                volume_flow_rate_m3_per_s: 0.0,
-                mass_flow_rate_kg_per_s: 0.0,
-                advective_momentum_n: [0.0; 3],
-                viscous_traction_n: [0.0; 3],
-                pressure_traction_n: [0.0; 3],
-                pressure_fluctuation_traction_n: [0.0; 3],
+                area_m2: runmat_types::physical::Area::new(0.0),
+                volume_flow_rate_m3_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::VolumeFlowRate,
+                    _,
+                >::new(0.0),
+                mass_flow_rate_kg_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::MassFlowRate,
+                    _,
+                >::new(0.0),
+                advective_momentum_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new([0.0; 3]),
+                viscous_traction_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new([0.0; 3]),
+                pressure_traction_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new([0.0; 3]),
+                pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new([0.0; 3]),
             }
         }))
     }
@@ -60,14 +86,26 @@ impl<'a, I: Iterator<Item = &'a str> + Clone> Serialize for BoundaryProfiles<I> 
 struct ResidualProfile<I> {
     boundary_balances: BoundaryProfiles<I>,
     face_forces: FaceForcesProfile,
-    cell_momentum_n: Repeated<[f64; 3]>,
-    cell_algebraic_momentum_n: Repeated<[f64; 3]>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    cell_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    cell_algebraic_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
     cell_momentum_relative: Repeated<f64>,
-    cell_continuity_m3_per_s: Repeated<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    cell_continuity_m3_per_s: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::VolumeFlowRate,
+        Repeated<f64>,
+    >,
     cell_continuity_relative: Repeated<f64>,
-    global_momentum_n: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    global_momentum_n:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, [f64; 3]>,
     global_momentum_relative: f64,
-    global_boundary_flux_m3_per_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    global_boundary_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, f64>,
     momentum_relative: f64,
     continuity_relative: f64,
     flux_constitutive_relative: f64,
@@ -77,11 +115,25 @@ struct ResidualProfile<I> {
 struct OriginalProfile<I> {
     numerical_input_identity: Digest,
     authored_authority_identity: Digest,
-    velocity_m_per_s: Repeated<[f64; 3]>,
-    pressure_fluctuation_pa: Repeated<f64>,
-    pressure_reference_pa: Repeated<f64>,
-    pressure_pa: Repeated<f64>,
-    face_volume_flux_m3_per_s: Repeated<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    velocity_m_per_s: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::Velocity,
+        Repeated<[f64; 3]>,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_fluctuation_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Repeated<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_reference_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Repeated<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Repeated<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    face_volume_flux_m3_per_s: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::VolumeFlowRate,
+        Repeated<f64>,
+    >,
     outer_iterations: usize,
     linear_iterations: u64,
     residual: ResidualProfile<I>,
@@ -90,29 +142,71 @@ fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalPr
     OriginalProfile {
         numerical_input_identity: Digest::from_bytes([0; 32]),
         authored_authority_identity: Digest::from_bytes([0; 32]),
-        velocity_m_per_s: vector(cells),
-        pressure_fluctuation_pa: scalar(cells),
-        pressure_reference_pa: scalar(cells),
-        pressure_pa: scalar(cells),
-        face_volume_flux_m3_per_s: scalar(faces),
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(vector(cells)),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(scalar(cells)),
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(scalar(cells)),
+        pressure_pa:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Pressure, _>::new(
+                scalar(cells),
+            ),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(scalar(faces)),
         outer_iterations: 0,
         linear_iterations: 0,
         residual: ResidualProfile {
             boundary_balances: BoundaryProfiles(authorities),
             face_forces: FaceForcesProfile {
-                advective_momentum_n: vector(faces),
-                viscous_traction_n: vector(faces),
-                pressure_traction_n: vector(faces),
-                pressure_fluctuation_traction_n: vector(faces),
+                advective_momentum_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new(vector(faces)),
+                viscous_traction_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new(vector(faces)),
+                pressure_traction_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new(vector(faces)),
+                pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Force,
+                    _,
+                >::new(vector(faces)),
             },
-            cell_momentum_n: vector(cells),
-            cell_algebraic_momentum_n: vector(cells),
+            cell_momentum_n: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Force,
+                _,
+            >::new(vector(cells)),
+            cell_algebraic_momentum_n: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Force,
+                _,
+            >::new(vector(cells)),
             cell_momentum_relative: scalar(cells),
-            cell_continuity_m3_per_s: scalar(cells),
+            cell_continuity_m3_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::VolumeFlowRate,
+                _,
+            >::new(scalar(cells)),
             cell_continuity_relative: scalar(cells),
-            global_momentum_n: [0.0; 3],
+            global_momentum_n: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Force,
+                _,
+            >::new([0.0; 3]),
             global_momentum_relative: 0.0,
-            global_boundary_flux_m3_per_s: 0.0,
+            global_boundary_flux_m3_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::VolumeFlowRate,
+                _,
+            >::new(0.0),
             momentum_relative: 0.0,
             continuity_relative: 0.0,
             flux_constitutive_relative: 0.0,
@@ -199,11 +293,26 @@ mod tests {
             let original = CanonicalFluidResult {
                 numerical_input_identity: Digest::from_bytes([1; 32]),
                 authored_authority_identity: Digest::from_bytes([2; 32]),
-                velocity_m_per_s: vec![v; cells],
-                pressure_fluctuation_pa: vec![f64::MAX; cells],
-                pressure_reference_pa: vec![0.0; cells],
-                pressure_pa: vec![f64::MAX; cells],
-                face_volume_flux_m3_per_s: vec![-f64::MAX; faces],
+                velocity_m_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(vec![v; cells]),
+                pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Pressure,
+                    _,
+                >::new(vec![f64::MAX; cells]),
+                pressure_reference_pa: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Pressure,
+                    _,
+                >::new(vec![0.0; cells]),
+                pressure_pa: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Pressure,
+                    _,
+                >::new(vec![f64::MAX; cells]),
+                face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::VolumeFlowRate,
+                    _,
+                >::new(vec![-f64::MAX; faces]),
                 outer_iterations: 123,
                 linear_iterations: 1234567,
                 residual: CanonicalFluidResidual {
@@ -211,30 +320,60 @@ mod tests {
                             crate::physics::cfd::canonical::CanonicalFluidBoundaryBalance {
                                 authority_id: "pressure_β".into(),
                                 face_count: u64::MAX,
-                                area_m2: f64::MAX,
-                                volume_flow_rate_m3_per_s: -f64::MAX,
-                                mass_flow_rate_kg_per_s: f64::MIN_POSITIVE,
-                                advective_momentum_n: v,
-                                viscous_traction_n: v,
-                                pressure_traction_n: v,
-                                pressure_fluctuation_traction_n: v,
+                                area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(f64::MAX),
+                                volume_flow_rate_m3_per_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::VolumeFlowRate,_>::new(-f64::MAX),
+                                mass_flow_rate_kg_per_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::MassFlowRate,_>::new(f64::MIN_POSITIVE),
+                                advective_momentum_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
+                                viscous_traction_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
+                                pressure_traction_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
+                                pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
                             };
                             faces
                         ],
                     face_forces: CanonicalFluidFaceForces {
-                        advective_momentum_n: vec![v; faces],
-                        viscous_traction_n: vec![v; faces],
-                        pressure_traction_n: vec![v; faces],
-                        pressure_fluctuation_traction_n: vec![v; faces],
+                        advective_momentum_n: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Force,
+                            _,
+                        >::new(vec![v; faces]),
+                        viscous_traction_n: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Force,
+                            _,
+                        >::new(vec![v; faces]),
+                        pressure_traction_n: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Force,
+                            _,
+                        >::new(vec![v; faces]),
+                        pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Force,
+                            _,
+                        >::new(vec![
+                            v;
+                            faces
+                        ]),
                     },
-                    cell_momentum_n: vec![v; cells],
-                    cell_algebraic_momentum_n: vec![v; cells],
+                    cell_momentum_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(vec![v; cells]),
+                    cell_algebraic_momentum_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(vec![v; cells]),
                     cell_momentum_relative: vec![f64::MAX; cells],
-                    cell_continuity_m3_per_s: vec![-f64::MAX; cells],
+                    cell_continuity_m3_per_s: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::VolumeFlowRate,
+                        _,
+                    >::new(vec![-f64::MAX; cells]),
                     cell_continuity_relative: vec![f64::MIN_POSITIVE; cells],
-                    global_momentum_n: v,
+                    global_momentum_n: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Force,
+                        _,
+                    >::new(v),
                     global_momentum_relative: f64::MAX,
-                    global_boundary_flux_m3_per_s: -f64::MAX,
+                    global_boundary_flux_m3_per_s: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::VolumeFlowRate,
+                        _,
+                    >::new(-f64::MAX),
                     momentum_relative: f64::MIN_POSITIVE,
                     continuity_relative: f64::MAX,
                     flux_constitutive_relative: -f64::MAX,
@@ -249,5 +388,13 @@ mod tests {
                 .unwrap(),
             );
         }
+    }
+}
+
+impl<T: runmat_types::physical::QuantityStorage> runmat_types::physical::QuantityStorage
+    for Repeated<T>
+{
+    fn all_finite(&self) -> bool {
+        self.sample.all_finite()
     }
 }

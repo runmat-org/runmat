@@ -91,9 +91,11 @@ fn compliant_surface_with_long_interior_edge_and_thin_collars_converges() {
                 .tetrahedra
                 .iter()
                 .map(|cell| {
-                    let points = cell
-                        .vertex_indices
-                        .map(|i| result.topology.nodes[i as usize].coordinates_m);
+                    let points = cell.vertex_indices.map(|i| {
+                        result.topology.nodes[i as usize]
+                            .coordinates_m
+                            .canonical_value()
+                    });
                     runmat_meshing_core::predicate::tetrahedron_volume(points).abs()
                 })
                 .sum::<f64>();

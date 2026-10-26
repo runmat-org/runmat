@@ -1,6 +1,6 @@
 use super::*;
 use crate::{AnalysisProcedure, PhysicsFamily, ProcedureStep, SolutionSpace};
-use runmat_types::QuantityDimension;
+use runmat_types::PhysicalDimension;
 
 fn model() -> AuthoredModel {
     AuthoredModel {
@@ -11,7 +11,7 @@ fn model() -> AuthoredModel {
         thermo_mechanical: None,
         inputs: vec![AuthoredInputDefinition {
             input_id: "load".into(),
-            value_type: AuthoredInputType::Quantity(QuantityDimension::Force),
+            value_type: AuthoredInputType::Quantity(PhysicalDimension::FORCE.into()),
             default: None,
             minimum: None,
             maximum: None,
@@ -117,14 +117,14 @@ fn study() -> AuthoredStudy {
                 input_id: "load".into(),
                 value: AuthoredModelArgumentValue::StudyInput(AuthoredStudyInputRef {
                     input_id: "service_load".into(),
-                    value_type: AuthoredInputType::Quantity(QuantityDimension::Force),
+                    value_type: AuthoredInputType::Quantity(PhysicalDimension::FORCE.into()),
                 }),
             }],
         },
         formulation_requirement: crate::FormulationRequirement::Experimental,
         inputs: vec![AuthoredInputDefinition {
             input_id: "service_load".into(),
-            value_type: AuthoredInputType::Quantity(QuantityDimension::Force),
+            value_type: AuthoredInputType::Quantity(PhysicalDimension::FORCE.into()),
             default: None,
             minimum: None,
             maximum: None,
@@ -178,10 +178,14 @@ fn realization_captures_the_geometry_source_definition() {
             &geometry,
             &[crate::AuthoredStudyInputBinding {
                 input_id: "service_load".into(),
-                value: AuthoredInputValue::Quantity {
-                    dimension: QuantityDimension::Force,
-                    value_si: 1000.0,
-                },
+                value: AuthoredInputValue::Quantity(
+                    runmat_types::physical::DimensionedScalar::try_from_dimension(
+                        PhysicalDimension::FORCE,
+                        None,
+                        1000.0,
+                    )
+                    .unwrap(),
+                ),
             }],
         )
         .unwrap();

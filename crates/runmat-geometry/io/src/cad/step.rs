@@ -13,6 +13,7 @@ pub(crate) struct StepImportSummary {
     pub regions: Vec<Region>,
     pub diagnostics: Vec<ImportDiagnostic>,
     pub exchange: Option<Ap242ExchangeInventory>,
+    pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
 }
 
 pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSummary, String> {
@@ -100,6 +101,7 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
     };
 
     Ok(StepImportSummary {
+        unit_evidence: crate::ap242::inspect_length_units(text),
         source_kind: SourceGeometryKind::Cad,
         assembly: Some(AssemblyNode {
             node_id: "assembly_root".to_string(),

@@ -40,23 +40,27 @@ fn low_wave_number_tet10_finer_pressure_velocity_and_power_converge() {
                     .projection
                     .nodes
                     .iter()
-                    .zip(&result.pressure_pa)
+                    .zip(result.pressure_pa.canonical_values())
                     .map(|(node, p)| {
-                        let x = axial(node.coordinates_m);
+                        let x = axial(node.coordinates_m.canonical_value());
                         let reference = multiply(amplitude, [(k * x).cos(), -(k * x).sin()]);
                         (p.real - reference[0]).powi(2) + (p.imaginary - reference[1]).powi(2)
                     })
                     .sum::<f64>()
-                    / result.pressure_pa.len() as f64)
+                    / result.pressure_pa.canonical_values().len() as f64)
                     .sqrt();
                 let velocity = (result
                     .projection
                     .elements
                     .iter()
-                    .zip(&result.element_velocity_m_per_s)
+                    .zip(result.element_velocity_m_per_s.canonical_values())
                     .map(|(element, v)| {
                         let xs = std::array::from_fn(|i| {
-                            axial(result.projection.nodes[element.node_indices[i]].coordinates_m)
+                            axial(
+                                result.projection.nodes[element.node_indices[i]]
+                                    .coordinates_m
+                                    .canonical_value(),
+                            )
                         });
                         let p = multiply(amplitude, mean_wave(xs, k));
                         (0..3)
@@ -80,10 +84,10 @@ fn low_wave_number_tet10_finer_pressure_velocity_and_power_converge() {
                     && result.power_relative_error < 1e-8
                     && inlet < 0.0
                     && outlet > 0.0
-                    && result.mean_impedance_loss_w > 0.0
+                    && result.mean_impedance_loss_w.canonical_value() > 0.0
                     && (inlet + exact_power).abs() < 0.005
                     && (outlet - exact_power).abs() < 0.005
-                    && (result.mean_impedance_loss_w - exact_power).abs() < 0.005)
+                    && (result.mean_impedance_loss_w.canonical_value() - exact_power).abs() < 0.005)
                 {
                     failures.push(format!("physical power/algebraic gate rotated={rotated} phase={phase} cells={cells}"));
                 }

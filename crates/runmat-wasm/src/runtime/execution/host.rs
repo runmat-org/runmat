@@ -10,6 +10,7 @@ use serde::Serialize;
 use super::model::BrowserExecutionCapabilities;
 
 mod owned_response;
+mod program;
 
 const BROWSER_EXECUTION_SUBMISSION_SCHEMA_V2: u16 = 2;
 
@@ -17,6 +18,7 @@ const BROWSER_EXECUTION_SUBMISSION_SCHEMA_V2: u16 = 2;
 pub(crate) struct BrowserExecutionHost {
     target: JsValue,
     capabilities: BrowserExecutionCapabilities,
+    worker_inventory: Option<std::rc::Rc<runmat_execution_artifact::ProgramWorkerInventory>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,14 +42,48 @@ impl BrowserExecutionHost {
         if capabilities.owned_builtin_work {
             required_method(&target, "cancelOwned")?;
         }
+        if capabilities.selected_program_work {
+            required_method(&target, "launchProgram")?;
+            required_method(&target, "cancelProgram")?;
+        }
+        let worker_inventory = Reflect::get(&target, &JsValue::from_str("workerInventory"))?;
+        let worker_inventory = if worker_inventory.is_undefined() || worker_inventory.is_null() {
+            if capabilities.selected_program_work {
+                return Err(JsValue::from_str(
+                    "selectedProgramWork requires its actual workerInventory",
+                ));
+            }
+            None
+        } else {
+            let inventory: runmat_execution_artifact::ProgramWorkerInventory =
+                serde_wasm_bindgen::from_value(worker_inventory).map_err(|error| {
+                    JsValue::from_str(&format!("invalid worker inventory: {error}"))
+                })?;
+            inventory
+                .validate()
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            if inventory.host.target != runmat_execution::host::ExecutionHostTarget::BrowserWasm {
+                return Err(JsValue::from_str(
+                    "browser program host requires a BrowserWasm worker inventory",
+                ));
+            }
+            Some(std::rc::Rc::new(inventory))
+        };
         Ok(Self {
             target,
             capabilities,
+            worker_inventory,
         })
     }
 
     pub(crate) fn capabilities(&self) -> BrowserExecutionCapabilities {
         self.capabilities
+    }
+
+    pub(crate) fn worker_inventory(
+        &self,
+    ) -> Option<&runmat_execution_artifact::ProgramWorkerInventory> {
+        self.worker_inventory.as_deref()
     }
 
     pub(crate) async fn launch(
@@ -128,8 +164,7 @@ impl BrowserExecutionHost {
             .call1(&self.target, &JsValue::from_str(task_id))
             .map_err(|_| "owned worker cancellation invocation failed".to_string())?;
         let promise = value.dyn_into::<Promise>().map_err(|_| {
-            "executionHost.cancelOwned must return a physical-exit Promise for owned CPU work"
-                .to_string()
+            "executionHost.cancelOwned must return a task-bound physical-exit Promise".to_string()
         })?;
         let acknowledgment = JsFuture::from(promise)
             .await

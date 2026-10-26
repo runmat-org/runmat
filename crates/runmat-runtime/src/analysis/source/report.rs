@@ -67,6 +67,16 @@ impl CheckedFeaSource {
             root_module: self.root_module.clone(),
             program,
             source_index: self.source_index(),
+            geometry_previews: self
+                .program
+                .geometry_inspections
+                .values()
+                .map(|inspection| runmat_fea_source::FeaGeometryPreview {
+                    module_path: inspection.module.clone(),
+                    geometry_id: inspection.geometry.clone(),
+                    source_path: inspection.source_path.clone(),
+                })
+                .collect(),
             diagnostics,
         }
     }

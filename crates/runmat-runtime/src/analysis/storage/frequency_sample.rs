@@ -184,7 +184,7 @@ pub(super) fn validate_artifact(
             || completed.accuracy.producer != original.producer()
             || receipt.producer != original.producer()
             || receipt.topology_digest != Digest::from_bytes(*original.mesh_digest().bytes())
-            || receipt.frequency_hz != expected.frequency.hertz
+            || receipt.frequency_hz != expected.frequency.canonical_value()
             || receipt.relative_residual != original.relative_residual()
             || receipt.power_relative_error != original.power_relative_error()
             || receipt.solver_relative_tolerance != expected.solver.relative_tolerance
@@ -217,7 +217,7 @@ pub(super) fn validate_artifact(
                 || state.kind != request.declaration.kind
                 || state.completeness != request.declaration.completeness
                 || state.persistence != request.declaration.persistence
-                || payload.frequency.hertz != numerical.entry.frequency_hz()
+                || payload.frequency.canonical_value() != numerical.entry.frequency_hz()
                 || payload.ordered_node_ids != original.ordered_node_ids()
                 || payload.ordered_element_ids != original.ordered_element_ids()
                 || payload.recovery_request

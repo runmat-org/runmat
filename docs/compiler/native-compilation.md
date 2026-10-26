@@ -23,7 +23,7 @@ RunMat can execute a project in a live session or link it into a native process 
 | Form | Compilation | Source availability during execution | Function discovery |
 | --- | --- | --- | --- |
 | `runmat run`, REPL, or Desktop | VM execution with adaptive JIT compilation | Project source remains available | Session lookup and runtime path changes are supported |
-| `runmat compile --policy=native-specialized` | Native object linked before launch | Program source closure is fixed at compile time | Runtime builtin discovery remains available |
+| `runmat compile --policy=native-specialized` | Native object linked before launch | Program source closure is fixed at compile time | Exact reachable bindings when proven; runtime discovery otherwise |
 | `runmat compile --policy=closed-world` | Native object linked before launch | Program source closure is fixed at compile time | Runtime calls must resolve to the selected builtin bindings |
 
 Use a live session when a program adds source paths, defines functions interactively, or selects source files at runtime. Use native compilation when the entrypoint and its project/package source closure are known before launch.
@@ -101,7 +101,7 @@ Select runtime composition with `--policy`.
 runmat compile simulation.m --policy=native-specialized -o simulation
 ```
 
-RunMat compiles the retained program functions and preserves builtin discovery through the runtime registry. The linker force-loads the runtime archive so inventory-backed builtin registration remains available to the process.
+RunMat compiles the retained program functions. When the runtime archive supports closed-world linking and canonical reachability and catalog metadata prove the complete builtin target set, the executable installs those exact bindings and uses ordinary archive extraction with platform dead stripping. Otherwise it preserves inventory-backed builtin discovery and force-loads the runtime archive.
 
 This policy accepts programs whose source closure is fixed but whose builtin targets cannot all be reduced to a finite set during analysis.
 
@@ -222,7 +222,7 @@ Use `--explain-link` to print the program and runtime nodes retained by compilat
 runmat compile simulation.m --explain-link -o simulation
 ```
 
-The explanation includes program functions, builtins, classes, provider and extension boundaries, runtime families, and the edge that retained each node. Reachability edges distinguish direct, finite-dynamic, and unknown targets. A closed-world explanation also lists each selected builtin binding and native symbol.
+The explanation includes program functions, builtins, classes, provider and extension boundaries, runtime families, and the edge that retained each node. Reachability edges distinguish direct, finite-dynamic, and unknown targets. The explanation reports the actual selected or dynamic runtime composition and lists each selected builtin binding and native symbol.
 
 Use `--link-plan-json` to write the deterministic plan for CI or artifact inspection:
 

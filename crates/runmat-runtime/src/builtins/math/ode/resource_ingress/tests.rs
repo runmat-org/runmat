@@ -1,4 +1,6 @@
 use super::*;
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::host_effect::HostEffectAllocationError;
 use crate::context::{
     host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeParallelResources,
     RuntimeParallelService, RuntimeServicePorts,
@@ -103,22 +105,43 @@ fn all_ode_public_entries_preserve_unbounded_execution_and_refuse_finite_before_
     )))
     .unwrap();
     drop(entry);
-    for name in ["ode45", "ode23", "ode15s"] {
-        let args = [
-            Value::FunctionHandle("ode_resource_rhs".into()),
-            Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap()),
-            Value::Num(1.0),
-        ];
+    let rhs = Value::FunctionHandle("ode_resource_rhs".into());
+    let times = Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap());
+    for (name, args, has_callback) in [
+        (
+            "ode45",
+            vec![rhs.clone(), times.clone(), Value::Num(1.0)],
+            true,
+        ),
+        (
+            "ode23",
+            vec![rhs.clone(), times.clone(), Value::Num(1.0)],
+            true,
+        ),
+        ("ode15s", vec![rhs.clone(), times, Value::Num(1.0)], true),
+        ("fminunc", vec![rhs.clone(), Value::Num(1.0)], true),
+        ("fsolve", vec![rhs, Value::Num(1.0)], true),
+        (
+            "linprog",
+            vec![Value::Num(1.0), Value::Num(-1.0), Value::Num(-1.0)],
+            false,
+        ),
+    ] {
         policy.finite.set(false);
         calls.store(0, Ordering::SeqCst);
         let result = futures::executor::block_on(crate::call_builtin_async_in_context(
             &runtime, name, &args,
         ))
         .expect("ordinary public ODE execution remains supported");
-        assert!(calls.load(Ordering::SeqCst) > 0);
-        assert!(
-            matches!(result.value(), Value::Tensor(values) if values.materialize_f64().iter().all(|value| *value == 1.0))
-        );
+        assert_eq!(calls.load(Ordering::SeqCst) > 0, has_callback);
+        assert!(match result.value() {
+            Value::Num(value) => (*value - 1.0).abs() < 1e-12,
+            Value::Tensor(values) => values
+                .materialize_f64()
+                .iter()
+                .all(|value| (*value - 1.0).abs() < 1e-12),
+            _ => false,
+        });
         drop(result);
         policy.finite.set(true);
         calls.store(0, Ordering::SeqCst);

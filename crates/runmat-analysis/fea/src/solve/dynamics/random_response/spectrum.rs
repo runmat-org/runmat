@@ -15,7 +15,7 @@ pub(super) fn interpolate_spectral_matrix(
             "random-response evaluation frequency is not finite".into(),
         ));
     }
-    let frequencies = &spectrum.frequencies_hz;
+    let frequencies = spectrum.frequencies_hz.canonical_values();
     let spectral_density = spectrum
         .resolved_spectral_density()
         .map_err(FeaRunError::Solve)?;
@@ -33,13 +33,16 @@ pub(super) fn interpolate_spectral_matrix(
             }
         };
     if lower == upper {
-        return Ok(matrix_values(&spectral_density[lower].values));
+        return Ok(matrix_values(
+            spectral_density[lower].values.canonical_values(),
+        ));
     }
     match spectrum.interpolation {
         RandomSpectrumInterpolation::LinearFrequency => Ok(spectral_density[lower]
             .values
+            .canonical_values()
             .iter()
-            .zip(&spectral_density[upper].values)
+            .zip(spectral_density[upper].values.canonical_values())
             .map(|(left, right)| {
                 Complex::new(
                     left.real + fraction * (right.real - left.real),
@@ -65,7 +68,9 @@ fn extrapolated_matrix(
             let spectral_density = spectrum
                 .resolved_spectral_density()
                 .map_err(FeaRunError::Solve)?;
-            Ok(matrix_values(&spectral_density[endpoint].values))
+            Ok(matrix_values(
+                spectral_density[endpoint].values.canonical_values(),
+            ))
         }
     }
 }

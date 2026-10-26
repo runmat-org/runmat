@@ -34,7 +34,7 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
                 .topology
                 .nodes
                 .iter()
-                .map(|node| node.coordinates_m)
+                .map(|node| node.coordinates_m.canonical_value())
                 .collect::<Vec<_>>(),
         ),
         ([0.0, 0.0, 0.0], [1.0, 2.0, 3.0])
@@ -68,7 +68,7 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
         .nodes
         .iter()
         .filter(|node| boundary_node_ids.contains(&node.node_id))
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     assert!(maximum_box_surface_deviation(&boundary_coordinates) <= TOLERANCE);
 
@@ -93,7 +93,7 @@ fn solver_coordinates(artifact: &SolverMeshArtifact) -> Vec<[f64; 3]> {
         .topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect()
 }
 
@@ -200,7 +200,7 @@ fn solver_tetrahedra(artifact: &SolverMeshArtifact) -> std::vec::IntoIter<[[f64;
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     artifact
         .topology

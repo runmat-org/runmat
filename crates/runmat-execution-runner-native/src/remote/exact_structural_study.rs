@@ -180,7 +180,7 @@ pub(super) async fn execute_with_completed_meshing(
     }
 
     let aliases = match &completed.regions {
-        super::exact_meshing::MeshedGeometryRegions::ImporterAliases(aliases) => aliases,
+        super::exact_meshing::MeshedGeometryRegions::PersistentEntities(aliases) => aliases,
         super::exact_meshing::MeshedGeometryRegions::Materialized(regions) => {
             return Ok(RemoteExactStructuralStudyComposition::Failed(format!(
                 "{} typed geometry regions require mesh-property compilation before structural execution",

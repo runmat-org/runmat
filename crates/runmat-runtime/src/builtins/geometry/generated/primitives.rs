@@ -20,10 +20,15 @@ use crate::BuiltinResult;
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
 pub async fn geometry_box_builtin(width: f64, depth: f64, height: f64) -> BuiltinResult<Value> {
+    let builtin = "geometry.box";
     primitive(GeometryFeatureOperation::Box {
-        width_m: scalar(width),
-        depth_m: scalar(depth),
-        height_m: scalar(height),
+        width_m: physical_scalar(width, runmat_types::physical::QuantityKind::Length, builtin)?,
+        depth_m: physical_scalar(depth, runmat_types::physical::QuantityKind::Length, builtin)?,
+        height_m: physical_scalar(
+            height,
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
     })
 }
 
@@ -43,11 +48,20 @@ pub async fn geometry_cylinder_builtin(
     axis: Value,
     origin: Value,
 ) -> BuiltinResult<Value> {
+    let builtin = "geometry.cylinder";
     primitive(GeometryFeatureOperation::Cylinder {
-        radius_m: scalar(radius),
-        height_m: scalar(height),
+        radius_m: physical_scalar(
+            radius,
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
+        height_m: physical_scalar(
+            height,
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
         axis: vector3(&axis, "geometry.cylinder", "axis")?.map(scalar),
-        origin_m: vector3(&origin, "geometry.cylinder", "origin")?.map(scalar),
+        origin_m: position(vector3(&origin, builtin, "origin")?, builtin)?,
     })
 }
 
@@ -62,9 +76,14 @@ pub async fn geometry_cylinder_builtin(
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
 pub async fn geometry_sphere_builtin(radius: f64, center: Value) -> BuiltinResult<Value> {
+    let builtin = "geometry.sphere";
     primitive(GeometryFeatureOperation::Sphere {
-        radius_m: scalar(radius),
-        center_m: vector3(&center, "geometry.sphere", "center")?.map(scalar),
+        radius_m: physical_scalar(
+            radius,
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
+        center_m: position(vector3(&center, builtin, "center")?, builtin)?,
     })
 }
 
@@ -89,7 +108,7 @@ pub async fn geometry_transform_builtin(source: Value, matrix: Value) -> Builtin
     }
     let operation = GeometryFeatureOperation::Transform {
         source: graph.result.clone(),
-        matrix: matrix.into_iter().map(scalar).collect(),
+        matrix: affine_matrix(matrix, "geometry.transform")?,
     };
     feature_value(unary_operation(graph, operation)?)
 }
@@ -123,7 +142,7 @@ pub async fn geometry_instance_builtin(
                     "each transform must contain exactly 16 column-major affine components",
                 ));
             }
-            Ok(values.into_iter().map(scalar).collect())
+            affine_matrix(values, builtin)
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     let operation = GeometryFeatureOperation::Instance {
@@ -177,5 +196,97 @@ pub(super) fn numeric_values(
             }
         }
         _ => Err(invalid(builtin, format!("{name} must be real numeric"))),
+    }
+}
+
+/// Public generated-geometry builtins accept canonical SI numerical MATLAB
+/// values. The physical role is explicit before an authored graph is returned.
+pub(super) fn physical_scalar(
+    value: f64,
+    kind: runmat_types::physical::QuantityKind,
+    builtin: &'static str,
+) -> BuiltinResult<GeometryScalarExpression> {
+    let descriptor = runmat_types::physical::DynamicDimension::try_with_angle(
+        kind.dimension(),
+        kind.angle_power(),
+        Some(kind),
+    )
+    .map_err(|error| invalid(builtin, error.to_string()))?;
+    let value = runmat_types::physical::DimensionedScalar::try_from_descriptor(descriptor, value)
+        .map_err(|error| invalid(builtin, error.to_string()))?;
+    Ok(GeometryScalarExpression::Canonical { value })
+}
+
+pub(super) fn position(
+    values: [f64; 3],
+    builtin: &'static str,
+) -> BuiltinResult<[GeometryScalarExpression; 3]> {
+    Ok([
+        physical_scalar(
+            values[0],
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
+        physical_scalar(
+            values[1],
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
+        physical_scalar(
+            values[2],
+            runmat_types::physical::QuantityKind::Length,
+            builtin,
+        )?,
+    ])
+}
+
+fn affine_matrix(
+    values: Vec<f64>,
+    builtin: &'static str,
+) -> BuiltinResult<Vec<GeometryScalarExpression>> {
+    if values.len() != 16 {
+        return Err(invalid(builtin, "affine transform requires 16 values"));
+    }
+    // MATLAB storage is column-major; the geometry/OCCT contract is row-major.
+    (0..16)
+        .map(|index| {
+            let row = index / 4;
+            let column = index % 4;
+            let value = values[column * 4 + row];
+            if matches!(index, 3 | 7 | 11) {
+                physical_scalar(value, runmat_types::physical::QuantityKind::Length, builtin)
+            } else {
+                Ok(scalar(value))
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod quantity_boundary_tests {
+    use super::*;
+    #[test]
+    fn matlab_column_major_translation_becomes_row_major_typed_lengths() {
+        let source = vec![
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0.012, 0.034, 0.056, 1.,
+        ];
+        let matrix = affine_matrix(source, "geometry.transform").unwrap();
+        for (index, expected) in [(3, 0.012), (7, 0.034), (11, 0.056)] {
+            let GeometryScalarExpression::Canonical { value } = &matrix[index] else {
+                panic!("translation lost its units")
+            };
+            assert_eq!(value.canonical_value(), expected);
+            assert_eq!(
+                value.semantic_kind(),
+                Some(runmat_types::physical::QuantityKind::Length)
+            );
+        }
+        assert_eq!(matrix[12], scalar(0.0));
+        assert!(physical_scalar(
+            f64::NAN,
+            runmat_types::physical::QuantityKind::Length,
+            "geometry.box"
+        )
+        .is_err());
     }
 }

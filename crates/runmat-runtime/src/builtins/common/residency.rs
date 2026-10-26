@@ -6,6 +6,28 @@ use runmat_accelerate_api::{automatic_offload_enabled, provider, sequence_thresh
 const DEFAULT_SEQUENCE_MIN_LEN: usize = 4_096;
 const MIN_THRESHOLD: usize = 1_024;
 
+/// A host-only consumer may undo authenticated automatic placement, not
+/// reinterpret explicit or missing device intent as permission to download.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HostGatherIntent {
+    AutomaticOrHost,
+    ExplicitOrUnproven,
+}
+pub(crate) fn host_gather_intent(
+    value: &runmat_value::Value,
+) -> crate::BuiltinResult<HostGatherIntent> {
+    let mut intent = HostGatherIntent::AutomaticOrHost;
+    // Exactly the gather owner's leaves; no separate object/capture traversal.
+    crate::dispatcher::try_visit_gathered_gpu_handles(value, &mut |handle| {
+        if runmat_accelerate_api::handle_provenance(handle)
+            != Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        {
+            intent = HostGatherIntent::ExplicitOrUnproven;
+        }
+    })?;
+    Ok(intent)
+}
+
 /// Kinds of sequence-producing builtins that can consult the residency helper.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SequenceIntent {

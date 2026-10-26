@@ -169,6 +169,16 @@ OcctSurfaceDerivativesPayload exact_surface_derivatives(std::uint64_t session_id
   surface.D2(u, v, point, du, dv, duu, dvv, duv);
   const double scale = context.meters_per_source_unit;
   OcctSurfaceDerivativesPayload result;
+  result.parameter_scale = scale;
+  result.u_parameter_unit = 0;
+  result.v_parameter_unit = 0;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: result.u_parameter_unit = 1; result.v_parameter_unit = 1; break;
+    case GeomAbs_Cylinder: result.u_parameter_unit = 2; result.v_parameter_unit = 1; break;
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: result.u_parameter_unit = 2; result.v_parameter_unit = 2; break;
+    default: break; // Retain other parameterizations as named native axes.
+  }
   result.point_x = point.X() * scale;
   result.point_y = point.Y() * scale;
   result.point_z = point.Z() * scale;
@@ -256,6 +266,16 @@ OcctSurfaceProjectionPayload exact_surface_closest_point(
   }
 
   OcctSurfaceProjectionPayload result;
+  result.parameter_scale = scale;
+  result.u_parameter_unit = 0;
+  result.v_parameter_unit = 0;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: result.u_parameter_unit = 1; result.v_parameter_unit = 1; break;
+    case GeomAbs_Cylinder: result.u_parameter_unit = 2; result.v_parameter_unit = 1; break;
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: result.u_parameter_unit = 2; result.v_parameter_unit = 2; break;
+    default: break;
+  }
   result.u = best.u;
   result.v = best.v;
   result.point_x = best.point.X() * scale;

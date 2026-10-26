@@ -4,14 +4,14 @@ use runmat_types::*;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    if !(3..=7).contains(&request.arguments.len()) {
+    if !(3..=8).contains(&request.arguments.len()) {
         diagnostics.push(argument_error(
             "RM-CATALOG-LINPROG-ARITY",
-            "linprog requires f, A, b and up to four equality/bound operands",
+            "linprog requires f, A, b and optional equality/bound operands and options",
             0,
         ));
     }
-    for (index, argument) in request.arguments.iter().enumerate() {
+    for (index, argument) in request.arguments.iter().take(7).enumerate() {
         if matches!(argument.kind, ValueKindFact::Logical) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-LINPROG-CLASS",
@@ -30,7 +30,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         facts::numeric(
             request,
             index,
-            facts::OptimNumericInput::OptionalMatrix,
+            facts::OptimNumericInput::OptionalSparseMatrix,
             &mut diagnostics,
         );
     }
@@ -42,6 +42,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             &mut diagnostics,
         );
     }
+    super::super::nonlinear_facts::options(request.arguments.get(7), 7, true, &mut diagnostics);
     facts::constraint_geometry(request, 0, &[(1, 2), (3, 4)], &[5, 6], &mut diagnostics);
     if request.arguments.len() == 4
         && request.arguments[3]
@@ -55,5 +56,56 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             3,
         ));
     }
-    facts::finish(entry, request, facts::solver_outputs(false), diagnostics)
+    let mut outputs = facts::solver_outputs(false);
+    let mut fields = std::collections::BTreeMap::new();
+    for name in [
+        "iterations",
+        "constrviolation",
+        "primalfeasibility",
+        "dualfeasibility",
+        "dualitygap",
+        "firstorderopt",
+    ] {
+        fields.insert(
+            name.into(),
+            facts::double(ShapeFact::Scalar, StorageFact::Scalar),
+        );
+    }
+    for name in ["algorithm", "message"] {
+        fields.insert(name.into(), ValueFact::scalar(ValueKindFact::String));
+    }
+    outputs[3] = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, true)));
+    let mut fields = std::collections::BTreeMap::new();
+    // Verified optimal multipliers are columns. Failure/stopped forms are [],
+    // so a universally column-shaped proof would be false.
+    for name in ["ineqlin", "eqlin", "lower", "upper"] {
+        fields.insert(
+            name.into(),
+            facts::double(ShapeFact::Unknown, StorageFact::Dense),
+        );
+    }
+    outputs.push(ValueFact::scalar(ValueKindFact::Struct(
+        StructFact::scalar(fields, true),
+    )));
+    let mut result = facts::finish(entry, request, outputs, diagnostics);
+    // Runtime's default Display is off. Existing facts can prove an absent
+    // field, but do not carry nested string literal values: a present dynamic
+    // Display field must retain the console/diary/forwarder upper bound.
+    let default_display = match request.arguments.get(7) {
+        None => true,
+        Some(options) if options.shape.element_count() == Some(0) => true,
+        Some(options) => matches!(&options.kind, ValueKindFact::Struct(options)
+            if options.fields_complete && !options.fields.keys().any(|name|
+                crate::OptimOptionField::parse(name)==Some(crate::OptimOptionField::Display))),
+    };
+    if default_display {
+        for effect in [
+            EffectKind::FilesystemWrite,
+            EffectKind::UserInterface,
+            EffectKind::HostCallback,
+        ] {
+            result.effects.0.remove(&effect);
+        }
+    }
+    result
 }

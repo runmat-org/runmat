@@ -137,10 +137,12 @@ fn validate_source(source: &CanonicalSignalRealization) -> AnalysisExecutionResu
 
 fn frequencies_hz(abscissa: &SpectrumAbscissa) -> AnalysisExecutionResult<Vec<f64>> {
     let frequencies = match abscissa {
-        SpectrumAbscissa::FrequencyHertz(values) => values.clone(),
-        SpectrumAbscissa::PeriodSeconds(values) => {
-            values.iter().map(|period| 1.0 / period).collect()
-        }
+        SpectrumAbscissa::FrequencyHertz(values) => values.canonical_values().clone(),
+        SpectrumAbscissa::PeriodSeconds(values) => values
+            .canonical_values()
+            .iter()
+            .map(|period| 1.0 / period)
+            .collect(),
     };
     if frequencies.is_empty()
         || frequencies

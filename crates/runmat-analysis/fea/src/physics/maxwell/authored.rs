@@ -79,7 +79,7 @@ pub fn compile_canonical_input(
             .as_ref()
             .ok_or_else(|| invalid("missing Maxwell material law"))?;
         if !law.conductivity_frequency_response.is_empty()
-            || law.resistive_heating_coefficient != 0.0
+            || law.resistive_heating_coefficient.canonical_value() != 0.0
         {
             return Err(MaxwellError::Unsupported(
                 "dispersive or temperature-dependent Maxwell material".into(),
@@ -87,11 +87,17 @@ pub fn compile_canonical_input(
         }
         volumes.push(MaxwellVolumeData {
             element_identity: element.stable_identity,
-            permeability_h_per_m: super::super::magnetic::VACUUM_PERMEABILITY_H_PER_M
-                * law.relative_permeability,
-            permittivity_f_per_m: super::super::electrical::VACUUM_PERMITTIVITY_F_PER_M
-                * law.relative_permittivity,
-            conductivity_s_per_m: law.conductivity_s_per_m,
+            permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(
+                super::super::magnetic::VACUUM_PERMEABILITY_H_PER_M.canonical_value()
+                    * law.relative_permeability.canonical_value(),
+            ),
+            permittivity_f_per_m: runmat_types::physical::ElectricPermittivity::new(
+                super::super::electrical::VACUUM_PERMITTIVITY_F_PER_M.canonical_value()
+                    * law.relative_permittivity.canonical_value(),
+            ),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                law.conductivity_s_per_m.canonical_value(),
+            ),
         });
     }
     let sampling =
@@ -99,7 +105,10 @@ pub fn compile_canonical_input(
             .map_err(invalid)?;
     let source_current = source::compile(model, mesh, step, frequency_hz, &sampling)?;
     let input = MaxwellInput {
-        angular_frequency_rad_per_s: std::f64::consts::TAU * frequency_hz,
+        angular_frequency_rad_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::AngularFrequency,
+            _,
+        >::new(std::f64::consts::TAU * frequency_hz),
         sampling,
         volumes,
         source_current,

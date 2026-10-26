@@ -195,7 +195,17 @@ fn owned_canonical_validation_and_cold_decode_share_original_identity_and_cancel
             SolverMeshArtifact::canonical_decode_with_cancellation(&bytes, &Cancelled).is_err()
         );
         let mut tampered = original.clone();
-        tampered.topology.nodes[0].coordinates_m[0] += 0.125;
+        {
+            let quantity_change = 0.125;
+            let quantity_index = 0;
+            let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert_eq!(
             tampered
                 .validate_canonical_with_cancellation(&NeverCancelled)

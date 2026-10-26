@@ -136,7 +136,9 @@ impl<'a> EvaluationCache<'a> {
             .curves
             .unit_tangent(&self.edge.curve_evaluator_id, parameter, self.control)
             .map_err(|error| geometry_error(self.edge, error))?;
-        let point_m = self.transform.transform_point(local_point);
+        let point_m = self
+            .transform
+            .transform_point(local_point.canonical_value());
         let tangent =
             normalize(self.transform.transform_vector(local_tangent)).ok_or_else(|| {
                 edge_error(

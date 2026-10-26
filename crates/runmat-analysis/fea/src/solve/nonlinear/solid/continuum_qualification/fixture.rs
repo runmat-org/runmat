@@ -35,13 +35,13 @@ pub(crate) fn prepare(
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
     model.materials[0].elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
-            youngs_modulus_pa: E,
-            poisson_ratio: NU,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(E),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(NU),
         },
     ));
     model.materials[0].plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-        yield_stress_pa: YIELD,
-        isotropic_hardening_modulus_pa: HARDENING,
+        yield_stress_pa: runmat_types::physical::YieldStress::new(YIELD),
+        isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(HARDENING),
     });
     model.sequence = AnalysisSequence::from_steps(
         "manufactured_nonlinear_cube",
@@ -113,7 +113,9 @@ pub(crate) fn prepare(
             StructuralTranslationDof::Uz,
         ]
         .into_iter()
-        .filter(|d| node.coordinates_m[0] == 0.0 || *d != StructuralTranslationDof::Ux)
+        .filter(|d| {
+            node.coordinates_m.canonical_value()[0] == 0.0 || *d != StructuralTranslationDof::Ux
+        })
         .map(|dof| TranslationDofValue {
             dof,
             value: PrescribedValue::Constant(Displacement::new(0.0)),

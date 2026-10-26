@@ -136,6 +136,21 @@ pub fn value_fact(value: &Value) -> ValueFact {
                 invalidation: InvalidationVector::default(),
             }
         }
+        Value::Object(value) if value.optimization_variable_shape().is_some() => object(
+            value.class_name().clone(),
+            BTreeMap::new(),
+            false,
+            true,
+            ShapeFact::from(
+                value
+                    .optimization_variable_shape()
+                    .expect("native reference shape")
+                    .iter()
+                    .copied()
+                    .map(Some)
+                    .collect::<Vec<_>>(),
+            ),
+        ),
         Value::Object(value) => object(
             value.class_name().clone(),
             value
@@ -174,6 +189,18 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::OutputList(values) => scalar(ValueKindFact::OutputList(OutputListFact {
             outputs: values.iter().map(value_fact).collect(),
             variadic: false,
+        })),
+        Value::ScopedFunctionHandle(_) => scalar(ValueKindFact::Callable(CallableFact {
+            identity: None,
+            capabilities: Default::default(),
+            parameters: Vec::new(),
+            parameters_complete: false,
+            outputs: Vec::new(),
+            outputs_complete: false,
+            variadic_inputs: true,
+            variadic_outputs: true,
+            captures: Vec::new(),
+            captures_complete: false,
         })),
         Value::FunctionHandle(name) => callable(CallableIdentity::DynamicName(SymbolName(
             name.name().to_owned(),

@@ -1,5 +1,20 @@
 use super::*;
 #[test]
+fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let _provider = runmat_filesystem::replace_provider(provider);
+    let path = Path::new("/immutable-mesh.cbor");
+    persist_canonical(path, b"original").unwrap();
+    persist_canonical(path, b"original").unwrap();
+    assert!(persist_canonical(path, b"different")
+        .unwrap_err()
+        .contains("collision"));
+    assert_eq!(runmat_filesystem::read(path).unwrap(), b"original");
+}
+
+#[test]
 fn immutable_mesh_collision_comparison_handles_matches_changes_short_and_oversized_files() {
     let _guard = crate::analysis::tests::analysis_test_guard();
     let directory = tempfile::tempdir().unwrap();

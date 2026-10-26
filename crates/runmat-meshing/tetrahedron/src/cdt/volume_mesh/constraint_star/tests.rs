@@ -40,8 +40,9 @@ fn visible_nondelaunay_stars_decline_without_weakening_physical_admission() {
                 (0..3)
                     .map(|i| {
                         weights[i]
-                            * constraints.nodes[facet.vertex_indices[i] as usize].coordinates_m
-                                [axis]
+                            * constraints.nodes[facet.vertex_indices[i] as usize]
+                                .coordinates_m
+                                .canonical_value()[axis]
                     })
                     .sum()
             });
@@ -49,7 +50,10 @@ fn visible_nondelaunay_stars_decline_without_weakening_physical_admission() {
             constraints.nodes.push(DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([0x71; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             });
             for edge in 0..3 {
                 let mut part = facet.clone();

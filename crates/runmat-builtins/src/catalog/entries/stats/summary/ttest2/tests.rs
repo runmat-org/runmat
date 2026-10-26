@@ -63,6 +63,32 @@ fn dimensional_outputs_are_host_logical_and_double_with_struct_fields() {
         .outputs
         .iter()
         .all(|output| output.residency == ResidencyFact::Host));
+    for dimension in [
+        1025.0,
+        f64::from_bits(2f64.powi(usize::BITS as i32).to_bits() - 1).floor(),
+    ] {
+        let result = infer(
+            vec![
+                numeric(&[3, 2]),
+                numeric(&[4, 2]),
+                ValueFact::scalar(ValueKindFact::Character),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Character("Dim".into()),
+                LiteralValue::Number(dimension),
+            ],
+            4,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs[1].shape, ShapeFact::Unknown);
+        assert_eq!(result.outputs[2].shape, ShapeFact::Unknown);
+    }
 }
 
 #[test]

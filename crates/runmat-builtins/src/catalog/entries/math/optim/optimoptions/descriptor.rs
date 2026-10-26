@@ -29,11 +29,11 @@ const INTEGER_FLOATING_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
     }];
 const INTEGER_STRUCTURAL_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
-        name: "count or logical option value",
+        name: "count, bandwidth, flag or sparsity-pattern option value",
         classes: &crate::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed iteration/evaluation counts are RunMat-only controls checked exactly against the platform size range and published in their native signed/unsigned class; scalar integer arrays normalize to native scalars. Typed flags are checked as 0/1 before logical publication.",
+        notes: "Typed iteration/evaluation/PCG/node/feasible-point counts and finite bandwidths are RunMat-only controls checked exactly against the platform size range and published in their native signed/unsigned class; scalar integer arrays normalize to native scalars. Typed flags are checked as 0/1 before logical publication. Native integer HessPattern carriers retain their class/storage; the model owner validates their pattern meaning.",
     }];
 pub const OPTIMOPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor { form: "options = optimoptions(___, floating_name, integer_value, ___)", inputs: &INTEGER_FLOATING_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat's supported compatibility subset normalizes accepted integer tolerances to double only after an exact representability check." },
@@ -50,21 +50,19 @@ const OPTIMOPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
 
 const OPTIMOPTIONS_INPUTS_SOLVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "solver",
-    ty: BuiltinParamType::StringScalar,
+    ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description:
-        "Solver name, such as coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin.",
+    description: "A supported solver name or its named function handle.",
 }];
 
 const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "solver",
-        ty: BuiltinParamType::StringScalar,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description:
-            "Solver name, such as coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin.",
+        description: "A supported solver name or its named function handle.",
     },
     BuiltinParamDescriptor {
         name: "name",

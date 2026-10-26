@@ -73,7 +73,7 @@ pub(super) fn prove(
     let positions = topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let identities = topology
         .nodes

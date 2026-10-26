@@ -1,7 +1,7 @@
 mod line;
 use super::super::{
-    CurveDerivatives, CurveProjection, GeometryEvaluationControl, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, ParameterRange,
+    CurveDerivativeCoefficients, CurveProjectionCoefficients, GeometryEvaluationControl,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, ParameterRange,
 };
 use super::invalid_result;
 use super::vector::{distance, dot, norm, subtract};
@@ -29,8 +29,8 @@ pub(super) fn project_curve(
     absolute_error_m: f64,
     seeds: impl IntoIterator<Item = f64>,
     control: &dyn GeometryEvaluationControl,
-    mut evaluate: impl FnMut(f64) -> Result<CurveDerivatives, GeometryEvaluationError>,
-) -> Result<CurveProjection, GeometryEvaluationError> {
+    mut evaluate: impl FnMut(f64) -> Result<CurveDerivativeCoefficients, GeometryEvaluationError>,
+) -> Result<CurveProjectionCoefficients, GeometryEvaluationError> {
     let projection = project_parametric(
         range,
         point_m,
@@ -46,7 +46,7 @@ pub(super) fn project_curve(
             })
         },
     )?;
-    Ok(CurveProjection {
+    Ok(CurveProjectionCoefficients {
         parameter: projection.parameter,
         point_m: projection.point,
         distance_m: projection.distance,

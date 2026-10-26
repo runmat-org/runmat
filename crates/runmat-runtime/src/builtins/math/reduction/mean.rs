@@ -6,8 +6,8 @@ pub use runmat_builtins::{
     MEAN_ERROR_INTERNAL, MEAN_ERROR_INVALID_ARGUMENT, MEAN_ERROR_INVALID_INPUT,
 };
 use runmat_value::{
-    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
-    NumericStorage, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, Tensor,
+    Value,
 };
 const NAME: &str = "mean";
 
@@ -111,31 +111,23 @@ struct MeanWeights {
 }
 
 #[derive(Clone)]
-enum MeanWeightStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
-}
+struct MeanWeightStorage(Tensor);
 
 impl MeanWeights {
     fn len(&self) -> usize {
-        match &self.storage {
-            MeanWeightStorage::F64(values) => values.len(),
-            MeanWeightStorage::F32(values) => values.len(),
-        }
+        self.storage.0.len()
     }
 
     fn f64_at(&self, index: usize) -> f64 {
-        match &self.storage {
-            MeanWeightStorage::F64(values) => values[index],
-            MeanWeightStorage::F32(values) => f64::from(values[index]),
+        match self.storage.0.numeric_value_at(index) {
+            Some(runmat_value::NumericScalar::F64(value)) => value,
+            Some(runmat_value::NumericScalar::F32(value)) => f64::from(value),
+            _ => unreachable!("validated mean weight class and coordinate"),
         }
     }
 
     fn f32_at(&self, index: usize) -> f32 {
-        match &self.storage {
-            MeanWeightStorage::F64(values) => values[index] as f32,
-            MeanWeightStorage::F32(values) => values[index],
-        }
+        self.f64_at(index) as f32
     }
 }
 
@@ -468,6 +460,13 @@ fn is_data_like(v: &Value) -> bool {
 async fn parse_arguments(
     args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<ParsedArguments> {
+    parse_arguments_cooperative(args, None, None).await
+}
+async fn parse_arguments_cooperative(
+    args: crate::call::FunctionArgumentView<'_>,
+    mut cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = MeanAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -488,7 +487,8 @@ async fn parse_arguments(
                     let value = args
                         .get(idx + 1)
                         .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
-                    weights = Some(parse_weights(value).await?);
+                    weights =
+                        Some(parse_weights(value, cooperation.as_deref_mut(), runtime).await?);
                     idx += 2;
                     continue;
                 }
@@ -563,7 +563,16 @@ async fn parse_arguments(
     })
 }
 
-async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
+async fn parse_weights(
+    value: &Value,
+    mut cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<MeanWeights> {
+    if let Some(c) = cooperation.as_deref_mut() {
+        c.checkpoint(0)
+            .await
+            .map_err(|e| e.into_runtime_error_in_context(runtime))?;
+    }
     let tensor = match value {
         Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
             .map_err(|error| mean_internal_error(format!("mean: {error}")))?,
@@ -585,17 +594,23 @@ async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
         }
     };
     let shape = tensor.shape().to_vec();
-    let storage = match tensor.into_numeric_storage().map_err(mean_internal_error)? {
-        NumericStorage::F64(values) => MeanWeightStorage::F64(values),
-        NumericStorage::F32(values) => MeanWeightStorage::F32(values),
-        _ => {
-            return Err(mean_invalid_argument(
-                "mean: Weights must be single or double",
-            ));
-        }
-    };
+    tensor.validate_shape().map_err(mean_internal_error)?;
+    if !matches!(
+        tensor.numeric_dtype(),
+        NumericDType::F64 | NumericDType::F32
+    ) {
+        return Err(mean_invalid_argument(
+            "mean: Weights must be single or double",
+        ));
+    }
+    let storage = MeanWeightStorage(tensor);
     let weights = MeanWeights { storage, shape };
     for index in 0..weights.len() {
+        if let Some(c) = cooperation.as_deref_mut() {
+            c.checkpoint(1)
+                .await
+                .map_err(|e| e.into_runtime_error_in_context(runtime))?;
+        }
         let weight = weights.f64_at(index);
         if weight.is_nan() || weight < 0.0 {
             return Err(mean_invalid_argument(format!(
@@ -2038,6 +2053,10 @@ async fn ensure_device(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     }
 }
 
+#[path = "mean/affine_geometry.rs"]
+mod affine_geometry;
+pub(in crate::builtins::math) use affine_geometry::{affine_geometry, AffineGeometry};
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -2094,6 +2113,21 @@ pub(crate) mod tests {
     fn mean_weights_vector_and_full_size_follow_operating_dimension() {
         let input = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let vector_weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let retained = futures::executor::block_on(parse_weights(
+            &Value::Tensor(vector_weights.clone()),
+            None,
+            None,
+        ))
+        .unwrap();
+        assert!(
+            retained
+                .storage
+                .0
+                .host_buffer()
+                .shares_allocation_with(vector_weights.host_buffer()),
+            "weight inspection retains the original immutable numeric owner"
+        );
+        drop(retained);
         let vector = mean_builtin(
             Value::Tensor(input.clone()),
             vec![

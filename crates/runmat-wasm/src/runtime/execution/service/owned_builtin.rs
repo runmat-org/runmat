@@ -14,10 +14,8 @@ use runmat_execution_runner::{
 };
 use runmat_runtime::context::host_effect::ManagedHostEffectStageReservation;
 use runmat_runtime::execution::{ExecutionServiceError, RuntimeOwnedBuiltinWorkService};
-use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::rc::{Rc, Weak};
+use std::rc::Weak;
 use std::sync::Arc;
 
 use super::super::request::BrowserWorkerRequest;
@@ -25,25 +23,7 @@ use super::super::resources::{browser_execution_host_inventory, browser_inventor
 use super::super::state::State;
 use super::BrowserExecutionService;
 
-thread_local! {
-    // A failed launch/cancel Promise cannot release an owned numerical claim.
-    // Keep its service, request, and reservation alive independently of caller
-    // references until the trusted host certifies physical task settlement.
-    static LIVE_OWNED_WORK: RefCell<HashMap<TaskId, Rc<BrowserExecutionService>>> =
-        RefCell::new(HashMap::new());
-}
-
-fn retain_until_physical_exit(task_id: TaskId, service: Rc<BrowserExecutionService>) {
-    LIVE_OWNED_WORK.with(|live| {
-        live.borrow_mut().insert(task_id, service);
-    });
-}
-
-fn physical_exit_certified(task_id: TaskId) {
-    LIVE_OWNED_WORK.with(|live| {
-        live.borrow_mut().remove(&task_id);
-    });
-}
+use super::physical_exit::{physical_exit_certified, retain_until_physical_exit};
 
 pub(super) struct OwnedTask {
     completion: Option<
@@ -76,6 +56,33 @@ impl Drop for OwnedAwaitGuard {
 }
 
 impl BrowserExecutionService {
+    pub(super) fn fail_owned_timer(&self, id: TaskId, message: &str) {
+        let send = self
+            .owned
+            .borrow_mut()
+            .get_mut(&id)
+            .and_then(|task| task.completion.take());
+        if let Some(send) = send {
+            let _ = send.send(Err(ExecutionServiceError::Infrastructure(message.into())));
+        }
+    }
+
+    pub(super) fn retire_unlaunched_owned(&self, id: TaskId) {
+        let task = {
+            let mut owned = self.owned.borrow_mut();
+            if owned.get(&id).is_some_and(|task| !task.launched) {
+                owned.remove(&id)
+            } else {
+                None
+            }
+        };
+        if let Some(mut task) = task {
+            if let Some(send) = task.completion.take() {
+                let _ = send.send(Err(ExecutionServiceError::Cancelled));
+            }
+        }
+    }
+
     pub(super) fn mark_owned_launched(
         &self,
         attempt: &AttemptRequest,
@@ -97,7 +104,7 @@ impl BrowserExecutionService {
         retain_until_physical_exit(attempt.task_id, service);
     }
 
-    pub(super) fn retain_launched_owned_requests(&self, state: &mut State) {
+    pub(super) fn retain_pending_requests(&self, state: &mut State) {
         // Ordinary future cancellation may discard a request, but not an
         // owned numerical claim while a launched worker may still be live.
         let launched_owned = self
@@ -106,7 +113,18 @@ impl BrowserExecutionService {
             .iter()
             .filter_map(|(id, task)| task.launched.then_some(*id))
             .collect::<std::collections::HashSet<_>>();
-        state.requests.retain(|id, _| launched_owned.contains(id));
+        let driver = &state.driver;
+        state.requests.retain(|id, _| {
+            launched_owned.contains(id)
+                || driver
+                    .task_record(*id)
+                    .is_ok_and(|task| task.active_attempt.is_some())
+        });
+        if let Some(owner) = self.self_weak.borrow().upgrade() {
+            for id in state.requests.keys() {
+                retain_until_physical_exit(*id, std::rc::Rc::clone(&owner));
+            }
+        }
         self.owned.borrow_mut().retain(|id, task| {
             if !task.launched {
                 if let Some(send) = task.completion.take() {
@@ -131,10 +149,12 @@ impl BrowserExecutionService {
                 })?;
                 let retained_service = self.self_weak.borrow().upgrade();
                 let task_id = attempt.task_id;
+                let retired_report = BackendReport::for_request(attempt, AttemptReport::Retired);
                 wasm_bindgen_futures::spawn_local(async move {
                     let acknowledged = host.cancel_owned(&task_id.to_string()).await;
                     if let Some(service) = retained_service {
                         if acknowledged.is_ok() {
+                            let actions = service.apply_browser_report(retired_report, true);
                             if let Some(task) = service.owned.borrow_mut().get_mut(&task_id) {
                                 task.cancel_ack_pending = false;
                                 task.physical_exit_certified = true;
@@ -150,6 +170,7 @@ impl BrowserExecutionService {
                                 service.state.borrow_mut().requests.remove(&task_id);
                             }
                             physical_exit_certified(task_id);
+                            service.dispatch(actions);
                         } else if let Some(task) = service.owned.borrow_mut().get_mut(&task_id) {
                             // Permit a later explicit retry, but keep the
                             // request and reservation quarantined meanwhile.
@@ -216,6 +237,7 @@ impl BrowserExecutionService {
                 "owned builtin resources exceed the browser worker pool".into(),
             ));
         }
+        self.advance_driver_now()?;
         let (send, receive) = oneshot::channel();
         let mut state = self.state.borrow_mut();
         let sequence = state.next_task;
@@ -290,7 +312,7 @@ impl BrowserExecutionService {
             .handle(DriverCommand::CancelScope {
                 scope_id,
                 reason: CancellationReason::User,
-                now_millis: js_sys::Date::now() as u64,
+                now_millis: self.clock.now_millis(),
             })
             .unwrap_or_default();
         let not_launched = self
@@ -353,7 +375,7 @@ impl BrowserExecutionService {
                 _ => Err("browser lost the owned builtin request authority".into()),
             }
         };
-        let (result, report) = match admitted {
+        let (result, mut report) = match admitted {
             Ok(ProgramExecutionResponse::Success { outputs }) => {
                 let decoded = decode_owned_outputs(&outputs);
                 let report =
@@ -391,18 +413,24 @@ impl BrowserExecutionService {
                 (Err(ExecutionServiceError::Infrastructure(message)), report)
             }
         };
-        let actions = {
+        if !physical_completion && !already_certified {
+            report = AttemptReport::RetirementUnverified {
+                message: result.as_ref().err().map_or_else(
+                    || "owned builtin has no physical retirement proof".into(),
+                    |error| error.to_string(),
+                ),
+            };
+        }
+        {
             let mut state = self.state.borrow_mut();
             if physical_completion || already_certified {
                 state.requests.remove(&attempt.task_id);
             }
-            state
-                .driver
-                .handle(DriverCommand::BackendReport(BackendReport::for_request(
-                    &attempt, report,
-                )))
-                .unwrap_or_default()
-        };
+        }
+        let actions = self.apply_browser_report(
+            BackendReport::for_request(&attempt, report),
+            physical_completion || already_certified,
+        );
         {
             let mut owned = self.owned.borrow_mut();
             if let Some(task) = owned.get_mut(&attempt.task_id) {

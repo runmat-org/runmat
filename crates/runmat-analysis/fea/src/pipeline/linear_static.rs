@@ -182,7 +182,7 @@ fn run_linear_static_with_constraint_plan(
         options.local_execution,
         thermal_transfer
             .as_ref()
-            .map(|transfer| transfer.nodal_temperature_k.as_slice()),
+            .map(|transfer| transfer.nodal_temperature_k.as_quantity_slice()),
     )
     .map_err(|err| match err {
         LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)

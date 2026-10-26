@@ -5,18 +5,39 @@ pub(super) fn validate_for(
     response: &CanonicalElectricalResponse,
     projection: &AnalysisProjection,
 ) -> AnalysisExecutionResult<()> {
-    let (densities, total) = match &response.constitutive {
+    match &response.constitutive {
         ElectricalConstitutiveResponse::Electrostatics {
             energy_density_j_per_m3,
             total_energy_j,
             ..
-        } => (energy_density_j_per_m3, *total_energy_j),
+        } => validate_integral(energy_density_j_per_m3, *total_energy_j, projection),
         ElectricalConstitutiveResponse::SteadyConduction {
             joule_density_w_per_m3,
             total_joule_power_w,
             ..
-        } => (joule_density_w_per_m3, *total_joule_power_w),
-    };
+        } => validate_integral(joule_density_w_per_m3, *total_joule_power_w, projection),
+    }
+}
+
+fn validate_integral<
+    D: runmat_types::physical::QuantityMarker,
+    T: runmat_types::physical::QuantityMarker,
+>(
+    densities: &runmat_types::physical::Quantity<D, Vec<f64>>,
+    total: runmat_types::physical::Quantity<T>,
+    projection: &AnalysisProjection,
+) -> AnalysisExecutionResult<()> {
+    let expected = densities
+        .dimension()
+        .multiply(runmat_types::PhysicalDimension::VOLUME);
+    if expected != Some(total.dimension()) || densities.angle_power() != total.angle_power() {
+        return Err(invalid(
+            "electrical density integral has incompatible dimensions",
+        ));
+    }
+    // Numerical quadrature retains its density and total types through this owner.
+    let densities = densities.canonical_values();
+    let total = total.canonical_value();
     let mut integrated = 0.0;
     for (element, density) in projection.elements.iter().zip(densities) {
         let mut volume = 0.0;

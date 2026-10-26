@@ -137,3 +137,20 @@ async fn prod_builtin(
     };
     call.finish_value(result)
 }
+
+pub(in crate::builtins::math) async fn product_geometry(
+    shape: &[usize],
+    arguments: crate::call::FunctionArgumentView<'_>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<super::sum::ReductionGeometry> {
+    let call = super::numerical_execution::NumericalCall::new(
+        runmat_builtins::NumericalReductionKind::Product,
+        runtime,
+    )?;
+    call.host()?;
+    let parsed = arguments::parse(arguments, &call).await?;
+    call.check()?;
+    let axes = ResolvedDims::resolve(shape, &parsed.selection);
+    let axes = axes.iter().collect::<Vec<_>>();
+    super::sum::reduction_geometry_for_axes(shape, &axes)
+}

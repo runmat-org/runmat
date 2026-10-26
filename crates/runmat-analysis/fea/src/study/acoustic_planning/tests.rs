@@ -23,10 +23,11 @@ fn compiled_duct() -> CompiledAnalysisStudy {
     model.constraints.clear();
     model.boundaries.clear();
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
@@ -73,7 +74,7 @@ fn plans_single_canonical_frequency_in_shared_order() {
         assert_eq!(planned.entry().ordinal() as usize, ordinal);
         assert_eq!(
             planned.entry().frequency_hz(),
-            planned.workload().frequency.hertz
+            planned.workload().frequency.canonical_value()
         );
         assert_eq!(planned.workload().model, study.model);
         assert_eq!(planned.workload().solver.relative_tolerance, 2.0e-9);

@@ -53,27 +53,35 @@ fn definition(
     reject_unsupported_top_level(declaration, diagnostics);
     reject_unsupported_settings(declaration, tetrahedra, diagnostics);
 
-    let order =
-        required_enum(declaration, tetrahedra, "order", diagnostics).and_then(
-            |value| match value {
-                "linear" => Some(ElementOrder::Tet4),
-                "quadratic" => Some(ElementOrder::Tet10),
-                _ => {
-                    diagnostic(
-                        declaration,
-                        declaration.span,
-                        "mesh `order` must be `linear` or `quadratic`",
-                        diagnostics,
-                    );
-                    None
-                }
-            },
-        );
-    let target_edge_length_m = required_length(declaration, tetrahedra, "target_size", diagnostics);
-    let maximum_chordal_deviation_m =
-        required_length(declaration, tetrahedra, "maximum_deviation", diagnostics);
-
     let defaults = MeshingRequestSettings::default();
+    let order = if assignment(tetrahedra, "order").is_none() {
+        Some(defaults.element_order)
+    } else {
+        required_enum(declaration, tetrahedra, "order", diagnostics).and_then(|value| match value {
+            "linear" => Some(ElementOrder::Tet4),
+            "quadratic" => Some(ElementOrder::Tet10),
+            _ => {
+                diagnostic(
+                    declaration,
+                    declaration.span,
+                    "mesh `order` must be `linear` or `quadratic`",
+                    diagnostics,
+                );
+                None
+            }
+        })
+    };
+    let target_edge_length_m = if assignment(tetrahedra, "target_size").is_none() {
+        Some(defaults.target_edge_length_m.canonical_value())
+    } else {
+        required_length(declaration, tetrahedra, "target_size", diagnostics)
+    };
+    let maximum_chordal_deviation_m = if assignment(tetrahedra, "maximum_deviation").is_none() {
+        Some(defaults.maximum_chordal_deviation_m.canonical_value())
+    } else {
+        required_length(declaration, tetrahedra, "maximum_deviation", diagnostics)
+    };
+
     let maximum_grading_ratio = optional_scalar(
         declaration,
         tetrahedra,
@@ -87,8 +95,10 @@ fn definition(
     let settings = MeshingRequestSettings {
         element_order: order?,
         deterministic_seed,
-        target_edge_length_m: target_edge_length_m?,
-        maximum_chordal_deviation_m: maximum_chordal_deviation_m?,
+        target_edge_length_m: runmat_types::physical::Length::new(target_edge_length_m?),
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            maximum_chordal_deviation_m?,
+        ),
         maximum_grading_ratio,
         ..defaults
     };
@@ -183,11 +193,15 @@ fn unique_block<'a>(
             (header.trim() == name).then_some(statements.as_slice())
         })
         .collect::<Vec<_>>();
-    if matching.len() != 1 {
+    if matching.is_empty() {
+        // An omitted request uses the canonical mesher defaults. Explicit
+        // settings still pass the normal type, duplicate, and value checks.
+        Some(&[])
+    } else if matching.len() != 1 {
         diagnostic(
             declaration,
             declaration.span,
-            format!("mesh requires exactly one `{name}` block"),
+            format!("mesh accepts at most one `{name}` block"),
             diagnostics,
         );
         None
@@ -251,7 +265,7 @@ fn reject_unsupported_settings(
             );
             continue;
         };
-        if *relation != runmat_parser::fea::FeaAssignmentRelation::Equal {
+        if *relation != runmat_fea_syntax::FeaAssignmentRelation::Equal {
             diagnostic(
                 declaration,
                 statement.span,
@@ -316,7 +330,7 @@ fn required_length(
         missing(declaration, name, diagnostics);
         return None;
     };
-    if value.value_type != FeaType::Quantity(PhysicalDimension::LENGTH) {
+    if !(value.value_type).is_quantity((PhysicalDimension::LENGTH).into()) {
         invalid(declaration, value, name, "length quantity", diagnostics);
         return None;
     }
@@ -398,16 +412,14 @@ fn scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
         CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-        } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            unit.to_canonical(scalar(value)?).ok()
+        }
         CheckedExpressionKind::Unary { operator, operand } => {
             let scalar = scalar(operand)?;
             Some(match operator {
-                runmat_parser::fea::FeaUnaryOperator::Positive => scalar,
-                runmat_parser::fea::FeaUnaryOperator::Negative => -scalar,
+                runmat_fea_syntax::FeaUnaryOperator::Positive => scalar,
+                runmat_fea_syntax::FeaUnaryOperator::Negative => -scalar,
             })
         }
         _ => None,

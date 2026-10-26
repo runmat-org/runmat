@@ -24,19 +24,24 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 
     sections: &[BuiltinDocumentationSection {
  heading: "Behavior and supported forms",
- paragraphs: &["The function handle must return a finite real scalar or vector.",
+ paragraphs: &["FiniteDifferenceStepSize (legacy FinDiffRelStep) accepts a finite strictly positive real floating scalar or vector; a scalar factor expands to every variable. TypicalX must be a finite strictly positive real floating vector with one element per original variable (a scalar for a scalar problem).",
+"Omitted or empty controls resolve to sqrt(eps) for forward differences, eps^(1/3) for existing central-difference routes, and unit TypicalX. Forward offsets use sign(x), with sign(0)=1, times the factor and max(abs(x),TypicalX); central offsets omit that sign. Actual representable bound-feasible offsets own the denominators. Nominal underflow uses adjacent representable feasible points; unusable actual offsets or an overflowing central span refuse before probe callbacks. These controls do not add objective calls or bypass existing evaluation budgets. Fully supplied derivative paths leave these operands dormant, without validating or gathering them. This least-squares implementation remains forward-difference only; FiniteDifferenceType='central' remains rejected, not accepted and ignored.",
+"A requested fifth output is the Jacobian at the returned iterate. With MaxIterations=0, finite differences are evaluated only when that output is requested and the hard MaxFunEvals budget permits. Paired analytic Jacobians require no additional callback. If the budget leaves final coefficients unevaluated, those entries are NaN (fixed-bound columns remain zero); an unmeasured firstorderopt is NaN. Unevaluated or previous-iterate zeros are not published as measured derivatives.",
+"SpecifyObjectiveGradient=true requires [F,J] from the objective. J may be real dense or sparse CSC, with one row per residual element and one column per variable. Sparse storage is validated and converted at the existing dense LM workspace boundary; this is not a sparse LM solver kernel. Each paired evaluation counts once; the supplied Jacobian is paired with the accepted iterate and moved into the final result, including iteration/evaluation-limit exits, rather than recomputed through finite differences or taken from a rejected trial.",
+"Finite host-memory execution is unsupported: requests with a finite host-memory policy fail before objective callbacks or solver workspace allocation; ordinary unbounded execution is unchanged.",
+"The function handle must return a finite real scalar or vector.",
 "Strict compatibility mode rejects typed-integer or logical initial guesses and residuals. RunMat extension mode accepts those values when every integer converts exactly to binary64.",
-"Typed-integer option controls are a separately gated RunMat extension. Structural counts such as `MaxIter` and `MaxFunEvals` are validated as exact nonnegative integers rather than rounded through floating point.",
-"Jacobians are estimated with forward finite differences.",
+"Typed-integer option controls are a separately gated RunMat extension. Structural counts are read exactly rather than rounded through floating point. Iteration limits are nonnegative; function-evaluation limits must be positive.",
+"Jacobians use forward finite differences by default, or the paired objective Jacobian when SpecifyObjectiveGradient is true.",
 "The step is chosen with a Levenberg-Marquardt damping parameter and accepted only when it reduces the residual norm.",
-"Options are supplied as a struct, usually created with `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
+"Options are supplied as a struct, usually created with `optimset`. `TolX`, `TolFun`, `MaxIter` (`MaxIterations`), `MaxFunEvals`, `Display`, and `SpecifyObjectiveGradient` are accepted.",
 "Up to five outputs are supported: `x`, `fval`, `exitflag`, `output`, and the final Jacobian. A stationary non-root or exhausted budget is returned with a nonpositive convergence status instead of being raised as an evaluation error.",
 "The initial guess and stopping tolerances affect convergence. Inspect the residual and convergence status to distinguish a root from a stationary non-root."] }
 ,
 
 BuiltinDocumentationSection {
  heading: "Execution and residency",
- paragraphs: &["The nonlinear solver runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands and callback results use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access.",
+ paragraphs: &["The solver runs on the host and has no provider-native solver kernel or tall-array execution. Authenticated automatic placement can be gathered transparently under either language compatibility mode. Explicit GPU operands and callback results require the RunMat resident-fallback extension; strict MATLAB mode rejects them before provider access. Device operands with unproven placement require an explicit gather. Compatibility, cancellation and provider authority come from the original invocation.",
 "The solver state uses host binary64; there is no provider-native solver kernel or numeric fusion producer. Callback computations retain their own capabilities, effects and acceleration policies. Native and browser routes use the same algorithm and the owning execution context's cooperative CPU budget.",
 "Cancellation is checked between bounded input/result scans and solver steps. Native dense linear algebra calls, where used, run to completion between checks rather than being hard-preempted."] }
 ,

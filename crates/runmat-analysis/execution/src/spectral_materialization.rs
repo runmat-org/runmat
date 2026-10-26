@@ -56,9 +56,9 @@ impl PreparedNumericalMaterialization {
         let invocation = validate_source_admission(&self.authored, &self.admitted)?;
         validate_generator_chunks(
             invocation,
-            &self.admitted.invocation.captures,
+            self.admitted.invocation.frozen_inputs.direct_captures(),
             self.admitted.materialization_identity.digest(),
-            &self.admitted.sample_points,
+            self.admitted.sample_points.canonical_values(),
             &self
                 .program
                 .chunks
@@ -138,9 +138,9 @@ pub fn plan_response_spectrum_generator_chunks(
     let invocation = matching_response_generator(spectrum, admitted)?;
     plan_generator_chunks(
         invocation,
-        &admitted.invocation.captures,
+        admitted.invocation.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
-        &admitted.sample_points,
+        admitted.sample_points.canonical_values(),
         1,
         maximum_inline_result_bytes,
         resolve_artifact,
@@ -163,9 +163,9 @@ pub fn plan_random_spectrum_generator_chunks(
         })?;
     plan_generator_chunks(
         invocation,
-        &admitted.invocation.captures,
+        admitted.invocation.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
-        &admitted.sample_points,
+        admitted.sample_points.canonical_values(),
         values_per_sample,
         maximum_inline_result_bytes,
         resolve_artifact,
@@ -181,7 +181,7 @@ pub fn materialize_response_spectrum(
 ) -> AnalysisBridgeResult<ResponseSpectrum> {
     let invocation = matching_response_generator(authored, admitted)?;
     validate_outputs(invocation, admitted, chunks, outputs)?;
-    let mut ordinates = Vec::with_capacity(admitted.sample_points.len());
+    let mut ordinates = Vec::with_capacity(admitted.sample_points.scalar_count());
     for (chunk, output) in chunks.iter().zip(outputs) {
         let decoded = decode_numeric_output(&output.value)?;
         validate_vector_shape(&decoded.dimensions, chunk.sample_points.len())?;
@@ -219,7 +219,7 @@ pub fn materialize_random_spectrum(
     let invocation = matching_random_generator(authored, admitted)?;
     validate_outputs(invocation, admitted, chunks, outputs)?;
     let width = authored.channels.len();
-    let mut matrices = Vec::with_capacity(admitted.sample_points.len());
+    let mut matrices = Vec::with_capacity(admitted.sample_points.scalar_count());
     for (chunk, output) in chunks.iter().zip(outputs) {
         let sample_count = chunk.sample_points.len();
         let decoded = decode_numeric_output(&output.value)?;
@@ -319,9 +319,9 @@ fn validate_outputs(
 ) -> AnalysisBridgeResult<()> {
     validate_generator_chunks(
         invocation,
-        &admitted.invocation.captures,
+        admitted.invocation.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
-        &admitted.sample_points,
+        admitted.sample_points.canonical_values(),
         chunks,
     )?;
     if chunks.len() != outputs.len()
@@ -344,11 +344,17 @@ fn matching_response_generator<'a>(
     let invocation = spectrum.ordinates.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("response spectrum is not callable-backed".into())
     })?;
-    if !matches!(
-        &admitted.kind,
-        NumericalGeneratorKind::ResponseSpectrum { spectrum_id }
-            if spectrum_id == &spectrum.spectrum_id
-    ) || invocation.callable.display_name() != admitted.invocation.callable.qualified_name
+    if admitted.schema_version != 2
+        || admitted.sample_points.descriptor()
+            != crate::callable::spectrum_axis_descriptor(&spectrum.abscissa)?
+        || admitted.sample_points.canonical_values().as_slice()
+            != crate::callable::spectrum_axis(&spectrum.abscissa)
+        || !matches!(
+            &admitted.kind,
+            NumericalGeneratorKind::ResponseSpectrum { spectrum_id }
+                if spectrum_id == &spectrum.spectrum_id
+        )
+        || invocation.callable.display_name() != admitted.invocation.callable.qualified_name
     {
         return Err(AnalysisBridgeError::Identity(
             "response-spectrum generator differs from its admission",
@@ -364,13 +370,20 @@ fn matching_random_generator<'a>(
     let invocation = spectrum.spectral_density.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("random spectrum is not callable-backed".into())
     })?;
-    if !matches!(
-        &admitted.kind,
-        NumericalGeneratorKind::RandomSpectrum {
-            excitation_id,
-            channel_count,
-        } if excitation_id == &spectrum.excitation_id && *channel_count == spectrum.channels.len()
-    ) || invocation.callable.display_name() != admitted.invocation.callable.qualified_name
+    if admitted.schema_version != 2
+        || admitted.sample_points.descriptor()
+            != runmat_analysis_core::GeneratorDomain::FrequencyHertz
+                .axis_descriptor(None)
+                .map_err(AnalysisBridgeError::Invalid)?
+        || admitted.sample_points.canonical_values() != spectrum.frequencies_hz.canonical_values()
+        || !matches!(
+            &admitted.kind,
+            NumericalGeneratorKind::RandomSpectrum {
+                excitation_id,
+                channel_count,
+            } if excitation_id == &spectrum.excitation_id && *channel_count == spectrum.channels.len()
+        )
+        || invocation.callable.display_name() != admitted.invocation.callable.qualified_name
     {
         return Err(AnalysisBridgeError::Identity(
             "random-spectrum generator differs from its admission",
@@ -440,7 +453,7 @@ fn append_spectral_matrices(
     for sample in 0..sample_count {
         let sample_values = &values[sample * matrix_size..(sample + 1) * matrix_size];
         target.push(CrossPowerSpectralDensity {
-            values: sample_values.to_vec(),
+            values: runmat_types::physical::Quantity::new(sample_values.to_vec()),
         });
     }
     Ok(())

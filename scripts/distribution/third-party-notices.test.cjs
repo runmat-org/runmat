@@ -20,6 +20,8 @@ test("distribution notices survive native and npm archives without changing pack
       readFileSync(join(runtime, "licenses/CLARABEL-LICENSE.txt")),
       Buffer.from("\n"),
       readFileSync(join(runtime, "licenses/CLARABEL-DEPENDENCIES-NOTICES.txt")),
+      Buffer.from("\n"),
+      readFileSync(join(runtime, "licenses/SOBOL-NOTICES.txt")),
     ]);
     assert.deepEqual(thirdPartyNoticeBytes(), expected);
     assert.deepEqual(readFileSync(join(runtime, "licenses/CLARABEL-LICENSE.txt")),

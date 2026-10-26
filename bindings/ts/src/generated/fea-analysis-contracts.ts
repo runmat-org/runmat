@@ -15,6 +15,10 @@ export const FEA_ARTIFACT_MANIFEST_KIND = "finite_element_artifact_manifest" as 
 export const FEA_FIELD_DEFAULT_PAGE_SIZE = 4096 as const;
 export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
 
+export type FeaExecutionMode = "single_core" | "multi_core";
+
+export type FeaExecutionReadiness = "ready" | "desktop_required" | "unavailable";
+
 export type FeaDocumentKind = "study" | "sweep";
 
 export type FeaFieldKind = "scalar" | "vector" | "tensor" | "unknown";
@@ -63,7 +67,7 @@ export interface FeaDiagnostic {
 
 export type { FeaSourceCheckResult } from "./fea-semantic-contracts.js";
 
-export type FeaGeometryUnits = "unspecified" | "meter" | "millimeter" | "inch";
+export type FeaGeometryUnits = import("./fea-semantic-contracts.js").LengthUnit;
 
 export type FeaComputeBackend = "cpu" | "gpu";
 
@@ -150,6 +154,29 @@ export interface FeaProgressEvent {
   total?: number;
   fraction?: number;
   metadata?: Record<string, string>;
+}
+
+export interface FeaExecutionDuration {
+  lowerMillis: number;
+  upperMillis: number;
+  sampleCount: number;
+}
+
+export interface FeaExecutionCandidate {
+  mode: FeaExecutionMode;
+  cores: number | null;
+  memoryBytes: number | null;
+  estimatedMillis: number | null;
+  durationEvidence?: FeaExecutionDuration;
+  readiness: FeaExecutionReadiness;
+  reason: string | null;
+}
+
+export interface FeaExecutionChoices {
+  schemaVersion: number;
+  planId: string;
+  revision: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+  candidates: FeaExecutionCandidate[];
 }
 
 export interface FeaCapabilities {
@@ -427,7 +454,7 @@ export interface FeaMaxwellHarmonicOptions {
   residual_target: number;
 }
 
-export type FeaRegionSelector = { kind: "name"; value: string } | { kind: "tag"; value: string } | { kind: "source_alias"; value: string } | { kind: "persistent_id"; value: string } | { kind: "feature_result"; value: string } | { kind: "boundary_introduced_by"; value: string } | { kind: "generated_output"; value: string } | { kind: "result" };
+export type FeaRegionSelector = { kind: "name"; value: string } | { kind: "tag"; value: string } | { kind: "persistent_id"; value: string } | { kind: "feature_result"; value: string } | { kind: "boundary_introduced_by"; value: string } | { kind: "generated_output"; value: string } | { kind: "result" };
 
 export interface FeaRegionInput { region_id: string; selector: FeaRegionSelector; }
 

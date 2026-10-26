@@ -81,21 +81,36 @@ pub(super) fn healing_report(
         nesting_consistent: true,
     };
     let tolerance = GeometryTolerancePolicy {
-        source_tolerance_m: imported
-            .topology
-            .vertices
-            .iter()
-            .map(|vertex| vertex.tolerance_m)
-            .fold(0.0_f64, f64::max),
-        absolute_floor_m: imported.analysis.absolute_tolerance_floor_m,
+        source_tolerance_m: runmat_types::physical::Length::new(
+            imported
+                .topology
+                .vertices
+                .iter()
+                .map(|vertex| vertex.tolerance_m.canonical_value())
+                .fold(0.0_f64, f64::max),
+        ),
+        absolute_floor_m: runmat_types::physical::Length::new(
+            imported
+                .analysis
+                .absolute_tolerance_floor_m
+                .canonical_value(),
+        ),
         model_relative_term: imported.analysis.model_relative_tolerance,
-        requested_deviation_m: imported.analysis.requested_deviation_m,
-        maximum_healing_displacement_m: imported.analysis.maximum_healing_displacement_m,
+        requested_deviation_m: runmat_types::physical::Length::new(
+            imported.analysis.requested_deviation_m.canonical_value(),
+        ),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(
+            imported
+                .analysis
+                .maximum_healing_displacement_m
+                .canonical_value(),
+        ),
     };
     let mut operations = Vec::new();
     let mut prior_validity = original_validity;
     if has_lineage_mutation
-        && evidence.maximum_displacement_m > tolerance.maximum_healing_displacement_m
+        && evidence.maximum_displacement_m
+            > tolerance.maximum_healing_displacement_m.canonical_value()
     {
         let operation = if evidence.gaps_repaired {
             GeometryHealingOperationKind::RepairGap
@@ -110,7 +125,7 @@ pub(super) fn healing_report(
             operation,
             affected_entities: lineage.affected_before.clone(),
             measured_displacement_m: evidence.maximum_displacement_m,
-            permitted_displacement_m: tolerance.maximum_healing_displacement_m,
+            permitted_displacement_m: tolerance.maximum_healing_displacement_m.canonical_value(),
             original_point_m: evidence.displacement_original_m,
             proposed_point_m: evidence.displacement_proposed_m,
             reason: "OCCT topology repair exceeded the admitted healing displacement".into(),

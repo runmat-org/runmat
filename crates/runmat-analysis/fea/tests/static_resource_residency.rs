@@ -57,7 +57,10 @@ fn static_model(enforcement: ConstraintEnforcement, node_count: u32) -> Analysis
     for node_id in 3..=node_count {
         structural.nodes.push(runmat_analysis_core::StructuralNode {
             node_id,
-            coordinates_m: [1.0, f64::from(node_id - 2) * 0.01, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0, f64::from(node_id - 2) * 0.01, 0.0]),
             solid_attachment: None,
         });
         let mut element = template.clone();

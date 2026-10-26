@@ -342,7 +342,7 @@ fn validate_source(request: &GeometryMaterializationRequest) -> AnalysisBridgeRe
                 && source_digest.bytes() == imported.content_digest.bytes()
                 && *encoded_length > 0
                 && valid_chunks(chunks, *encoded_length, *source_digest)
-                && request.import_options.source_units == imported.units
+                && request.import_options.source_units == imported.unit_fallback
         }
         (
             Definition::Derived(derived),

@@ -120,7 +120,7 @@ pub(super) fn join_with_admission(
     for face in faces {
         checkpoint(control)?;
         maximum_chordal_deviation_m =
-            maximum_chordal_deviation_m.max(face.maximum_chordal_deviation_m);
+            maximum_chordal_deviation_m.max(face.maximum_chordal_deviation_m.canonical_value());
         maximum_normal_deviation_rad =
             maximum_normal_deviation_rad.max(face.maximum_normal_deviation_rad);
         for triangle in face.triangles {
@@ -187,7 +187,9 @@ pub(super) fn join_with_admission(
         triangles,
         boundary_segments,
         shells,
-        maximum_chordal_deviation_m,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            maximum_chordal_deviation_m,
+        ),
         maximum_normal_deviation_rad,
     };
     Ok(result)
@@ -228,8 +230,8 @@ pub(super) fn validate_with_control(
 pub(super) fn validate_options(
     options: ExactSurfaceJoinOptions,
 ) -> Result<(), ExactSurfaceMeshError> {
-    if !options.coordinate_tolerance_m.is_finite()
-        || options.coordinate_tolerance_m <= 0.0
+    if !options.coordinate_tolerance_m.canonical_value().is_finite()
+        || options.coordinate_tolerance_m.canonical_value() <= 0.0
         || options.maximum_nodes == 0
         || options.maximum_triangles == 0
         || options.maximum_boundary_segments == 0

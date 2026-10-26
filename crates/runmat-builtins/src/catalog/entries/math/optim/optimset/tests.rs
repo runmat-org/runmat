@@ -17,13 +17,16 @@ fn call(args: Vec<ValueFact>, literals: Vec<LiteralValue>) -> runmat_types::Call
 }
 
 #[test]
-fn empty_builder_proves_empty_host_struct() {
+fn default_builder_proves_legacy_field_names() {
     let result = call(vec![], vec![]);
     let ValueKindFact::Struct(output) = &result.outputs[0].kind else {
         panic!("struct expected")
     };
     assert!(output.fields_complete);
-    assert!(output.fields.is_empty());
+    assert_eq!(output.fields.len(), crate::FminsearchOptionName::ALL.len());
+    assert!(crate::FminsearchOptionName::ALL
+        .into_iter()
+        .all(|field| output.fields.contains_key(field.name())));
     assert_eq!(
         result.outputs[0].residency,
         runmat_types::ResidencyFact::Host

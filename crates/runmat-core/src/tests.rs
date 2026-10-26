@@ -3,6 +3,9 @@ use crate::*;
 #[path = "tests/executable_roots.rs"]
 mod executable_roots;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/genetic_solver.rs"]
+mod genetic_solver;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_arity.rs"]
 mod native_arity;
 #[cfg(not(target_arch = "wasm32"))]
@@ -6452,16 +6455,18 @@ end
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "a",
-        &runmat_value::Value::Num(6.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "b",
-        &runmat_value::Value::Num(13.0)
-    ));
+    assert!(
+        outcome_has_named_upsert(&outcome, "a", &runmat_value::Value::Num(6.0)),
+        "upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "b", &runmat_value::Value::Num(13.0)),
+        "upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
 }
 
 #[test]

@@ -150,7 +150,11 @@ impl AuthoredOutputExpression {
                     }
                     AuthoredFieldProjection::Phase if domain == AuthoredFieldDomain::Complex => {
                         Ok(AuthoredOutputType::Field {
-                            value: AuthoredOutputValue::Dimensionless,
+                            value: AuthoredOutputValue::Derived(
+                                runmat_types::physical::DynamicDimension::quantity_type(
+                                    runmat_types::physical::QuantityKind::ComplexPhase,
+                                ),
+                            ),
                             shape,
                             domain: AuthoredFieldDomain::Real,
                             location,
@@ -261,8 +265,8 @@ impl AuthoredOutputExpression {
                     }),
                     AuthoredSpatialReduction::Integral => Ok(AuthoredOutputType::Reduced {
                         value: AuthoredOutputValue::Derived(
-                            output_dimension(value)
-                                .multiply(region_measure(target)?)
+                            output_dimension(value)?
+                                .multiply(region_measure(target)?.into())
                                 .ok_or(AuthoredOutputError::DimensionOverflow)?,
                         ),
                         shape,
@@ -288,19 +292,21 @@ impl AuthoredOutputExpression {
                         if !compatible {
                             return Err(AuthoredOutputError::ResultantRequiresVectorOrTraction);
                         }
-                        let mut dimension = quantity.physical_dimension();
+                        let mut dimension = quantity
+                            .quantity_descriptor()
+                            .ok_or(AuthoredOutputError::UnresolvedQuantityDescriptor)?;
                         if !matches!(
                             quantity,
                             ObservationQuantity::ReactionForce
                                 | ObservationQuantity::ReactionMoment
                         ) {
                             dimension = dimension
-                                .multiply(region_measure(target)?)
+                                .multiply(region_measure(target)?.into())
                                 .ok_or(AuthoredOutputError::DimensionOverflow)?;
                         }
                         if matches!(reduction, AuthoredSpatialReduction::Moment { .. }) {
                             dimension = dimension
-                                .multiply(PhysicalDimension::LENGTH)
+                                .multiply(PhysicalDimension::LENGTH.into())
                                 .ok_or(AuthoredOutputError::DimensionOverflow)?;
                         }
                         Ok(AuthoredOutputType::Reduced {
@@ -322,7 +328,7 @@ impl AuthoredOutputExpression {
                 if positions.is_empty()
                     || positions.iter().any(|position| {
                         position
-                            .meters
+                            .canonical_value()
                             .iter()
                             .any(|component| !component.is_finite())
                     })
@@ -392,7 +398,7 @@ impl AuthoredOutputExpression {
                     }
                     AuthoredSeriesReduction::Variance { .. } => Ok(AuthoredOutputType::Reduced {
                         value: AuthoredOutputValue::Derived(
-                            output_dimension(value)
+                            output_dimension(value)?
                                 .power(2)
                                 .ok_or(AuthoredOutputError::DimensionOverflow)?,
                         ),
@@ -451,12 +457,16 @@ fn validate_authored_sampling(
         .ok_or(AuthoredOutputError::SamplingDomainMismatch)
 }
 
-fn output_dimension(value: AuthoredOutputValue) -> PhysicalDimension {
-    match value {
-        AuthoredOutputValue::Physical(quantity) => quantity.physical_dimension(),
+fn output_dimension(
+    value: AuthoredOutputValue,
+) -> Result<runmat_types::physical::DynamicDimension, AuthoredOutputError> {
+    Ok(match value {
+        AuthoredOutputValue::Physical(quantity) => quantity
+            .quantity_descriptor()
+            .ok_or(AuthoredOutputError::UnresolvedQuantityDescriptor)?,
         AuthoredOutputValue::Derived(dimension) => dimension,
-        AuthoredOutputValue::Dimensionless => PhysicalDimension::DIMENSIONLESS,
-    }
+        AuthoredOutputValue::Dimensionless => PhysicalDimension::DIMENSIONLESS.into(),
+    })
 }
 
 fn region_measure(target: &AuthoredRegionSource) -> Result<PhysicalDimension, AuthoredOutputError> {
@@ -500,6 +510,8 @@ fn validate_region(target: &AuthoredRegionSource) -> Result<(), AuthoredOutputEr
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthoredOutputError {
+    #[error("output quantity requires explicit producer or basis dimensions")]
+    UnresolvedQuantityDescriptor,
     #[error("output id must not be empty")]
     EmptyId,
     #[error("output `{0}` is duplicated")]

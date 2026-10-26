@@ -604,6 +604,7 @@ fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     );
     let submission = GraphBatchSubmission {
         request,
+        task: None,
         idempotency_key: Some("graph-key".into()),
         retention_millis: MIN_RETENTION_MILLIS,
     };
@@ -613,6 +614,50 @@ fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     digest_bytes.extend(serde_json::to_vec(&canonical_digest_submission).unwrap());
     let expected_digest = Digest::sha256(digest_bytes);
     assert_eq!(submission.request_digest().unwrap(), expected_digest);
+    let mut retained = submission.clone();
+    retained.idempotency_key = Some("retained-graph-key".into());
+    let mut original = original_program_submission(super::DurableExecutionContext {
+        scope_id: runmat_execution::ExecutionScopeId::derive(&[b"retained-graph-scope"]),
+        pool_id: runmat_execution::PoolId::derive(&[b"retained-graph-pool"]),
+    })
+    .task;
+    original.request.executable = runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+        crate::graph_submission::primary_artifact(&retained.request),
+    );
+    original.request.callable.program = retained.request.scheduler_callable().unwrap();
+    original.request.host = retained
+        .request
+        .execution_host_requirement(original.request.host.permitted_trust_tiers.clone())
+        .unwrap();
+    original.request.invocation_context = retained.request.context.clone();
+    original.request.outputs = retained.request.recipe.outputs.clone();
+    original.request.inputs.clear();
+    original.request.environment = runmat_execution::EnvironmentSnapshot::default();
+    original.request.console = None;
+    original.request.resources.memory_bytes = 512 * 1024 * 1024;
+    original.request.resources.max_wall_millis = 15_000;
+    retained.task = Some(original.clone());
+    retained.validate().unwrap();
+    let admitted = retained.request.clone().into_validated().unwrap();
+    crate::graph_submission::validate_floor(&retained.request, &original, 1024).unwrap();
+    crate::graph_submission::validate_scratch(&admitted, &original).unwrap();
+    let mut tighter_time = original.clone();
+    tighter_time.request.resources.max_wall_millis = 1;
+    crate::graph_submission::validate_floor(&retained.request, &tighter_time, 1024).unwrap();
+    assert_eq!(tighter_time.request.resources.max_wall_millis, 1);
+    let mut inadequate = original.clone();
+    inadequate.request.resources.memory_bytes = 1;
+    assert!(crate::graph_submission::validate_floor(&retained.request, &inadequate, 1024).is_err());
+    let (retained_record, _) = store.create_graph(retained, 1).unwrap();
+    let restored = store
+        .retained_submission(retained_record.handle.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        restored.task(),
+        &original,
+        "durable round trip preserves the entire caller submission"
+    );
     let (record, created) = store.create_graph(submission, 1).unwrap();
     assert!(created);
     assert_eq!(

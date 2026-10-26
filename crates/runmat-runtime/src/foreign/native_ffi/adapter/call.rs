@@ -48,6 +48,7 @@ impl NativeFfiAdapter {
             let value = call_arguments
                 .get(index)
                 .expect("validated native argument count");
+            crate::foreign::reject_scoped_callback(value)?;
             match (&parameter.ty, value) {
                 (NativeType::Pointer { .. }, Value::Foreign(reference)) => {
                     self.handles.resolve(reference, ForeignCapability::Invoke)?;
@@ -201,7 +202,8 @@ pub(super) fn requested_output_sequence(
 pub(crate) fn is_callable(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)

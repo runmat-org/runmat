@@ -9,7 +9,11 @@ enum Store {
     Dependent,
 }
 
-fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Store, RuntimeError> {
+fn admit(
+    obj: &ObjectInstance,
+    field: &str,
+    caller: MemberCaller<'_>,
+) -> Result<Store, RuntimeError> {
     let selected = crate::class_registry::checked_receiver_projection(obj)?;
     let property = match &selected {
         Some(projection) => projection.receiver_property(obj.class_name(), &field.into()),
@@ -42,7 +46,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
             Some(projection) => projection.receiver_member_accessible(
                 &owner,
                 property.set_access,
-                caller_class_for_function(caller).as_ref(),
+                caller.class().as_ref(),
             ),
             None => access_permitted(&owner, &property.set_access, caller),
         };
@@ -72,7 +76,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
         }
         return Ok(Store::Stored);
     }
-    let caller_class = caller_class_for_function(caller);
+    let caller_class = caller.class();
     let dynamic_access = match &selected {
         Some(projection) => obj.dynamic_property(field).map(|definition| {
             projection.receiver_member_accessible(
@@ -108,7 +112,7 @@ pub(super) async fn store_value(
     mut obj: ObjectInstance,
     field: runmat_value::Utf8Text,
     rhs: Value,
-    caller: Option<&str>,
+    caller: MemberCaller<'_>,
     on_write: &mut impl FnMut(&Value, &Value),
 ) -> Result<RootedValue, RuntimeError> {
     match admit(&obj, &field, caller)? {
@@ -200,7 +204,7 @@ pub(super) async fn store_handle(
     handle: HandleRef,
     field: runmat_value::Utf8Text,
     rhs: Value,
-    caller: Option<&str>,
+    caller: MemberCaller<'_>,
 ) -> Result<RootedValue, RuntimeError> {
     if handle
         .class_name

@@ -135,6 +135,7 @@ mod tests {
             inputs: Vec::new(),
             outputs: Vec::new(),
             effects: EffectSet::default(),
+            cooperative_suspension: false,
             capabilities: CapabilitySet::default(),
         };
         let profile_id = ExecutionProfileIdentity::new("engineering").unwrap();

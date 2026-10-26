@@ -42,7 +42,12 @@ impl ThermalSolverResultManifest {
                 },
                 0.0,
                 Repeated {
-                    value: ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0),
+                    value: ThermalEnergyBalance::from_powers(
+                        runmat_types::physical::Power::new(0.0),
+                        runmat_types::physical::Power::new(0.0),
+                        runmat_types::physical::Power::new(0.0),
+                        runmat_types::physical::Power::new(0.0),
+                    ),
                     count: solves,
                 },
                 0.0,
@@ -137,7 +142,12 @@ impl ThermalSolverResultManifest {
                     count: solves,
                 },
                 Repeated {
-                    value: ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0),
+                    value: ThermalEnergyBalance::from_powers(
+                        runmat_types::physical::Power::new(0.0),
+                        runmat_types::physical::Power::new(0.0),
+                        runmat_types::physical::Power::new(0.0),
+                        runmat_types::physical::Power::new(0.0),
+                    ),
                     count: solves,
                 },
                 Repeated {
@@ -202,17 +212,17 @@ fn skeleton(
         nonlinear_evidence: Vec::new(),
         residual_target: 0.0,
         energy_balances: Vec::new(),
-        reference_temperature_k: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(0.0),
         initial_state: ThermalInitialStateEvidence {
             procedure_step_id: String::new(),
-            reference_temperature_k: 0.0,
+            reference_temperature_k: runmat_types::physical::Temperature::new(0.0),
             applied_initial_condition_ids: Vec::new(),
             authored_node_count: 0,
             prescribed_node_count: 0,
             authored_and_prescribed_node_count: 0,
             reference_node_count: 0,
-            minimum_temperature_k: 0.0,
-            maximum_temperature_k: 0.0,
+            minimum_temperature_k: runmat_types::physical::Temperature::new(0.0),
+            maximum_temperature_k: runmat_types::physical::Temperature::new(0.0),
         },
         fields: Vec::new(),
     })
@@ -220,12 +230,12 @@ fn skeleton(
 
 fn nonlinear_profile_value() -> crate::contracts::ThermalNonlinearSampleEvidence {
     crate::contracts::ThermalNonlinearSampleEvidence {
-        time_s: 0.0,
+        time_s: runmat_types::physical::Time::new(0.0),
         iteration_count: crate::contracts::THERMAL_MAXIMUM_NEWTON_CORRECTIONS,
         backtracking_count: crate::contracts::THERMAL_MAXIMUM_NEWTON_CORRECTIONS
             * crate::contracts::THERMAL_MAXIMUM_BACKTRACKING_TRIALS,
         relative_equilibrium_residual: 0.0,
         relative_increment: 0.0,
-        power_scale_w: 0.0,
+        power_scale_w: runmat_types::physical::Power::new(0.0),
     }
 }

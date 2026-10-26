@@ -152,8 +152,15 @@ impl<'a> ParameterSources<'a> {
             .request
             .tolerance
             .source_tolerance_m
-            .max(input.request.tolerance.absolute_floor_m)
-            .max(input.request.tolerance.maximum_healing_displacement_m);
+            .canonical_value()
+            .max(input.request.tolerance.absolute_floor_m.canonical_value())
+            .max(
+                input
+                    .request
+                    .tolerance
+                    .maximum_healing_displacement_m
+                    .canonical_value(),
+            );
         let surface = std::sync::OnceLock::new();
         Ok(Self {
             nodes,

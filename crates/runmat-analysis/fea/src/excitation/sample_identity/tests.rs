@@ -32,7 +32,7 @@ fn count_only_encoding_projection_bounds_actual_frozen_fields_and_all_sample_met
         };
         let kind = RealizedExcitationKind::BodyForceField(
             NodalVectorField::sample(&signal, ExcitationSamplePoint::Static, |value| {
-                value.newtons_per_cubic_meter
+                value.canonical_value()
             })
             .unwrap(),
         );

@@ -324,6 +324,7 @@ impl JavaAdapter {
         context: &RuntimeContext,
         value: crate::call::RootedArgumentValue,
     ) -> Result<JavaValue, RuntimeError> {
+        crate::foreign::reject_scoped_callback(value.value())?;
         if super::super::is_callable(value.value()) {
             let instance = value
                 .value()

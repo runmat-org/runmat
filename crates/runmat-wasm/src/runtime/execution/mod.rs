@@ -1,4 +1,5 @@
 mod admission;
+pub(crate) mod controlled;
 mod host;
 mod model;
 pub(crate) mod program;

@@ -178,7 +178,8 @@ fn validate_value_source(value: &Value) -> BuiltinResult<()> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle(_) => Ok(()),
+        | Value::BoundFunctionHandle(_)
+        | Value::ScopedFunctionHandle(_) => Ok(()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(()),
         Value::Tensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::LogicalArray(array) => validate_host_vector_shape(&array.shape),

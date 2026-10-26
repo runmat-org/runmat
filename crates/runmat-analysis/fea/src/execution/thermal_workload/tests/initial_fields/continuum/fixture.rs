@@ -18,10 +18,11 @@ pub(super) fn base() -> ThermalWorkload {
     input.model.excitation_cases.clear();
     input.model.initial_conditions.clear();
     input.model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-    input.model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    input.model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     let thermal = input.model.materials[0].thermal.as_mut().unwrap();
-    thermal.conductivity_w_per_mk = 1.0;
-    thermal.specific_heat_j_per_kgk = 1.0;
+    thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
+    thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(1.0);
     input.model.thermal.as_mut().unwrap().reference_temperature = Temperature::new(REFERENCE);
     input
 }

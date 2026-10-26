@@ -31,18 +31,18 @@ pub(in crate::builtins::math::linalg::ops::sparse_factor) async fn transfer_csc<
         ));
     }
     let pointers = Adoption::indices(
-        pointers.into_adopted(Adoption::index_header_bytes(), work.runtime)?,
+        pointers.into_adopted(Adoption::index_header_bytes(), work.required_runtime()?)?,
         pointer_len,
     )
     .map_err(RetainedFactorError::Storage)?;
     work.flush().await?;
     let indices = Adoption::indices(
-        indices.into_adopted(Adoption::index_header_bytes(), work.runtime)?,
+        indices.into_adopted(Adoption::index_header_bytes(), work.required_runtime()?)?,
         len,
     )
     .map_err(RetainedFactorError::Storage)?;
     work.flush().await?;
-    let allocation = values.into_adopted(T::header_bytes(), work.runtime)?;
+    let allocation = values.into_adopted(T::header_bytes(), work.required_runtime()?)?;
     let mut validation = SparseCscValidation::new(rows, columns, pointers, indices, len)
         .map_err(RetainedFactorError::Invalid)?;
     loop {
@@ -91,12 +91,12 @@ pub(in crate::builtins::math::linalg::ops::sparse_factor) async fn transfer_perm
     }
     work.flush().await?;
     let forward = Adoption::indices(
-        forward.into_adopted(Adoption::index_header_bytes(), work.runtime)?,
+        forward.into_adopted(Adoption::index_header_bytes(), work.required_runtime()?)?,
         len,
     )
     .map_err(RetainedFactorError::Storage)?;
     let inverse = Adoption::indices(
-        inverse.into_adopted(Adoption::index_header_bytes(), work.runtime)?,
+        inverse.into_adopted(Adoption::index_header_bytes(), work.required_runtime()?)?,
         len,
     )
     .map_err(RetainedFactorError::Storage)?;

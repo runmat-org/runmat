@@ -16,6 +16,7 @@ mod errors;
 mod host;
 mod integer;
 mod provider;
+mod sparse;
 pub(crate) use errors::ProductError;
 type ProductResult<T> = Result<T, ProductError>;
 // Mathematical operation label retained for established helper error messages.
@@ -33,7 +34,7 @@ pub(crate) async fn evaluate_in_context(
     rhs: &Value,
 ) -> crate::BuiltinResult<ProductResult<Value>> {
     if integer::contains(lhs) || integer::contains(rhs) {
-        return integer::evaluate(lhs, rhs).await;
+        return integer::evaluate(context, lhs, rhs).await;
     }
     if let Some(result) = product_try!(provider::try_product(lhs, rhs).await?) {
         return Ok(Ok(result));
@@ -66,7 +67,7 @@ pub(crate) async fn evaluate_in_context(
             return Ok(Ok(result));
         }
     }
-    let output = product_try!(host::evaluate(lhs.clone(), rhs.clone()).await?);
+    let output = product_try!(host::evaluate(context, lhs.clone(), rhs.clone()).await?);
     if let Some(route) = route {
         route.confirm_intrinsic_host(context.unwrap(), runmat_types::OperatorKind::MatrixMultiply);
     }

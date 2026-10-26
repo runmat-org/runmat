@@ -1788,6 +1788,7 @@ for (const { path: sourcePath, text } of rustSources(
   }
 }
 for (const obsolete of [
+  "crates/runmat-runtime/src/builtins/io/type_resolvers.rs",
   "crates/runmat-builtins/src/catalog/inference/routing/io/console.rs",
   "crates/runmat-builtins/src/catalog/inference/routing/io/repl_fs.rs",
 ]) {
@@ -1840,9 +1841,6 @@ if (/\b(?:category|summary|keywords|descriptor|type_resolver|accel)\s*=/.test(re
 if (/"(?:cd|chdir)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
   fail("legacy name-selected semantics must not reclaim cd authority");
 }
-if (/\bpub fn cd_type\b/.test(read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"))) {
-  fail("legacy runtime type resolver must not reclaim cd inference authority");
-}
 if (/\bgather_if_needed_async\b/.test(rustSources("crates/runmat-runtime/src/builtins/io/repl_fs/cd").map(({ text }) => text).join("\n"))) {
   fail("cd must reject non-text values instead of gathering accelerator buffers");
 }
@@ -1853,9 +1851,6 @@ if (/\b(?:category|summary|keywords|descriptor|type_resolver|accel)\s*=/.test(re
 }
 if (/"path"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
   fail("legacy name-selected semantics must not reclaim path authority");
-}
-if (/\bpub fn path_type\b/.test(read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"))) {
-  fail("legacy runtime type resolver must not reclaim path inference authority");
 }
 
 for (const identity of ["addpath", "rmpath"]) {
@@ -2156,11 +2151,6 @@ for (const sourcePath of [
     fail(`${sourcePath} must route directory-listing inference by typed rules, not builtin names`);
   }
 }
-if (/\bpub fn (?:dir|ls)_type\b/.test(
-  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
-)) {
-  fail("legacy dir/ls type resolvers must not return after catalog cutover");
-}
 if (/"(?:dir|ls)"\s*(?:\||=>)/.test(
   read("crates/runmat-builtins/src/semantics.rs"),
 )) {
@@ -2207,11 +2197,6 @@ for (const sourcePath of [
     fail(`${sourcePath} must route file-transfer inference by typed rules, not builtin names`);
   }
 }
-if (/\bpub fn (?:copyfile|movefile)_type\b/.test(
-  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
-)) {
-  fail("legacy runtime type resolvers must not reclaim file-transfer inference authority");
-}
 if (/"(?:copyfile|movefile)"\s*(?:\||=>)/.test(
   read("crates/runmat-builtins/src/semantics.rs"),
 )) {
@@ -2229,11 +2214,6 @@ for (const sourcePath of [
   if (/"(?:mkdir|rmdir)"/.test(read(sourcePath))) {
     fail(`${sourcePath} must route directory lifecycle inference by typed rules, not builtin names`);
   }
-}
-if (/\bpub fn (?:mkdir|rmdir)_type\b/.test(
-  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
-)) {
-  fail("legacy runtime type resolvers must not reclaim directory-lifecycle inference authority");
 }
 if (/"(?:mkdir|rmdir)"\s*(?:\||=>)/.test(
   read("crates/runmat-builtins/src/semantics.rs"),
@@ -2269,11 +2249,6 @@ for (const sourcePath of [
     fail(`${sourcePath} must dispatch lexical-path behavior through typed rules and entries`);
   }
 }
-if (/\bpub fn (?:fullfile|fileparts|filesep|pathsep)_type\b/.test(
-  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
-)) {
-  fail("legacy runtime type resolvers must not reclaim lexical-path inference authority");
-}
 if (/"(?:fullfile|fileparts|filesep|pathsep)"\s*(?:\||=>)/.test(
   read("crates/runmat-builtins/src/semantics.rs"),
 )) {
@@ -2292,11 +2267,6 @@ for (const sourcePath of [
   if (/"(?:tempdir|tempname)"/.test(source)) {
     fail(`${sourcePath} must dispatch temporary-path behavior through typed rules and entries`);
   }
-}
-if (/\bpub fn (?:tempdir|tempname)_type\b/.test(
-  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
-)) {
-  fail("legacy runtime type resolvers must not reclaim temporary-path inference authority");
 }
 if (/"(?:tempdir|tempname)"\s*(?:\||=>)/.test(
   read("crates/runmat-builtins/src/semantics.rs"),
@@ -2322,10 +2292,6 @@ for (const { path: sourcePath, text } of rustSources(
     fail(`${sourcePath} bypasses the native/browser process-environment service`);
   }
 }
-const legacyIoResolvers = read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs");
-if (/\bpub fn (?:addpath|rmpath|genpath|savepath|getenv|setenv|isenv|unsetenv)_type\b/.test(legacyIoResolvers)) {
-  fail("legacy runtime type resolvers must not reclaim migrated search-path or environment inference authority");
-}
 if (/"(?:addpath|rmpath|genpath|savepath|getenv|setenv|isenv|unsetenv)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
   fail("legacy name-selected semantics must not reclaim migrated search-path or environment authority");
 }
@@ -2337,11 +2303,6 @@ if (/\b(?:category|summary|keywords|descriptor|type_resolver)\s*=/.test(
 }
 if (/"pwd"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
   fail("legacy name-selected semantics must not reclaim pwd authority");
-}
-if (/\bpub fn pwd_type\b/.test(
-  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
-)) {
-  fail("legacy runtime type resolver must not reclaim pwd inference authority");
 }
 
 const clcRuntimePath = "crates/runmat-runtime/src/builtins/io/clc.rs";

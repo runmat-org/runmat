@@ -12,6 +12,7 @@ impl CoordinateLookup for NodeValues<[f64; 3]> {
 }
 impl CoordinateLookup for NodeValues<ExplicitShellSurfaceNode> {
     fn position(&self, id: &StableDigest) -> Option<[f64; 3]> {
-        self.get(id).map(|node| node.coordinates_m)
+        self.get(id)
+            .map(|node| node.coordinates_m.canonical_value())
     }
 }

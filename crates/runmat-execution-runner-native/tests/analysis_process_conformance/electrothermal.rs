@@ -199,7 +199,7 @@ pub(super) async fn run() {
             }
             assert_eq!(values.len(), projection.nodes.len());
             assert!(projection.nodes.iter().zip(values).all(|(node, value)| {
-                let x = node.coordinates_m[0];
+                let x = node.coordinates_m.canonical_value()[0];
                 (value - (300.0 + 6.0 * x * (1.0 - x))).abs() < 1e-8
             }));
         }

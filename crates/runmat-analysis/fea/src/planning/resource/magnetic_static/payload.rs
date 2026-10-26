@@ -35,10 +35,16 @@ struct Sampling<'a> {
 #[derive(Serialize)]
 struct Response<'a> {
     edge_node_identities: Repeated<'a, [StableDigest; 2]>,
-    edge_circulations_wb: Repeated<'a, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    edge_circulations_wb: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::MagneticFlux,
+        Repeated<'a, f64>,
+    >,
     samples: Repeated<'a, MagneticFieldSample>,
-    magnetic_energy_j: f64,
-    source_work_j: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    magnetic_energy_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    source_work_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
     relative_physical_residual: f64,
     relative_gauge_residual: f64,
     relative_energy_work_error: f64,
@@ -88,9 +94,18 @@ pub(super) fn profile(
         element_identity: stable,
         position_m: [0.0; 3],
         volume_weight_m3: 0.0,
-        vector_potential_wb_per_m: [0.0; 3],
-        flux_density_t: [0.0; 3],
-        magnetic_field_a_per_m: [0.0; 3],
+        vector_potential_wb_per_m: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::MagneticVectorPotential,
+            _,
+        >::new([0.0; 3]),
+        flux_density_t: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::MagneticFluxDensity,
+            _,
+        >::new([0.0; 3]),
+        magnetic_field_a_per_m: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::MagneticFieldIntensity,
+            _,
+        >::new([0.0; 3]),
     };
     let value = ResultProjection {
         source_workload: workload.identity().map_err(invalid)?,
@@ -139,16 +154,25 @@ pub(super) fn profile(
                 value: &pair,
                 count: edges,
             },
-            edge_circulations_wb: Repeated {
+            edge_circulations_wb: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::MagneticFlux,
+                _,
+            >::new(Repeated {
                 value: &scalar,
                 count: edges,
-            },
+            }),
             samples: Repeated {
                 value: &physical,
                 count: samples,
             },
-            magnetic_energy_j: 0.0,
-            source_work_j: 0.0,
+            magnetic_energy_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(0.0),
+            source_work_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(0.0),
             relative_physical_residual: 0.0,
             relative_gauge_residual: 0.0,
             relative_energy_work_error: 0.0,
@@ -156,4 +180,12 @@ pub(super) fn profile(
         },
     };
     runmat_canonical_codec::profile_serialized_shape(&value, LIMITS).map_err(invalid)
+}
+
+impl<T: runmat_types::physical::QuantityStorage> runmat_types::physical::QuantityStorage
+    for Repeated<'_, T>
+{
+    fn all_finite(&self) -> bool {
+        self.value.all_finite()
+    }
 }

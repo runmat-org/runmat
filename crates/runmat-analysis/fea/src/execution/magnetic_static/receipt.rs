@@ -21,8 +21,11 @@ pub struct MagneticNumericalReceipt {
     pub relative_gauge_residual: f64,
     pub relative_energy_work_error: f64,
     pub solver_relative_tolerance: f64,
-    pub magnetic_energy_j: f64,
-    pub source_work_j: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub magnetic_energy_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub source_work_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ReceiptWire")]
@@ -70,15 +73,21 @@ impl MagneticNumericalReceiptArtifact {
             element_order: result.element_order(),
             nodes: mesh.topology.nodes.len(),
             elements: mesh.topology.volume_elements.len(),
-            oriented_edges: r.edge_circulations_wb.len(),
+            oriented_edges: r.edge_circulations_wb.canonical_values().len(),
             integration_samples: r.samples.len(),
             iterations: r.iterations,
             relative_physical_residual: r.relative_physical_residual,
             relative_gauge_residual: r.relative_gauge_residual,
             relative_energy_work_error: r.relative_energy_work_error,
             solver_relative_tolerance: workload.relative_residual_target,
-            magnetic_energy_j: r.magnetic_energy_j,
-            source_work_j: r.source_work_j,
+            magnetic_energy_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(r.magnetic_energy_j.canonical_value()),
+            source_work_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(r.source_work_j.canonical_value()),
         };
         let source_workload = workload.identity()?;
         let source_result = result.source_result_identity()?;
@@ -122,9 +131,12 @@ impl MagneticNumericalReceiptArtifact {
         let maximum_iterations = crate::physics::magnetic::resources::gmres_policy(dimension, t)
             .map_err(invalid)?
             .maximum_iterations;
-        let scale = (2.0 * r.magnetic_energy_j).abs().max(r.source_work_j.abs());
+        let scale = (2.0 * r.magnetic_energy_j.canonical_value())
+            .abs()
+            .max(r.source_work_j.canonical_value().abs());
         let closure = if scale > 0.0 {
-            (2.0 * r.magnetic_energy_j - r.source_work_j).abs() / scale
+            (2.0 * r.magnetic_energy_j.canonical_value() - r.source_work_j.canonical_value()).abs()
+                / scale
         } else {
             0.0
         };
@@ -142,8 +154,8 @@ impl MagneticNumericalReceiptArtifact {
             || !within(r.relative_physical_residual, t * 8.0)
             || !within(r.relative_gauge_residual, t * 8.0)
             || !within(r.relative_energy_work_error, t * 16.0)
-            || !within(r.magnetic_energy_j, f64::MAX)
-            || !r.source_work_j.is_finite()
+            || !within(r.magnetic_energy_j.canonical_value(), f64::MAX)
+            || !r.source_work_j.canonical_value().is_finite()
             || !closure.is_finite()
             || r.relative_energy_work_error != closure
             || self.identity != receipt_identity(self.source_workload, self.source_result, &r)?

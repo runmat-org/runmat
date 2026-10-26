@@ -9,7 +9,7 @@ use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
 };
 use runmat_analysis_fea::AnalysisRunIdentity;
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::LengthUnit;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
     MeshRegion, MeshScalarField, MeshTriangleRange, MeshVectorField, PlotElement,
@@ -609,20 +609,18 @@ fn excitation_vector(model: &AnalysisModel, action: &ExcitationAction) -> Option
         .find(|signal| signal.signal_id() == &action.excitation().signal_id)?;
     let components = match (action, signal) {
         (ExcitationAction::Force(_), runmat_analysis_core::PhysicalSignal::Force(signal)) => {
-            constant_vector(&signal.representation, |value| value.newtons)
+            constant_vector(&signal.representation, |value| value.canonical_value())
         }
         (ExcitationAction::Moment(_), runmat_analysis_core::PhysicalSignal::Moment(signal)) => {
-            constant_vector(&signal.representation, |value| value.newton_meters)
+            constant_vector(&signal.representation, |value| value.canonical_value())
         }
         (ExcitationAction::Traction(_), runmat_analysis_core::PhysicalSignal::Traction(signal)) => {
-            constant_vector(&signal.representation, |value| value.pascals)
+            constant_vector(&signal.representation, |value| value.canonical_value())
         }
         (
             ExcitationAction::BodyForce(_),
             runmat_analysis_core::PhysicalSignal::BodyForceDensity(signal),
-        ) => constant_vector(&signal.representation, |value| {
-            value.newtons_per_cubic_meter
-        }),
+        ) => constant_vector(&signal.representation, |value| value.canonical_value()),
         _ => None,
     };
     let direction_applies = matches!(
@@ -668,7 +666,7 @@ fn constant_scalar_sign(signal: &runmat_analysis_core::PhysicalSignal) -> Option
             else {
                 return None;
             };
-            Some(value.$field.signum())
+            Some(value.canonical_value().signum())
         }};
     }
     match signal {
@@ -702,7 +700,7 @@ fn excitation_pressure_sign(model: &AnalysisModel, action: &ExcitationAction) ->
         return None;
     }
     let prescribed = PrescribedValue::<Pressure>::Signal(action.excitation().signal_id.clone());
-    let magnitude = f64_to_f32(prescribed.study_constant(&model.signals)?.pascals)?;
+    let magnitude = f64_to_f32(prescribed.study_constant(&model.signals)?.canonical_value())?;
     if magnitude.abs() > f32::EPSILON {
         Some(-magnitude.signum())
     } else {
@@ -1209,7 +1207,7 @@ fn cad_reference_mesh_figure(
         },
     )
     .ok()?;
-    normalize_geometry_meshes_to_solver_units(&mut figure, geometry.units);
+    normalize_geometry_meshes_to_solver_units(&mut figure, geometry.coordinate_units?.unit());
     if let Some(topology) = render_topology {
         if let Ok(solver) = render_topology_figure(topology, title, options) {
             append_mesh_plots(&mut figure, &solver);
@@ -1218,7 +1216,7 @@ fn cad_reference_mesh_figure(
     Some(figure)
 }
 
-fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSystem) {
+fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: LengthUnit) {
     let scale = geometry_unit_scale_to_meters(units);
     if (scale - 1.0).abs() <= f32::EPSILON {
         return;
@@ -1236,12 +1234,8 @@ fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSys
     }
 }
 
-fn geometry_unit_scale_to_meters(units: UnitSystem) -> f32 {
-    match units {
-        UnitSystem::Unspecified | UnitSystem::Meter => 1.0,
-        UnitSystem::Millimeter => 0.001,
-        UnitSystem::Inch => 0.0254,
-    }
+fn geometry_unit_scale_to_meters(units: LengthUnit) -> f32 {
+    units.meters_per_unit() as f32
 }
 
 fn append_mesh_plots(target: &mut Figure, source: &Figure) {
@@ -2395,15 +2389,20 @@ mod tests {
     use result_fixture::simple_run_result;
 
     fn simple_geometry_asset() -> runmat_geometry_core::GeometryAsset {
-        simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Meter)
+        simple_geometry_asset_with_units(runmat_geometry_core::LengthUnit::Meter)
     }
 
     fn simple_geometry_asset_with_units(
-        units: runmat_geometry_core::UnitSystem,
+        units: runmat_geometry_core::LengthUnit,
     ) -> runmat_geometry_core::GeometryAsset {
         runmat_geometry_core::GeometryAsset {
             geometry_id: "geometry".to_string(),
             source: runmat_geometry_core::GeometrySource {
+                unit_evidence:
+                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                        units,
+                        "explicit fixture source scale",
+                    ),
                 path: "/tmp/generic.step".to_string(),
                 sha256: "hash".to_string(),
                 importer_version: "test/v1".to_string(),
@@ -2416,7 +2415,7 @@ mod tests {
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
-            units,
+            coordinate_units: Some(runmat_geometry_core::physical::CoordinateUnits::new(units)),
             revision: 1,
             meshes: vec![runmat_geometry_core::MeshDescriptor {
                 mesh_id: "cad_surface".to_string(),
@@ -2440,7 +2439,7 @@ mod tests {
             model_id: AnalysisModelId("model".to_string()),
             geometry_id: "geometry".to_string(),
             geometry_revision: 1,
-            units: runmat_geometry_core::UnitSystem::Meter,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
             frame: CoordinateFrame::Global,
             materials: Vec::new(),
             material_assignments: Vec::new(),
@@ -2914,7 +2913,7 @@ mod tests {
     #[test]
     fn auto_layered_result_scales_geometry_context_to_solver_meters() {
         let mut geometry =
-            simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Millimeter);
+            simple_geometry_asset_with_units(runmat_geometry_core::LengthUnit::Millimeter);
         geometry.surface_meshes[0].vertices =
             vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 1000.0, 0.0]];
         let topology = simple_render_topology();

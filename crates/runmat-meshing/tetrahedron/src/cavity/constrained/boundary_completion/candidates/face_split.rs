@@ -55,7 +55,7 @@ pub(in super::super::super) fn best_boundary_face_split_completion(
             if child_tetrahedra.iter().any(|tetrahedron| {
                 let tetrahedron_points = tetrahedron.node_ids.map(|node_id| {
                     if node_id == split_node.node_id {
-                        split_node.coordinates_m
+                        split_node.coordinates_m.canonical_value()
                     } else {
                         boundary_nodes[&node_id]
                     }

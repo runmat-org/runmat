@@ -67,6 +67,7 @@ pub(crate) fn analysis() -> AnalysisStore {
     AnalysisStore {
         functions: vec![FunctionAnalysis {
             function: ProgramFunctionId(7),
+            captures: Vec::new(),
             callable: CallableFact {
                 capabilities: CapabilitySet::default(),
                 identity: None,

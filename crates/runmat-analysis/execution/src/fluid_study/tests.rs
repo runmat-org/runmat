@@ -28,7 +28,8 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.response_spectra.clear();
     model.random_excitations.clear();
     model.frame = CoordinateFrame::Global;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
@@ -207,7 +208,8 @@ fn exact_authored_plan_and_owned_phases_fail_closed() {
     changed.product.workload.policy.momentum_relaxation *= 0.5;
     assert!(FluidStudyCoordinator::new(changed).is_err());
     let mut changed = preparation();
-    changed.product.compiled.model.materials[0].mass_density_kg_per_m3 = Some(2.0);
+    changed.product.compiled.model.materials[0].mass_density_kg_per_m3 =
+        (Some(2.0)).map(runmat_types::physical::MassDensity::new);
     assert!(FluidStudyCoordinator::new(changed).is_err());
 }
 #[test]

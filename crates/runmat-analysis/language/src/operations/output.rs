@@ -236,7 +236,9 @@ fn moment() -> OperationFacts {
             parameter(
                 "about",
                 OperationTypePattern::VectorQuantity {
-                    dimension: runmat_types::QuantityDimension::Length,
+                    dimension: runmat_types::physical::DynamicDimension::from(
+                        runmat_types::PhysicalDimension::LENGTH,
+                    ),
                     length: Some(3),
                 },
                 OperationParameterArity::Required,
@@ -345,7 +347,9 @@ fn sample() -> OperationFacts {
 
 fn interpolate() -> OperationFacts {
     let point = OperationTypePattern::VectorQuantity {
-        dimension: runmat_types::QuantityDimension::Length,
+        dimension: runmat_types::physical::DynamicDimension::from(
+            runmat_types::PhysicalDimension::LENGTH,
+        ),
         length: Some(3),
     };
     let mut facts = operation(

@@ -219,13 +219,17 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
         GeometryRegionDefinition {
             region_id: "body".into(),
             role: GeometryRegionRole::Solid,
-            selector: GeometryRegionSelector::SourceAlias("solid_000001".into()),
+            selector: GeometryRegionSelector::PersistentId(
+                expected_solid.analysis_selection_id().unwrap(),
+            ),
             cardinality: GeometryRegionCardinality::ExactlyOne,
         },
         GeometryRegionDefinition {
             region_id: "support".into(),
             role: GeometryRegionRole::Face,
-            selector: GeometryRegionSelector::SourceAlias("face_000001".into()),
+            selector: GeometryRegionSelector::PersistentId(
+                expected_face.analysis_selection_id().unwrap(),
+            ),
             cardinality: GeometryRegionCardinality::ExactlyOne,
         },
     ];
@@ -427,6 +431,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     );
     let function = FunctionAnalysis {
         function: ProgramFunctionId(4),
+        captures: Vec::new(),
         callable: CallableFact {
             identity: None,
             parameters: Vec::new(),
@@ -636,10 +641,13 @@ fn imported_request(
             module_path: "examples/imported.fea".into(),
             geometry_id: "box".into(),
             parameters: Vec::new(),
-            source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+            source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
+                preview_extent_m: None,
+                named_selections: None,
+                unit_evidence: Default::default(),
                 logical_path: "box.brep".into(),
                 format: GeometrySourceFormat::Brep,
-                units: runmat_geometry_core::UnitSystem::Meter,
+                unit_fallback: Some(runmat_geometry_core::LengthUnit::Meter),
                 content_digest: GeometryDigest::from_bytes(*source_digest.bytes()),
                 topology_digest,
                 capabilities: GeometryAuthoringCapabilities {
@@ -648,7 +656,7 @@ fn imported_request(
                     ..Default::default()
                 },
                 exchange: None,
-            }),
+            })),
             regions: body_region(),
             cad_parameters: Vec::new(),
         },

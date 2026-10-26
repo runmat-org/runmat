@@ -99,19 +99,16 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                     }
                 };
             }
-            if !auto_enabled() {
-                return request
-                    .into_operands()
-                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)?;
+            let prepared = if !auto_enabled() {
+                return host::prepare_unobserved_operands(&context, request)
+                    .map_err(|error| *error);
+            } else if let Some(auto) = global().await {
+                prepare_async(&auto, &context, request).await
+            } else {
+                return host::prepare_unobserved_operands(&context, request)
+                    .map_err(|error| *error);
             }
-            let Some(auto) = global().await else {
-                return request
-                    .into_operands()
-                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)?;
-            };
-            let prepared = prepare_async(&auto, &context, request)
-                .await
-                .map_err(|error| *error)?;
+            .map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
             PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
         })
@@ -177,19 +174,13 @@ fn prepare_with_inner(
         || (request.form().provider_requirement == BuiltinPreparationProviderRequirement::F64
             && auto.provider.precision() != ProviderPrecision::F64)
     {
-        return request
-            .into_operands()
-            .with_unbounded_values(PreparedBuiltinCall::unobserved)
-            .map_err(Box::new);
+        return host::prepare_passthrough(context, request);
     }
     if !super::owner_admission::matches_selected_owner(auto.provider, request.operands())? {
         // The domain already owns the correct direct/cross-provider behavior.
         // Do not upload other operands or observe a candidate whose retained
         // provider cannot execute the actual borrowed operands.
-        return request
-            .into_operands()
-            .with_unbounded_values(PreparedBuiltinCall::unobserved)
-            .map_err(Box::new);
+        return host::prepare_passthrough(context, request);
     }
     let operation = match request.form().operation {
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),

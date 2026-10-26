@@ -1,7 +1,7 @@
 #![cfg(feature = "occt-native")]
 
 use runmat_geometry_core::{
-    ExactMassPropertiesEvaluator, GeometryEvaluationControl, GeometryEvaluationError, UnitSystem,
+    ExactMassPropertiesEvaluator, GeometryEvaluationControl, GeometryEvaluationError, LengthUnit,
 };
 use runmat_geometry_io::import::GeometryImportError;
 use runmat_geometry_io::{
@@ -21,14 +21,14 @@ fn concurrent_step_imports_keep_independent_units_and_physical_properties() {
             scope.spawn(move || {
                 start.wait();
                 for iteration in 0..6 {
-                    let units = [UnitSystem::Meter, UnitSystem::Millimeter, UnitSystem::Inch]
+                    let units = [LengthUnit::Meter, LengthUnit::Millimeter, LengthUnit::Inch]
                         [(worker + iteration) % 3];
                     let imported = import_exact_cad(
                         "nist_seeker_table_acis.step",
                         NIST_SEEKER_TABLE,
                         GeometryFormat::Step,
                         &ExactCadImportOptions {
-                            source_units: units,
+                            source_units: Some(units),
                             ..ExactCadImportOptions::default()
                         },
                         &GeometryImportContext::new(),
@@ -41,8 +41,8 @@ fn concurrent_step_imports_keep_independent_units_and_physical_properties() {
                             &Unlimited,
                         )
                         .unwrap();
-                    assert!((mass.volume_m3 - 0.011_076_007_2).abs() < 1.0e-12);
-                    assert!((mass.centroid_m[2] + 0.005).abs() < 1.0e-12);
+                    assert!((mass.volume_m3.canonical_value() - 0.011_076_007_2).abs() < 1.0e-12);
+                    assert!((mass.centroid_m.canonical_value()[2] + 0.005).abs() < 1.0e-12);
                 }
             });
         }
@@ -51,30 +51,13 @@ fn concurrent_step_imports_keep_independent_units_and_physical_properties() {
 
 #[test]
 fn declared_step_units_preserve_physical_scale_across_requested_coordinate_units() {
-    let unspecified = import_exact_cad(
-        "nist_seeker_table_acis.step",
-        NIST_SEEKER_TABLE,
-        GeometryFormat::Step,
-        &ExactCadImportOptions {
-            source_units: UnitSystem::Unspecified,
-            ..ExactCadImportOptions::default()
-        },
-        &GeometryImportContext::new(),
-    )
-    .unwrap_err();
-    assert!(matches!(
-        unspecified,
-        GeometryImportError::InvalidOptions(_)
-    ));
-    // This STEP's native dimensions are independently fixed by the public corpus
-    // reference below. Caller coordinate units must not reinterpret that shape.
-    for units in [UnitSystem::Meter, UnitSystem::Millimeter, UnitSystem::Inch] {
+    for units in [LengthUnit::Meter, LengthUnit::Millimeter, LengthUnit::Inch] {
         let imported = import_exact_cad(
             "nist_seeker_table_acis.step",
             NIST_SEEKER_TABLE,
             GeometryFormat::Step,
             &ExactCadImportOptions {
-                source_units: units,
+                source_units: Some(units),
                 ..ExactCadImportOptions::default()
             },
             &GeometryImportContext::new(),
@@ -88,11 +71,11 @@ fn declared_step_units_preserve_physical_scale_across_requested_coordinate_units
             )
             .unwrap();
         assert!(
-            (mass.volume_m3 - 0.011_076_007_2).abs() < 1.0e-12,
+            (mass.volume_m3.canonical_value() - 0.011_076_007_2).abs() < 1.0e-12,
             "{units:?}: {mass:?}"
         );
-        assert!((mass.surface_area_m2 - 2.269_505_468_8).abs() < 1.0e-11);
-        assert!((mass.centroid_m[2] + 0.005).abs() < 1.0e-12);
+        assert!((mass.surface_area_m2.canonical_value() - 2.269_505_468_8).abs() < 1.0e-11);
+        assert!((mass.centroid_m.canonical_value()[2] + 0.005).abs() < 1.0e-12);
         imported.build_closure().unwrap();
     }
 }
@@ -120,7 +103,7 @@ impl GeometryEvaluationControl for Unlimited {
 #[test]
 fn public_industrial_step_imports_exact_topology_and_mass_properties() {
     let options = ExactCadImportOptions {
-        source_units: UnitSystem::Millimeter,
+        source_units: Some(LengthUnit::Millimeter),
         ..ExactCadImportOptions::default()
     };
     let imported = import_exact_cad(
@@ -147,15 +130,15 @@ fn public_industrial_step_imports_exact_topology_and_mass_properties() {
             &Unlimited,
         )
         .expect("kernel mass properties must evaluate");
-    assert!((mass.volume_m3 - 0.011_076_007_2).abs() < 1.0e-12);
-    assert!((mass.surface_area_m2 - 2.269_505_468_8).abs() < 1.0e-12);
-    assert!(mass.centroid_m[0].abs() < 1.0e-12);
-    assert!(mass.centroid_m[1].abs() < 1.0e-12);
-    assert!((mass.centroid_m[2] + 0.005).abs() < 1.0e-12);
+    assert!((mass.volume_m3.canonical_value() - 0.011_076_007_2).abs() < 1.0e-12);
+    assert!((mass.surface_area_m2.canonical_value() - 2.269_505_468_8).abs() < 1.0e-12);
+    assert!(mass.centroid_m.canonical_value()[0].abs() < 1.0e-12);
+    assert!(mass.centroid_m.canonical_value()[1].abs() < 1.0e-12);
+    assert!((mass.centroid_m.canonical_value()[2] + 0.005).abs() < 1.0e-12);
     imported.build_closure().expect("closure must validate");
     OcctExactEvaluator::from_closure(
         &imported.representation,
-        imported.meters_per_source_unit,
+        imported.kernel_units.meters_per_unit(),
         &imported.topology,
         &imported.evaluators,
     )
@@ -165,7 +148,7 @@ fn public_industrial_step_imports_exact_topology_and_mass_properties() {
 #[test]
 fn public_iges_wireframe_is_read_then_rejected_by_typed_admission() {
     let options = ExactCadImportOptions {
-        source_units: UnitSystem::Millimeter,
+        source_units: Some(LengthUnit::Millimeter),
         ..ExactCadImportOptions::default()
     };
     let error = import_exact_cad(

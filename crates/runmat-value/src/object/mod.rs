@@ -7,12 +7,17 @@ mod graphics_receiver;
 mod graphics_scene;
 mod handle;
 mod instance;
+mod linear_constraint;
 mod listener;
+pub use linear_constraint::LinearRowRole;
 mod memmap;
 mod native;
 mod numeric_factor;
+pub mod optimization_model;
+pub mod optimization_variable;
 mod payload;
 mod selected_class;
+pub mod warm_start;
 
 pub use array::{
     ObjectArray, ObjectArrayAdmission, ObjectArrayBuildError, ObjectArrayBuilder,

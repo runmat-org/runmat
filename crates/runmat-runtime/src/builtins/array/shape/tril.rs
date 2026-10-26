@@ -137,6 +137,7 @@ fn tril_host_value(value: Value, offset: isize) -> crate::BuiltinResult<Value> {
         | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::StructArray(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

@@ -61,7 +61,8 @@ impl PenaltyContactLaw {
                 None
             }
             ContactFriction::Coulomb { coefficient } => {
-                if !coefficient.ratio.is_finite() || coefficient.ratio < 0.0 {
+                if !coefficient.canonical_value().is_finite() || coefficient.canonical_value() < 0.0
+                {
                     return Err(ContactPointError::InvalidFriction);
                 }
                 if policy
@@ -70,7 +71,7 @@ impl PenaltyContactLaw {
                 {
                     return Err(ContactPointError::InvalidPolicy);
                 }
-                Some(coefficient.ratio)
+                Some(coefficient.canonical_value())
             }
         };
         let encoded = runmat_canonical_codec::encode_contract(

@@ -42,7 +42,12 @@ fn refine_fixture(
     let position = std::array::from_fn(|axis| {
         corners
             .iter()
-            .map(|id| source.topology.nodes[*id as usize - 1].coordinates_m[axis] * 0.25)
+            .map(|id| {
+                source.topology.nodes[*id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[axis]
+                    * 0.25
+            })
             .sum()
     });
     let mut target = source.clone();
@@ -52,7 +57,10 @@ fn refine_fixture(
         .push(runmat_meshing_core::SolverMeshNode {
             node_id: inserted_id,
             stable_identity: inserted_identity,
-            coordinates_m: position,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(position),
             provenance: vec![region.clone()],
             exact_parameters: Vec::new(),
         });

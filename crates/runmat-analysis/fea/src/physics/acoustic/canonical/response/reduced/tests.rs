@@ -3,7 +3,7 @@ mod uniqueness;
 
 use super::{solve, AcousticAssembly, AcousticHarmonicPolicy};
 use crate::{
-    algebra::{MatrixProperties, OperatorRole, RealSparseAssembler, RealSparseMatrix},
+    algebra::{MatrixProperties, OperatorRole, RealSparseAssembler},
     constraints::{build_phase_reduction, UnitPhaseRelation},
     excitation::ProjectionScalar,
     topology::AnalysisProjection,
@@ -29,24 +29,35 @@ fn sparse_reduction_and_physical_warm_starts_match_independent_phased_solution()
                     maximum_iterations: 64,
                 };
                 let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
-                for column in 0..prepared.rhs.len() {
-                    let mut basis = vec![0.0; prepared.rhs.len()];
+                for column in 0..prepared.rhs.scalar_count() {
+                    let mut basis = vec![0.0; prepared.rhs.scalar_count()];
                     basis[column] = 1.0;
                     let full = prepared.reduction.expand_linear(&basis).unwrap();
                     let (mut real, imaginary) = assembly.apply(&full[..4], &full[4..]);
                     real.extend(imaginary);
                     let expected = prepared.reduction.transpose_apply(&real).unwrap();
-                    let sparse = crate::algebra::spmv(&prepared.operator, &basis).unwrap();
+                    let sparse = crate::algebra::spmv(
+                        &prepared
+                            .operator
+                            .with_canonical_storage(|matrix| matrix.clone()),
+                        &basis,
+                    )
+                    .unwrap();
                     for (actual, expected) in sparse.iter().zip(expected) {
                         assert!((actual - expected).abs() < 2e-14);
                     }
                 }
                 let warm = [0.08, -0.12, 0.04, 0.17].map(|value| amplitude * value);
+                let warm = runmat_types::physical::QuantityField::try_new(
+                    prepared.operator.input_layout().clone(),
+                    warm.to_vec(),
+                )
+                .unwrap();
                 let result = prepared.solve(&assembly, policy, Some(&warm)).unwrap();
                 let expected = independent_pressure(phase);
                 for (node, expected) in expected.iter().enumerate() {
-                    let error = (result.real[node] / amplitude - expected.0)
-                        .hypot(result.imaginary[node] / amplitude - expected.1);
+                    let error = (result.real.canonical_values()[node] / amplitude - expected.0)
+                        .hypot(result.imaginary.canonical_values()[node] / amplitude - expected.1);
                     assert!(error < 2e-11, "phase={phase} amplitude={amplitude} method={preconditioner:?} error={error}");
                 }
                 let same = prepared
@@ -54,7 +65,11 @@ fn sparse_reduction_and_physical_warm_starts_match_independent_phased_solution()
                     .unwrap();
                 assert_eq!(same.iterations, 0);
                 assert!(same.relative_residual <= policy.relative_tolerance);
-                assert!(prepared.solve(&assembly, policy, Some(&[0.0])).is_err());
+                assert!(runmat_types::physical::QuantityField::try_new(
+                    prepared.operator.input_layout().clone(),
+                    vec![0.0]
+                )
+                .is_err());
             }
         }
     }
@@ -93,7 +108,8 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
     for amplitude in [1e-12, 1.0, 1e12] {
         for homogeneous in [false, true] {
             let mut assembly = assembly(0.0, amplitude);
-            assembly.omega = 1.0;
+            assembly.derivative_rate =
+                runmat_types::physical::AngularFrequency::new(1.0).phasor_derivative_rate();
             assembly.stiffness = matrix(
                 [
                     [2.0, -1.0, 0.0, 0.0],
@@ -118,7 +134,7 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
             } else {
                 (amplitude, 0.5 * amplitude)
             };
-            assembly.prescribed = vec![
+            assembly.prescribed = runmat_types::physical::Quantity::new(vec![
                 Some(ProjectionScalar {
                     real: fixed.0,
                     imaginary: fixed.1,
@@ -132,8 +148,10 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                     real: 0.0,
                     imaginary: 0.0,
                 }),
-            ];
-            assembly.reduction = Some(build_phase_reduction(4, &[], &assembly.prescribed).unwrap());
+            ]);
+            assembly.reduction = Some(
+                build_phase_reduction(4, &[], &assembly.prescribed.canonical_values()).unwrap(),
+            );
             // Literal independent A*c for A=K+iI, not production assembly.apply.
             let source = if homogeneous {
                 [(0.0, 0.0); 4]
@@ -145,10 +163,14 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                     (0.0, 0.0),
                 ]
             };
-            assembly.source = source
-                .into_iter()
-                .map(|(real, imaginary)| ProjectionScalar { real, imaginary })
-                .collect();
+            assembly.source = runmat_types::physical::Quantity::try_from_descriptor(
+                crate::physics::acoustic::canonical::quantity_layout::equation_descriptor(2),
+                source
+                    .into_iter()
+                    .map(|(real, imaginary)| ProjectionScalar { real, imaginary })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
             for preconditioner in [
                 crate::contracts::SolverPreconditioner::None,
                 crate::contracts::SolverPreconditioner::Ilu0,
@@ -161,14 +183,18 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                     maximum_iterations: 16,
                 };
                 let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
-                assert!(prepared.rhs.iter().all(|value| *value == 0.0));
+                assert!(prepared
+                    .rhs
+                    .canonical_values()
+                    .iter()
+                    .all(|value| *value == 0.0));
                 let physical_reference = if homogeneous {
                     0.0
                 } else {
                     1.25_f64.sqrt() * amplitude
                 };
                 assert!(
-                    (prepared.residual_reference - physical_reference).abs()
+                    (prepared.residual_reference.canonical_value() - physical_reference).abs()
                         <= 2e-15 * physical_reference
                 );
                 let cold = prepared.solve(&assembly, policy, None).unwrap();
@@ -178,10 +204,17 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                     .solve(
                         &assembly,
                         policy,
-                        Some(&[3.0 * amplitude, -2.0 * amplitude]),
+                        Some(
+                            &runmat_types::physical::QuantityField::try_new(
+                                prepared.operator.input_layout().clone(),
+                                vec![3.0 * amplitude, -2.0 * amplitude],
+                            )
+                            .unwrap(),
+                        ),
                     )
                     .unwrap();
-                let error = result.real[1].hypot(result.imaginary[1]);
+                let error =
+                    result.real.canonical_values()[1].hypot(result.imaginary.canonical_values()[1]);
                 let reference = if homogeneous {
                     65.0_f64.sqrt() * amplitude
                 } else {
@@ -192,8 +225,8 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                 assert!((result.relative_residual - independent_relative).abs() < 1e-14);
                 assert!(independent_relative <= policy.relative_tolerance);
                 assert!(error / amplitude < 4e-12);
-                assert_eq!(result.real[0], fixed.0);
-                assert_eq!(result.imaginary[0], fixed.1);
+                assert_eq!(result.real.canonical_values()[0], fixed.0);
+                assert_eq!(result.imaginary.canonical_values()[0], fixed.1);
             }
         }
     }
@@ -221,7 +254,10 @@ const OMEGA: f64 = 0.7;
 const SOURCE: [Complex; 4] = [(0.9, -0.3), (-0.5, 1.2), (0.4, 0.7), (1.1, 0.2)];
 const PRESCRIBED: Complex = (0.35, -0.27);
 
-fn matrix(values: [[f64; 4]; 4], role: OperatorRole) -> RealSparseMatrix {
+fn matrix(
+    values: [[f64; 4]; 4],
+    role: OperatorRole,
+) -> crate::physics::acoustic::canonical::quantity_layout::PressureOperator {
     let mut assembler =
         RealSparseAssembler::square(4, role, MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE);
     for (row, values) in values.iter().enumerate() {
@@ -229,7 +265,16 @@ fn matrix(values: [[f64; 4]; 4], role: OperatorRole) -> RealSparseMatrix {
             assembler.add(row, column, *value);
         }
     }
-    assembler.finish().unwrap()
+    crate::physics::acoustic::canonical::quantity_layout::pressure_operator(
+        assembler.finish().unwrap(),
+        match role {
+            OperatorRole::Stiffness => 2,
+            OperatorRole::Mass => 0,
+            OperatorRole::Damping => 1,
+            _ => unreachable!(),
+        },
+    )
+    .unwrap()
 }
 
 fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
@@ -250,7 +295,7 @@ fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
         &[UnitPhaseRelation {
             primary: 0,
             secondary: 1,
-            phase_radians: phase,
+            phase_radians: runmat_types::physical::Angle::new(phase),
         }],
         &prescribed,
     )
@@ -261,17 +306,28 @@ fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
         stiffness: matrix(STIFFNESS, OperatorRole::Stiffness),
         mass: matrix(MASS, OperatorRole::Mass),
         impedance: matrix(IMPEDANCE, OperatorRole::Damping),
-        omega: OMEGA,
-        density: vec![1.0],
-        compressibility: vec![1.0],
-        source: SOURCE
-            .iter()
-            .map(|value| ProjectionScalar {
-                real: amplitude * value.0,
-                imaginary: amplitude * value.1,
-            })
-            .collect(),
-        prescribed,
+        derivative_rate: runmat_types::physical::AngularFrequency::new(OMEGA)
+            .phasor_derivative_rate(),
+        density:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::MassDensity, _>::new(
+                vec![1.0],
+            ),
+        compressibility: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Compressibility,
+            _,
+        >::new(vec![1.0]),
+        source: runmat_types::physical::Quantity::try_from_descriptor(
+            crate::physics::acoustic::canonical::quantity_layout::equation_descriptor(2),
+            SOURCE
+                .iter()
+                .map(|value| ProjectionScalar {
+                    real: amplitude * value.0,
+                    imaginary: amplitude * value.1,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        prescribed: runmat_types::physical::Quantity::new(prescribed),
         source_evidence: Vec::new(),
         incident_faces: Vec::new(),
         reduction: Some(reduction),
@@ -416,8 +472,8 @@ fn free_phased_helmholtz_pressure_matches_independent_complex_dense_lifting() {
             assert!(iterations > 0, "free phased DOFs must actually be solved");
             assert!(residual < 1e-11);
             for (node, expected) in expected.iter().enumerate() {
-                let error = (real[node] / amplitude - expected.0)
-                    .hypot(imaginary[node] / amplitude - expected.1);
+                let error = (real.canonical_values()[node] / amplitude - expected.0)
+                    .hypot(imaginary.canonical_values()[node] / amplitude - expected.1);
                 assert!(
                     error < 2e-11,
                     "phase={phase}, amplitude={amplitude}, node={node}, error={error}"
@@ -425,10 +481,15 @@ fn free_phased_helmholtz_pressure_matches_independent_complex_dense_lifting() {
             }
             let phased = multiply(
                 (phase.cos(), phase.sin()),
-                (real[0] / amplitude, imaginary[0] / amplitude),
+                (
+                    real.canonical_values()[0] / amplitude,
+                    imaginary.canonical_values()[0] / amplitude,
+                ),
             );
             assert!(
-                (real[1] / amplitude - phased.0).hypot(imaginary[1] / amplitude - phased.1) < 2e-12
+                (real.canonical_values()[1] / amplitude - phased.0)
+                    .hypot(imaginary.canonical_values()[1] / amplitude - phased.1)
+                    < 2e-12
             );
         }
     }

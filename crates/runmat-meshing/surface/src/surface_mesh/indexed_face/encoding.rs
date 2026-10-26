@@ -195,7 +195,8 @@ impl Serialize for FaceEncoding<'_> {
             quality: &'a QualityEncoding<'b>,
             boundary_segments: Boundaries<'a, 'b>,
             joined_chart_cuts: &'b [ExactFaceMeshJoinedCut],
-            maximum_chordal_deviation_m: f64,
+            #[serde(with = "runmat_types::physical::canonical_scalar")]
+            maximum_chordal_deviation_m: runmat_types::physical::Length,
             maximum_normal_deviation_rad: f64,
         }
         Face {
@@ -208,7 +209,9 @@ impl Serialize for FaceEncoding<'_> {
             quality: &self.quality,
             boundary_segments: Boundaries(self),
             joined_chart_cuts: self.mesh.joined_chart_cuts,
-            maximum_chordal_deviation_m: self.mesh.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                self.mesh.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_normal_deviation_rad: self.mesh.maximum_normal_deviation_rad,
         }
         .serialize(serializer)

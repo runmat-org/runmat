@@ -112,7 +112,8 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
             .iter()
             .find(|node| node.node_id == *node_id)
             .unwrap()
-            .coordinates_m;
+            .coordinates_m
+            .canonical_value();
         for component in 0..3 {
             face_center[component] += point[component] / 3.0;
         }
@@ -123,14 +124,20 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
         .iter_mut()
         .find(|node| node.node_id == 101)
         .unwrap();
-    root.coordinates_m = face_center;
+    root.coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new(face_center);
     root.solid_attachment = None;
     structural
         .nodes
         .iter_mut()
         .find(|node| node.node_id == 102)
         .unwrap()
-        .coordinates_m = [face_center[0] + 1.0, face_center[1], face_center[2]];
+        .coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([face_center[0] + 1.0, face_center[1], face_center[2]]);
     model
         .constraints
         .push(AnalysisConstraint::Structural(StructuralConstraint {
@@ -332,7 +339,7 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
 
 fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let (_, mesh) = model_and_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     (
         crate::fixtures::mixed_solid_beam_shell_model(attached_coordinates),
         mesh,
@@ -341,7 +348,7 @@ fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
 
 fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0].provenance.push(PersistentEntityId {
         kind: PersistentEntityKind::Vertex,
         source_topology_id: "beam_root".into(),

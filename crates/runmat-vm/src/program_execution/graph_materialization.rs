@@ -37,21 +37,20 @@ pub fn materialize_deferred_graph_call(
     }
     let captured = selected
         .snapshot(&call.invocation, limits)
-        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    if captured.selected_foreign_policies.len() != captured.retained_units.len() + 1 {
-        return Err(ExecutionServiceError::Failed(
-            "captured graph policy refs differ from exact selected units".into(),
-        ));
-    }
-    let primary_policy = captured.selected_foreign_policies[0];
-    let legacy_pure_policy_encoding = captured
+        .map_err(|error| match error {
+            runmat_runtime::execution::value_codec::ValueCodecError::Allocation {
+                source, ..
+            } => ExecutionServiceError::HostAllocation(source),
+            error => ExecutionServiceError::Failed(error.to_string()),
+        })?;
+    // Preserve the capture's canonical encoding. The shared request validator
+    // checks empty pure policy sets and exact ordered foreign-policy sets;
+    // materialization must not invent entries or erase malformed claims.
+    let primary_policy = captured
         .selected_foreign_policies
-        .iter()
-        .all(Option::is_none)
-        && captured
-            .selected_bundle_archives
-            .iter()
-            .all(Option::is_none);
+        .first()
+        .copied()
+        .flatten();
     let primary =
         runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&captured.primary_unit)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
@@ -144,11 +143,7 @@ pub fn materialize_deferred_graph_call(
             .into_iter()
             .map(|archive| archive.map(|bytes| bytes.as_ref().to_vec()))
             .collect(),
-        selected_foreign_policies: if legacy_pure_policy_encoding {
-            Vec::new()
-        } else {
-            captured.selected_foreign_policies
-        },
+        selected_foreign_policies: captured.selected_foreign_policies,
         retained_units: captured
             .retained_units
             .iter()

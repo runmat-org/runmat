@@ -116,7 +116,7 @@ fn excluded(
         return Ok(false);
     };
     let metric = prepared.metric_for_corners(corners, &candidate.region)?;
-    let points = [a, b, c, d].map(|i| topology.nodes[i as usize].coordinates_m);
+    let points = [a, b, c, d].map(|i| topology.nodes[i as usize].coordinates_m.canonical_value());
     Ok(math::tetrahedron_jacobian_upper_bound(points, metric)
         .is_some_and(|upper| upper < prepared.options().minimum_metric_scaled_jacobian))
 }

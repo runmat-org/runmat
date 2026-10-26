@@ -2,6 +2,8 @@ mod errors;
 mod identity;
 mod operands;
 mod preparation;
+mod text;
+use text::normalize_text;
 
 #[cfg(test)]
 mod tests;
@@ -182,54 +184,4 @@ fn integer_operator(operator: RelationalOperator) -> IntegerComparisonOp {
         RelationalOperator::GreaterThan => IntegerComparisonOp::Gt,
         RelationalOperator::GreaterThanOrEqual => IntegerComparisonOp::Ge,
     }
-}
-
-fn normalize_text(
-    lhs: Value,
-    rhs: Value,
-    operator: RelationalOperator,
-) -> crate::BuiltinResult<(Value, Value)> {
-    Ok(match (lhs, rhs) {
-        (Value::CharArray(chars), Value::String(text)) => (
-            Value::string(runmat_value::decode_utf16_code_units(chars.data()).map_err(
-                |source| {
-                    let mut error = runtime_error(operator, ComparisonError::InvalidInput);
-                    error.source = Some(Box::new(source));
-                    error
-                },
-            )?),
-            Value::String(text),
-        ),
-        (Value::String(text), Value::CharArray(chars)) => (
-            Value::String(text),
-            Value::string(runmat_value::decode_utf16_code_units(chars.data()).map_err(
-                |source| {
-                    let mut error = runtime_error(operator, ComparisonError::InvalidInput);
-                    error.source = Some(Box::new(source));
-                    error
-                },
-            )?),
-        ),
-        (Value::CharArray(chars), Value::StringArray(text)) => (
-            Value::string(runmat_value::decode_utf16_code_units(chars.data()).map_err(
-                |source| {
-                    let mut error = runtime_error(operator, ComparisonError::InvalidInput);
-                    error.source = Some(Box::new(source));
-                    error
-                },
-            )?),
-            Value::StringArray(text),
-        ),
-        (Value::StringArray(text), Value::CharArray(chars)) => (
-            Value::StringArray(text),
-            Value::string(runmat_value::decode_utf16_code_units(chars.data()).map_err(
-                |source| {
-                    let mut error = runtime_error(operator, ComparisonError::InvalidInput);
-                    error.source = Some(Box::new(source));
-                    error
-                },
-            )?),
-        ),
-        values => values,
-    })
 }

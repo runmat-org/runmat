@@ -22,6 +22,7 @@ use crate::execution::{CpuCooperationPolicy, ExecutionServiceError};
 mod native_view;
 mod retained;
 mod scalar;
+pub(crate) mod system;
 #[cfg(test)]
 pub(in crate::builtins::math::linalg) use retained::solve_dense;
 pub(in crate::builtins::math::linalg) use retained::{
@@ -171,6 +172,22 @@ impl<T: FaerFactorScalar> DenseFactor<T> {
         if source.len() != count {
             return Err(DenseFactorError::InvalidShape);
         }
+        Self::factor_indexed(order, runtime, async |index| source.read(index)).await
+    }
+
+    /// Build directly in the admitted LU backing. Numerical model owners do
+    /// not need a duplicate coefficient tensor just to call this factorizer.
+    async fn factor_indexed(
+        order: usize,
+        runtime: Option<&RuntimeContext>,
+        read: impl std::ops::AsyncFnMut(usize) -> Result<T, DenseFactorError>,
+    ) -> Result<Box<Self>, DenseFactorError> {
+        if order == 0 || order > isize::MAX as usize {
+            return Err(DenseFactorError::InvalidShape);
+        }
+        let count = order
+            .checked_mul(order)
+            .ok_or(DenseFactorError::InvalidShape)?;
         let (plan, scratch_req) = quote::<T>(order)?;
         let receipt = HostAllocationReceipt::admit(runtime, plan)?;
         // Only general dense factors need a stable heap owner. Quote its
@@ -225,14 +242,14 @@ impl<T: FaerFactorScalar> DenseFactor<T> {
             receipt,
             _metadata_claim: metadata_claim,
         });
-        owner.copy_input(source, runtime).await?;
+        owner.copy_indexed(read, runtime).await?;
         owner.run_factor(runtime).await?;
         Ok(owner)
     }
 
-    async fn copy_input(
+    async fn copy_indexed(
         &mut self,
-        source: input::Input<'_, T>,
+        mut read: impl std::ops::AsyncFnMut(usize) -> Result<T, DenseFactorError>,
         runtime: Option<&RuntimeContext>,
     ) -> Result<(), DenseFactorError> {
         let mut work = work::Work::new(runtime, self.receipt.as_ref())?;
@@ -241,7 +258,7 @@ impl<T: FaerFactorScalar> DenseFactor<T> {
             FactorBacking::Unbounded { lu, .. } => lu.as_mut_slice(),
         };
         for (index, target) in lu.iter_mut().enumerate() {
-            *target = source.read(index)?.to_factor();
+            *target = read(index).await?.to_factor();
             if !T::finite(*target) {
                 return Err(DenseFactorError::NonFinite);
             }

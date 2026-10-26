@@ -65,7 +65,10 @@ impl ValueCodecError {
         }
     }
 
-    pub(super) fn unsupported(path: &str, rule: impl Into<Cow<'static, str>>) -> Self {
+    pub(in crate::execution) fn unsupported(
+        path: &str,
+        rule: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self::Unsupported {
             path: path.to_owned(),
             rule: rule.into(),

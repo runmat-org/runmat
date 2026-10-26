@@ -60,14 +60,29 @@ pub(super) fn outputs_for_count(out_count: usize, eval: Evaluation) -> BuiltinRe
     }
 }
 
-pub(super) async fn gathered_tensor(value: Value) -> BuiltinResult<Tensor> {
-    let value = gather_if_needed_async(&value).await.map_err(|cause| {
-        let mut owner = invalid_argument(format!("ttest2: {cause}"));
-        owner.gpu_gather_retry = cause.gpu_gather_retry;
-        owner.span = cause.span;
-        owner.source = Some(Box::new(cause));
-        owner
-    })?;
+pub(super) async fn gathered_value(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    crate::dispatcher::gather_if_needed_in_context_async(&value, runtime)
+        .await
+        .map_err(|cause| {
+            if crate::runtime_error::error_has_control_cancellation_origin(&cause) {
+                return cause;
+            }
+            let mut owner = invalid_argument(format!("ttest2: {cause}"));
+            owner.gpu_gather_retry = cause.gpu_gather_retry;
+            owner.span = cause.span;
+            owner.source = Some(Box::new(cause));
+            owner
+        })
+}
+
+pub(super) async fn gathered_tensor(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Tensor> {
+    let value = gathered_value(value, runtime).await?;
     tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(invalid_argument)
 }
 
@@ -165,21 +180,10 @@ pub(super) fn scalar_usize(value: &Value) -> Option<usize> {
                 storage.value_at(0)?.try_to_usize()
             } else {
                 let value = tensor::tensor_values_f64(tensor).first().copied()?;
-                (value.is_finite()
-                    && value >= 0.0
-                    && value.fract() == 0.0
-                    && value < usize::MAX as f64)
-                    .then_some(value as usize)
+                runmat_types::decode_shape_dimension(value).ok()
             }
         }
-        Value::Num(value)
-            if value.is_finite()
-                && *value >= 0.0
-                && value.fract() == 0.0
-                && *value < usize::MAX as f64 =>
-        {
-            Some(*value as usize)
-        }
+        Value::Num(value) => runmat_types::decode_shape_dimension(*value).ok(),
         Value::Bool(value) => Some(usize::from(*value)),
         _ => None,
     }
@@ -196,9 +200,17 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
             .dim
             .unwrap_or_else(|| first_nonsingleton_dim(x.shape()))
     };
-    let rank = x.shape().len().max(y.shape().len()).max(dim + 1).max(2);
-    let x_shape = normalized_shape(x.shape(), rank);
-    let y_shape = normalized_shape(y.shape(), rank);
+    let rank = x
+        .shape()
+        .len()
+        .max(y.shape().len())
+        .max(
+            dim.checked_add(1)
+                .ok_or_else(|| invalid_argument("ttest2: dimension geometry overflow"))?,
+        )
+        .max(2);
+    let x_shape = normalized_shape(x.shape(), rank)?;
+    let y_shape = normalized_shape(y.shape(), rank)?;
     let out_shape = if vector_collapse {
         vec![1, 1]
     } else {
@@ -220,9 +232,9 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
         let result = if vector_collapse {
             evaluate_pair(&x_values, &y_values, options)
         } else {
-            let coords = coords_from_linear(linear, &out_shape);
-            let xs = sample_along_dim(&x_values, &x_shape, &coords, dim);
-            let ys = sample_along_dim(&y_values, &y_shape, &coords, dim);
+            let coords = coords_from_linear(linear, &out_shape)?;
+            let xs = sample_along_dim(&x_values, &x_shape, &coords, dim)?;
+            let ys = sample_along_dim(&y_values, &y_shape, &coords, dim)?;
             evaluate_pair(&xs, &ys, options)
         };
         h_data.push(u8::from(result.h));
@@ -238,7 +250,7 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
 
     let h = logical_output(h_data, out_shape.clone())?;
     let p = numeric_output(p_data, out_shape.clone())?;
-    let ci_shape = interval_shape(&out_shape, dim);
+    let ci_shape = interval_shape(&out_shape, dim)?;
     let ci = Value::Tensor(Tensor::new(ci_data, ci_shape).map_err(internal_error)?);
     let mut stats = runmat_value::UnboundedStructValueBuilder::new();
     stats.insert("tstat", numeric_output(tstat_data, out_shape.clone())?);
@@ -246,7 +258,7 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
     if options.vartype == VarType::Equal {
         stats.insert("sd", numeric_output(sd_equal_data, out_shape)?);
     } else {
-        let sd_shape = interval_shape(&out_shape, dim);
+        let sd_shape = interval_shape(&out_shape, dim)?;
         let mut sd_data = Vec::with_capacity(tests * 2);
         for idx in 0..tests {
             sd_data.push(sd_x_data[idx]);
@@ -284,7 +296,7 @@ fn compatible_output_shape(
     y_shape: &[usize],
     dim: usize,
 ) -> BuiltinResult<Vec<usize>> {
-    let mut out = Vec::with_capacity(x_shape.len());
+    let mut out = shape_buffer(x_shape.len())?;
     for axis in 0..x_shape.len() {
         if axis == dim {
             out.push(1);
@@ -442,10 +454,11 @@ fn variance(values: &[f64]) -> f64 {
         / (values.len() - 1) as f64
 }
 
-fn normalized_shape(shape: &[usize], rank: usize) -> Vec<usize> {
-    let mut out = shape.to_vec();
+fn normalized_shape(shape: &[usize], rank: usize) -> BuiltinResult<Vec<usize>> {
+    let mut out = shape_buffer(rank)?;
+    out.extend_from_slice(shape);
     out.resize(rank, 1);
-    out
+    Ok(out)
 }
 
 fn first_nonsingleton_dim(shape: &[usize]) -> usize {
@@ -456,24 +469,30 @@ fn is_nonempty_vector_shape(shape: &[usize]) -> bool {
     shape.iter().all(|dim| *dim > 0) && shape.iter().filter(|dim| **dim > 1).count() <= 1
 }
 
-fn sample_along_dim(data: &[f64], shape: &[usize], out_coords: &[usize], dim: usize) -> Vec<f64> {
+fn sample_along_dim(
+    data: &[f64],
+    shape: &[usize],
+    out_coords: &[usize],
+    dim: usize,
+) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::with_capacity(shape[dim]);
-    let mut coords = out_coords.to_vec();
+    let mut coords = shape_buffer(shape.len())?;
+    coords.extend_from_slice(out_coords);
     coords.resize(shape.len(), 0);
     for idx in 0..shape[dim] {
         coords[dim] = idx;
         values.push(data[linear_index(&coords, shape)]);
     }
-    values
+    Ok(values)
 }
 
-fn coords_from_linear(mut linear: usize, shape: &[usize]) -> Vec<usize> {
-    let mut coords = Vec::with_capacity(shape.len());
+fn coords_from_linear(mut linear: usize, shape: &[usize]) -> BuiltinResult<Vec<usize>> {
+    let mut coords = shape_buffer(shape.len())?;
     for dim in shape {
         coords.push(linear % *dim);
         linear /= *dim;
     }
-    coords
+    Ok(coords)
 }
 
 fn linear_index(coords: &[usize], shape: &[usize]) -> usize {
@@ -502,8 +521,9 @@ fn numeric_output(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
         .map_err(internal_error)
 }
 
-fn interval_shape(out_shape: &[usize], dim: usize) -> Vec<usize> {
-    let mut shape = vec![2];
+fn interval_shape(out_shape: &[usize], dim: usize) -> BuiltinResult<Vec<usize>> {
+    let mut shape = shape_buffer(out_shape.len().max(2))?;
+    shape.push(2);
     for (axis, extent) in out_shape.iter().copied().enumerate() {
         if axis != dim {
             shape.push(extent);
@@ -512,5 +532,13 @@ fn interval_shape(out_shape: &[usize], dim: usize) -> Vec<usize> {
     if shape.len() == 1 {
         shape.push(1);
     }
-    shape
+    Ok(shape)
+}
+
+fn shape_buffer(rank: usize) -> BuiltinResult<Vec<usize>> {
+    runmat_value::exact_capacity_vec(rank).map_err(|source| {
+        let mut error = internal_error("ttest2: dimension metadata allocation failed");
+        error.source = Some(Box::new(source));
+        error
+    })
 }

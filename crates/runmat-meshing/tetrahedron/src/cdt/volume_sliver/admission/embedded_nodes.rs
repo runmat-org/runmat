@@ -21,7 +21,7 @@ pub(super) fn contains_embedded_node(
         .enumerate()
         .map(|(index, node)| {
             checkpoint()?;
-            SpatialPoint::new(node.coordinates_m, index).ok_or_else(|| {
+            SpatialPoint::new(node.coordinates_m.canonical_value(), index).ok_or_else(|| {
                 error(
                     DelaunayVolumeSliverErrorKind::InvalidTopology,
                     "embedded-node index requires finite canonical coordinates",
@@ -32,17 +32,19 @@ pub(super) fn contains_embedded_node(
     let index = PointSpatialIndex::from_entries_with_checkpoint(entries, &mut checkpoint)?;
     for tetrahedron in &topology.tetrahedra {
         checkpoint()?;
-        let points = tetrahedron
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+        let points = tetrahedron.vertex_indices.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         let bounds = bounds(points);
         // The open region also prunes entire coplanar occupied branches.
         // Stream payloads into one inventory; preserve the original x/index
         // order for predicate failures and the first embedded-node verdict.
         let mut candidates = candidate_nodes(&index, bounds, &mut checkpoint)?;
         candidates.sort_unstable_by(|left, right| {
-            topology.nodes[*left].coordinates_m[0]
-                .total_cmp(&topology.nodes[*right].coordinates_m[0])
+            topology.nodes[*left].coordinates_m.canonical_value()[0]
+                .total_cmp(&topology.nodes[*right].coordinates_m.canonical_value()[0])
                 .then_with(|| left.cmp(right))
         });
         for node_index in candidates {
@@ -54,7 +56,7 @@ pub(super) fn contains_embedded_node(
             let mut interior = true;
             for replace in 0..4 {
                 let mut simplex = points;
-                simplex[replace] = node.coordinates_m;
+                simplex[replace] = node.coordinates_m.canonical_value();
                 let sign = orient3d(simplex).map_err(|failure| {
                     error(
                         DelaunayVolumeSliverErrorKind::InvalidTopology,

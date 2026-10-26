@@ -185,6 +185,11 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         numerical_suspension.insert(*function, flow.numerical_suspension);
         store.functions.push(FunctionAnalysis {
             function: program_function,
+            captures: capture_contract(
+                assembly,
+                *function,
+                program.captures.get(function).map_or(&[], Vec::as_slice),
+            ),
             callable: CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
                 capabilities: operation_capabilities.clone(),
@@ -269,6 +274,54 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.parallel = parallel;
     store.diagnostics.extend(diagnostics);
     store
+}
+
+fn capture_contract(
+    assembly: &MirAssembly,
+    function: runmat_types::FunctionId,
+    values: &[ValueFact],
+) -> Vec<super::FunctionCaptureAnalysis> {
+    use super::{FunctionCaptureAnalysis, FunctionCaptureSource};
+    if values.is_empty() {
+        return Vec::new();
+    }
+    // Ordinary scalar leaves pay no extra lexical traversal. Capturing bodies
+    // use the same projection that supplies both VM and Native execution.
+    let metadata = assembly.functions.get(&function);
+    let projection = assembly.lexical_environment_projection(function).ok();
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let source = match (
+                metadata.and_then(|metadata| metadata.captures.get(index)),
+                projection.as_ref(),
+            ) {
+                (Some(capture), Some(projection)) => {
+                    if projection
+                        .inherited_storage
+                        .iter()
+                        .any(|entry| entry.binding == capture.binding)
+                    {
+                        FunctionCaptureSource::CanonicalStorage(capture.binding)
+                    } else if projection.inherited.contains(&capture.binding) {
+                        FunctionCaptureSource::Lexical(capture.binding)
+                    } else if projection.transit.contains(&capture.binding) {
+                        // An anonymous snapshot and its descendant's live cell
+                        // are distinct authorities, not one certified value.
+                        FunctionCaptureSource::Unknown
+                    } else {
+                        FunctionCaptureSource::ByValue
+                    }
+                }
+                _ => FunctionCaptureSource::Unknown,
+            };
+            FunctionCaptureAnalysis {
+                source,
+                value: value.clone(),
+            }
+        })
+        .collect()
 }
 
 fn analysis_dependencies(store: &AnalysisStore) -> Vec<AnalysisDependency> {

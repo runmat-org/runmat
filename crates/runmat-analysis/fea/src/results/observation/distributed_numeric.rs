@@ -463,7 +463,13 @@ pub(super) fn discrete_reaction_contribution(
                 if observation.spec.quantity
                     == runmat_analysis_core::ObservationQuantity::ReactionForce =>
             {
-                cross(subtract(node.coordinates_m, about.meters), vector)
+                cross(
+                    subtract(
+                        node.coordinates_m.canonical_value(),
+                        about.canonical_value(),
+                    ),
+                    vector,
+                )
             }
             SpatialReduction::Moment { .. } => {
                 return Err(ObservationError::Invalid(
@@ -595,7 +601,7 @@ fn accumulate_volume_reduction(
         SpatialReduction::Moment { about } => {
             let force = weighted_vector_components(projected, weight)?;
             accumulator.add_resultant(
-                &cross_vector_components(subtract(position_m, about.meters), &force)?,
+                &cross_vector_components(subtract(position_m, about.canonical_value()), &force)?,
                 weight,
             )
         }
@@ -623,7 +629,7 @@ fn accumulate_boundary_reduction(
             )?;
             let value = match operation {
                 SpatialReduction::Moment { about } => {
-                    cross_vector_components(subtract(position_m, about.meters), &force)?
+                    cross_vector_components(subtract(position_m, about.canonical_value()), &force)?
                 }
                 SpatialReduction::Resultant => force,
                 _ => unreachable!(),

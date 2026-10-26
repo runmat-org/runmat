@@ -315,11 +315,12 @@ pub use buckling_task::{
     ImportedStructuralBucklingResult, PreparedStructuralBucklingTask,
     StructuralBucklingTaskPreparation,
 };
+pub use callable::graph::admit_graph_callable_signal_generator;
 pub use callable::{
     admit_callable_signal_generator, admit_named_random_spectrum_generator,
     admit_named_response_spectrum_generator, admit_named_signal_generator,
     AdmittedGeneratorInvocation, AdmittedNumericalGenerator, AdmittedSignalGenerator,
-    NumericalGeneratorKind,
+    FrozenGeneratorInputs, NumericalGeneratorKind,
 };
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult, CoordinatorRetentionLimit};
 pub use field_recovery::{
@@ -505,11 +506,11 @@ pub use signal_materialization::{
     GeneratorChunkOutput, PlannedGenerator,
 };
 pub use signal_program::{
-    build_generator_task_submission, prepare_generator_descriptor, prepare_generator_program,
-    prepare_signal_materialization, GeneratorExecutionContext, GeneratorProgramAdmission,
-    GeneratorProgramAdmissionRef, PreparedGeneratorChunk, PreparedGeneratorProgram,
-    PreparedSignalMaterialization, SignalMaterializationExpectation, GENERATOR_EXECUTION_MODE,
-    GENERATOR_TARGET_PROFILE,
+    build_generator_task_submission, generator_chunk_output_from_success,
+    prepare_generator_descriptor, prepare_generator_program, prepare_signal_materialization,
+    GeneratorExecutionContext, GeneratorProgramAdmission, GeneratorProgramAdmissionRef,
+    PreparedGeneratorChunk, PreparedGeneratorProgram, PreparedSignalMaterialization,
+    SignalMaterializationExpectation, GENERATOR_EXECUTION_MODE, GENERATOR_TARGET_PROFILE,
 };
 pub use spectral_materialization::{
     canonical_materialized_random_spectrum_bytes, canonical_materialized_response_spectrum_bytes,
@@ -642,3 +643,11 @@ pub use nonlinear_field_recovery::{
     require_nonlinear_recovery_decode_budget, NonlinearFieldRecoveryPreparation,
     PreparedNonlinearFieldRecovery,
 };
+
+mod serial_kernel;
+pub use serial_kernel::{SerialStructuralAnalysisKernel,SerialAnalysisHost,execute_serial_structural_sequence,execute_structural_linear_kernel,execute_state_publication_kernel};
+
+/// Source-bound artifact authority shared by checked-source execution hosts.
+pub fn checked_fea_artifact_access(authority:&str)->runmat_execution_artifact::ArtifactAccess {
+    runmat_execution_artifact::ArtifactAccess {authorization_scope:authority.to_owned(),encryption_context:runmat_execution::Digest::sha256([b"runmat-typed-fea-access/v1\0".as_slice(),authority.as_bytes()].concat())}
+}

@@ -167,7 +167,7 @@ fn cold_complex_acoustic_fields_use_generic_domains_and_partition_exactly() {
             .iter()
             .zip(values.chunks_exact(2))
             .map(|(node, p)| {
-                let phase = std::f64::consts::PI * 0.2 * node.coordinates_m[0];
+                let phase = std::f64::consts::PI * 0.2 * node.coordinates_m.canonical_value()[0];
                 (p[0] - phase.cos()).powi(2) + (p[1] + phase.sin()).powi(2)
             })
             .sum::<f64>()
@@ -204,7 +204,8 @@ fn cold_complex_acoustic_fields_use_generic_domains_and_partition_exactly() {
                     .iter()
                     .find(|node| node.node_id == element.node_ids[corner])
                     .unwrap()
-                    .coordinates_m[0]
+                    .coordinates_m
+                    .canonical_value()[0]
             });
             let exact = mean_plane_wave(xs, std::f64::consts::PI * 0.2);
             velocity_error += (stored[0] - exact[0] / 6.0).powi(2)

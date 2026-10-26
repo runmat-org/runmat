@@ -27,9 +27,7 @@ async fn invoke(
     request: &ProgramExecutionRequest,
     execution: Option<Rc<dyn RuntimeExecutionServices>>,
 ) -> Result<Vec<runmat_execution::value::ValuePayload>, String> {
-    request
-        .validate_for_portable_host()
-        .map_err(|error| error.to_string())?;
+    super::admission::validate_browser_admission(request)?;
     let envelope = request
         .artifact
         .executable_unit()
@@ -57,6 +55,12 @@ async fn invoke(
     if let Some(execution) = execution {
         session.install_execution_services(execution);
     }
+    // Core session projections share this actual invocation state. Retain the
+    // original assignment/job through execution AND portable output encoding.
+    let selected_runtime =
+        session.execution_runtime_context(request.recipe.program_revision.clone());
+    let _assignment = selected_runtime.enter_execution_assignment(request.assignment.clone());
+    let _job = selected_runtime.enter_execution_job(request.job_id);
     let arguments = request
         .arguments
         .iter()

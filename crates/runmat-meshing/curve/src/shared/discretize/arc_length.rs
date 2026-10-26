@@ -22,10 +22,10 @@ pub(crate) fn world_arc_length(
             .arc_length_m(
                 &edge.curve_evaluator_id,
                 range,
-                absolute_error_m / scale,
+                runmat_geometry_core::physical::Length::new(absolute_error_m / scale),
                 control,
             )
-            .map(|length| length * scale)
+            .map(|length| length.canonical_value() * scale)
             .map_err(|error| geometry_error(edge, error));
     }
     let speed = |parameter| {
@@ -35,7 +35,13 @@ pub(crate) fn world_arc_length(
         let derivatives = curves
             .derivatives(&edge.curve_evaluator_id, parameter, control)
             .map_err(|error| geometry_error(edge, error))?;
-        let value = norm(transform.transform_vector(derivatives.first_m));
+        let value = norm(
+            transform.transform_vector(
+                derivatives
+                    .first_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
+        );
         if !value.is_finite() || value <= 0.0 {
             return Err(edge_error(
                 edge,

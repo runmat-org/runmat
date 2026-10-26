@@ -3,7 +3,7 @@ use crate::{
     FeaDiagnosticPhase, GeometryInspection, GeometryInspectionRequest, GeometryInspectionSource,
     LogicalSourcePath,
 };
-use runmat_parser::fea::{FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, FeaStatementKind};
+use runmat_fea_syntax::{FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, FeaStatementKind};
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
@@ -83,15 +83,15 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
 }
 
 fn imported_geometry_source(
-    declaration: &runmat_parser::fea::FeaDeclaration,
-) -> Option<(String, runmat_geometry_core::UnitSystem, Span)> {
+    declaration: &runmat_fea_syntax::FeaDeclaration,
+) -> Option<(String, Option<runmat_geometry_core::LengthUnit>, Span)> {
     // Omitted `units` asks the host for the file's own declared length unit.
     let authored_units = declaration.body.statements.iter().any(|statement| {
         matches!(&statement.kind, FeaStatementKind::Assignment { target, .. }
             if target.segments.len() == 1 && target.segments[0].text == "units")
     });
     let units = if !authored_units {
-        Some(runmat_geometry_core::UnitSystem::Unspecified)
+        None
     } else {
         declaration.body.statements.iter().find_map(|statement| {
             let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
@@ -107,15 +107,18 @@ fn imported_geometry_source(
                 return None;
             };
             match unit.text.as_str() {
-                "m" | "meter" | "meters" => Some(runmat_geometry_core::UnitSystem::Meter),
+                "m" | "meter" | "meters" => Some(runmat_geometry_core::LengthUnit::Meter),
                 "mm" | "millimeter" | "millimeters" => {
-                    Some(runmat_geometry_core::UnitSystem::Millimeter)
+                    Some(runmat_geometry_core::LengthUnit::Millimeter)
                 }
-                "in" | "inch" | "inches" => Some(runmat_geometry_core::UnitSystem::Inch),
+                "in" | "inch" | "inches" => Some(runmat_geometry_core::LengthUnit::Inch),
                 _ => None,
             }
         })
-    }?;
+    };
+    if authored_units && units.is_none() {
+        return None;
+    }
     declaration.body.statements.iter().find_map(|statement| {
         let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
             return None;

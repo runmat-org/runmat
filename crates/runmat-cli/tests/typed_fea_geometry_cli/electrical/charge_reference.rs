@@ -11,7 +11,7 @@ pub(super) fn verify(
     let response = completion.result.response();
     assert_eq!(fields[0], response.potential_v);
     for (actual, node) in fields[0].iter().zip(&projection.nodes) {
-        let x = node.coordinates_m[0];
+        let x = node.coordinates_m.canonical_value()[0];
         near(*actual, gauge + sign * x * (1.0 - x), 1.0);
     }
     for (field, element) in fields[1].chunks_exact(3).zip(&projection.elements) {

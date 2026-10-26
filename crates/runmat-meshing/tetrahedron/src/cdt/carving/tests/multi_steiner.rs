@@ -232,7 +232,10 @@ fn constraints() -> ([[f64; 3]; 18], DelaunayConstraints) {
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: segment_vertices

@@ -77,8 +77,13 @@ pub(super) fn validate_shared_curve_mesh_with_cancellation(
         for node in &curve.nodes {
             checkpoint(cancellation)?;
             if coordinates_by_node
-                .insert(node.node_id, node.coordinates_m.map(f64::to_bits))
-                .is_some_and(|previous| previous != node.coordinates_m.map(f64::to_bits))
+                .insert(
+                    node.node_id,
+                    node.coordinates_m.canonical_value().map(f64::to_bits),
+                )
+                .is_some_and(|previous| {
+                    previous != node.coordinates_m.canonical_value().map(f64::to_bits)
+                })
             {
                 return Err(invalid(
                     "shared curve node coordinates",
@@ -142,9 +147,13 @@ fn validate_curve(
         if (duplicate && !closes_at_source_vertex)
             || node.node_id != expected_node_id
             || !node.parameter.is_finite()
-            || !node.arc_length_m.is_finite()
-            || node.arc_length_m < 0.0
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || !node.arc_length_m.canonical_value().is_finite()
+            || node.arc_length_m.canonical_value() < 0.0
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
         {
             return Err(invalid(
                 "shared curve node",
@@ -161,8 +170,9 @@ fn validate_curve(
             let canonical = topology
                 .world_transform_for(vertex_id)
                 .map_err(|error| invalid("shared curve vertex transform", error.to_string()))?
-                .transform_point(vertex.point_m);
-            if canonical.map(f64::to_bits) != node.coordinates_m.map(f64::to_bits) {
+                .transform_point(vertex.point_m.canonical_value());
+            if canonical.map(f64::to_bits) != node.coordinates_m.canonical_value().map(f64::to_bits)
+            {
                 return Err(invalid(
                     "shared curve vertex coordinate",
                     "endpoint coordinates must equal the authoritative world-space vertex",
@@ -172,7 +182,8 @@ fn validate_curve(
         if index > 0
             && (curve.nodes[index - 1].parameter >= node.parameter
                 || (!edge.is_degenerate
-                    && curve.nodes[index - 1].arc_length_m >= node.arc_length_m))
+                    && curve.nodes[index - 1].arc_length_m.canonical_value()
+                        >= node.arc_length_m.canonical_value()))
         {
             return Err(invalid(
                 "shared curve node order",
@@ -183,9 +194,12 @@ fn validate_curve(
     if edge.is_degenerate {
         for node in &curve.nodes {
             checkpoint(cancellation)?;
-            if node.arc_length_m.to_bits() != 0
-                || node.coordinates_m.map(f64::to_bits)
-                    != curve.nodes[0].coordinates_m.map(f64::to_bits)
+            if node.arc_length_m.canonical_value().to_bits() != 0
+                || node.coordinates_m.canonical_value().map(f64::to_bits)
+                    != curve.nodes[0]
+                        .coordinates_m
+                        .canonical_value()
+                        .map(f64::to_bits)
             {
                 return Err(invalid(
                     "degenerate shared curve",
@@ -203,7 +217,7 @@ fn validate_curve(
     let last = curve.nodes.last().expect("node count checked");
     if first.parameter != curve.parameter_range.start
         || last.parameter != curve.parameter_range.end
-        || first.arc_length_m != 0.0
+        || first.arc_length_m.canonical_value() != 0.0
         || first.source_vertex_id != edge.start_vertex_id
         || last.source_vertex_id != edge.end_vertex_id
         || interior_vertex
@@ -330,13 +344,13 @@ fn validate_resolution(
     is_degenerate: bool,
 ) -> Result<(), SharedCurveError> {
     let requested_values = [
-        requested.maximum_chordal_deviation_m,
+        requested.maximum_chordal_deviation_m.canonical_value(),
         requested.maximum_tangent_change_rad,
         requested.minimum_metric_edge_length,
         requested.maximum_metric_edge_length,
     ];
     let achieved_values = [
-        achieved.maximum_chordal_deviation_m,
+        achieved.maximum_chordal_deviation_m.canonical_value(),
         achieved.maximum_tangent_change_rad,
         achieved.minimum_metric_edge_length,
         achieved.maximum_metric_edge_length,
@@ -367,7 +381,8 @@ fn validate_resolution(
         || achieved.minimum_metric_edge_length <= 0.0
         || achieved.minimum_metric_edge_length > achieved.maximum_metric_edge_length
         || achieved.minimum_metric_edge_length < requested.minimum_metric_edge_length
-        || achieved.maximum_chordal_deviation_m > requested.maximum_chordal_deviation_m
+        || achieved.maximum_chordal_deviation_m.canonical_value()
+            > requested.maximum_chordal_deviation_m.canonical_value()
         || achieved.maximum_tangent_change_rad > requested.maximum_tangent_change_rad
         || achieved.maximum_metric_edge_length > requested.maximum_metric_edge_length
     {

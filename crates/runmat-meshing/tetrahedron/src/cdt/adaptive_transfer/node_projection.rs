@@ -41,8 +41,11 @@ pub(super) fn build_node_transfers(
     elements.sort_by_key(|e| e.stable_identity);
     for element in &elements {
         if element.order == ElementOrder::Tet10 {
-            let p: [[f64; 3]; 4] =
-                std::array::from_fn(|i| source_nodes[&element.node_ids[i]].coordinates_m);
+            let p: [[f64; 3]; 4] = std::array::from_fn(|i| {
+                source_nodes[&element.node_ids[i]]
+                    .coordinates_m
+                    .canonical_value()
+            });
             let scale = (1..4)
                 .flat_map(|i| (0..3).map(move |a| (p[i][a] - p[0][a]).abs()))
                 .fold(0.0_f64, f64::max);
@@ -54,7 +57,9 @@ pub(super) fn build_node_transfers(
             }
             for (i, [a, b]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
                 work.predicate()?;
-                let mid = source_nodes[&element.node_ids[4 + i]].coordinates_m;
+                let mid = source_nodes[&element.node_ids[4 + i]]
+                    .coordinates_m
+                    .canonical_value();
                 if (0..3).any(|axis| {
                     (mid[axis] - 0.5 * (p[a][axis] + p[b][axis])).abs()
                         > 128.0 * f64::EPSILON * scale
@@ -74,8 +79,11 @@ pub(super) fn build_node_transfers(
         }
         let mut found = None;
         for element in &elements {
-            let p: [[f64; 3]; 4] =
-                std::array::from_fn(|i| source_nodes[&element.node_ids[i]].coordinates_m);
+            let p: [[f64; 3]; 4] = std::array::from_fn(|i| {
+                source_nodes[&element.node_ids[i]]
+                    .coordinates_m
+                    .canonical_value()
+            });
             // Artifact validation owns exact orientation. This floating triple
             // product has the opposite sign to orient3d; barycentric ratios
             // preserve that common sign rather than imposing another convention.
@@ -91,7 +99,7 @@ pub(super) fn build_node_transfers(
             for (i, value) in bary.iter_mut().enumerate() {
                 work.predicate()?;
                 let mut sample = p;
-                sample[i] = node.coordinates_m;
+                sample[i] = node.coordinates_m.canonical_value();
                 match orient3d(sample).map_err(|e| {
                     error(
                         Kind::ProjectionFailure,

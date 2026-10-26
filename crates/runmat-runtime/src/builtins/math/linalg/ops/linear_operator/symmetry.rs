@@ -72,7 +72,7 @@ async fn check<S: SourceScalar>(
     Ok(true)
 }
 impl LinearOperator<'_> {
-    pub(in crate::builtins::math::linalg) async fn is_hermitian(
+    pub(crate) async fn is_hermitian(
         &self,
         runtime: Option<&RuntimeContext>,
     ) -> Result<bool, CooperativeOperatorError> {

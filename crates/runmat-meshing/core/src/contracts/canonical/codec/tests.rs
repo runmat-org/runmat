@@ -133,11 +133,11 @@ fn domains_prevent_equal_values_from_cross_contract_decoding() {
     assert_eq!(error.field, "canonical decoding domain");
 
     let tolerance = GeometryTolerancePolicy {
-        source_tolerance_m: 1.0e-8,
-        absolute_floor_m: 1.0e-10,
+        source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+        absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
         model_relative_term: 1.0e-9,
-        requested_deviation_m: 1.0e-5,
-        maximum_healing_displacement_m: 1.0e-6,
+        requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
     };
     assert_ne!(
         tolerance.canonical_digest().unwrap(),
@@ -328,7 +328,17 @@ fn artifact_digest_is_sealed_over_payload_and_detects_tampering() {
     assert_eq!(decoded, artifact);
 
     let mut tampered = artifact.clone();
-    tampered.topology.nodes[0].coordinates_m[0] = 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         tampered.validate_canonical().unwrap_err().field,
         "artifact.canonical_digest"

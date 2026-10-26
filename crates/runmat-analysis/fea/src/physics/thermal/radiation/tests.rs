@@ -10,7 +10,7 @@ fn fixture(order: ElementOrder) -> (AnalysisProjection, ProjectedBoundaryFace) {
         .find(|face| {
             face.node_indices
                 .iter()
-                .all(|&node| projection.nodes[node].coordinates_m[2] == 0.0)
+                .all(|&node| projection.nodes[node].coordinates_m.canonical_value()[2] == 0.0)
         })
         .unwrap()
         .clone();
@@ -132,7 +132,7 @@ fn flat_tri6_quadratic_temperature_integrates_degree_ten_form() {
         .node_indices
         .iter()
         .map(|&node| {
-            let x = projection.nodes[node].coordinates_m[0];
+            let x = projection.nodes[node].coordinates_m.canonical_value()[0];
             300.0 + 100.0 * x * x
         })
         .collect::<Vec<_>>();
@@ -184,8 +184,18 @@ fn curved_tri6_constant_flux_matches_analytic_parabolic_surface_area() {
     let a = 0.2;
     // Isoparametric quadratic graph z=a*x^2 over the unit right triangle.
     for &node in &face.node_indices {
-        let x = projection.nodes[node].coordinates_m[0];
-        projection.nodes[node].coordinates_m[2] = a * x * x;
+        let x = projection.nodes[node].coordinates_m.canonical_value()[0];
+        {
+            let quantity_change = a * x * x;
+            let quantity_index = 2;
+            let quantity_slot = &mut projection.nodes[node].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
     }
     let b = 2.0_f64 * a;
     let area = 0.5 * ((1.0 + b * b).sqrt() + b.asinh() / b)

@@ -32,10 +32,18 @@ export function collectExamples(source, output, validate, requirements, snapshot
         // Reject undeclared local geometry/import dependencies before offering a complete package.
         for (const file of files.filter(file => file.path.endsWith(".fea"))) {
             const base = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
-            for (const match of file.content.matchAll(/(?:file\s*=\s*|import\s+)["']([^"']+)["']/g)) {
+            for (const match of file.content.matchAll(/(?:file\s*=\s*|import\s+(?:\w+\s+)*)["']([^"']+)["']/g)) {
                 const target = base + match[1].replace(/^\.\//, "");
                 if (!files.some(file => file.path === target))
                     throw new Error(`Undeclared example dependency: ${target}`);
+                if (/file\s*=/.test(match[0]) && /select\s+name\s+"/.test(file.content)) {
+                    const slash = target.lastIndexOf("/");
+                    const metadata = `${slash < 0 ? "" : target.slice(0, slash + 1)}.runmat/geometry/${target.slice(slash + 1)}.json`;
+                    const saved = files.find(file => file.path === metadata);
+                    if (!saved) throw new Error(`Undeclared CAD selection metadata: ${metadata}`);
+                    if (JSON.stringify(JSON.parse(saved.content).source_digest) !== JSON.stringify([...Buffer.from(hash(files.find(file => file.path === target).content), "hex")]))
+                        throw new Error(`Stale CAD selection metadata: ${metadata}`);
+                }
             }
         }
         const snapshot_digest = example.snapshot ? snapshotIdentity(snapshotsRoot, example.id) : undefined;

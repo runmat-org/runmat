@@ -1,12 +1,13 @@
 use super::*;
-mod ownership;
 mod admitted;
-mod integer_conversion;
-mod pol2cart;
 mod admitted_owners;
-mod receipt;
 #[cfg(feature = "wgpu")]
 mod floating_cast;
+mod host_fallback;
+mod integer_conversion;
+mod ownership;
+mod pol2cart;
+mod receipt;
 use crate::placement::{begin_trace, LocalPlacementFeedback};
 use runmat_execution::{
     Digest, PlacementFeedback, PlacementPlanRequest, PlacementRevision, PlacementSignature,
@@ -149,6 +150,7 @@ fn known_fixture_resources(
 
 #[derive(Default)]
 struct Probe {
+    session: crate::placement::PlacementSession,
     provider: Cell<bool>,
     requests: RefCell<Vec<PlacementPlanRequest>>,
     feedback: RefCell<Vec<PlacementFeedback>>,
@@ -172,6 +174,20 @@ impl RuntimeGraphObservationPermit for LifecycleFixturePermit {
     }
 }
 impl RuntimePlacementService for Probe {
+    fn whole_work_runtime_binding_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        binding: runmat_builtins::BuiltinBindingIdentity,
+        registration: Digest,
+    ) -> Option<PlacementRevision> {
+        RuntimePlacementService::whole_work_runtime_binding_session_revision(
+            &self.session,
+            program,
+            binding,
+            registration,
+        )
+    }
+
     fn plan_with_observation_permit(
         &self,
         request: PlacementPlanRequest,

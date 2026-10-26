@@ -14,22 +14,22 @@ use runmat_analysis_language::{
 };
 use runmat_geometry_core::{GeometryRegionRole, ResolvedGeometryRegion};
 use runmat_meshing_core::{fixtures, CanonicalMeshingContract, ElementOrder, StableDigest};
-use runmat_types::QuantityDimension;
+use runmat_types::PhysicalDimension;
 
 const SOURCE: &str = r#"
 geometry part {
     file = "./part.step"
     units = m
     region body : solid {
-        select id "solid_000001"
+        select persistent_id "BODY_ID"
         expect exactly_one
     }
     region support : face {
-        select id "face_000001"
+        select persistent_id "SUPPORT_ID"
         expect exactly_one
     }
     region loaded : face {
-        select id "face_000002"
+        select persistent_id "LOAD_ID"
         expect exactly_one
     }
 }
@@ -85,6 +85,9 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
     let host = TestHost::default().with_geometry_inspection(
         "project/part.step",
         GeometryInspection {
+            preview_extent_m: None,
+            named_selections: None,
+            unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
             capabilities: vec![
@@ -95,10 +98,23 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
             resolved_units: None,
         },
     );
+    let source = SOURCE
+        .replace(
+            "BODY_ID",
+            &topology.solids[0].id.analysis_selection_id().unwrap(),
+        )
+        .replace(
+            "SUPPORT_ID",
+            &topology.faces[0].id.analysis_selection_id().unwrap(),
+        )
+        .replace(
+            "LOAD_ID",
+            &topology.faces[1].id.analysis_selection_id().unwrap(),
+        );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
-            root: source_module("project/main.fea", SOURCE, 1),
+            root: source_module("project/main.fea", &source, 1),
         },
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
@@ -156,10 +172,14 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
                 &resolved.geometry,
                 &[AuthoredStudyInputBinding {
                     input_id: "commanded_load".into(),
-                    value: AuthoredInputValue::Quantity {
-                        dimension: QuantityDimension::Force,
-                        value_si: newtons,
-                    },
+                    value: AuthoredInputValue::Quantity(
+                        runmat_types::physical::DimensionedScalar::try_from_dimension(
+                            PhysicalDimension::FORCE,
+                            None,
+                            newtons,
+                        )
+                        .unwrap(),
+                    ),
                 }],
             )
             .unwrap();
@@ -248,7 +268,7 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
             for axis in 0..3 {
                 reaction_force[axis] += force[axis];
             }
-            let [x, y, z] = node.coordinates_m;
+            let [x, y, z] = node.coordinates_m.canonical_value();
             reaction_moment[0] += y * force[2] - z * force[1];
             reaction_moment[1] += z * force[0] - x * force[2];
             reaction_moment[2] += x * force[1] - y * force[0];

@@ -108,6 +108,14 @@ const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Output array.",
 }];
+const ZEROS_LIKE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Numeric output selected by the prototype, or the object creation method's result.",
+}];
 const ZEROS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
 const ZEROS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
@@ -210,7 +218,7 @@ const ZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "A = zeros(..., \"like\", prototype)",
         inputs: &ZEROS_SIG_LIKE_INPUTS,
-        outputs: &ZEROS_OUTPUT,
+        outputs: &ZEROS_LIKE_OUTPUT,
     },
 ];
 pub const ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

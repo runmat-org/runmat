@@ -260,8 +260,8 @@ model driven {
         reconstruction,
     } = &motion.translations[0].history;
     assert_eq!(acceleration.0 .0, "base_acceleration");
-    assert_eq!(initial_displacement.meters, 0.0);
-    assert_eq!(initial_velocity.meters_per_second, 0.0);
+    assert_eq!(initial_displacement.canonical_value(), 0.0);
+    assert_eq!(initial_velocity.canonical_value(), 0.0);
     assert_eq!(
         *reconstruction,
         runmat_analysis_core::StructuralMotionReconstruction::PiecewiseLinearAccelerationExact

@@ -1,8 +1,11 @@
+geometry selection.
+// Engineering physics belongs in the importing study.
+
 geometry heatsink {
     file = "./geometry/electronics-heatsink.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
-    region heater_face : face { select id "face_000001"; expect exactly_one }
+    region body : solid { select name "body"; expect exactly_one }
+    region heater_face : face { select name "heater_face"; expect exactly_one }
     region outer_surface : face { select result; expect one_or_more }
 }
 mesh heatsink on geometry.heatsink {

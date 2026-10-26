@@ -91,6 +91,7 @@ fn analysis() -> FunctionAnalysis {
     let output = geometry_output();
     FunctionAnalysis {
         function: ProgramFunctionId(7),
+        captures: Vec::new(),
         callable: CallableFact {
             capabilities: CapabilitySet::default(),
             identity: None,

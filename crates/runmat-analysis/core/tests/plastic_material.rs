@@ -9,11 +9,11 @@ fn material(yield_stress_pa: f64, isotropic_hardening_modulus_pa: f64) -> Materi
         material_id: "steel".into(),
         name: "Steel".into(),
         provenance: MaterialProvenance::Authored,
-        mass_density_kg_per_m3: None,
+        mass_density_kg_per_m3: (None).map(runmat_types::physical::MassDensity::new),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200e9),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
             },
         )),
         damping: None,
@@ -21,8 +21,10 @@ fn material(yield_stress_pa: f64, isotropic_hardening_modulus_pa: f64) -> Materi
         acoustic: None,
         electrical: None,
         plastic: Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa,
-            isotropic_hardening_modulus_pa,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(yield_stress_pa),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(
+                isotropic_hardening_modulus_pa,
+            ),
         }),
     }
 }
@@ -44,12 +46,12 @@ fn j2_requires_finite_dimensional_parameters_and_isotropic_elasticity() {
     let mut wrong_elasticity = material(250e6, 1e9);
     wrong_elasticity.elasticity = Some(MaterialElasticityModel::OrthotropicLamina(
         MaterialOrthotropicLaminaModel {
-            longitudinal_modulus_pa: 200e9,
-            transverse_modulus_pa: 200e9,
-            major_poisson_ratio: 0.3,
-            in_plane_shear_modulus_pa: 80e9,
-            transverse_shear_modulus_13_pa: 80e9,
-            transverse_shear_modulus_23_pa: 80e9,
+            longitudinal_modulus_pa: runmat_types::physical::YoungsModulus::new(200e9),
+            transverse_modulus_pa: runmat_types::physical::YoungsModulus::new(200e9),
+            major_poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
+            in_plane_shear_modulus_pa: runmat_types::physical::ShearModulus::new(80e9),
+            transverse_shear_modulus_13_pa: runmat_types::physical::ShearModulus::new(80e9),
+            transverse_shear_modulus_23_pa: runmat_types::physical::ShearModulus::new(80e9),
         },
     ));
     assert!(validate_material_definitions(&[wrong_elasticity]).is_err());
@@ -57,8 +59,8 @@ fn j2_requires_finite_dimensional_parameters_and_isotropic_elasticity() {
         let mut invalid = material(250e6, 1e9);
         invalid.elasticity = Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
-                youngs_modulus_pa: youngs,
-                poisson_ratio: poisson,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(youngs),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(poisson),
             },
         ));
         assert!(validate_material_definitions(&[invalid]).is_err());

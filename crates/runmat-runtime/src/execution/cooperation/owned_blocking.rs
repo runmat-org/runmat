@@ -8,6 +8,19 @@ use crate::context::{
 use crate::execution::blocking_cpu::OwnedCpuJob;
 use crate::execution::blocking_cpu::RuntimeBlockingCpuService;
 
+/// Values transferred to the physical owned CPU lane. Native jobs cross a
+/// thread boundary; the browser lane executes inline on its original worker.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait OwnedCpuPayload: Send + 'static {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + 'static> OwnedCpuPayload for T {}
+
+/// Browser payloads remain local; this does not grant native thread transport.
+#[cfg(target_arch = "wasm32")]
+pub trait OwnedCpuPayload: 'static {}
+#[cfg(target_arch = "wasm32")]
+impl<T: 'static> OwnedCpuPayload for T {}
+
 impl CpuCooperationBudget {
     /// Ordinary embedding adapter. Missing context is not a finite grant.
     pub async fn run_owned_blocking<T, G, F>(
@@ -17,9 +30,9 @@ impl CpuCooperationBudget {
         work: F,
     ) -> Result<T, ExecutionServiceError>
     where
-        T: Send + 'static,
-        G: Send + 'static,
-        F: FnOnce() -> T + Send + 'static,
+        T: OwnedCpuPayload,
+        G: OwnedCpuPayload,
+        F: FnOnce() -> T + OwnedCpuPayload,
     {
         let runtime = crate::context::legacy::active();
         if HostAllocationReceipt::policy(runtime.as_ref())
@@ -44,9 +57,9 @@ impl CpuCooperationBudget {
         work: F,
     ) -> Result<T, ExecutionServiceError>
     where
-        T: Send + 'static,
-        G: Send + 'static,
-        F: FnOnce() -> T + Send + 'static,
+        T: OwnedCpuPayload,
+        G: OwnedCpuPayload,
+        F: FnOnce() -> T + OwnedCpuPayload,
     {
         self.run_selected(Some(runtime), service, retained, work)
             .await
@@ -60,9 +73,9 @@ impl CpuCooperationBudget {
         work: F,
     ) -> Result<T, ExecutionServiceError>
     where
-        T: Send + 'static,
-        G: Send + 'static,
-        F: FnOnce() -> T + Send + 'static,
+        T: OwnedCpuPayload,
+        G: OwnedCpuPayload,
+        F: FnOnce() -> T + OwnedCpuPayload,
     {
         if self.cancellation.is_cancelled() {
             return Err(ExecutionServiceError::Cancelled);

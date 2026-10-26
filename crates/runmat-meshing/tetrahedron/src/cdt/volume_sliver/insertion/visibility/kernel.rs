@@ -57,7 +57,7 @@ impl VisibilityKernel {
         self.faces
             .iter()
             .map(|face| {
-                let [a, b, c] = face.nodes.map(|node| node.coordinates_m);
+                let [a, b, c] = face.nodes.map(|node| node.coordinates_m.canonical_value());
                 face.metric
                     .as_ref()
                     .and_then(|metric| metric.score([a, b, c, point]))

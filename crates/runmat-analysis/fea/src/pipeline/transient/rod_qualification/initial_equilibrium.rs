@@ -46,7 +46,7 @@ fn original_sine_initial_acceleration_separates_spatial_and_time_error() {
                 assert_eq!(
                     values,
                     &[
-                        reference::shape(node.coordinates_m[0]) * AMPLITUDE,
+                        reference::shape(node.coordinates_m.canonical_value()[0]) * AMPLITUDE,
                         0.0,
                         0.0
                     ]
@@ -58,7 +58,7 @@ fn original_sine_initial_acceleration_separates_spatial_and_time_error() {
                 .iter()
                 .zip(continuum_acceleration.chunks_exact_mut(3))
             {
-                values[0] = reference::shape(node.coordinates_m[0]) * exact[2];
+                values[0] = reference::shape(node.coordinates_m.canonical_value()[0]) * exact[2];
             }
             let mass = summary.operator.operators().mass();
             let elastic = spmv(summary.operator.operators().stiffness(), displacement).unwrap();

@@ -1548,7 +1548,7 @@ mod tests {
     fn moment_reduction_preserves_its_typed_reference_point() {
         let about = Position::new([1.0, -2.0, 3.5]);
         let position = block_on(crate::builtins::fea::values::position_meters_builtin(
-            Value::Tensor(Tensor::new_2d(about.meters.to_vec(), 1, 3).unwrap()),
+            Value::Tensor(Tensor::new_2d(about.canonical_value().to_vec(), 1, 3).unwrap()),
         ))
         .unwrap();
         let reduction = block_on(spatial_moment(position)).unwrap();

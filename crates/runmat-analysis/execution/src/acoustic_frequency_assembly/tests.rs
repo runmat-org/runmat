@@ -18,10 +18,11 @@ fn fixture_with_memory(
     model.constraints.clear();
     model.boundaries.clear();
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.1, 0.2]);

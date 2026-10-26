@@ -91,7 +91,7 @@ fn pattern_search_improves_the_worst_incident_tetrahedron() {
     let source_index = 4;
     let star = &topology.incidence.vertex_stars[source_index];
     let metric = MetricTensor3::isotropic_length_m(1.0).unwrap();
-    let start = topology.nodes[source_index].coordinates_m;
+    let start = topology.nodes[source_index].coordinates_m.canonical_value();
     let before = relocated_star_minimum_jacobian(&topology, star, source_index, start, metric);
 
     let point = pattern_search_vertex_star(

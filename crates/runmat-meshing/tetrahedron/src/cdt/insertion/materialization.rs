@@ -37,12 +37,16 @@ pub(super) fn representable_nodes(
     };
     let mut positions = BTreeSet::new();
     offsets[..count].iter().filter_map(move |offset| {
-        let coordinates_m =
-            std::array::from_fn(|axis| offset_ulps(node.coordinates_m[axis], offset[axis]));
+        let coordinates_m = std::array::from_fn(|axis| {
+            offset_ulps(node.coordinates_m.canonical_value()[axis], offset[axis])
+        });
         positions
             .insert(coordinates_m.map(f64::to_bits))
             .then_some(DelaunayVolumeNode {
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 ..node
             })
     })
@@ -69,7 +73,10 @@ mod tests {
     fn constructed_nodes_enumerate_nominal_then_bounded_neighbors() {
         let node = DelaunayVolumeNode {
             identity: StableDigest::from_bytes([7; 32]),
-            coordinates_m: [1.0, 2.0, 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0, 2.0, 3.0]),
             construction: Point3Construction::Segment {
                 endpoints: [[0.0; 3], [2.0, 4.0, 6.0]],
                 parameter_numerator: 1,
@@ -104,7 +111,10 @@ mod sequence_tests {
         ] {
             let node = DelaunayVolumeNode {
                 identity: StableDigest::from_bytes([9; 32]),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 construction: Point3Construction::TetrahedronCentroid {
                     vertices: [[0.0; 3]; 4],
                 },
@@ -132,7 +142,7 @@ mod sequence_tests {
             }
             assert_eq!(
                 representable_nodes(node)
-                    .map(|point| point.coordinates_m.map(f64::to_bits))
+                    .map(|point| point.coordinates_m.canonical_value().map(f64::to_bits))
                     .collect::<Vec<_>>(),
                 expected
             );

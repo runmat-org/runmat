@@ -18,7 +18,7 @@ pub(in crate::cdt::volume_sliver) fn neighbor_centroid(
                     "vertex-star neighbor is absent from topology",
                 )
             })?;
-            Ok(topology.node(index).coordinates_m)
+            Ok(topology.node(index).coordinates_m.canonical_value())
         })
         .collect::<Result<Vec<_>, DelaunayVolumeSliverError>>()?;
     if neighbors.len() < 4 {
@@ -52,7 +52,7 @@ pub(in crate::cdt::volume_sliver) fn volume_weighted_star_centroid(
         let points = topology
             .cell(*tetrahedron_index)
             .vertex_indices
-            .map(|vertex| topology.node(vertex).coordinates_m);
+            .map(|vertex| topology.node(vertex).coordinates_m.canonical_value());
         let volume = tetrahedron_volume(points);
         if !volume.is_finite() || volume <= 0.0 {
             return Err(error(

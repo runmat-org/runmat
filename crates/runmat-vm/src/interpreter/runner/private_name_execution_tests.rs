@@ -80,9 +80,15 @@ fn retained_private_name_executes_old_body_after_same_id_republication() {
             .expect("call-port scope");
             runmat_runtime::user_functions::bound_function_authority_for(1)
         };
+        // A published ordinary helper must not eclipse the caller-private
+        // selection, including an old caller whose private body is leased.
+        let mut public_helper = helper("helper.m", "", 99.0);
+        public_helper.function = FunctionId(3);
+        public_helper.display_name = "helper".into();
         let mut registry = FunctionRegistry::new(HashMap::from([
             (FunctionId(1), old_caller),
             (FunctionId(2), old_helper),
+            (FunctionId(3), public_helper),
         ]));
         registry.insert_replacing_name(caller("new/entry.m", "new"));
         let mut new_helper = helper("new/private/helper.m", "new", 22.0);
@@ -128,6 +134,15 @@ fn retained_private_name_executes_old_body_after_same_id_republication() {
         ))
         .expect("leased caller executes private name");
         assert_eq!(old.as_slice(), &[Value::Num(33.0)]);
+        let fresh_caller = futures::executor::block_on(invoke_semantic_function_value_in_context(
+            1,
+            &[],
+            1,
+            &registry.current_view(),
+            runtime.clone(),
+        ))
+        .expect("current caller resolves its private helper before the ordinary name");
+        assert_eq!(fresh_caller.as_slice(), &[Value::Num(22.0)]);
         let current = futures::executor::block_on(invoke_semantic_function_value_in_context(
             2,
             &[],

@@ -326,7 +326,11 @@ fn geometry_key(
                 "working quality corner is absent",
             )
         })?;
-        result[slot] = topology.node(index).coordinates_m.map(ordered_float_key);
+        result[slot] = topology
+            .node(index)
+            .coordinates_m
+            .canonical_value()
+            .map(ordered_float_key);
     }
     result.sort_unstable();
     Ok(result)

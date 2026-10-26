@@ -23,7 +23,7 @@ pub fn consistent_mass_matrix(
     let mut mass = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
     for (barycentric, reference_weight) in tensor_tetrahedron_rule(&GAUSS_LEGENDRE_FIVE_UNIT) {
         let shape = shape_values(barycentric);
-        let scale = material.density_kg_per_m3
+        let scale = material.density_kg_per_m3.canonical_value()
             * reference_weight
             * jacobian_determinant(geometry.nodes_m, barycentric)?;
         for left_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
@@ -50,7 +50,7 @@ fn affine_consistent_mass(
     let determinant = jacobian_determinant(geometry.nodes_m, [0.25; 4])?;
     // Apply the dimensionless coefficient to the larger factor first. Dividing a
     // subnormal determinant before multiplying by a compensating density loses mass.
-    let density = material.density_kg_per_m3;
+    let density = material.density_kg_per_m3.canonical_value();
     let (large, small) = if density >= determinant {
         (density, determinant)
     } else {

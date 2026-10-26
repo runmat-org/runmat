@@ -31,7 +31,17 @@ fn acoustic_receipt_roundtrip_binds_exact_workload_result_and_mesh() {
         let other = foreign.execute(&mesh).unwrap();
         assert!(cold.validate_against(&foreign, &other, &mesh).is_err());
         let mut other_mesh = mesh.clone();
-        other_mesh.topology.nodes[0].coordinates_m[0] += 0.1;
+        {
+            let quantity_change = 0.1;
+            let quantity_index = 0;
+            let quantity_slot = &mut other_mesh.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         other_mesh.seal_canonical_digest().unwrap();
         assert!(cold
             .validate_against(&workload, &result, &other_mesh)

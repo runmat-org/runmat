@@ -13,6 +13,16 @@ pub(super) async fn get_object_field(
     name: &str,
     receiver: Option<&runmat_value::HandleRef>,
 ) -> BuiltinResult<RootedValue> {
+    if receiver.is_none() {
+        if let Some(prepared) = crate::builtins::structs::core::field_path::native::prepare(
+            runtime,
+            obj,
+            crate::object::protocol::ObjectProtocol::Subsref,
+            name,
+        )? {
+            return prepared.read(obj, name).await;
+        }
+    }
     let receiver = || match receiver {
         Some(handle) => Value::HandleObject(handle.clone()),
         None => Value::Object(obj.clone()),

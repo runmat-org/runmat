@@ -8,14 +8,16 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::common::{
-    call_function, initial_guess_with_cooperation, lookup_option,
-};
+use crate::builtins::math::optim::common::{initial_guess_with_cooperation, lookup_option};
 use crate::builtins::math::optim::least_squares::{
-    solve_least_squares, LeastSquaresBounds, LeastSquaresEvaluator, LeastSquaresOptions,
-    LeastSquaresResult, ResidualFuture,
+    LeastSquaresBounds, LeastSquaresEvaluator, LeastSquaresOptions, LeastSquaresResult, Method,
+    ResidualFuture,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+pub(in crate::builtins::math::optim) mod compiled;
+mod evaluation;
+use evaluation::NonlinEvaluator;
 
 const NAME: &str = "lsqnonlin";
 const DEFAULT_TOL_X: f64 = 1.0e-6;
@@ -69,9 +71,10 @@ async fn lsqnonlin_builtin_registered(
 
 #[cfg(test)]
 async fn lsqnonlin_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let runtime = crate::context::legacy::active();
     let rest =
         crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
-    lsqnonlin_in_runtime(None, first, rest.into()).await
+    lsqnonlin_in_runtime(runtime.as_ref(), first, rest.into()).await
 }
 
 async fn lsqnonlin_in_runtime(
@@ -79,12 +82,17 @@ async fn lsqnonlin_in_runtime(
     first: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    validate_requested_outputs()?;
+    validate_requested_outputs(runtime)?;
     let mut cooperation = crate::builtins::math::optim::common::ScalarCooperation::new(
         runmat_builtins::OptimSolver::Lsqnonlin,
         runtime,
     );
     cooperation.completed(0).await?;
+    crate::context::host_allocation::require_unbounded_workspace(
+        cooperation.runtime(),
+        NAME,
+        "nonlinear residual Jacobian and factorization workspaces require unbounded host memory",
+    )?;
     let _option_sources = rest.fork();
     let first_source = crate::execution::RootedValue::in_optional_context(first, runtime)?;
     let parsed = ParsedProblem::parse(first_source.value().clone(), rest)
@@ -111,27 +119,50 @@ async fn lsqnonlin_in_runtime(
         .await
         .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_INPUT))?;
     let n = guess.values.len();
-    let options = LsqOptions::from_struct(
+    let mut options = LsqOptions::from_struct(
         prepared_options.as_ref().map(|options| options.structure()),
         n,
     )
     .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
+    let outputs = crate::output_count::current_output_count_in(cooperation.runtime()).unwrap_or(1);
+    options.solver.final_gradient = outputs >= 5;
+    options.solver.final_jacobian = outputs >= 7;
     let bounds = ParsedProblem::bounds_from_values(lb, ub, n, &mut cooperation)
         .await
         .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
-    let mut evaluator = NonlinEvaluator {
+    let mut evaluator = NonlinEvaluator::new(
         cooperation,
         function,
-        x_shape: guess.shape.clone(),
-        x_scalar: guess.scalar,
-        residual_shape: None,
-    };
-    let result = solve_least_squares(NAME, &mut evaluator, guess.values, &bounds, &options.solver)
-        .await
-        .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_INPUT))?;
+        guess.shape.clone(),
+        guess.scalar,
+        options.supplied,
+    )?;
+    let mut result = crate::builtins::math::optim::least_squares::solve_controlled(
+        NAME,
+        &mut evaluator,
+        guess.values,
+        &bounds,
+        &options.solver,
+        options.method,
+        options.display,
+        prepared_options.as_ref().map(|value| value.structure()),
+    )
+    .await
+    .map_err(|mut err| {
+        err.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        map_error(err, &LSQNONLIN_ERROR_INVALID_INPUT)
+    })?;
+    if result.method == Method::LevenbergMarquardt {
+        crate::builtins::math::optim::least_squares::original_derivative_columns(
+            NAME,
+            &mut result,
+            &bounds,
+            Some(&mut evaluator.cooperation),
+        )
+        .await?;
+    }
     let residual_shape = evaluator
-        .residual_shape
-        .as_deref()
+        .residual_shape()
         .unwrap_or(&[result.residual_len])
         .to_vec();
     finalize(
@@ -140,18 +171,23 @@ async fn lsqnonlin_in_runtime(
         guess.scalar,
         &residual_shape,
         &bounds,
-        &options.algorithm,
         &mut evaluator.cooperation,
     )
     .await
-    .map_err(|error| map_error(error, &LSQNONLIN_ERROR_INVALID_INPUT))
+    .map_err(|mut error| {
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        map_error(error, &LSQNONLIN_ERROR_INVALID_INPUT)
+    })
 }
 
-fn validate_requested_outputs() -> BuiltinResult<()> {
-    crate::output_count::validate_bounded_outputs(
+fn validate_requested_outputs(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
+    crate::output_count::validate_bounded_outputs_in(
         &LSQNONLIN_DESCRIPTOR,
         &LSQNONLIN_ERROR_TOO_MANY_OUTPUTS,
         NAME,
+        runtime,
     )
 }
 
@@ -374,130 +410,125 @@ fn string_scalar(label: &str, value: &Value) -> BuiltinResult<String> {
                 )
             })
         }
-        other => Err(lsq_error_with_detail(
+        _ => Err(lsq_error_with_detail(
             &LSQNONLIN_ERROR_INVALID_ARGUMENT,
-            format!("{label} must be a character vector or string scalar, got {other:?}"),
+            format!("{label} must be a character vector or string scalar"),
         )),
     }
 }
 
 struct LsqOptions {
+    supplied: bool,
     solver: LeastSquaresOptions,
-    algorithm: String,
+    method: Method,
+    display: runmat_builtins::OptimDisplay,
 }
 
 impl LsqOptions {
-    fn from_struct(options: Option<&StructValue>, _variable_len: usize) -> BuiltinResult<Self> {
-        let fields = crate::builtins::math::optim::common::ScalarOptionFields::from_struct(options);
+    fn from_struct(options: Option<&StructValue>, variable_len: usize) -> BuiltinResult<Self> {
+        let fields =
+            crate::builtins::math::optim::common::ScalarOptionFields::from_struct_for_solver(
+                options,
+                runmat_builtins::OptimSolver::Lsqnonlin,
+            );
+        let supplied = fields.switch(
+            NAME,
+            runmat_builtins::OptimOptionField::SpecifyObjectiveGradient,
+        )?;
         let display = fields.text(runmat_builtins::OptimOptionField::Display, "off")?;
-        if !matches!(
-            runmat_builtins::OptimDisplay::parse(&display),
-            Some(
-                runmat_builtins::OptimDisplay::Off
-                    | runmat_builtins::OptimDisplay::None
-                    | runmat_builtins::OptimDisplay::Final
-                    | runmat_builtins::OptimDisplay::Iter
-            )
-        ) {
-            return Err(lsq_error_with_detail(
-                &LSQNONLIN_ERROR_INVALID_ARGUMENT,
-                "option Display must be 'off', 'none', 'final', or 'iter'",
-            ));
-        }
+        let display = runmat_builtins::OptimDisplay::parse(&display)
+            .filter(|value| {
+                matches!(
+                    value,
+                    runmat_builtins::OptimDisplay::Off
+                        | runmat_builtins::OptimDisplay::None
+                        | runmat_builtins::OptimDisplay::Final
+                        | runmat_builtins::OptimDisplay::Iter
+                )
+            })
+            .ok_or_else(|| {
+                lsq_error_with_detail(
+                    &LSQNONLIN_ERROR_INVALID_ARGUMENT,
+                    "Display must be off, none, final or iter",
+                )
+            })?;
         let algorithm = fields.text(
             runmat_builtins::OptimOptionField::Algorithm,
             DEFAULT_ALGORITHM,
         )?;
-        let algorithm = algorithm.to_ascii_lowercase();
-        if !matches!(
-            runmat_builtins::OptimAlgorithm::parse(&algorithm),
-            Some(
-                runmat_builtins::OptimAlgorithm::LevenbergMarquardt
-                    | runmat_builtins::OptimAlgorithm::TrustRegionReflective
-            )
-        ) {
-            return Err(lsq_error_with_detail(
-                &LSQNONLIN_ERROR_INVALID_ARGUMENT,
-                "option Algorithm must be 'levenberg-marquardt' or 'trust-region-reflective'",
-            ));
-        }
+        let method = match runmat_builtins::OptimAlgorithm::parse(&algorithm) {
+            Some(runmat_builtins::OptimAlgorithm::LevenbergMarquardt) => Method::LevenbergMarquardt,
+            Some(runmat_builtins::OptimAlgorithm::TrustRegionReflective) => Method::Reflective,
+            _ => {
+                return Err(lsq_error_with_detail(
+                    &LSQNONLIN_ERROR_INVALID_ARGUMENT,
+                    "Algorithm must be levenberg-marquardt or trust-region-reflective",
+                ))
+            }
+        };
         let tol_x = fields.real(NAME, runmat_builtins::OptimOptionField::TolX, DEFAULT_TOL_X)?;
-        let tol_fun = fields.real(
+        let legacy = crate::builtins::math::optim::common::option_f64_value(
             NAME,
-            runmat_builtins::OptimOptionField::TolFun,
+            fields.exact(runmat_builtins::OptimOptionField::TolFun),
+            "TolFun",
             DEFAULT_TOL_FUN,
         )?;
-        if tol_x <= 0.0 || tol_fun <= 0.0 {
+        let tol_fun = crate::builtins::math::optim::common::option_f64_value(
+            NAME,
+            fields.exact(runmat_builtins::OptimOptionField::FunctionTolerance),
+            "FunctionTolerance",
+            legacy,
+        )?;
+        if fields
+            .exact(runmat_builtins::OptimOptionField::TolFun)
+            .is_some()
+            && fields
+                .exact(runmat_builtins::OptimOptionField::FunctionTolerance)
+                .is_some()
+            && legacy != tol_fun
+        {
             return Err(lsq_error_with_detail(
                 &LSQNONLIN_ERROR_INVALID_ARGUMENT,
-                "options TolX and TolFun must be positive",
+                "conflicting TolFun and FunctionTolerance controls",
             ));
         }
-        let max_iter = fields
-            .count(
-                NAME,
-                runmat_builtins::OptimOptionField::MaxIter,
-                DEFAULT_MAX_ITER,
-            )?
-            .max(1);
-        let max_fun_evals = fields
-            .count_product_default(
-                NAME,
-                runmat_builtins::OptimOptionField::MaxFunEvals,
-                DEFAULT_MAX_FUN_EVALS_FACTOR,
-                max_iter,
-            )?
-            .max(1);
+        if tol_x < 0.0 || tol_fun < 0.0 || legacy < 0.0 {
+            return Err(lsq_error_with_detail(
+                &LSQNONLIN_ERROR_INVALID_ARGUMENT,
+                "StepTolerance, FunctionTolerance and TolFun must be nonnegative",
+            ));
+        }
+        let max_iter = fields.count(
+            NAME,
+            runmat_builtins::OptimOptionField::MaxIter,
+            DEFAULT_MAX_ITER,
+        )?;
+        let max_fun_evals = fields.count_product_default(
+            NAME,
+            runmat_builtins::OptimOptionField::MaxFunEvals,
+            if method == Method::Reflective {
+                DEFAULT_MAX_FUN_EVALS_FACTOR
+            } else {
+                2 * DEFAULT_MAX_FUN_EVALS_FACTOR
+            },
+            variable_len,
+        )?;
         Ok(Self {
+            supplied,
             solver: LeastSquaresOptions {
+                criteria: Some(crate::builtins::math::optim::least_squares::Criteria {
+                    function: tol_fun, optimality: legacy, step: tol_x,
+                }),
                 tol_x,
                 tol_fun,
                 max_iter,
                 max_fun_evals,
+                final_gradient: true,
                 final_jacobian: true,
+                scaling: crate::builtins::math::optim::common::derivative_scaling::DerivativeScaling::from_fields(NAME,&fields,!supplied)?,
             },
-            algorithm,
-        })
-    }
-}
-
-struct NonlinEvaluator {
-    cooperation: crate::builtins::math::optim::common::ScalarCooperation,
-    function: Value,
-    x_shape: Vec<usize>,
-    x_scalar: bool,
-    residual_shape: Option<Vec<usize>>,
-}
-
-impl LeastSquaresEvaluator for NonlinEvaluator {
-    fn cooperation(
-        &mut self,
-    ) -> Option<&mut crate::builtins::math::optim::common::ScalarCooperation> {
-        Some(&mut self.cooperation)
-    }
-    fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a> {
-        Box::pin(async move {
-            let arg = x_value(x, &self.x_shape, self.x_scalar)?;
-            let value = call_function(&self.function, vec![arg]).await?;
-            let residual = value
-                .with_owned_async(|value| {
-                    real_array_with_cooperation("function output", value, &mut self.cooperation)
-                })
-                .await?;
-            if let Some(expected) = &self.residual_shape {
-                if expected != &residual.shape {
-                    return Err(lsq_error_with_detail(
-                        &LSQNONLIN_ERROR_INVALID_INPUT,
-                        format!(
-                            "function output shape {:?} changed from initial shape {:?}",
-                            residual.shape, expected
-                        ),
-                    ));
-                }
-            } else {
-                self.residual_shape = Some(residual.shape.clone());
-            }
-            Ok(residual.values)
+            method,
+            display,
         })
     }
 }
@@ -523,7 +554,8 @@ async fn real_array_with_cooperation(
     cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
 ) -> BuiltinResult<RealArray> {
     crate::builtins::math::optim::common::preflight_real_array(NAME, &value, label, false)?;
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let value =
+        crate::dispatcher::gather_if_needed_in_context_async(&value, cooperation.runtime()).await?;
     match value {
         Value::Num(n) => finite_array(label, vec![n], vec![1, 1], cooperation).await,
         Value::Int(i) => finite_array(label, vec![i.to_f64()], vec![1, 1], cooperation).await,
@@ -623,7 +655,8 @@ async fn bound_vector_with_cooperation(
             format!("{label} must be empty or contain no more elements than x0"),
         ));
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let value =
+        crate::dispatcher::gather_if_needed_in_context_async(&value, cooperation.runtime()).await?;
     if is_empty_value(&value) {
         return Ok(vec![default; n]);
     }
@@ -678,11 +711,10 @@ async fn finalize(
     x_scalar: bool,
     residual_shape: &[usize],
     bounds: &LeastSquaresBounds,
-    algorithm: &str,
     cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
 ) -> BuiltinResult<Value> {
-    let requested = match crate::output_count::current_output_count() {
-        None => return x_value(&result.x, x_shape, x_scalar),
+    let requested = match crate::output_count::current_output_count_in(cooperation.runtime()) {
+        None => return into_x_value(result.x, x_shape, x_scalar),
         Some(0) => return Ok(Value::output_list(Vec::new())),
         Some(count @ 1..=7) => count,
         Some(_) => {
@@ -692,37 +724,56 @@ async fn finalize(
             ))
         }
     };
+    // Borrow derivative consumers before moving the actual numerical buffers
+    // into their requested output carriers. No residual/x payload clone is
+    // manufactured merely to keep the terminal record readable.
+    let information = (requested >= 5).then(|| Value::Struct(output_struct(&result)));
+    let lambda = if requested >= 6 {
+        Some(Value::Struct(
+            lambda_struct(&result, x_shape, x_scalar, bounds, cooperation).await?,
+        ))
+    } else {
+        None
+    };
+    let jacobian = if requested >= 7 {
+        Some(
+            crate::builtins::math::optim::least_squares::jacobian_value(NAME, &result, cooperation)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let unevaluated = result.point_evidence
+        == crate::builtins::math::optim::least_squares::PointEvidence::Supplied;
     let mut outputs = Vec::with_capacity(requested);
-    outputs.push(x_value(&result.x, x_shape, x_scalar)?);
+    outputs.push(into_x_value(result.x, x_shape, x_scalar)?);
     if requested >= 2 {
         outputs.push(Value::Num(result.resnorm));
     }
     if requested >= 3 {
-        outputs.push(tensor_value(
-            result.residual.clone(),
-            residual_shape.to_vec(),
-        )?);
+        outputs.push(if unevaluated {
+            crate::builtins::math::optim::common::output_callback::empty(cooperation.runtime())?
+        } else {
+            tensor_value(result.residual, residual_shape.to_vec())?
+        });
     }
     if requested >= 4 {
         outputs.push(Value::Num(result.exitflag as f64));
     }
-    if requested >= 5 {
-        outputs.push(Value::Struct(output_struct(&result, algorithm)));
-    }
-    if requested >= 6 {
-        outputs.push(Value::Struct(
-            lambda_struct(&result, x_shape, x_scalar, bounds, cooperation).await?,
-        ));
-    }
-    if requested >= 7 {
-        outputs.push(
-            crate::builtins::math::optim::least_squares::jacobian_value(NAME, &result, cooperation)
-                .await?,
-        );
-    }
+    outputs.extend(information);
+    outputs.extend(lambda);
+    outputs.extend(jacobian);
     Ok(crate::output_count::output_list_with_padding(
         requested, outputs,
     ))
+}
+
+fn into_x_value(values: Vec<f64>, shape: &[usize], scalar: bool) -> BuiltinResult<Value> {
+    if scalar {
+        Ok(Value::Num(values[0]))
+    } else {
+        tensor_value(values, shape.to_vec())
+    }
 }
 
 fn tensor_value(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
@@ -731,18 +782,21 @@ fn tensor_value(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
         .map_err(|err| lsq_error_with_detail(&LSQNONLIN_ERROR_INVALID_INPUT, err))
 }
 
-fn output_struct(result: &LeastSquaresResult, algorithm: &str) -> StructValue {
+fn output_struct(result: &LeastSquaresResult) -> StructValue {
     let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(result.iterations as f64));
     fields.insert("funcCount", Value::Num(result.func_count as f64));
     fields.insert("firstorderopt", Value::Num(result.first_order_optimality));
     fields.insert("stepsize", Value::Num(result.step_size));
-    fields.insert("cgiterations", Value::Num(0.0));
+    fields.insert("cgiterations", Value::Num(result.cg_iterations as f64));
     fields.insert(
         "lssteplength",
         Value::Num(if result.step_size == 0.0 { 0.0 } else { 1.0 }),
     );
-    fields.insert("algorithm", Value::from(algorithm));
+    fields.insert("algorithm", Value::from(result.method.name()));
+    if let Method::NotStarted(requested) = result.method {
+        fields.insert("requestedalgorithm", Value::from(requested.name()));
+    }
     fields.insert("message", Value::from(result.message.clone()));
     fields.finish()
 }
@@ -754,21 +808,28 @@ async fn lambda_struct(
     bounds: &LeastSquaresBounds,
     cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
 ) -> BuiltinResult<StructValue> {
-    let gradient =
-        crate::builtins::math::optim::least_squares::bound_gradient(result, cooperation).await?;
-    let mut lower = vec![0.0; result.variable_len];
-    let mut upper = vec![0.0; result.variable_len];
-    for i in 0..result.variable_len {
-        if bounds.lower[i].is_finite()
-            && (result.x[i] - bounds.lower[i]).abs() <= 1.0e-8 * (1.0 + result.x[i].abs())
-        {
-            lower[i] = gradient[i].max(0.0);
-        }
-        if bounds.upper[i].is_finite()
-            && (result.x[i] - bounds.upper[i]).abs() <= 1.0e-8 * (1.0 + result.x[i].abs())
-        {
-            upper[i] = (-gradient[i]).max(0.0);
-        }
+    let compiled::BoundMultipliers {
+        lower,
+        upper,
+        finite_gradient,
+    } = compiled::bound_multipliers(result, bounds, cooperation).await?;
+    if !finite_gradient {
+        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+        fields.insert(
+            "lower",
+            Value::Tensor(
+                Tensor::new(Vec::new(), vec![0, 0])
+                    .map_err(|e| lsq_error_with_detail(&LSQNONLIN_ERROR_INVALID_INPUT, e))?,
+            ),
+        );
+        fields.insert(
+            "upper",
+            Value::Tensor(
+                Tensor::new(Vec::new(), vec![0, 0])
+                    .map_err(|e| lsq_error_with_detail(&LSQNONLIN_ERROR_INVALID_INPUT, e))?,
+            ),
+        );
+        return Ok(fields.finish());
     }
     let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("lower", multiplier_value(lower, x_shape, x_scalar)?);

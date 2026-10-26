@@ -228,12 +228,13 @@ async fn run_owned_attempt(
         task_id,
         request,
         retry: RetryPolicy::Never,
+        task: None,
     })?;
     let mut cancel_sent = false;
     loop {
         if let Some(result) = completion.try_value() {
             return Ok(match result {
-                Ok(AttemptSuccess::Graph { graph }) => RemotePoolExecutionOutcome::Completed(
+                Ok(AttemptSuccess::Graph { graph, .. }) => RemotePoolExecutionOutcome::Completed(
                     RemotePoolExecutionResult::without_objects(
                         ProgramExecutionResponse::GraphSuccess { graph },
                     ),

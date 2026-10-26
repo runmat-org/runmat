@@ -39,7 +39,8 @@ pub struct ThermalSolverResultManifest {
     pub nonlinear_evidence: Vec<crate::contracts::ThermalNonlinearSampleEvidence>,
     pub residual_target: f64,
     pub energy_balances: Vec<crate::contracts::ThermalEnergyBalance>,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub initial_state: ThermalInitialStateEvidence,
     pub fields: Vec<[RecoveredFieldArtifactEntry; 4]>,
 }
@@ -121,7 +122,9 @@ impl ThermalSolverResultManifest {
             nonlinear_evidence: result.nonlinear_evidence.clone(),
             residual_target: result.residual_target,
             energy_balances: result.energy_balances.clone(),
-            reference_temperature_k: result.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                result.reference_temperature_k.canonical_value(),
+            ),
             initial_state: result.initial_state.clone(),
             fields,
         };
@@ -139,7 +142,9 @@ impl ThermalSolverResultManifest {
             nonlinear_evidence: &self.nonlinear_evidence,
             residual_target: self.residual_target,
             energy_balances: &self.energy_balances,
-            reference_temperature_k: self.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                self.reference_temperature_k.canonical_value(),
+            ),
             topology_digest: self.topology_digest,
             producer: self.producer,
             ordered_node_ids: &self.ordered_node_ids,
@@ -312,8 +317,12 @@ impl ThermalSolverResultManifest {
                 state: Box::new(CanonicalThermalStatePayload {
                     temperature,
                     ordered_node_ids: self.ordered_node_ids.clone(),
-                    reference_temperature_k: self.reference_temperature_k,
-                    sample_time_s: *self.time_points_s.last().unwrap(),
+                    reference_temperature_k: runmat_types::physical::Temperature::new(
+                        self.reference_temperature_k.canonical_value(),
+                    ),
+                    sample_time_s: runmat_types::physical::Time::new(
+                        *self.time_points_s.last().unwrap(),
+                    ),
                     maximum_relative_linear_residual: self
                         .residual_norms
                         .iter()

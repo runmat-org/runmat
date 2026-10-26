@@ -45,12 +45,12 @@ fn exact_cell_inventory_admits_same_coefficients_from_distinct_material_ids() {
     assert_eq!(map.cell_materials().len(), 3);
     assert_eq!(map.solid_materials().len(), 0);
     let domain = derive_canonical_fluid_material(&model, &mesh, &map).unwrap();
-    assert_eq!(domain.dynamic_viscosity.pascal_seconds, 0.001);
+    assert_eq!(domain.dynamic_viscosity.canonical_value(), 0.001);
     assert_eq!(
         domain.density,
-        runmat_analysis_core::MassDensity::new(model.materials[0].require_mass_density().unwrap())
+        model.materials[0].require_mass_density().unwrap()
     );
-    assert_eq!(domain.turbulence_intensity.ratio, 0.0);
+    assert_eq!(domain.turbulence_intensity.canonical_value(), 0.0);
     let wire = serde_json::to_vec(&map).unwrap();
     let restored: CompiledPropertyMap = serde_json::from_slice(&wire).unwrap();
     assert_eq!(restored, map);

@@ -105,7 +105,8 @@ async fn run_callback_with_error(
             values.extend(cell.data().iter().skip(1).cloned());
             crate::call_feval_async_with_outputs_in_context(runtime, function, &values, 0).await?;
         }
-        function @ (Value::FunctionHandle(_)
+        function @ (Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

@@ -20,10 +20,12 @@ struct ChtKnownAnswerMetrics {
 
 pub(super) struct ChtDiagnosticInputs<'a> {
     pub(super) authored_interface_count: usize,
-    pub(super) reference_temperature_k: f64,
-    pub(super) applied_temperature_delta_k: f64,
-    pub(super) inlet_velocity_m_per_s: f64,
-    pub(super) nominal_time_step_s: f64,
+    pub(super) reference_temperature_k: runmat_types::physical::Temperature,
+    pub(super) applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    pub(super) inlet_velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, f64>,
+    pub(super) nominal_time_step_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Time, f64>,
     pub(super) options: ChtCouplingOptions,
     pub(super) domain: &'a CfdDomain,
     pub(super) closure: &'a ChtInterfaceClosure,
@@ -31,7 +33,10 @@ pub(super) struct ChtDiagnosticInputs<'a> {
 
 pub(super) fn coupling_diagnostics(input: ChtDiagnosticInputs<'_>) -> Vec<FeaDiagnostic> {
     let known_answer = known_answer_metrics(
-        super::super::cfd::reynolds_number_for_velocity(input.domain, input.inlet_velocity_m_per_s),
+        super::super::cfd::reynolds_number_for_velocity(
+            input.domain,
+            input.inlet_velocity_m_per_s.canonical_value(),
+        ),
         input.closure,
     );
     vec![
@@ -40,10 +45,10 @@ pub(super) fn coupling_diagnostics(input: ChtDiagnosticInputs<'_>) -> Vec<FeaDia
             severity: FeaDiagnosticSeverity::Info,
             message: format!(
                 "reference_temperature_k={} applied_temperature_delta_k={} sample_count={} nominal_time_step_s={} authored_interface_count={}",
-                input.reference_temperature_k,
-                input.applied_temperature_delta_k,
+                input.reference_temperature_k.canonical_value(),
+                input.applied_temperature_delta_k.canonical_value(),
                 input.options.sample_count,
-                input.nominal_time_step_s,
+                input.nominal_time_step_s.canonical_value(),
                 input.authored_interface_count,
             ),
         },
@@ -55,7 +60,7 @@ pub(super) fn coupling_diagnostics(input: ChtDiagnosticInputs<'_>) -> Vec<FeaDia
 fn closure_diagnostic(closure: &ChtInterfaceClosure, threshold: f64) -> FeaDiagnostic {
     let severity = if closure.heat_flux_balance_ratio <= 1.0e-9
         && closure.max_energy_residual <= threshold
-        && closure.max_temperature_jump_k <= 0.1
+        && closure.max_temperature_jump_k.canonical_value() <= 0.1
         && closure.max_thermal_transport_residual_ratio <= threshold
         && closure.max_flux_temperature_law_residual_ratio <= threshold
         && closure.max_heat_flux_realization_residual_ratio <= threshold
@@ -73,14 +78,14 @@ fn closure_diagnostic(closure: &ChtInterfaceClosure, threshold: f64) -> FeaDiagn
         message: format!(
             "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={} thermal_network_node_count={} thermal_network_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} full_topology_edge_count={} full_topology_element_count={} thermal_network_residual_ratio={}",
             closure.interface_face_count,
-            closure.max_temperature_jump_k,
+            closure.max_temperature_jump_k.canonical_value(),
             closure.max_energy_residual,
             closure.heat_flux_balance_ratio,
-            closure.mean_interface_heat_flux_w_per_m2,
+            closure.mean_interface_heat_flux_w_per_m2.canonical_value(),
             closure.max_thermal_transport_residual_ratio,
             closure.interface_temperature_continuity_ratio,
-            closure.max_advection_temperature_shift_k,
-            closure.interface_conductance_w_per_m2k,
+            closure.max_advection_temperature_shift_k.canonical_value(),
+            closure.interface_conductance_w_per_m2k.canonical_value(),
             closure.max_flux_temperature_law_residual_ratio,
             closure.max_heat_flux_realization_residual_ratio,
             closure.max_coupled_interface_iteration_count,
@@ -99,16 +104,22 @@ fn closure_diagnostic(closure: &ChtInterfaceClosure, threshold: f64) -> FeaDiagn
 fn known_answer_metrics(reynolds: f64, closure: &ChtInterfaceClosure) -> ChtKnownAnswerMetrics {
     let advection_shift_coverage_ratio = if reynolds.is_finite()
         && reynolds > 0.0
-        && closure.max_advection_temperature_shift_k.is_finite()
-        && closure.max_advection_temperature_shift_k >= 0.0
+        && closure
+            .max_advection_temperature_shift_k
+            .canonical_value()
+            .is_finite()
+        && closure.max_advection_temperature_shift_k.canonical_value() >= 0.0
     {
         1.0
     } else {
         0.0
     };
     let known_answer_coverage_ratio = if closure.interface_face_count > 0
-        && closure.interface_conductance_w_per_m2k.is_finite()
-        && closure.interface_conductance_w_per_m2k > 0.0
+        && closure
+            .interface_conductance_w_per_m2k
+            .canonical_value()
+            .is_finite()
+        && closure.interface_conductance_w_per_m2k.canonical_value() > 0.0
         && closure.max_energy_residual.is_finite()
         && closure.max_flux_temperature_law_residual_ratio.is_finite()
         && closure.max_heat_flux_realization_residual_ratio.is_finite()

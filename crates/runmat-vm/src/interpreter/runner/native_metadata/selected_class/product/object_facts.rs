@@ -58,8 +58,32 @@ impl SelectedClassProduct {
                 "selected class binding belongs to another session",
             ));
         }
-        let facts = self.receiver_facts_with_binding(selected, binding)?;
         let projection = self.invocation_projection()?;
+        // Graph selection already issued canonical facts. Preserve their Rc
+        // identity for subsequent exact selected-method dispatch, but only
+        // when the original binding, declarations and definition seal agree.
+        let facts = match runtime.selected_object_class().filter(|facts| {
+            facts.class() == self.class()
+                && facts.constructor() == binding
+                && binding
+                    .authority
+                    .admits_local(&self._source_owners[0].session_lease())
+                && binding
+                    .authority
+                    .local_lease(binding.function)
+                    .is_some_and(|lease| {
+                        lease
+                            .owner_arc()
+                            .owns_selected_receiver_seal(&self.receiver_seal)
+                    })
+                && projection
+                    .receiver_declarations(self.class())
+                    .ok()
+                    .is_some_and(|admitted| std::sync::Arc::ptr_eq(&admitted, facts.declarations()))
+        }) {
+            Some(facts) => Rc::clone(facts),
+            None => self.receiver_facts_with_binding(selected, binding)?,
+        };
         Ok(runtime
             .with_selected_class_projection(projection)
             .with_selected_object_class(facts))

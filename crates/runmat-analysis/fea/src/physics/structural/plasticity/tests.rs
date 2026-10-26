@@ -12,11 +12,11 @@ fn material(plastic: bool, hardening: f64) -> MaterialModel {
         material_id: "j2-test".into(),
         name: "independent constitutive fixture".into(),
         provenance: MaterialProvenance::Authored,
-        mass_density_kg_per_m3: None,
+        mass_density_kg_per_m3: (None).map(runmat_types::physical::MassDensity::new),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
-                youngs_modulus_pa: YOUNGS,
-                poisson_ratio: POISSON,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(YOUNGS),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(POISSON),
             },
         )),
         damping: None,
@@ -24,8 +24,10 @@ fn material(plastic: bool, hardening: f64) -> MaterialModel {
         acoustic: None,
         electrical: None,
         plastic: plastic.then_some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: YIELD,
-            isotropic_hardening_modulus_pa: hardening,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(YIELD),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(
+                hardening,
+            ),
         }),
     }
 }
@@ -360,16 +362,16 @@ fn mixed_stress_tangent_is_symmetric_and_all_six_columns_match_finite_difference
 fn malformed_laws_strains_and_history_are_rejected() {
     let mut value = material(true, HARDENING);
     value.plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-        yield_stress_pa: -1.0,
-        isotropic_hardening_modulus_pa: HARDENING,
+        yield_stress_pa: runmat_types::physical::YieldStress::new(-1.0),
+        isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(HARDENING),
     });
     assert!(matches!(
         IsotropicConstitutiveModel::from_material(&value),
         Err(PlasticityError::InvalidPlasticLaw)
     ));
     value.plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-        yield_stress_pa: YIELD,
-        isotropic_hardening_modulus_pa: -1.0,
+        yield_stress_pa: runmat_types::physical::YieldStress::new(YIELD),
+        isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(-1.0),
     });
     assert!(matches!(
         IsotropicConstitutiveModel::from_material(&value),
@@ -381,7 +383,7 @@ fn malformed_laws_strains_and_history_are_rejected() {
         else {
             panic!("isotropic fixture");
         };
-        elasticity.poisson_ratio = poisson;
+        elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(poisson);
         assert!(matches!(
             IsotropicConstitutiveModel::from_material(&value),
             Err(PlasticityError::InvalidElasticity)
@@ -533,10 +535,14 @@ fn replay_bound_is_invariant_to_consistent_stress_unit_scaling_and_rejects_nonfi
     else {
         panic!("isotropic fixture");
     };
-    elasticity.youngs_modulus_pa *= 1000.0;
+    elasticity.youngs_modulus_pa = runmat_types::physical::Quantity::new(
+        elasticity.youngs_modulus_pa.canonical_value() * (1000.0),
+    );
     scaled.plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-        yield_stress_pa: YIELD * 1000.0,
-        isotropic_hardening_modulus_pa: HARDENING * 1000.0,
+        yield_stress_pa: runmat_types::physical::YieldStress::new(YIELD * 1000.0),
+        isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(
+            HARDENING * 1000.0,
+        ),
     });
     let scaled = IsotropicConstitutiveModel::from_material(&scaled).unwrap();
     close(

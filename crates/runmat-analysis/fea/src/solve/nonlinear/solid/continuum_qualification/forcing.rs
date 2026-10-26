@@ -20,7 +20,7 @@ fn original_dead_load_projection_preserves_all_representable_polynomial_work() {
                             .iter()
                             .enumerate()
                             .map(|(i, node)| {
-                                let [x, y, z] = node.coordinates_m;
+                                let [x, y, z] = node.coordinates_m.canonical_value();
                                 let value = x.powi(a) * y.powi(b) * z.powi(c);
                                 value
                                     * summary.physical_load[summary

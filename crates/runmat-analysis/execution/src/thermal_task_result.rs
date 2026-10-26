@@ -162,7 +162,7 @@ pub fn import_thermal_result(
             ));
         };
         let expected = source.transfer().power_w();
-        let actual = balance.applied_power_w;
+        let actual = balance.applied_power_w.canonical_value();
         let scale = expected.abs().max(actual.abs());
         let relative = if scale == 0.0 {
             0.0

@@ -40,9 +40,9 @@ pub(super) fn errors(result: &CanonicalAcousticResponse, amplitude: [f64; 2]) ->
         .projection
         .nodes
         .iter()
-        .zip(&result.pressure_pa)
+        .zip(result.pressure_pa.canonical_values())
         .map(|(node, p)| {
-            let reference = wave(node.coordinates_m[0], amplitude);
+            let reference = wave(node.coordinates_m.canonical_value()[0], amplitude);
             (p.real - reference[0]).powi(2) + (p.imaginary - reference[1]).powi(2)
         })
         .sum::<f64>()
@@ -51,11 +51,13 @@ pub(super) fn errors(result: &CanonicalAcousticResponse, amplitude: [f64; 2]) ->
         .projection
         .elements
         .iter()
-        .zip(&result.element_velocity_m_per_s)
+        .zip(result.element_velocity_m_per_s.canonical_values())
         .map(|(element, v)| {
             let p = mean_wave(
                 std::array::from_fn(|i| {
-                    result.projection.nodes[element.node_indices[i]].coordinates_m[0]
+                    result.projection.nodes[element.node_indices[i]]
+                        .coordinates_m
+                        .canonical_value()[0]
                 }),
                 amplitude,
             );
@@ -70,6 +72,7 @@ pub(super) fn errors(result: &CanonicalAcousticResponse, amplitude: [f64; 2]) ->
         / result.projection.elements.len() as f64;
     let intensity = result
         .element_mean_intensity_w_per_m2
+        .canonical_values()
         .iter()
         .map(|value| (value[0] - norm / 12.0).powi(2) + value[1].powi(2) + value[2].powi(2))
         .sum::<f64>()
@@ -78,9 +81,16 @@ pub(super) fn errors(result: &CanonicalAcousticResponse, amplitude: [f64; 2]) ->
 }
 
 pub(super) fn check_paired_planes(result: &CanonicalAcousticResponse, amplitude: [f64; 2]) {
-    for (node, p) in result.projection.nodes.iter().zip(&result.pressure_pa) {
-        if node.coordinates_m[0] == 0.0 || node.coordinates_m[0] == 1.0 {
-            let reference = wave(node.coordinates_m[0], amplitude);
+    for (node, p) in result
+        .projection
+        .nodes
+        .iter()
+        .zip(result.pressure_pa.canonical_values())
+    {
+        if node.coordinates_m.canonical_value()[0] == 0.0
+            || node.coordinates_m.canonical_value()[0] == 1.0
+        {
+            let reference = wave(node.coordinates_m.canonical_value()[0], amplitude);
             assert!(
                 (p.real - reference[0]).abs() < 1e-10 && (p.imaginary - reference[1]).abs() < 1e-10
             );

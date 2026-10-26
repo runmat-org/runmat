@@ -266,7 +266,9 @@ pub(super) fn execute_thermal_with_options(
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
             energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
             residual_norms: thermal_run.residual_norms,
-            reference_temperature_k: thermal_run.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                thermal_run.reference_temperature_k.canonical_value(),
+            ),
             initial_state: thermal_run.initial_state,
         }),
         transient_results: None,

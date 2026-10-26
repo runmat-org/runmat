@@ -53,6 +53,26 @@ pub async fn object_path_assignment_cardinality(
     .await
 }
 
+/// Prepared destinations retain their actual caller without changing the
+/// assignment-specific fallback cardinality convention.
+pub(crate) async fn object_path_assignment_cardinality_with_access(
+    runtime: Option<&crate::context::RuntimeContext>,
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
+) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    let ordinary = crate::object::protocol::ObjectAccessContext::default();
+    object_path_cardinality_with_context(
+        runtime,
+        target,
+        path,
+        IndexingContext::Assignment,
+        access.unwrap_or(&ordinary),
+        DefaultCardinality::AssignmentDestination,
+    )
+    .await
+}
+
 pub async fn object_path_assignment_cardinality_in_context(
     runtime: &crate::context::RuntimeContext,
     target: &Value,

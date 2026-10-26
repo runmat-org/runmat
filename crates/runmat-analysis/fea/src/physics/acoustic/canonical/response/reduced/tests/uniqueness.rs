@@ -9,7 +9,10 @@ use runmat_analysis_core::{
 };
 
 fn check_operator(prepared: &super::super::PreparedReduced) -> Option<RightInverseVerdict> {
-    let a = &prepared.operator;
+    let numerical = prepared
+        .operator
+        .with_canonical_storage(|matrix| matrix.clone());
+    let a = &numerical;
     let ilu = SparseRightIlu::factor(a, || false).ok()?;
     let envelope = RightInverseWorkEnvelope::derive(a.rows(), a.values().len()).unwrap();
     let mut check = RightInverseCheck::new(a, envelope).unwrap();
@@ -29,7 +32,10 @@ fn check_corrected_operator(
     use crate::solve::uniqueness::{
         certify_sparse_uniqueness, SparseUniquenessEnvelope, SparseUniquenessPolicy,
     };
-    let a = &prepared.operator;
+    let numerical = prepared
+        .operator
+        .with_canonical_storage(|matrix| matrix.clone());
+    let a = &numerical;
     let policy = SparseUniquenessPolicy {
         candidate_relative_tolerance: 1.0 / (16.0 * a.rows() as f64),
         restart: 64,
@@ -55,7 +61,7 @@ fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
     let assembly = AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
         &properties,
-        80.0_f64.sqrt(),
+        runmat_types::physical::AngularFrequency::new(80.0_f64.sqrt()),
     )
     .unwrap();
     let policy = AcousticHarmonicPolicy {
@@ -64,9 +70,15 @@ fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
     };
     let prepared = super::super::PreparedReduced::new(&assembly, policy).unwrap();
     let mode = [0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let action = crate::algebra::spmv(&prepared.operator, &mode).unwrap();
+    let action = crate::algebra::spmv(
+        &prepared
+            .operator
+            .with_canonical_storage(|matrix| matrix.clone()),
+        &mode,
+    )
+    .unwrap();
     assert!(action.iter().all(|v| v.abs() < 1e-14));
-    assert!(prepared.rhs.iter().all(|v| *v == 0.0));
+    assert!(prepared.rhs.canonical_values().iter().all(|v| *v == 0.0));
     let solution = prepared.solve(&assembly, policy, None).unwrap();
     assert_eq!(solution.iterations, 0);
     assert_eq!(solution.relative_residual, 0.0);
@@ -79,7 +91,7 @@ fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
         check_corrected_operator(&prepared),
         crate::solve::uniqueness::SparseUniquenessVerdict::Indeterminate { .. }
     ));
-    let frequency = assembly.omega / std::f64::consts::TAU;
+    let frequency = assembly.derivative_rate.canonical_value() / std::f64::consts::TAU;
     let required = AcousticHarmonicPolicy {
         uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
         ..policy
@@ -96,6 +108,7 @@ fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
     assert_eq!(response.power_relative_error, 0.0);
     assert!(response
         .pressure_pa
+        .canonical_values()
         .iter()
         .all(|p| p.real == 0.0 && p.imaginary == 0.0));
 }
@@ -117,7 +130,10 @@ fn original_phase_operator_proof_is_reused_and_underadmission_rejects() {
     let record = prepared.uniqueness.unwrap();
     assert_eq!(
         record.operator_identity(),
-        prepared.operator.numerical_identity().unwrap()
+        prepared
+            .operator
+            .with_canonical_storage(|matrix| matrix.numerical_identity())
+            .unwrap()
     );
     assert_eq!(record.dimension(), 4);
     assert!(record.defect_infinity_upper().unwrap() < 1.0);
@@ -145,13 +161,14 @@ fn original_phase_operator_proof_is_reused_and_underadmission_rejects() {
 #[test]
 fn fully_prescribed_original_pressure_has_explicit_zero_free_diagnostic() {
     let mut assembly = super::assembly(0.0, 1.0);
-    assembly.prescribed = vec![
-        Some(crate::excitation::ProjectionScalar {
-            real: 0.0,
-            imaginary: 0.0
-        });
-        4
-    ];
+    assembly.prescribed =
+        runmat_types::physical::Quantity::new(vec![
+            Some(crate::excitation::ProjectionScalar {
+                real: 0.0,
+                imaginary: 0.0
+            });
+            4
+        ]);
     assembly.reduction = None;
     let policy = AcousticHarmonicPolicy {
         uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
@@ -168,7 +185,10 @@ fn fully_prescribed_original_pressure_has_explicit_zero_free_diagnostic() {
     assert_eq!(record.defect_infinity_upper(), None);
     assert_eq!(
         record.operator_identity(),
-        prepared.operator.numerical_identity().unwrap()
+        prepared
+            .operator
+            .with_canonical_storage(|matrix| matrix.numerical_identity())
+            .unwrap()
     );
     assert_eq!(
         prepared.solve(&assembly, policy, None).unwrap().uniqueness,
@@ -187,7 +207,7 @@ fn original_matched_duct_ilu_certificate_discriminator() {
                 super::super::PreparedReduced::new(&assembly, AcousticHarmonicPolicy::default())
                     .unwrap();
             let verdict = check_operator(&prepared);
-            eprintln!("original matched duct Tet10={quadratic} cells={cells} dimension={} nnz={} uniqueness={verdict:?}", prepared.operator.rows(), prepared.operator.values().len());
+            eprintln!("original matched duct Tet10={quadratic} cells={cells} dimension={} nnz={} uniqueness={verdict:?}", prepared.operator.with_canonical_storage(|matrix| matrix.rows()), prepared.operator.with_canonical_storage(|matrix| matrix.values().len()));
             match verdict {
                 Some(RightInverseVerdict::Verified(_)) => verified += 1,
                 _ => indeterminate += 1,
@@ -217,7 +237,7 @@ fn original_matched_duct_corrected_inverse_certificate() {
             else {
                 panic!("original matched duct Tet10={quadratic} cells={cells}: {verdict:?}");
             };
-            eprintln!("original matched duct corrected Tet10={quadratic} cells={cells} dimension={} actual_iterations={iterations} outward_defect={}", prepared.operator.rows(), certificate.defect_infinity_upper());
+            eprintln!("original matched duct corrected Tet10={quadratic} cells={cells} dimension={} actual_iterations={iterations} outward_defect={}", prepared.operator.with_canonical_storage(|matrix| matrix.rows()), certificate.defect_infinity_upper());
         }
     }
 }
@@ -245,7 +265,7 @@ fn matched_assembly(cells: usize, quadratic: bool) -> AcousticAssembly {
     AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
         &properties,
-        std::f64::consts::TAU * 0.2,
+        runmat_types::physical::AngularFrequency::new(std::f64::consts::TAU * 0.2),
     )
     .unwrap()
     .with_boundaries(&model, step, &sources, sample)

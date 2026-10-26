@@ -792,6 +792,7 @@ fn is_function_value(value: &Value) -> bool {
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
+            | Value::ScopedFunctionHandle(_)
     )
 }
 

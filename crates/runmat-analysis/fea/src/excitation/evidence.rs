@@ -357,3 +357,18 @@ mod tests {
         );
     }
 }
+
+// Complex real/imaginary components share the enclosing field's descriptor.
+impl runmat_types::physical::QuantityStorage for ProjectionScalar {
+    fn all_finite(&self) -> bool {
+        self.real.is_finite() && self.imaginary.is_finite()
+    }
+}
+impl runmat_types::physical::QuantityStorage for ProjectionVector3 {
+    fn all_finite(&self) -> bool {
+        self.real
+            .iter()
+            .chain(&self.imaginary)
+            .all(|value| value.is_finite())
+    }
+}

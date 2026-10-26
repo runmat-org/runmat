@@ -151,6 +151,14 @@ impl RuntimeLifecycleHost {
         }
     }
 
+    /// Worker invocation retirement requires actual child-frame destruction,
+    /// not merely the synchronous cancellation outcomes used by ordinary close.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn force_close_and_retire(&self) {
+        self.force_close();
+        self.supervisor.shutdown_and_retire().await;
+    }
+
     fn ensure_runtime(&self, runtime: &RuntimeContext) -> Result<(), RuntimeError> {
         let matching = self
             .state

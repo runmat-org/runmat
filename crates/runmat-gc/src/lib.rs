@@ -22,8 +22,8 @@ pub use lexical_activation::{
     LexicalActivation, LexicalBindingMutationError, LexicalReservationOutcome, LexicalSlotState,
     LexicalValueOwner, PreparedLexicalTable, RetiredLexicalTable,
 };
-pub mod roots;
 mod reachability;
+pub mod roots;
 pub use reachability::{gc_with_registered_root_reachability, RegisteredRootReachability};
 mod root_admission;
 pub use root_admission::{
@@ -31,7 +31,11 @@ pub use root_admission::{
 };
 mod root_retirement;
 pub use root_retirement::{RootRetirement, RootRetirementObserver};
+mod admitted_allocation;
 mod retirement;
+pub use admitted_allocation::{
+    gc_allocate_prepared_rooted, GcRootedAllocationError, PreparedGcAllocation,
+};
 pub mod stats;
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
@@ -347,20 +351,23 @@ impl GarbageCollector {
                 return Err(error);
             }
         };
+        let should_collect = self.allocation_should_collect(&allocator);
+        drop(allocator);
+        Ok((ptr, should_collect))
+    }
+
+    /// The same post-allocation policy applies to Values and typed activations.
+    /// Caller retains the allocator lock only while observing its counters.
+    fn allocation_should_collect(&self, allocator: &allocator::GenerationalAllocator) -> bool {
         let usage = allocator.young_generation_usage();
         let alloc_count = allocator.young_allocations_count();
-        let cfg = self.config.read().clone();
-        drop(allocator);
+        let cfg = self.config.read();
 
         // Heuristic triggers:
         // - Utilization threshold
         // - Aggressive mode: periodic minor GC by allocation count to satisfy stress configs
-        if usage > cfg.minor_gc_threshold
+        usage > cfg.minor_gc_threshold
             || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count.is_multiple_of(32))
-        {
-            return Ok((ptr, true));
-        }
-        Ok((ptr, false))
     }
 
     /// Allocate a new Value object
@@ -946,12 +953,19 @@ impl Drop for AllocationGate<'_> {
 
 /// Allocate a GC value and register it as an explicit root before collection can run.
 pub fn gc_allocate_rooted(value: Value) -> Result<ExplicitRoot> {
-    let _gate = AllocationGate::enter(&GC);
-    let (handle, _) = GC.allocate_inner(value)?;
+    // Unlike prepared allocation, incoming children need not have independent
+    // roots. Do not collect until their new parent has its actual root.
+    let gate = AllocationGate::enter(&GC);
+    let (handle, should_collect) = GC.allocate_inner(value)?;
     GC.add_root(handle)?;
-    Ok(ExplicitRoot {
+    let root = ExplicitRoot {
         handle: Some(handle),
-    })
+    };
+    drop(gate);
+    if should_collect {
+        GC.collect_minor()?;
+    }
+    Ok(root)
 }
 
 /// Allocate a private lexical activation and root it before collection may
@@ -959,7 +973,7 @@ pub fn gc_allocate_rooted(value: Value) -> Result<ExplicitRoot> {
 pub fn gc_allocate_lexical_activation_rooted(
     activation: LexicalActivation,
 ) -> Result<ExplicitRoot> {
-    let _gate = AllocationGate::enter(&GC);
+    let gate = AllocationGate::enter(&GC);
     let mut allocator = GC.allocator.lock();
     let handle = match allocator.allocate_lexical_activation(activation, &GC.stats) {
         Ok(handle) => handle,
@@ -969,11 +983,17 @@ pub fn gc_allocate_lexical_activation_rooted(
             return Err(error);
         }
     };
+    let should_collect = GC.allocation_should_collect(&allocator);
     drop(allocator);
     GC.add_root(handle)?;
-    Ok(ExplicitRoot {
+    let root = ExplicitRoot {
         handle: Some(handle),
-    })
+    };
+    drop(gate);
+    if should_collect {
+        GC.collect_minor()?;
+    }
+    Ok(root)
 }
 
 pub fn gc_with_lexical_activation<R>(
@@ -1791,6 +1811,56 @@ mod tests {
             );
 
             drop(root);
+            assert!(!GC.root_ptrs.lock().contains_key(&handle));
+
+            // The admitted allocator participates in automatic collection,
+            // while its one prepared root protects the new result throughout.
+            struct One(GcHandle);
+            impl Trace for One {
+                fn trace(&self, tracer: &mut dyn Tracer) {
+                    tracer.mark(self.0);
+                }
+            }
+            let mut config = gc_get_config();
+            config.minor_gc_threshold = 0.0;
+            gc_configure(config).expect("automatic collection configuration");
+            // The ordinary rooted API protects a child carried only by its
+            // incoming Value before honoring the automatic trigger.
+            let child = gc_allocate(Value::Num(5.0)).expect("unrooted child");
+            let before = gc_collection_epoch();
+            let ordinary = gc_allocate_rooted(Value::HandleObject(runmat_value::HandleRef {
+                class_name: "RootedAllocationChild".into(),
+                target: child,
+                valid: true,
+            }))
+            .expect("ordinary rooted parent");
+            assert!(gc_collection_epoch() > before);
+            assert_eq!(gc_clone_value(&child).unwrap(), Value::Num(5.0));
+            assert!(GC.root_ptrs.lock().contains_key(&ordinary.handle()));
+
+            let before = gc_collection_epoch();
+            let activation = gc_allocate_lexical_activation_rooted(LexicalActivation::empty())
+                .expect("rooted lexical activation");
+            assert!(gc_collection_epoch() > before);
+            gc_with_lexical_activation(&activation.handle(), |value| {
+                assert_eq!(value.owned_bindings().count(), 0);
+            })
+            .expect("the exact typed root survives collection");
+
+            let before = gc_collection_epoch();
+            let admitted = gc_allocate_prepared_rooted(Value::Num(9.0), |handle| {
+                let source = One(handle);
+                PreparedRootPlan::for_traced(&source)?.prepare_unbounded(&source)
+            })
+            .expect("prepared rooted allocation");
+            assert!(
+                gc_collection_epoch() > before,
+                "allocation threshold must collect"
+            );
+            assert_eq!(gc_clone_value(&admitted.handle()).unwrap(), Value::Num(9.0));
+            assert!(GC.root_ptrs.lock().contains_key(&admitted.handle()));
+            let handle = admitted.handle();
+            drop(admitted);
             assert!(!GC.root_ptrs.lock().contains_key(&handle));
         });
     }

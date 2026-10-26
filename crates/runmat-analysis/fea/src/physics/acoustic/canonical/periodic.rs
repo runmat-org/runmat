@@ -44,7 +44,7 @@ impl AcousticAssembly {
             let (periodic, phase_radians) = match &constraint.kind {
                 AcousticConstraintKind::Periodic(periodic) => (periodic, 0.0),
                 AcousticConstraintKind::PhaseShiftedPeriodic(bloch) => {
-                    (&bloch.periodic, bloch.phase.radians)
+                    (&bloch.periodic, bloch.phase.canonical_value())
                 }
                 AcousticConstraintKind::PrescribedPressure { .. } => continue,
             };
@@ -121,7 +121,7 @@ impl AcousticAssembly {
                                 "periodic secondary node is missing".into(),
                             )
                         })?,
-                    phase_radians,
+                    phase_radians: runmat_types::physical::Angle::new(phase_radians),
                 });
             }
         }
@@ -157,9 +157,12 @@ impl AcousticAssembly {
                 }
             }
         }
-        let reduction =
-            build_phase_reduction(self.projection.nodes.len(), &relations, &self.prescribed)
-                .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
+        let reduction = build_phase_reduction(
+            self.projection.nodes.len(),
+            &relations,
+            self.prescribed.canonical_values(),
+        )
+        .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
         // A prescribed representative fixes its entire phase component. Mark those nodes
         // for reaction power recovery; reactions on free paired nodes cancel in aggregate.
         let size = self.projection.nodes.len();
@@ -168,10 +171,17 @@ impl AcousticAssembly {
                 reduction.recovery_row_offsets[row] == reduction.recovery_row_offsets[row + 1]
             });
             if fixed {
-                self.prescribed[node] = Some(crate::excitation::ProjectionScalar {
-                    real: reduction.offset[node],
-                    imaginary: reduction.offset[node + size],
-                });
+                self.prescribed
+                    .try_replace(
+                        node,
+                        runmat_types::physical::Quantity::new(Some(
+                            crate::excitation::ProjectionScalar {
+                                real: reduction.offset[node],
+                                imaginary: reduction.offset[node + size],
+                            },
+                        )),
+                    )
+                    .map_err(|e| AcousticHarmonicError::Boundary(e.to_string()))?;
             }
         }
         self.reduction = Some(reduction);

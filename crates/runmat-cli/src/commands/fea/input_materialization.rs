@@ -158,6 +158,10 @@ fn execute_compiled_materializations(
     let mut chunk_identities = Vec::new();
     for materialization in unique.values() {
         for chunk in &materialization.program.chunks {
+            let mut chunk_resources = resources.clone();
+            chunk_resources
+                .required_capabilities
+                .extend(chunk.graph_capability()?);
             chunk_identities.push(chunk.plan.identity);
             submissions.push((
                 chunk.request.clone(),
@@ -168,13 +172,10 @@ fn execute_compiled_materializations(
                     GeneratorExecutionContext {
                         scope_id: session.scope_id(),
                         pool_id: session.pool_id(),
-                        host: chunk.request.artifact.execution_host_requirement(
-                            &chunk.request.recipe,
-                            BTreeSet::from([
-                                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
-                            ]),
-                        )?,
-                        resources: resources.clone(),
+                        host: chunk.execution_host_requirement(BTreeSet::from([
+                            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                        ]))?,
+                        resources: chunk_resources,
                         retry: RetryPolicy::IdempotentInfrastructure,
                         deadline_unix_millis: None,
                         priority: 0,
@@ -183,7 +184,7 @@ fn execute_compiled_materializations(
             ));
         }
     }
-    let tasks = session.submit_graph(submissions)?;
+    let tasks = session.submit_workers(submissions)?;
     let outputs = wait_for_outputs(
         &session,
         tasks,
@@ -323,11 +324,14 @@ fn wait_for_outputs(
                         bail!("input materialization task failed: {message}");
                     }
                 };
-                let Some(([value], [])) = success.values() else {
+                let output = runmat_analysis_execution::generator_chunk_output_from_success(
+                    chunk_identities[index],
+                    success,
+                )
+                .inspect_err(|_| {
                     session.cancel(CancellationReason::ParentScope);
-                    bail!("bounded input task returned a non-inline or non-scalar output list");
-                };
-                outputs[index] = Some(value.clone());
+                })?;
+                outputs[index] = Some(output.value);
             }
         }
         if outputs.iter().all(Option::is_some) {

@@ -101,7 +101,7 @@ pub fn recover_completed_transient_run(
         &basis.initial_assembly,
         Some(input.solver_mesh),
         &basis.motions,
-        basis.schedule.points[0].time_s,
+        basis.schedule.points[0].time_s.canonical_value(),
         &input.workload.initial_fields,
     )?;
     let initial_sample =
@@ -192,6 +192,7 @@ fn validate_reporting_summary(
 ) -> Result<(), FeaRunError> {
     if candidate.dof_count != initial.dof_count
         || candidate.structural_dof_layout != initial.structural_dof_layout
+        || candidate.structural_reduced_basis != initial.structural_reduced_basis
         || candidate.structural_formulations != initial.structural_formulations
         || candidate.operator.operators().stiffness() != initial.operator.operators().stiffness()
         || candidate.operator.operators().mass() != initial.operator.operators().mass()

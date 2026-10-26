@@ -127,6 +127,7 @@ pub(super) fn evaluate_rvalue(
                 let function = state.function.portable_id;
                 let member =
                     runmat_runtime::call::argument_text::copy_str(&member.0, Some(&runtime))?;
+                let access = super::subscript_path::frame_access(state)?;
                 super::call_suspension::begin_sequence_read(state, stage, || async move {
                     let caller = functions
                         .iter()
@@ -137,12 +138,13 @@ pub(super) fn evaluate_rvalue(
                             )
                         })?;
                     let sequence =
-                        runmat_runtime::object::resolve::read_member_sequence_text_with_context(
+                        runmat_runtime::object::resolve::read_member_sequence_text_with_access(
                             Some(&runtime),
                             base,
                             member,
                             false,
                             Some(&caller.name),
+                            &access,
                         )
                         .await?;
                     drop(roots);
@@ -191,6 +193,7 @@ pub(super) fn evaluate_rvalue(
                 let member =
                     runmat_runtime::call::argument_text::convert(&member, Some(&state.runtime))?;
                 let runtime = state.runtime.clone();
+                let access = super::subscript_path::frame_access(state)?;
                 let functions = std::sync::Arc::clone(&state.functions);
                 let function = state.function.portable_id;
                 super::call_suspension::begin_sequence_read(state, stage, || async move {
@@ -203,12 +206,13 @@ pub(super) fn evaluate_rvalue(
                             )
                         })?;
                     let sequence =
-                        runmat_runtime::object::resolve::read_member_sequence_text_with_context(
+                        runmat_runtime::object::resolve::read_member_sequence_text_with_access(
                             Some(&runtime),
                             base,
                             member,
                             false,
                             Some(&caller.name),
+                            &access,
                         )
                         .await?;
                     drop(roots);

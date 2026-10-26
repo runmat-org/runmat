@@ -4735,6 +4735,17 @@ dependencies = [
 
 [[package]]
 name = "libflate"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ff4ae71b685bbad2f2f391fe74f6b7659a34871c08b210fdc039e43bee07d18"
+dependencies = [
+ "adler32",
+ "crc32fast",
+ "libflate_lz77 1.2.0",
+]
+
+[[package]]
+name = "libflate"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd96e993e5f3368b0cb8497dae6c860c22af8ff18388c61c6c0b86c58d86b5df"
@@ -4742,8 +4753,17 @@ dependencies = [
  "adler32",
  "crc32fast",
  "dary_heap",
- "libflate_lz77",
+ "libflate_lz77 2.3.0",
  "no_std_io2",
+]
+
+[[package]]
+name = "libflate_lz77"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a52d3a8bfc85f250440e4424db7d857e241a3aebbbe301f3eb606ab15c39acbf"
+dependencies = [
+ "rle-decode-fast",
 ]
 
 [[package]]
@@ -5012,7 +5032,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b22724209845c600f095bca5be902d636b4fc4f0b27fe5bb5d8314b5c117d0d6"
 dependencies = [
  "enum-primitive-derive",
- "libflate",
+ "libflate 2.3.0",
  "nom",
  "num-traits",
 ]
@@ -7700,6 +7720,7 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7712,10 +7733,10 @@ version = "0.6.2"
 dependencies = [
  "runmat-analysis-core",
  "runmat-analysis-fea",
+ "runmat-fea-syntax",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
- "runmat-parser",
  "runmat-types",
  "schemars",
  "serde",
@@ -7908,6 +7929,9 @@ dependencies = [
  "pollster 0.3.0",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-core",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-builtins",
  "runmat-config",
  "runmat-execution",
@@ -7916,10 +7940,12 @@ dependencies = [
  "runmat-fea-source",
  "runmat-filesystem",
  "runmat-gc",
+ "runmat-geometry-core",
  "runmat-hir",
  "runmat-java",
  "runmat-jit",
  "runmat-lexer",
+ "runmat-meshing-core",
  "runmat-mex",
  "runmat-mir",
  "runmat-native-codegen",
@@ -8033,6 +8059,7 @@ dependencies = [
  "runmat-execution-runner",
  "runmat-execution-transport-native",
  "runmat-filesystem",
+ "runmat-gc",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-geometry-io",
@@ -8115,6 +8142,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-fea-syntax"
+version = "0.6.2"
+dependencies = [
+ "runmat-types",
+ "serde",
+]
+
+[[package]]
 name = "runmat-filesystem"
 version = "0.6.2"
 dependencies = [
@@ -8184,6 +8219,7 @@ version = "0.6.2"
 dependencies = [
  "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-types",
  "schemars",
  "serde",
  "serde_json",
@@ -8195,6 +8231,7 @@ name = "runmat-geometry-fixtures"
 version = "0.6.2"
 dependencies = [
  "runmat-geometry-core",
+ "runmat-types",
 ]
 
 [[package]]
@@ -8210,6 +8247,7 @@ dependencies = [
  "runmat-build-identity",
  "runmat-geometry-core",
  "runmat-geometry-ops",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -8225,8 +8263,24 @@ dependencies = [
  "delaunator",
  "runmat-build-identity",
  "runmat-geometry-core",
+ "runmat-types",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-geometry-wasm-host"
+version = "0.6.2"
+dependencies = [
+ "base64 0.22.1",
+ "runmat-analysis-execution",
+ "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-geometry-io",
+ "runmat-meshing-core",
+ "runmat-meshing-execution",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -8291,6 +8345,7 @@ name = "runmat-lexer"
 version = "0.6.2"
 dependencies = [
  "logos",
+ "runmat-fea-syntax",
  "runmat-types",
  "serde",
 ]
@@ -8380,6 +8435,7 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-size",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -8395,6 +8451,7 @@ dependencies = [
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "runmat-meshing-size",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -8432,6 +8489,7 @@ dependencies = [
  "runmat-build-identity",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
+ "runmat-types",
  "serde",
  "serde_json",
 ]
@@ -8449,6 +8507,7 @@ dependencies = [
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-size",
+ "runmat-types",
  "serde",
  "sha2 0.10.9",
  "tracing",
@@ -8467,6 +8526,7 @@ dependencies = [
  "runmat-meshing-curve",
  "runmat-meshing-size",
  "runmat-meshing-surface",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -8664,6 +8724,7 @@ dependencies = [
 name = "runmat-parser"
 version = "0.6.2"
 dependencies = [
+ "runmat-fea-syntax",
  "runmat-lexer",
  "runmat-types",
  "serde",
@@ -8825,6 +8886,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sobol",
  "target-lexicon 0.12.16",
  "tempfile",
  "thiserror 1.0.69",
@@ -9079,6 +9141,8 @@ dependencies = [
  "miette",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
@@ -9092,6 +9156,7 @@ dependencies = [
  "runmat-geometry-io",
  "runmat-hir",
  "runmat-logging",
+ "runmat-meshing-core",
  "runmat-package",
  "runmat-package-cache",
  "runmat-plot",
@@ -9101,6 +9166,7 @@ dependencies = [
  "runmat-test-runner",
  "runmat-test-runner-execution",
  "runmat-thread-local",
+ "runmat-time",
  "runmat-types",
  "runmat-value",
  "runmat-vm",
@@ -9920,6 +9986,16 @@ name = "snap"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "199905e6153d6405f9728fe44daace35f8f837bbf830bb6e85fbd5828709a886"
+
+[[package]]
+name = "sobol"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c89261886d6e2618cab19a7f8aec2f0674dfadb1663109cffeeaaa266edf20c"
+dependencies = [
+ "libflate 1.4.0",
+ "num-traits",
+]
 
 [[package]]
 name = "socket2"

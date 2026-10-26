@@ -6,9 +6,7 @@ use crate::{
     BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKind,
     FeaSymbolOrigin, LogicalSourcePath,
 };
-use runmat_parser::fea::{
-    FeaBlock, FeaDeclaration, FeaExpression, FeaStatementKind, FeaTokenRange,
-};
+use runmat_fea_syntax::{FeaBlock, FeaDeclaration, FeaExpression, FeaStatementKind, FeaTokenRange};
 use runmat_types::Span;
 
 pub(super) struct InputSyntax {
@@ -51,10 +49,10 @@ pub(super) fn extend_module_scope(
                     continue;
                 };
                 let Some(target_declaration) = target_syntax.items.iter().find_map(|item| {
-                    let runmat_parser::fea::FeaModuleItem::Declaration(declaration) = item else {
+                    let runmat_fea_syntax::FeaModuleItem::Declaration(declaration) = item else {
                         return None;
                     };
-                    (declaration.kind == runmat_parser::fea::FeaDeclarationKind::Geometry
+                    (declaration.kind == runmat_fea_syntax::FeaDeclarationKind::Geometry
                         && declaration.name.text == target.name)
                         .then_some(declaration)
                 }) else {
@@ -87,10 +85,10 @@ pub(super) fn extend_module_scope(
         return;
     };
     for item in &syntax.items {
-        let runmat_parser::fea::FeaModuleItem::Declaration(declaration) = item else {
+        let runmat_fea_syntax::FeaModuleItem::Declaration(declaration) = item else {
             continue;
         };
-        if declaration.kind != runmat_parser::fea::FeaDeclarationKind::Geometry {
+        if declaration.kind != runmat_fea_syntax::FeaDeclarationKind::Geometry {
             continue;
         }
         extend_geometry_members(scope, syntax.source(), declaration, &declaration.name.text);
@@ -159,7 +157,7 @@ pub(super) fn extend_declaration_signatures(
         return;
     };
     for item in &syntax.items {
-        let runmat_parser::fea::FeaModuleItem::Declaration(declaration) = item else {
+        let runmat_fea_syntax::FeaModuleItem::Declaration(declaration) = item else {
             continue;
         };
         let mut ignored_diagnostics = Vec::new();
@@ -193,7 +191,7 @@ fn model_header_inputs(
     diagnostics: &mut Vec<FeaDiagnostic>,
     path: &LogicalSourcePath,
 ) -> Vec<InputSyntax> {
-    if declaration.kind != runmat_parser::fea::FeaDeclarationKind::Model {
+    if declaration.kind != runmat_fea_syntax::FeaDeclarationKind::Model {
         return Vec::new();
     }
     let header = source[declaration.header.span.start..declaration.header.span.end].trim();
@@ -425,22 +423,22 @@ fn split_parameters(source: &str) -> Vec<&str> {
     parameters
 }
 
-fn declaration_kind(kind: runmat_parser::fea::FeaDeclarationKind) -> FeaSymbolKind {
+fn declaration_kind(kind: runmat_fea_syntax::FeaDeclarationKind) -> FeaSymbolKind {
     match kind {
-        runmat_parser::fea::FeaDeclarationKind::Geometry => FeaSymbolKind::Geometry,
-        runmat_parser::fea::FeaDeclarationKind::Mesh => FeaSymbolKind::Mesh,
-        runmat_parser::fea::FeaDeclarationKind::Material => FeaSymbolKind::Material,
-        runmat_parser::fea::FeaDeclarationKind::Model => FeaSymbolKind::Model,
-        runmat_parser::fea::FeaDeclarationKind::Study => FeaSymbolKind::Study,
-        runmat_parser::fea::FeaDeclarationKind::Sweep => FeaSymbolKind::Sweep,
-        runmat_parser::fea::FeaDeclarationKind::Execution => FeaSymbolKind::Execution,
+        runmat_fea_syntax::FeaDeclarationKind::Geometry => FeaSymbolKind::Geometry,
+        runmat_fea_syntax::FeaDeclarationKind::Mesh => FeaSymbolKind::Mesh,
+        runmat_fea_syntax::FeaDeclarationKind::Material => FeaSymbolKind::Material,
+        runmat_fea_syntax::FeaDeclarationKind::Model => FeaSymbolKind::Model,
+        runmat_fea_syntax::FeaDeclarationKind::Study => FeaSymbolKind::Study,
+        runmat_fea_syntax::FeaDeclarationKind::Sweep => FeaSymbolKind::Sweep,
+        runmat_fea_syntax::FeaDeclarationKind::Execution => FeaSymbolKind::Execution,
     }
 }
 
 pub(super) fn local_declaration_key(
     bound: &BoundFeaProgram,
     path: &LogicalSourcePath,
-    kind: runmat_parser::fea::FeaDeclarationKind,
+    kind: runmat_fea_syntax::FeaDeclarationKind,
     name: &str,
 ) -> Option<crate::FeaSymbolKey> {
     let kind = declaration_kind(kind);

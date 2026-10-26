@@ -104,7 +104,13 @@ impl ResolvedHostAllocationPolicy {
         if runtime.is_cancelled() {
             return Err(HostAllocationError::Cancelled);
         }
-        let Some(parallel) = runtime.service_ports().parallel() else {
+        Self::for_parallel(runtime.service_ports().parallel().map(|port| port.as_ref()))
+    }
+
+    fn for_parallel(
+        parallel: Option<&dyn crate::context::RuntimeParallelService>,
+    ) -> Result<Self, HostAllocationError> {
+        let Some(parallel) = parallel else {
             return Ok(Self::Unbounded);
         };
         let resources = parallel.placement_resources();
@@ -345,6 +351,15 @@ impl HostAllocationReceipt {
         Ok(ResolvedHostAllocationPolicy::for_runtime(runtime)?.policy())
     }
 
+    /// Read the same policy from a captured original parallel port. This
+    /// returns no grant, reservation or runtime; callers check cancellation
+    /// independently before and after invoking the external read-only port.
+    pub(crate) fn policy_for_parallel(
+        parallel: Option<&dyn crate::context::RuntimeParallelService>,
+    ) -> Result<HostAllocationPolicy, HostAllocationError> {
+        Ok(ResolvedHostAllocationPolicy::for_parallel(parallel)?.policy())
+    }
+
     /// A selected provider callback may outlive the invocation frame after
     /// cancellation. Move this exact retained metadata claim into that
     /// callback owner; no view issuer is needed for non-view control state.
@@ -398,6 +413,18 @@ impl HostAllocationReceipt {
             return Ok(None);
         };
         let runtime = runtime.expect("managed allocation policy has a runtime");
+        let receipt = Self::admit_captured(checkpoint, plan)?;
+        receipt.checkpoint(runtime)?;
+        Ok(Some(receipt))
+    }
+
+    /// Reserve only through the captured original ledger/epoch/token. This
+    /// exposes no substitute RuntimeContext or ambient-policy fallback.
+    pub(crate) fn admit_captured(
+        checkpoint: HostAllocationCheckpoint,
+        plan: HostAllocationPlan,
+    ) -> Result<Self, HostAllocationError> {
+        checkpoint.check_captured()?;
         let stage = checkpoint
             .owner
             .ledger
@@ -416,8 +443,8 @@ impl HostAllocationReceipt {
             },
             fence,
         };
-        receipt.checkpoint(runtime)?;
-        Ok(Some(receipt))
+        receipt.checkpoint_captured()?;
+        Ok(receipt)
     }
 
     pub fn checkpoint(&self, runtime: &RuntimeContext) -> Result<(), HostAllocationError> {
@@ -518,8 +545,18 @@ impl HostAllocationReceipt {
         len: usize,
     ) -> Result<HostTypedWorkspace<T>, HostAllocationError> {
         self.checkpoint(runtime)?;
-        let result = HostTypedWorkspace::new(len, self.stage.clone(), self.fence.clone());
+        let result = self.temporary_typed_captured(len);
         self.checkpoint(runtime)?;
+        result
+    }
+
+    pub(crate) fn temporary_typed_captured<T: HostTypedElement>(
+        &self,
+        len: usize,
+    ) -> Result<HostTypedWorkspace<T>, HostAllocationError> {
+        self.checkpoint_captured()?;
+        let result = HostTypedWorkspace::new(len, self.stage.clone(), self.fence.clone());
+        self.checkpoint_captured()?;
         result
     }
 

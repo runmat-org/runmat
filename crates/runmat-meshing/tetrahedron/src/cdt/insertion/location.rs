@@ -46,8 +46,8 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
         // retain their complete conservative candidate traversal. Neither the
         // index nor a failed walk substitutes for exact physical containment.
         let bounds = Aabb3 {
-            min_m: node.coordinates_m.map(f64::next_down),
-            max_m: node.coordinates_m.map(f64::next_up),
+            min_m: node.coordinates_m.canonical_value().map(f64::next_down),
+            max_m: node.coordinates_m.canonical_value().map(f64::next_up),
         };
         for tetrahedron_index in self
             .topology
@@ -58,7 +58,7 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
             };
             work.checkpoint()?;
             if expanded_tetrahedron_bounds(self.topology, tetrahedron.vertex_indices)
-                .contains_point(node.coordinates_m)
+                .contains_point(node.coordinates_m.canonical_value())
                 && point_in_tetrahedron(self.topology, tetrahedron.vertex_indices, node, work)?
             {
                 return Ok(Some(tetrahedron_index));
@@ -142,7 +142,9 @@ fn expanded_tetrahedron_bounds(topology: &impl TetrahedralTopology, vertices: [u
     let mut minimum = [f64::INFINITY; 3];
     let mut maximum = [f64::NEG_INFINITY; 3];
     for vertex in vertices {
-        let coordinates = topology.nodes()[vertex as usize].coordinates_m;
+        let coordinates = topology.nodes()[vertex as usize]
+            .coordinates_m
+            .canonical_value();
         for axis in 0..3 {
             minimum[axis] = minimum[axis].min(coordinates[axis]);
             maximum[axis] = maximum[axis].max(coordinates[axis]);

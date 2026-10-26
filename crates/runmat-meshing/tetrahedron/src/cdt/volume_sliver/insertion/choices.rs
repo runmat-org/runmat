@@ -72,7 +72,10 @@ pub(super) fn edge_star_choices_prepared(
                 choices.push(EdgeStarChoice {
                     edge_identities,
                     index: 0,
-                    coordinates_m: midpoint,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(midpoint),
                     construction: midpoint_construction,
                     proposal_score: prepared.score(midpoint),
                     strategy: InsertionStrategy::EdgeStar,
@@ -117,7 +120,10 @@ pub(super) fn edge_star_choices_prepared(
                         index: 2
                             + (direction * EDGE_STAR_DIRECTION_WEIGHTS.len() + fraction_index)
                                 as u16,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                         construction,
                         proposal_score: prepared.score(coordinates_m),
                         strategy: InsertionStrategy::EdgeStar,
@@ -139,7 +145,10 @@ pub(super) fn edge_star_choices_prepared(
                     choices.push(EdgeStarChoice {
                         edge_identities,
                         index: 1_000 + search_index as u16,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                         construction: Point3Construction::Explicit,
                         proposal_score: prepared.score(coordinates_m),
                         strategy: InsertionStrategy::EdgeStar,
@@ -155,7 +164,10 @@ pub(super) fn edge_star_choices_prepared(
                     choices.push(EdgeStarChoice {
                         edge_identities,
                         index: 2_000 + search_index as u16,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                         construction: Point3Construction::Explicit,
                         proposal_score: prepared.score(coordinates_m),
                         strategy: InsertionStrategy::EdgeStar,
@@ -187,7 +199,7 @@ pub(super) fn edge_star_choices_prepared(
         }
         let vertices = neighbor
             .vertex_indices
-            .map(|vertex| topology.node(vertex).coordinates_m);
+            .map(|vertex| topology.node(vertex).coordinates_m.canonical_value());
         let neighbor_centroid: [f64; 3] = std::array::from_fn(|axis| {
             vertices[0][axis]
                 + (vertices[1][axis] - vertices[0][axis] + vertices[2][axis] - vertices[0][axis]
@@ -198,7 +210,7 @@ pub(super) fn edge_star_choices_prepared(
         let source_vertices = topology
             .cell(source_index)
             .vertex_indices
-            .map(|vertex| topology.node(vertex).coordinates_m);
+            .map(|vertex| topology.node(vertex).coordinates_m.canonical_value());
         let source_centroid = average(source_vertices.into_iter());
         for (blend_index, neighbor_weight) in [0.25, 0.5, 0.75].into_iter().enumerate() {
             let coordinates_m = std::array::from_fn(|axis| {
@@ -208,7 +220,10 @@ pub(super) fn edge_star_choices_prepared(
             choices.push(EdgeStarChoice {
                 edge_identities: lineage_edge,
                 index: 10_000 + (slot * 3 + blend_index) as u16,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 construction: Point3Construction::Explicit,
                 proposal_score: 0.0,
                 strategy: InsertionStrategy::Cavity { neighbor_index },
@@ -237,7 +252,7 @@ pub(super) fn edge_star_choices_prepared(
         else {
             continue;
         };
-        let points = face.map(|vertex| topology.node(vertex).coordinates_m);
+        let points = face.map(|vertex| topology.node(vertex).coordinates_m.canonical_value());
         let first: [f64; 3] = std::array::from_fn(|axis| points[1][axis] - points[0][axis]);
         let second: [f64; 3] = std::array::from_fn(|axis| points[2][axis] - points[0][axis]);
         let mut normal = [
@@ -257,7 +272,8 @@ pub(super) fn edge_star_choices_prepared(
         let centroid = average(points.into_iter());
         let interior = topology
             .node(source_tetrahedron.vertex_indices[opposite])
-            .coordinates_m;
+            .coordinates_m
+            .canonical_value();
         if normal
             .into_iter()
             .enumerate()
@@ -288,7 +304,10 @@ pub(super) fn edge_star_choices_prepared(
             choices.push(EdgeStarChoice {
                 edge_identities: lineage_edge,
                 index: 20_000 + (opposite * 3 + offset_index) as u16,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 construction: Point3Construction::Explicit,
                 proposal_score: 0.0,
                 strategy: InsertionStrategy::Cavity { neighbor_index },

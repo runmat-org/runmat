@@ -1,4 +1,4 @@
-use runmat_geometry_core::{GeometryDigest, GeometryRevisionIdentity, UnitSystem};
+use runmat_geometry_core::{GeometryDigest, GeometryRevisionIdentity, LengthUnit};
 use runmat_geometry_ops::{
     GeometryFeatureCapabilities, GeometryFeatureKind, GeometryFeatureProvider,
     GeometryFeatureProviderOutput, GeometryFeatureProviderSelection,
@@ -147,7 +147,7 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
         .map_err(|error| OcctExactFeatureError::Kernel(error.to_string()))?;
 
         let mut options = self.options.clone();
-        options.source_units = UnitSystem::Meter;
+        options.source_units = Some(LengthUnit::Meter);
         options.analysis.revision = derived_revision(dependencies)?;
         let geometry = crate::import_exact_cad(
             &format!("{feature_id}.brep"),
@@ -224,7 +224,15 @@ fn encode_operation(
             width_m,
             depth_m,
             height_m,
-        } => (Kind::Box, vec![*width_m, *depth_m, *height_m], Vec::new()),
+        } => (
+            Kind::Box,
+            vec![
+                width_m.canonical_value(),
+                depth_m.canonical_value(),
+                height_m.canonical_value(),
+            ],
+            Vec::new(),
+        ),
         Operation::Cylinder {
             radius_m,
             height_m,
@@ -232,17 +240,17 @@ fn encode_operation(
             origin_m,
         } => (
             Kind::Cylinder,
-            std::iter::once(*radius_m)
-                .chain(std::iter::once(*height_m))
+            std::iter::once(radius_m.canonical_value())
+                .chain(std::iter::once(height_m.canonical_value()))
                 .chain(axis.iter().copied())
-                .chain(origin_m.iter().copied())
+                .chain(origin_m.canonical_values().iter().copied())
                 .collect(),
             Vec::new(),
         ),
         Operation::Sphere { radius_m, center_m } => (
             Kind::Sphere,
-            std::iter::once(*radius_m)
-                .chain(center_m.iter().copied())
+            std::iter::once(radius_m.canonical_value())
+                .chain(center_m.canonical_values().iter().copied())
                 .collect(),
             Vec::new(),
         ),
@@ -258,7 +266,7 @@ fn encode_operation(
             ..
         } => (
             Kind::Extrude,
-            std::iter::once(*distance_m)
+            std::iter::once(distance_m.canonical_value())
                 .chain(direction.iter().copied())
                 .collect(),
             Vec::new(),
@@ -272,8 +280,8 @@ fn encode_operation(
             Kind::Revolve,
             axis.iter()
                 .copied()
-                .chain(origin_m.iter().copied())
-                .chain(std::iter::once(*angle_rad))
+                .chain(origin_m.canonical_values().iter().copied())
+                .chain(std::iter::once(angle_rad.canonical_value()))
                 .collect(),
             Vec::new(),
         ),
@@ -288,10 +296,10 @@ fn encode_operation(
             ..
         } => (
             Kind::Hole,
-            std::iter::once(*radius_m)
-                .chain(std::iter::once(*depth_m))
+            std::iter::once(radius_m.canonical_value())
+                .chain(std::iter::once(depth_m.canonical_value()))
                 .chain(axis.iter().copied())
-                .chain(origin_m.iter().copied())
+                .chain(origin_m.canonical_values().iter().copied())
                 .collect(),
             Vec::new(),
         ),
@@ -299,13 +307,19 @@ fn encode_operation(
             depth_m, direction, ..
         } => (
             Kind::Pocket,
-            std::iter::once(*depth_m)
+            std::iter::once(depth_m.canonical_value())
                 .chain(direction.iter().copied())
                 .collect(),
             Vec::new(),
         ),
-        Operation::Fillet { radius_m, .. } => (Kind::Fillet, vec![*radius_m], Vec::new()),
-        Operation::Chamfer { distance_m, .. } => (Kind::Chamfer, vec![*distance_m], Vec::new()),
+        Operation::Fillet { radius_m, .. } => {
+            (Kind::Fillet, vec![radius_m.canonical_value()], Vec::new())
+        }
+        Operation::Chamfer { distance_m, .. } => (
+            Kind::Chamfer,
+            vec![distance_m.canonical_value()],
+            Vec::new(),
+        ),
         unsupported => {
             return Err(OcctExactFeatureError::InvalidRequest(format!(
                 "operation {:?} is outside the bounded OCCT feature profile",

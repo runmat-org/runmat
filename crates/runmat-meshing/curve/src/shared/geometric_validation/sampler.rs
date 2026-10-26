@@ -74,7 +74,7 @@ impl<'a> ValidationSampler<'a> {
         let point_m = self
             .curves
             .point(&self.edge.curve_evaluator_id, parameter, self.control)
-            .map(|point| self.transform.transform_point(point))
+            .map(|point| self.transform.transform_point(point.canonical_value()))
             .map_err(|error| geometry_error(self.edge, error))?;
         let tangent = self
             .curves

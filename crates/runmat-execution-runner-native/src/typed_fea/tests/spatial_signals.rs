@@ -267,8 +267,9 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
         );
         let mut outputs = Vec::new();
         for chunk in &resolved.program().chunks {
-            let response = crate::execute_host_program_request(chunk.request.clone()).await;
-            response.validate_against(&chunk.request).unwrap();
+            let request = chunk.direct_request().unwrap();
+            let response = crate::execute_host_program_request(request.clone()).await;
+            response.validate_against(request).unwrap();
             let runmat_execution_artifact::ProgramExecutionResponse::Success { value } = response
             else {
                 panic!("named density callable failed: {response:?}")

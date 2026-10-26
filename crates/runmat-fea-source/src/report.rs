@@ -25,6 +25,16 @@ impl std::fmt::Display for FeaCheckStatus {
     }
 }
 
+/// Successfully inspected imported CAD available to read-only preview. This is
+/// not an admitted analysis geometry definition or evidence of solve readiness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeaGeometryPreview {
+    pub module_path: LogicalSourcePath,
+    pub geometry_id: String,
+    pub source_path: LogicalSourcePath,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FeaSourceCheckResult {
@@ -34,6 +44,8 @@ pub struct FeaSourceCheckResult {
     pub root_module: LogicalSourcePath,
     pub program: crate::FeaSemanticProgram,
     pub source_index: crate::FeaSourceIndex,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry_previews: Vec<FeaGeometryPreview>,
     pub diagnostics: Vec<FeaDiagnostic>,
 }
 

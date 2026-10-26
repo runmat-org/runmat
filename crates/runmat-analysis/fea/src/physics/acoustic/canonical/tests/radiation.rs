@@ -20,20 +20,24 @@ fn fixture(
     if rotated {
         let a = std::f64::consts::FRAC_1_SQRT_2;
         for node in &mut mesh.topology.nodes {
-            let [x, y, z] = node.coordinates_m;
-            node.coordinates_m = [a * (x - y), a * (x + y), z];
+            let [x, y, z] = node.coordinates_m.canonical_value();
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([a * (x - y), a * (x + y), z]);
         }
         mesh.seal_canonical_digest().unwrap();
         mesh.validate().unwrap();
     }
     let mut model = model();
     if rotated {
-        model.materials[0].mass_density_kg_per_m3 = Some(5.0);
+        model.materials[0].mass_density_kg_per_m3 =
+            (Some(5.0)).map(runmat_types::physical::MassDensity::new);
         model.materials[0]
             .acoustic
             .as_mut()
             .unwrap()
-            .speed_of_sound_m_per_s = 4.0;
+            .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(4.0);
     }
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![frequency]);
@@ -95,14 +99,15 @@ fn outward_recovered_power(result: &CanonicalAcousticResponse, target: &str) -> 
         .projection
         .boundary_faces_for_target(&RegionTarget::boundary(target))
     {
-        let velocity = &result.element_velocity_m_per_s[face.adjacent_element_indices[0]];
+        let velocity =
+            &result.element_velocity_m_per_s.canonical_values()[face.adjacent_element_indices[0]];
         result
             .projection
             .visit_boundary_quadrature(face, |point| {
                 let mut p = [0.0; 2];
                 for (&index, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                    p[0] += shape * result.pressure_pa[index].real;
-                    p[1] += shape * result.pressure_pa[index].imaginary;
+                    p[0] += shape * result.pressure_pa.canonical_values()[index].real;
+                    p[1] += shape * result.pressure_pa.canonical_values()[index].imaginary;
                 }
                 for axis in 0..3 {
                     power += 0.5
@@ -222,28 +227,32 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                             .projection
                             .nodes
                             .iter()
-                            .zip(&result.pressure_pa)
+                            .zip(result.pressure_pa.canonical_values())
                             .map(|(n, p)| {
                                 let reference = multiply(
                                     amplitude,
                                     [
-                                        (k * axial(n.coordinates_m)).cos(),
-                                        -(k * axial(n.coordinates_m)).sin(),
+                                        (k * axial(n.coordinates_m.canonical_value())).cos(),
+                                        -(k * axial(n.coordinates_m.canonical_value())).sin(),
                                     ],
                                 );
                                 (p.real - reference[0]).powi(2)
                                     + (p.imaginary - reference[1]).powi(2)
                             })
                             .sum::<f64>()
-                            / result.pressure_pa.len() as f64;
+                            / result.pressure_pa.canonical_values().len() as f64;
                         let velocity_error = result
                             .projection
                             .elements
                             .iter()
-                            .zip(&result.element_velocity_m_per_s)
+                            .zip(result.element_velocity_m_per_s.canonical_values())
                             .map(|(e, v)| {
                                 let xs = std::array::from_fn(|i| {
-                                    axial(result.projection.nodes[e.node_indices[i]].coordinates_m)
+                                    axial(
+                                        result.projection.nodes[e.node_indices[i]]
+                                            .coordinates_m
+                                            .canonical_value(),
+                                    )
                                 });
                                 let p = multiply(amplitude, mean_wave(xs, k));
                                 (0..3)
@@ -284,7 +293,8 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                         );
                         // Outward radiation power is positive; inlet outward power is its negative.
                         gate!(
-                            result.mean_input_power_w > 0.0 && result.mean_impedance_loss_w > 0.0,
+                            result.mean_input_power_w.canonical_value() > 0.0
+                                && result.mean_impedance_loss_w.canonical_value() > 0.0,
                             context
                         );
                         if cells == refinements[2] {
@@ -305,7 +315,7 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                                 }
                                 total
                             });
-                            eprintln!("radiation quadratic={quadratic} rotated={rotated} rho={rho} c={c} frequency={frequency} cells={cells} amplitude={amplitude:?} pressure={pressure_errors:?} velocity={velocity_errors:?} inlet={inlet} outlet={outlet} exact={exact_power} admittance_power={} face_vectors={vectors:?}", result.mean_impedance_loss_w);
+                            eprintln!("radiation quadratic={quadratic} rotated={rotated} rho={rho} c={c} frequency={frequency} cells={cells} amplitude={amplitude:?} pressure={pressure_errors:?} velocity={velocity_errors:?} inlet={inlet} outlet={outlet} exact={exact_power} admittance_power={} face_vectors={vectors:?}", result.mean_impedance_loss_w.canonical_value());
                             gate!(
                                 inlet < 0.0 && outlet > 0.0,
                                 context,
@@ -322,10 +332,12 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                                 "outlet={outlet}, exact={exact_power}"
                             );
                             gate!(
-                                (result.mean_impedance_loss_w - exact_power).abs() < 0.005,
+                                (result.mean_impedance_loss_w.canonical_value() - exact_power)
+                                    .abs()
+                                    < 0.005,
                                 context,
                                 "admittance_power={}, exact={exact_power}",
-                                result.mean_impedance_loss_w
+                                result.mean_impedance_loss_w.canonical_value()
                             );
                             gate!(
                                 pressure_error.sqrt()
@@ -404,7 +416,7 @@ fn rotated_affine_pressure_gradients_reproduce_world_basis_for_both_orders() {
                 for world_axis in 0..3 {
                     let gradient: [f64;3] = std::array::from_fn(|axis| {
                         element.node_indices.iter().enumerate().map(|(local,&node)| {
-                            projection.nodes[node].coordinates_m[world_axis]*point.physical_shape_gradients()[local][axis]
+                            projection.nodes[node].coordinates_m.canonical_value()[world_axis]*point.physical_shape_gradients()[local][axis]
                         }).sum()
                     });
                     for (axis,&actual) in gradient.iter().enumerate() {
@@ -428,10 +440,14 @@ fn local_radiation_operator_and_pressure_rotate_with_compiled_medium_scaling() {
             let step = &model.sequence.steps[0];
             let sample = ExcitationSamplePoint::frequency(frequency);
             let excitations = realize_step_excitations(&model, step, sample).unwrap();
-            AcousticAssembly::assemble(projection, &properties, std::f64::consts::TAU * frequency)
-                .unwrap()
-                .with_boundaries(&model, step, &excitations, sample)
-                .unwrap()
+            AcousticAssembly::assemble(
+                projection,
+                &properties,
+                runmat_types::physical::AngularFrequency::new(std::f64::consts::TAU * frequency),
+            )
+            .unwrap()
+            .with_boundaries(&model, step, &excitations, sample)
+            .unwrap()
         });
         let n = assemblies[0].projection.nodes.len();
         let real = (0..n).map(|i| (i as f64 + 0.4).sin()).collect::<Vec<_>>();
@@ -453,8 +469,9 @@ fn local_radiation_operator_and_pressure_rotate_with_compiled_medium_scaling() {
         let rotated = solve(1, quadratic, 0.4, [1.0, 0.4], true);
         for (index, (a, b)) in original
             .pressure_pa
+            .canonical_values()
             .iter()
-            .zip(&rotated.pressure_pa)
+            .zip(rotated.pressure_pa.canonical_values())
             .enumerate()
         {
             assert!(
@@ -465,8 +482,9 @@ fn local_radiation_operator_and_pressure_rotate_with_compiled_medium_scaling() {
         let d = std::f64::consts::FRAC_1_SQRT_2;
         for (a, b) in original
             .element_velocity_m_per_s
+            .canonical_values()
             .iter()
-            .zip(&rotated.element_velocity_m_per_s)
+            .zip(rotated.element_velocity_m_per_s.canonical_values())
         {
             for (av, bv) in [(&a.real, &b.real), (&a.imaginary, &b.imaginary)] {
                 let expected = [

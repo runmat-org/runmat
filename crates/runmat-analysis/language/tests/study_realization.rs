@@ -238,7 +238,7 @@ study response {
     else {
         panic!("parameterized load must realize as a constant vector");
     };
-    assert_eq!(values[1].newtons, -1000.0);
+    assert_eq!(values[1].canonical_value(), -1000.0);
 
     let overridden = authored_study
         .realize(
@@ -246,10 +246,14 @@ study response {
             geometry,
             &[runmat_analysis_core::AuthoredStudyInputBinding {
                 input_id: "commanded_load".into(),
-                value: runmat_analysis_core::AuthoredInputValue::Quantity {
-                    dimension: runmat_types::QuantityDimension::Force,
-                    value_si: 2000.0,
-                },
+                value: runmat_analysis_core::AuthoredInputValue::Quantity(
+                    runmat_types::physical::DimensionedScalar::try_from_dimension(
+                        runmat_types::PhysicalDimension::FORCE,
+                        None,
+                        2000.0,
+                    )
+                    .unwrap(),
+                ),
             }],
         )
         .unwrap();
@@ -262,17 +266,21 @@ study response {
     else {
         panic!("parameterized load must realize as a constant vector");
     };
-    assert_eq!(values[1].newtons, -2000.0);
+    assert_eq!(values[1].canonical_value(), -2000.0);
 
     let out_of_bounds = authored_study.realize(
         authored_model,
         geometry,
         &[runmat_analysis_core::AuthoredStudyInputBinding {
             input_id: "commanded_load".into(),
-            value: runmat_analysis_core::AuthoredInputValue::Quantity {
-                dimension: runmat_types::QuantityDimension::Force,
-                value_si: 6000.0,
-            },
+            value: runmat_analysis_core::AuthoredInputValue::Quantity(
+                runmat_types::physical::DimensionedScalar::try_from_dimension(
+                    runmat_types::PhysicalDimension::FORCE,
+                    None,
+                    6000.0,
+                )
+                .unwrap(),
+            ),
         }],
     );
     assert!(matches!(

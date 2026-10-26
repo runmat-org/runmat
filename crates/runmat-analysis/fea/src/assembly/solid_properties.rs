@@ -54,9 +54,9 @@ mod tests {
         let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
         model.materials[0].thermal = None;
         let context = FeaThermoMechanicalContext {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 10.0,
-            thermal_expansion_coefficient: 1.0e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(10.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.0e-5),
             region_temperature_deltas: Vec::new(),
         };
         let error = assemble_linear_system_impl(

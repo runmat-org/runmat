@@ -169,7 +169,8 @@ pub(super) fn is_empty_option(value: &Value) -> bool {
 pub(super) fn is_callable(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)

@@ -11,7 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 [features]
 default = []
 gui = ["runmat-core/gui", "runmat-runtime/gui"]
-occt-native = ["runmat-geometry-io/occt-native"]
+occt-native = ["runmat-geometry-io/occt-native", "runmat-analysis-execution/occt-native"]
 
 [dependencies]
 sysinfo = { version = "0.30", default-features = false }
@@ -71,6 +71,7 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 libc = "0.2"
 
 [dev-dependencies]
+runmat-gc = { workspace = true }
 runmat-logging = { workspace = true }
 rcgen = "0.14"
 runmat-geometry-fixtures = { workspace = true }

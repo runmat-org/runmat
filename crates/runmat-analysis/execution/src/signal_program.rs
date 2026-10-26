@@ -5,7 +5,7 @@ use runmat_execution::task::TaskRequest;
 use runmat_execution::{Digest, ExecutableUnitEnvelope, OutputContract, TaskId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionObjectLocation, ProgramExecutionRequest,
+    ProgramExecutionObjectLocation, ProgramExecutionRequest, WorkerProgramRequest,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::TaskSubmission;
@@ -19,6 +19,9 @@ use crate::{
 
 pub const GENERATOR_EXECUTION_MODE: &str = "analysis-generator";
 pub const GENERATOR_TARGET_PROFILE: &str = crate::named_callable::ANALYSIS_CALLABLE_TARGET_PROFILE;
+mod graph;
+mod output;
+pub use output::generator_chunk_output_from_success;
 
 pub trait GeneratorProgramAdmission {
     fn invocation_admission(&self) -> GeneratorProgramAdmissionRef<'_>;
@@ -34,6 +37,8 @@ pub struct GeneratorProgramAdmissionRef<'a> {
     pub function: runmat_types::ProgramFunctionId,
     pub generator_identity: runmat_analysis_fea::execution::GeneratorIdentity,
     pub required_capabilities: &'a BTreeSet<runmat_types::CapabilityRequirement>,
+    pub frozen_inputs: &'a crate::FrozenGeneratorInputs,
+    pub provenance: &'a runmat_analysis_core::GeneratorProvenance,
 }
 
 impl GeneratorProgramAdmission for AdmittedSignalGenerator {
@@ -46,6 +51,8 @@ impl GeneratorProgramAdmission for AdmittedSignalGenerator {
             function: self.function,
             generator_identity: self.generator_identity,
             required_capabilities: &self.required_capabilities,
+            frozen_inputs: &self.frozen_inputs,
+            provenance: &self.provenance,
         }
     }
 
@@ -75,6 +82,8 @@ fn invocation_admission_ref(
         function: admitted.function,
         generator_identity: admitted.generator_identity,
         required_capabilities: &admitted.required_capabilities,
+        frozen_inputs: &admitted.frozen_inputs,
+        provenance: &admitted.provenance,
     }
 }
 
@@ -88,7 +97,44 @@ pub struct PreparedGeneratorProgram {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedGeneratorChunk {
     pub plan: GeneratorChunk,
-    pub request: ProgramExecutionRequest,
+    pub request: WorkerProgramRequest,
+}
+impl PreparedGeneratorChunk {
+    pub fn execution_host_requirement(
+        &self,
+        trust: BTreeSet<runmat_execution::security::ExecutionTrustTier>,
+    ) -> AnalysisBridgeResult<runmat_execution::host::ExecutionHostRequirement> {
+        Ok(match &self.request {
+            WorkerProgramRequest::Direct(request) => request
+                .artifact
+                .execution_host_requirement(&request.recipe, trust)?,
+            WorkerProgramRequest::Graph(request) => request.execution_host_requirement(trust)?,
+        })
+    }
+    pub fn graph_capability(
+        &self,
+    ) -> AnalysisBridgeResult<Option<runmat_execution::resource::Capability>> {
+        match &self.request {
+            WorkerProgramRequest::Direct(_) => Ok(None),
+            WorkerProgramRequest::Graph(request) => Ok(
+                runmat_execution::value::GraphRequiredSchema::from_version(request.schema_version)
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "unsupported generator Graph schema",
+                    ))?
+                    .required_capability(),
+            ),
+        }
+    }
+    /// Adapters whose domain admits named/by-value functions retain an explicit
+    /// direct route. They must not silently discard a selected graph closure.
+    pub fn direct_request(&self) -> AnalysisBridgeResult<&ProgramExecutionRequest> {
+        match &self.request {
+            WorkerProgramRequest::Direct(request) => Ok(request),
+            WorkerProgramRequest::Graph(_) => Err(AnalysisBridgeError::Invalid(
+                "selected shared-closure generator requires the graph invocation route".into(),
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -120,16 +166,24 @@ impl SignalMaterializationExpectation {
                 "signal materialization expectation is not callable-backed".into(),
             )
         })?;
-        if generator.invocation.callable.display_name() != self.admitted.callable.qualified_name
-            || self.admitted.sample_points.len() < 2
+        if self.admitted.schema_version != 2
+            || self.admitted.sample_points.descriptor()
+                != generator
+                    .domain
+                    .axis_descriptor(None)
+                    .map_err(AnalysisBridgeError::Invalid)?
+            || generator.invocation.callable.display_name() != self.admitted.callable.qualified_name
+            || self.admitted.sample_points.scalar_count() < 2
             || self
                 .admitted
                 .sample_points
+                .canonical_values()
                 .iter()
                 .any(|point| !point.is_finite())
             || self
                 .admitted
                 .sample_points
+                .canonical_values()
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
         {
@@ -295,6 +349,9 @@ pub(crate) fn validate_prepared_generator_program(
     program: &PreparedGeneratorProgram,
 ) -> AnalysisBridgeResult<()> {
     let admission = admitted.invocation_admission();
+    if let Some(graph) = admission.frozen_inputs.graph() {
+        crate::callable::graph::validate_identity(admission, graph)?;
+    }
     if &program.descriptor.recipe.program_revision != admission.program_revision
         || program.descriptor.callable.semantic_function() != Some(admission.function)
         || program.descriptor.requested_outputs != 1
@@ -306,20 +363,41 @@ pub(crate) fn validate_prepared_generator_program(
         ));
     }
     for chunk in &program.chunks {
-        chunk.request.validate_for_portable_host()?;
+        if let WorkerProgramRequest::Graph(request) = &chunk.request {
+            graph::validate(admission, &chunk.plan, request)?;
+            if request.recipe != program.descriptor.recipe
+                || request.artifact != program.descriptor.artifact
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "graph generator changed its original compiled program",
+                ));
+            }
+            continue;
+        }
+        if admission.frozen_inputs.graph().is_some() {
+            return Err(AnalysisBridgeError::Identity(
+                "graph generator was demoted to flat capture inputs",
+            ));
+        }
+        let request = chunk.direct_request()?;
+        request.validate_for_portable_host()?;
         ProgramExecutionInputs {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             context: runmat_execution::ProgramInvocationContext::Direct,
-            arguments: chunk.request.arguments.clone(),
+            arguments: request.arguments.clone(),
             objects: input_locations(&program.input_references),
         }
         .validate()?;
-        if chunk.request.recipe != program.descriptor.recipe
-            || chunk.request.artifact != program.descriptor.artifact
-            || chunk.request.callable != program.descriptor.callable
-            || chunk.request.context != runmat_execution::ProgramInvocationContext::Direct
-            || chunk.request.requested_outputs != program.descriptor.requested_outputs
-            || chunk.request.arguments != chunk.plan.arguments
+        if request.recipe != program.descriptor.recipe
+            || request.artifact != program.descriptor.artifact
+            || request.callable != program.descriptor.callable
+            || request.console != program.descriptor.console
+            || request.environment != program.descriptor.environment
+            || request.assignment.is_some()
+            || request.job_id.is_some()
+            || request.context != runmat_execution::ProgramInvocationContext::Direct
+            || request.requested_outputs != program.descriptor.requested_outputs
+            || request.arguments != chunk.plan.arguments
         {
             return Err(AnalysisBridgeError::Identity(
                 "prepared generator chunk differs from its exact program descriptor",
@@ -382,7 +460,9 @@ pub(crate) fn rebind_generator_inputs(
         for argument in &mut chunk.plan.arguments {
             rebind_value(argument, &replacements)?;
         }
-        chunk.request.arguments = chunk.plan.arguments.clone();
+        if let WorkerProgramRequest::Direct(request) = &mut chunk.request {
+            request.arguments = chunk.plan.arguments.clone();
+        }
     }
     *input_objects = replacements.into_values().collect();
     program.input_references = input_objects
@@ -425,6 +505,10 @@ pub fn prepare_generator_program(
     input_objects: &[ProgramExecutionObject],
 ) -> AnalysisBridgeResult<PreparedGeneratorProgram> {
     let descriptor = prepare_generator_descriptor(admitted, executable)?;
+    let admission = admitted.invocation_admission();
+    if let Some(graph) = admission.frozen_inputs.graph() {
+        crate::callable::graph::validate_identity(admission, graph)?;
+    }
     if chunks.is_empty() {
         return Err(AnalysisBridgeError::Invalid(
             "generator program requires at least one chunk".into(),
@@ -455,6 +539,24 @@ pub fn prepare_generator_program(
     let chunks = chunks
         .into_iter()
         .map(|plan| {
+            if admitted
+                .invocation_admission()
+                .frozen_inputs
+                .graph()
+                .is_some()
+            {
+                let request =
+                    graph::prepare(admitted.invocation_admission(), &plan, input_objects)?;
+                if request.recipe != descriptor.recipe || request.artifact != descriptor.artifact {
+                    return Err(AnalysisBridgeError::Identity(
+                        "graph generator differs from its exact compiled descriptor",
+                    ));
+                }
+                return Ok(PreparedGeneratorChunk {
+                    plan,
+                    request: WorkerProgramRequest::Graph(request),
+                });
+            }
             let inputs = ProgramExecutionInputs {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 context: runmat_execution::ProgramInvocationContext::Direct,
@@ -463,7 +565,10 @@ pub fn prepare_generator_program(
             };
             let request = ProgramExecutionRequest::from_parts(descriptor.clone(), inputs)?;
             request.validate_for_portable_host()?;
-            Ok(PreparedGeneratorChunk { plan, request })
+            Ok(PreparedGeneratorChunk {
+                plan,
+                request: WorkerProgramRequest::Direct(request),
+            })
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     let referenced_inputs = chunks
@@ -625,21 +730,78 @@ pub fn build_generator_task_submission(
     context: GeneratorExecutionContext,
 ) -> AnalysisBridgeResult<TaskSubmission> {
     let admission = admitted.invocation_admission();
-    chunk.request.validate_for_portable_host()?;
+    chunk.request.validate()?;
     context.resources.validate()?;
-    let expected_artifact = ArtifactId::derive(&[chunk.request.artifact.id.0.bytes()]);
-    if &chunk.request.recipe.program_revision != admission.program_revision
-        || chunk.request.callable.semantic_function() != Some(admission.function)
-        || !context
-            .resources
-            .required_capabilities
-            .contains(&runmat_execution::resource::Capability::ProcessIsolation)
+    let (artifact, callable, invocation_context, inputs) = match &chunk.request {
+        WorkerProgramRequest::Direct(request) => {
+            if admission.frozen_inputs.graph().is_some()
+                || request.callable.semantic_function() != Some(admission.function)
+                || &request.recipe.program_revision != admission.program_revision
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "direct generator task changed its original callable",
+                ));
+            }
+            request.validate_for_portable_host()?;
+            crate::named_callable::validate_program_host(request, &context.host)?;
+            (
+                request.artifact.id,
+                request.callable.clone(),
+                request.context.clone(),
+                request.arguments.clone(),
+            )
+        }
+        WorkerProgramRequest::Graph(request) => {
+            crate::callable::graph::validate_identity(
+                admission,
+                admission
+                    .frozen_inputs
+                    .graph()
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "graph generator has no frozen callable",
+                    ))?,
+            )?;
+            graph::validate(admission, &chunk.plan, request)?;
+            let derived =
+                request.execution_host_requirement(context.host.permitted_trust_tiers.clone())?;
+            if derived != context.host {
+                return Err(AnalysisBridgeError::Identity(
+                    "graph generator task changed its derived host requirement",
+                ));
+            }
+            let schema =
+                runmat_execution::value::GraphRequiredSchema::from_version(request.schema_version)
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "generator graph schema is unsupported",
+                    ))?;
+            if schema.required_capability().is_some_and(|capability| {
+                !context
+                    .resources
+                    .required_capabilities
+                    .contains(&capability)
+            }) {
+                return Err(AnalysisBridgeError::Identity(
+                    "graph generator task omits its typed schema capability",
+                ));
+            }
+            (
+                request.artifact.id,
+                request.scheduler_callable()?,
+                request.context.clone(),
+                Vec::new(),
+            )
+        }
+    };
+    let expected_artifact = ArtifactId::derive(&[artifact.0.bytes()]);
+    if !context
+        .resources
+        .required_capabilities
+        .contains(&runmat_execution::resource::Capability::ProcessIsolation)
     {
         return Err(AnalysisBridgeError::Invalid(
             "signal task context differs from its admitted portable program".into(),
         ));
     }
-    crate::named_callable::validate_program_host(&chunk.request, &context.host)?;
     let task_id = TaskId::derive(&[
         admitted.materialization_digest().bytes(),
         chunk.plan.identity.bytes(),
@@ -655,13 +817,13 @@ pub fn build_generator_task_submission(
             executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
                 expected_artifact,
             ),
-            callable: crate::named_callable::program_task_callable(
+            callable: runmat_execution::task::Callable::for_program(
                 &admission.callable.owner_identity,
-                &chunk.request,
+                &callable,
             ),
             host: context.host,
-            invocation_context: chunk.request.context.clone(),
-            inputs: chunk.request.arguments.clone(),
+            invocation_context,
+            inputs,
             outputs: OutputContract {
                 requested_outputs: 1,
                 owned_work: None,

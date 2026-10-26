@@ -12,9 +12,27 @@ use std::sync::Arc;
 
 use super::{recipe_supports_capabilities, runtime_failure_response};
 
+/// Software schemas implemented by this compiled selected Graph decoder and
+/// executor. These are not service permissions or resource grants: original
+/// host requirements and assignment admission remain independent authorities.
+pub fn compiled_graph_execution_capabilities(
+) -> std::collections::BTreeSet<runmat_execution::resource::Capability> {
+    use runmat_execution::value::GraphRequiredSchema;
+    [
+        GraphRequiredSchema::SelectedValuesV11,
+        GraphRequiredSchema::CallableArgumentsV12,
+    ]
+    .into_iter()
+    .filter_map(GraphRequiredSchema::required_capability)
+    .collect()
+}
+
 #[path = "graph_request/selected.rs"]
 mod selected;
 use selected::SelectedWorkerGraph;
+#[path = "graph_request/restored.rs"]
+mod restored;
+pub use restored::RestoredSelectedGraph;
 #[path = "graph_request/prepared.rs"]
 mod prepared;
 pub use prepared::{
@@ -80,7 +98,32 @@ async fn invoke_selected_nested_bound(
     requested_outputs: usize,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
-    let (_caller_runtime, selected_method) =
+    let owner = selected.owner_for_binding(&binding).map_err(graph_error)?;
+    let foreign = selected
+        .active_foreign_for_unit(owner.unit)
+        .map_err(graph_error)?;
+    invoke_selected_code_bound(
+        selected,
+        caller_runtime,
+        binding,
+        arguments,
+        requested_outputs,
+        lexical_environment,
+        foreign,
+    )
+    .await
+}
+
+async fn invoke_selected_code_bound(
+    selected: &selected::RetainedSelectedGraph,
+    caller_runtime: runmat_runtime::context::RuntimeContext,
+    binding: runmat_value::BoundFunctionBinding,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    selected_foreign: Option<&Rc<dyn RuntimeForeignService>>,
+) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
+    let (caller_runtime, selected_method) =
         caller_runtime.take_selected_method_body_for(&binding)?;
     let owner = selected.owner_for_binding(&binding).map_err(graph_error)?;
     let unit = selected.unit(owner).map_err(graph_error)?;
@@ -88,7 +131,9 @@ async fn invoke_selected_nested_bound(
         .registry()
         .owned_view(runmat_hir::FunctionId(binding.function), &binding.authority)
         .ok_or_else(|| graph_error("selected static target definition graph is incomplete"))?;
-    let mut runtime = selected.runtime_for_unit(owner.unit).map_err(graph_error)?;
+    let mut runtime = selected
+        .project_runtime(owner.unit, &caller_runtime, selected_foreign)
+        .map_err(graph_error)?;
     if let Some(product) = selected.class_products.get(&owner) {
         view.attach_selected_class_product(
             runmat_hir::FunctionId(binding.function),
@@ -431,7 +476,7 @@ async fn invoke_selected_root(
                 request.requested_outputs,
                 &request.recipe,
                 primary.bytecode(),
-                primary.runtime(),
+                runtime,
                 values,
             )
             .await

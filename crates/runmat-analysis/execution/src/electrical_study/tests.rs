@@ -31,11 +31,11 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
         equation: StaticElectricalEquation::Electrostatics,
     });
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 3.0,
-        relative_permittivity: 4.0,
-        relative_permeability: 1.0,
-        resistive_heating_coefficient: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(4.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
         conductivity_frequency_response: vec![],
     });
     let face = AnalysisProjection::derive(&mesh).unwrap().boundary_faces[0].provenance[0]

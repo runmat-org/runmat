@@ -195,9 +195,9 @@ pub(super) fn restrict_cavity_to_protected_side(
                         format!(
                             "inserted node {:?} at {:?} lies on protected face {:?} at {:?}",
                             node.identity,
-                            node.coordinates_m,
+                            node.coordinates_m.canonical_value(),
                             stable,
-                            face.map(|vertex| vertex.coordinates_m),
+                            face.map(|vertex| vertex.coordinates_m.canonical_value()),
                         ),
                     ));
                 }
@@ -256,13 +256,15 @@ pub(super) fn node_lies_on_face(
     let mut cursor = 0;
     for (vertex_index, vertex) in vertices.iter().enumerate() {
         if vertex_index != opposite {
-            triangle[cursor] = topology.nodes()[*vertex as usize].coordinates_m;
+            triangle[cursor] = topology.nodes()[*vertex as usize]
+                .coordinates_m
+                .canonical_value();
             cursor += 1;
         }
     }
     let axes = projection_axes(triangle, work)?;
     let project = |point: [f64; 3]| [point[axes[0]], point[axes[1]]];
-    let query = project(node.coordinates_m);
+    let query = project(node.coordinates_m.canonical_value());
     let signs = [
         planar_orientation([project(triangle[0]), project(triangle[1]), query], work)?,
         planar_orientation([project(triangle[1]), project(triangle[2]), query], work)?,
@@ -389,7 +391,12 @@ mod tests {
         let vertices = topology.tetrahedra[0].vertex_indices;
         let opposite = vertices
             .iter()
-            .position(|vertex| topology.nodes[*vertex as usize].coordinates_m[2] == 2.0)
+            .position(|vertex| {
+                topology.nodes[*vertex as usize]
+                    .coordinates_m
+                    .canonical_value()[2]
+                    == 2.0
+            })
             .unwrap();
         let mut work = InsertionWork::new(DelaunayInsertionOptions::default(), &NeverCancelled);
 
@@ -430,10 +437,12 @@ mod tests {
             .tetrahedra
             .iter()
             .position(|tetrahedron| {
-                tetrahedron
-                    .vertex_indices
-                    .iter()
-                    .any(|vertex| topology.nodes[*vertex as usize].coordinates_m == [0.0, 0.0, 1.0])
+                tetrahedron.vertex_indices.iter().any(|vertex| {
+                    topology.nodes[*vertex as usize]
+                        .coordinates_m
+                        .canonical_value()
+                        == [0.0, 0.0, 1.0]
+                })
             })
             .unwrap() as u32;
         let mut cavity = BTreeSet::from([0, 1]);
@@ -485,10 +494,12 @@ mod tests {
             .tetrahedra
             .iter()
             .position(|tetrahedron| {
-                tetrahedron
-                    .vertex_indices
-                    .iter()
-                    .all(|vertex| topology.nodes[*vertex as usize].coordinates_m[0] >= 10.0)
+                tetrahedron.vertex_indices.iter().all(|vertex| {
+                    topology.nodes[*vertex as usize]
+                        .coordinates_m
+                        .canonical_value()[0]
+                        >= 10.0
+                })
             })
             .unwrap() as u32;
         let incident = (0..topology.tetrahedra.len() as u32)

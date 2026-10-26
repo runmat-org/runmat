@@ -39,6 +39,34 @@ fn constructorless_class_has_admitted_declaration_product_without_callable_entry
     forged.manifest.identity.declaration_class = Some(foreign);
     assert!(runmat_vm::admit_executable_unit(&forged.canonical_bytes().unwrap()).is_err());
 
+    // Hash refresh cannot supply missing or contradictory source provenance.
+    for analysis in [false, true] {
+        let mut altered = envelope.clone();
+        let kind = if analysis {
+            runmat_execution::ExecutableComponentKind::Analysis
+        } else {
+            runmat_execution::ExecutableComponentKind::Mir
+        };
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&altered.component(kind).unwrap().bytes).unwrap();
+        if analysis {
+            payload["classes"][0]["declaration"]["source"] = u32::MAX.into();
+        } else {
+            payload["classes"][0]["source"] = u32::MAX.into();
+        }
+        replace_component(&mut altered, kind, &payload);
+        assert!(runmat_vm::admit_executable_unit(&altered.canonical_bytes().unwrap()).is_err());
+    }
+    let mut missing = envelope.clone();
+    let kind = runmat_execution::ExecutableComponentKind::Mir;
+    let mut payload: serde_json::Value =
+        serde_json::from_slice(&missing.component(kind).unwrap().bytes).unwrap();
+    payload["classes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("source");
+    replace_component(&mut missing, kind, &payload);
+    assert!(runmat_vm::admit_executable_unit(&missing.canonical_bytes().unwrap()).is_err());
     let mut source_mismatch = envelope;
     let component = source_mismatch
         .component(runmat_execution::ExecutableComponentKind::Bytecode)

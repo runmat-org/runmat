@@ -36,15 +36,15 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
                 definition_id: beam_id.clone(),
                 definition: AuthoredSectionDefinition::RectangularBeam(RectangularBeamSection {
                     section_id: "rail-section".into(),
-                    width_m: 0.02,
-                    height_m: 0.04,
+                    width_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.02),
+                    height_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.04),
                 }),
             },
             RealizedSectionDefinition {
                 definition_id: shell_id.clone(),
                 definition: AuthoredSectionDefinition::HomogeneousShell(HomogeneousShellSection {
                     section_id: "skin-section".into(),
-                    thickness_m: 0.002,
+                    thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.002),
                     reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                     shear_correction: 5.0 / 6.0,
                 }),
@@ -54,7 +54,7 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
             definition_id: orientation_id.clone(),
             definition: AuthoredOrientationDefinition::Cartesian(CartesianOrientation {
                 orientation_id: "rail-axes".into(),
-                origin_m: [0.0; 3],
+                origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0; 3]),
                 x_axis: [1.0, 0.0, 0.0],
                 y_axis: [0.0, 1.0, 0.0],
             }),
@@ -147,8 +147,9 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
         .iter()
         .find(|node| node.node_id == edge_nodes[1])
         .expect("fixture edge end");
-    orientation.y_axis =
-        std::array::from_fn(|index| to.coordinates_m[index] - from.coordinates_m[index]);
+    orientation.y_axis = std::array::from_fn(|index| {
+        to.coordinates_m.canonical_value()[index] - from.coordinates_m.canonical_value()[index]
+    });
     let error = realize_formulation_properties(
         RealizedAnalysisModel {
             model: model.clone(),
@@ -184,7 +185,10 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
         node.solid_attachment,
         Some(runmat_analysis_core::ConformalSolidAttachment::SolverNode { .. })
     )));
-    assert_eq!(structural.beam_sections[0].area_m2, 0.0008);
+    assert_eq!(
+        structural.beam_sections[0].area_m2.canonical_value(),
+        0.0008
+    );
     let compiled = super::compile::compile_property_map(&model, Some(&mesh))
         .expect("derived elements should consume the canonical material compiler");
     assert_eq!(compiled.beam_properties().len(), 1);

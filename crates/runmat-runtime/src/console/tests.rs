@@ -53,6 +53,36 @@ fn append_thread_buffer_orders_entries_by_timestamp_stably() {
 }
 
 #[test]
+fn statement_struct_output_uses_the_command_window_field_renderer() {
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let _scope = runtime.enter();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    fields.insert("iterations", Value::Num(3.0));
+    fields.insert(
+        "algorithm",
+        Value::CharArray(runmat_value::CharArray::new_row("quasi-newton")),
+    );
+    fields.insert(
+        "identifier",
+        Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+    );
+    let value = Value::Struct(fields.finish());
+    let body =
+        "    iterations: 3\n    algorithm: 'quasi-newton'\n    identifier: 18446744073709551615";
+    for (label, expected) in [
+        (Some("output"), format!("output =\n{body}\n")),
+        (None, format!("{body}\n")),
+    ] {
+        reset_thread_buffer();
+        record_value_output(label, &value).unwrap();
+        let entries = take_thread_buffer();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text.as_str(), expected);
+        assert_eq!(take_last_value_output(), Some(value.clone()));
+    }
+}
+
+#[test]
 fn pending_sibling_captures_do_not_exchange_streams_or_drop_state() {
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let make = |label: &'static str, release: futures::channel::oneshot::Receiver<()>| {

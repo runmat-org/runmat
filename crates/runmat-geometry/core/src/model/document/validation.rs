@@ -3,7 +3,7 @@ use super::{
     DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE, FACETED_SOLID_MEDIA_TYPE,
     GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
-use crate::{GeometryContractError, UnitSystem};
+use crate::GeometryContractError;
 
 const MAX_ARTIFACT_BYTES: u64 = 1 << 40;
 const MAX_DISPLAY_TESSELLATIONS: usize = 16;
@@ -21,13 +21,15 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
         &document.source.importer_version,
         128,
     )?;
-    if document.source.source_units == UnitSystem::Unspecified
-        || !document.source.meters_per_source_unit.is_finite()
-        || document.source.meters_per_source_unit <= 0.0
-    {
+    document
+        .source
+        .unit_evidence
+        .validate()
+        .map_err(|error| invalid("geometry source units", error.to_string()))?;
+    if !document.source.unit_evidence.physical_scale_resolved() {
         return Err(invalid(
             "geometry source units",
-            "units and positive finite normalization must be explicit",
+            "source physical scale must be established from declarations or explicit fallback",
         ));
     }
     if document.revision.revision == 0 || document.revision.persistent_mapping_version == 0 {

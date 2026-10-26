@@ -82,6 +82,9 @@ impl From<SharedShape> for HostShapeInput {
 }
 
 impl SharedShape {
+    pub fn shared_storage_identity(&self) -> crate::exact_array_storage::SharedStorageIdentity {
+        crate::exact_array_storage::SharedStorageIdentity::of(self.0.get())
+    }
     /// Reserves the original backing and header before either allocation.
     pub fn begin_exact(
         rank: usize,

@@ -38,12 +38,16 @@ pub(super) fn solve_admitted(
                 maximum_iterations: remaining,
                 ..policy
             },
-            initial.as_deref(),
+            initial.as_ref(),
         )?;
         iterations = iterations
             .checked_add(solution.iterations)
             .ok_or(AcousticHarmonicError::NotConverged)?;
-        let closure = power::evaluate(assembly, &solution.real, &solution.imaginary)?;
+        let closure = power::evaluate(
+            assembly,
+            solution.real.canonical_values(),
+            solution.imaginary.canonical_values(),
+        )?;
         if closure.power_relative_error <= power_tolerance {
             solution.iterations = iterations;
             return Ok((solution, closure));

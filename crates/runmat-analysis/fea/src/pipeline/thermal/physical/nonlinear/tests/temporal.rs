@@ -14,7 +14,7 @@ fn manufactured_continuum_cooling_retains_first_order_backward_euler_and_power_c
             let temperature_error = result.time_points_s.iter().zip(&result.temperature_snapshots)
                 .flat_map(|(&time, field)| mesh.topology.nodes.iter().zip(field.as_host_f64().unwrap())
                     .map(move |(node, &temperature)| (temperature
-                        - (400.0 - 10.0 * node.coordinates_m[0] - 20.0 * time * time)).abs()))
+                        - (400.0 - 10.0 * node.coordinates_m.canonical_value()[0] - 20.0 * time * time)).abs()))
                 .fold(0.0_f64, f64::max);
             let gradient_error = result.temperature_gradient_snapshots.iter().skip(1)
                 .flat_map(|field| field.as_host_f64().unwrap().chunks_exact(3))

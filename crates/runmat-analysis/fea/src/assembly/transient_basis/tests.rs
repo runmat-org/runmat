@@ -250,7 +250,17 @@ fn foreign_mesh_material_step_constraints_and_unmapped_sources_do_not_reuse_auth
     let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
     let summary = initial(&model, &mesh);
     let mut foreign_mesh = mesh.clone();
-    foreign_mesh.topology.nodes[0].coordinates_m[0] += 0.01;
+    {
+        let quantity_change = 0.01;
+        let quantity_index = 0;
+        let quantity_slot = &mut foreign_mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     foreign_mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     foreign_mesh.seal_canonical_digest().unwrap();
     assert!(PreparedStructuralTransientBasis::from_admitted(
@@ -261,7 +271,8 @@ fn foreign_mesh_material_step_constraints_and_unmapped_sources_do_not_reuse_auth
     )
     .is_err());
     let mut foreign_material = model.clone();
-    foreign_material.materials[0].mass_density_kg_per_m3 = Some(1234.0);
+    foreign_material.materials[0].mass_density_kg_per_m3 =
+        (Some(1234.0)).map(runmat_types::physical::MassDensity::new);
     assert!(PreparedStructuralTransientBasis::from_admitted(
         &foreign_material,
         &foreign_material.sequence.steps[0],

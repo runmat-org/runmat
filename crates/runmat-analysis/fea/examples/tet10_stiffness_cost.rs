@@ -26,14 +26,15 @@ fn run_case(
     repetitions: usize,
 ) -> Result<(), Box<dyn Error>> {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    let base_nodes_m = std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m);
+    let base_nodes_m =
+        std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m.canonical_value());
     let geometries = (0..count)
         .map(|sample| geometry(base_nodes_m, warp_m, sample))
         .collect::<Vec<_>>();
     let material = SolidMaterial {
-        youngs_modulus_pa: 100.0,
-        poisson_ratio: 0.25,
-        density_kg_per_m3: 1.0,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
     };
     let mut nanos_per_element = Vec::with_capacity(repetitions);
     let mut expected_checksum = None;

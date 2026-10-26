@@ -59,12 +59,12 @@ pub(super) fn measure(
         evaluation
             .element_evidence
             .iter()
-            .map(|e| e.elastic_energy_j)
+            .map(|e| e.elastic_energy_j.canonical_value())
             .sum::<f64>(),
         evaluation
             .element_evidence
             .iter()
-            .map(|e| e.hardening_energy_j)
+            .map(|e| e.hardening_energy_j.canonical_value())
             .sum::<f64>(),
         dissipation,
     ];
@@ -83,11 +83,11 @@ pub(super) fn measure(
         {
             let row = summary.structural_dof_layout.index(i, kind).unwrap();
             let reaction = evaluation.internal_force[row] - summary.physical_load[row];
-            if axis == 0 && node.coordinates_m[0] == 0.0 {
+            if axis == 0 && node.coordinates_m.canonical_value()[0] == 0.0 {
                 axial_reaction += reaction;
             }
             if axis > 0 {
-                lateral_moment += node.coordinates_m[axis] * reaction;
+                lateral_moment += node.coordinates_m.canonical_value()[axis] * reaction;
             }
         }
     }

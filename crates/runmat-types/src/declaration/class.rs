@@ -1,9 +1,14 @@
-use crate::{ClassId, ClassIdentity, FunctionId, MemberName, MethodName, QualifiedName, Span};
+use crate::{
+    ClassId, ClassIdentity, FunctionId, MemberName, MethodName, ProgramSourceId, QualifiedName,
+    Span,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassDeclaration {
     pub id: ClassId,
+    /// Original program-source coordinate of this declaration's HIR module.
+    pub source: ProgramSourceId,
     pub name: QualifiedName,
     pub inheritance: InheritanceDeclaration,
     pub kind: ClassKind,

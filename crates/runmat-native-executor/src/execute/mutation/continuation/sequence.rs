@@ -46,14 +46,16 @@ impl PendingSequenceAssign {
                 let field = self.prepared.destination.field.clone();
                 let runtime = state.runtime.clone();
                 let caller = state.function.name.clone();
+                let access = super::super::super::subscript_path::frame_access(state)?;
                 let updated = member_call(state, move || async move {
                     let value = runtime
-                            .scope(runmat_runtime::object::resolve::store_member_sequence_traced_in_context(
+                            .scope(runmat_runtime::object::resolve::store_member_sequence_traced_with_access(
                                 &runtime,
                                 base,
                                 field,
                                 values,
                                 Some(&caller),
+                                &access,
                             ))
                             .await?;
                     single_member_sequence(value).map_err(|error| *error)

@@ -4,15 +4,16 @@
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 pub mod abi;
+mod callable_selection;
 mod diagnostic_path;
 mod error;
 mod executable;
 mod execution;
-mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod foreign_artifacts;
 #[cfg(not(target_arch = "wasm32"))]
 mod foreign_unit_host;
+mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
 mod generic_native;
 mod parallel_runtime;
@@ -32,6 +33,7 @@ pub use foreign_unit_host::{ForeignUnitHost, ForeignUnitRetirement};
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
 pub use session::{
+    FeaExecutionTimingKey, FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
     CheckedFeaSessionSource, FeaCapturedDependency, FeaWorkingCheckRequest, FeaWorkingSource,
     FeaWorkspaceCapture, FeaWorkspaceCheckRequest, FeaWorkspaceCheckResult,
     PreparedFeaWorkspacePublication, RunMatSession, SelectedNativeSourceEvaluator,
@@ -108,3 +110,5 @@ pub fn execute_text_request_for_testing(
         |error| RunError::Runtime(error.into_runtime_error()),
     )
 }
+
+pub use session::{FeaExecutionPreflight,PreparedSerialFeaStudy,FeaGeometryExecutionHost,FeaStudyPreparationError};

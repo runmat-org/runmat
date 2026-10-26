@@ -41,8 +41,8 @@ pub(super) fn contribution_is_valid(
         && !contribution.spectrum_provenance_digest.trim().is_empty()
         && contribution.direction.iter().all(|value| value.is_finite())
         && scalar_close(direction_norm, 1.0)
-        && contribution.damping_ratio.is_finite()
-        && (0.0..1.0).contains(&contribution.damping_ratio)
+        && contribution.damping_ratio.canonical_value().is_finite()
+        && (0.0..1.0).contains(&contribution.damping_ratio.canonical_value())
         && !contribution.modes.is_empty()
         && contribution.rigid_coefficients.len() == contribution.modes.len()
         && contribution

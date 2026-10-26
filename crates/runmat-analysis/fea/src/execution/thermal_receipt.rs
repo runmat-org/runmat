@@ -20,15 +20,18 @@ pub struct ThermalNumericalReceipt {
     pub producer: StepIdentity,
     pub topology_digest: Digest,
     pub accepted_sample_count: u64,
-    pub first_sample_time_s: f64,
-    pub terminal_sample_time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub first_sample_time_s: runmat_types::physical::Time,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub terminal_sample_time_s: runmat_types::physical::Time,
     pub maximum_relative_linear_residual: f64,
     pub nonlinear_sample_count: usize,
     pub maximum_relative_nonlinear_residual: Option<f64>,
     pub maximum_relative_nonlinear_increment: Option<f64>,
     pub maximum_relative_energy_residual: f64,
     pub residual_target: f64,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -123,12 +126,16 @@ impl ThermalNumericalReceiptArtifact {
         let r = self.receipt;
         if self.schema_version != 2
             || r.accepted_sample_count == 0
-            || !r.first_sample_time_s.is_finite()
-            || !r.terminal_sample_time_s.is_finite()
-            || r.first_sample_time_s.to_bits() == (-0.0_f64).to_bits()
-            || r.terminal_sample_time_s.to_bits() == (-0.0_f64).to_bits()
-            || (r.accepted_sample_count == 1 && r.first_sample_time_s != r.terminal_sample_time_s)
-            || (r.accepted_sample_count > 1 && r.first_sample_time_s >= r.terminal_sample_time_s)
+            || !r.first_sample_time_s.canonical_value().is_finite()
+            || !r.terminal_sample_time_s.canonical_value().is_finite()
+            || r.first_sample_time_s.canonical_value().to_bits() == (-0.0_f64).to_bits()
+            || r.terminal_sample_time_s.canonical_value().to_bits() == (-0.0_f64).to_bits()
+            || (r.accepted_sample_count == 1
+                && r.first_sample_time_s.canonical_value()
+                    != r.terminal_sample_time_s.canonical_value())
+            || (r.accepted_sample_count > 1
+                && r.first_sample_time_s.canonical_value()
+                    >= r.terminal_sample_time_s.canonical_value())
             || !r.maximum_relative_linear_residual.is_finite()
             || r.maximum_relative_linear_residual < 0.0
             || !r.residual_target.is_finite()
@@ -155,8 +162,8 @@ impl ThermalNumericalReceiptArtifact {
             || !r.maximum_relative_energy_residual.is_finite()
             || r.maximum_relative_energy_residual < 0.0
             || r.maximum_relative_energy_residual > r.residual_target
-            || !r.reference_temperature_k.is_finite()
-            || r.reference_temperature_k <= 0.0
+            || !r.reference_temperature_k.canonical_value().is_finite()
+            || r.reference_temperature_k.canonical_value() <= 0.0
             || self.identity != receipt_identity(self.source_workload, self.source_result, &r)?
         {
             return Err(invalid(
@@ -276,8 +283,8 @@ fn evidence(
             .model
             .thermal
             .as_ref()
-            .map(|domain| domain.reference_temperature.kelvin)
-            != Some(metadata.reference_temperature_k)
+            .map(|domain| domain.reference_temperature.canonical_value())
+            != Some(metadata.reference_temperature_k.canonical_value())
         || maximum > workload.residual_target
     {
         return Err(invalid(
@@ -288,8 +295,10 @@ fn evidence(
         producer,
         topology_digest: metadata.topology_digest,
         accepted_sample_count: u64::try_from(schedule.sample_count()).map_err(invalid)?,
-        first_sample_time_s: schedule.points_s()[0],
-        terminal_sample_time_s: *schedule.points_s().last().unwrap(),
+        first_sample_time_s: runmat_types::physical::Time::new(schedule.points_s()[0]),
+        terminal_sample_time_s: runmat_types::physical::Time::new(
+            *schedule.points_s().last().unwrap(),
+        ),
         maximum_relative_linear_residual: maximum,
         nonlinear_sample_count: metadata.nonlinear_evidence.len(),
         maximum_relative_nonlinear_residual: nonlinear.then(|| {
@@ -312,7 +321,9 @@ fn evidence(
             .map(|balance| balance.relative_residual)
             .fold(0.0_f64, f64::max),
         residual_target: workload.residual_target,
-        reference_temperature_k: metadata.reference_temperature_k,
+        reference_temperature_k: runmat_types::physical::Temperature::new(
+            metadata.reference_temperature_k.canonical_value(),
+        ),
     })
 }
 

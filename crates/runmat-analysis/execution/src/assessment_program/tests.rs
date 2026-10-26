@@ -17,6 +17,7 @@ fn function_facts() -> FunctionAnalysis {
     )));
     FunctionAnalysis {
         function: ProgramFunctionId(1),
+        captures: Vec::new(),
         callable: CallableFact {
             capabilities: CapabilitySet::default(),
             identity: None,

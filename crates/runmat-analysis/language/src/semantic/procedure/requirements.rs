@@ -110,9 +110,7 @@ fn time_scalar(
 ) -> Option<f64> {
     let value = values::assignment(statements, name);
     match value {
-        Some(value)
-            if value.value_type == crate::FeaType::Quantity(crate::PhysicalDimension::TIME) =>
-        {
+        Some(value) if (value.value_type).is_quantity((crate::PhysicalDimension::TIME).into()) => {
             values::canonical_scalar(value)
         }
         _ => missing(

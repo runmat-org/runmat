@@ -3,6 +3,7 @@ use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
     ParameterRange,
 };
+#[cfg(not(target_os = "emscripten"))]
 use std::{sync::mpsc, time::Duration};
 
 use super::{evaluator_bindings::EvaluatorBindings, ffi};
@@ -24,7 +25,7 @@ impl OcctExactEvaluator {
         let bindings = EvaluatorBindings::from_import(imported)?;
         Self::start(
             &imported.representation,
-            imported.meters_per_source_unit,
+            imported.kernel_units.meters_per_unit(),
             bindings,
         )
     }
@@ -67,36 +68,49 @@ impl OcctExactEvaluator {
         let bindings = EvaluatorBindings::from_closure(representation, topology, evaluators, None)?;
         control.checkpoint()?;
         let face_keys = session::face_keys(&bindings, Some(control))?;
-        let owned_representation = representation.to_vec();
-        let (sender, receiver) = mpsc::sync_channel(1);
-        std::thread::spawn(move || {
-            let result = ffi::bridge::start_exact_evaluator_session(
-                &owned_representation,
-                meters_per_source_unit,
-                &face_keys,
-            )
-            .map_err(kernel_error);
-            match result {
-                Ok(session_id) => {
-                    if sender.send(Ok(session_id)).is_err() {
-                        ffi::bridge::close_exact_evaluator_session(session_id);
+        // The browser sidecar already runs off the UI thread. Emscripten's
+        // single-core host cannot spawn a native helper thread.
+        #[cfg(target_os = "emscripten")]
+        let session_id = ffi::bridge::start_exact_evaluator_session(
+            representation,
+            meters_per_source_unit,
+            &face_keys,
+        )
+        .map_err(kernel_error)?;
+        #[cfg(not(target_os = "emscripten"))]
+        let session_id = {
+            let owned_representation = representation.to_vec();
+            let (sender, receiver) = mpsc::sync_channel(1);
+            std::thread::spawn(move || {
+                let result = ffi::bridge::start_exact_evaluator_session(
+                    &owned_representation,
+                    meters_per_source_unit,
+                    &face_keys,
+                )
+                .map_err(kernel_error);
+                match result {
+                    Ok(session_id) => {
+                        if sender.send(Ok(session_id)).is_err() {
+                            ffi::bridge::close_exact_evaluator_session(session_id);
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
                     }
                 }
-                Err(error) => {
-                    let _ = sender.send(Err(error));
+            });
+            let started = loop {
+                match receiver.recv_timeout(Duration::from_millis(10)) {
+                    Ok(result) => break result?,
+                    Err(mpsc::RecvTimeoutError::Timeout) => control.checkpoint()?,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(invalid_result(
+                            "OCCT evaluator session worker stopped before returning a result",
+                        ));
+                    }
                 }
-            }
-        });
-        let session_id = loop {
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(result) => break result?,
-                Err(mpsc::RecvTimeoutError::Timeout) => control.checkpoint()?,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(invalid_result(
-                        "OCCT evaluator session worker stopped before returning a result",
-                    ));
-                }
-            }
+            };
+            started
         };
         let evaluator = Self {
             session_id,
@@ -156,20 +170,18 @@ impl OcctExactEvaluator {
             ffi::bridge::exact_curve_derivatives(self.session_id, self.shape_key(id)?, parameter)
                 .map_err(kernel_error)?;
         control.checkpoint()?;
-        let result = CurveDerivatives {
-            point_m: [value.point_x, value.point_y, value.point_z],
-            first_m: [value.first_x, value.first_y, value.first_z],
-            second_m: [value.second_x, value.second_y, value.second_z],
-        };
-        if result
-            .point_m
-            .into_iter()
-            .chain(result.first_m)
-            .chain(result.second_m)
-            .any(|component| !component.is_finite())
-        {
-            return Err(invalid_result("OCCT curve derivatives are not finite"));
-        }
+        let frame = parameter_frame(
+            value.parameter_unit,
+            value.parameter_scale,
+            format!("occt:{}:{}", self.session_id, id.as_str()),
+            runmat_geometry_core::GeometryParameterAxis::Curve,
+        )?;
+        let result = CurveDerivatives::from_parameter_coefficients(
+            [value.point_x, value.point_y, value.point_z],
+            [value.first_x, value.first_y, value.first_z],
+            [value.second_x, value.second_y, value.second_z],
+            frame,
+        )?;
         Ok(result)
     }
 }
@@ -203,7 +215,7 @@ impl ExactCurveEvaluator for OcctExactEvaluator {
         id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 3], GeometryEvaluationError> {
+    ) -> Result<runmat_geometry_core::physical::Position, GeometryEvaluationError> {
         Ok(self.raw_derivatives(id, parameter, control)?.point_m)
     }
 
@@ -214,7 +226,9 @@ impl ExactCurveEvaluator for OcctExactEvaluator {
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError> {
         let first = self.raw_derivatives(id, parameter, control)?.first_m;
-        normalized(first).ok_or_else(|| invalid_result("OCCT curve tangent is singular"))
+        first
+            .with_canonical_storage(|values, _axes| normalized(*values))
+            .ok_or_else(|| invalid_result("OCCT curve tangent is singular"))
     }
 
     fn derivatives(
@@ -231,27 +245,39 @@ impl ExactCurveEvaluator for OcctExactEvaluator {
         id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<f64, GeometryEvaluationError> {
+    ) -> Result<runmat_geometry_core::physical::Curvature, GeometryEvaluationError> {
         let derivatives = self.raw_derivatives(id, parameter, control)?;
-        let first_norm = norm(derivatives.first_m);
+        let first_norm = norm(
+            derivatives
+                .first_m
+                .with_canonical_storage(|values, _axes| *values),
+        );
         if first_norm == 0.0 {
             return Err(invalid_result("OCCT curve curvature is singular"));
         }
-        let curvature = norm(cross(derivatives.first_m, derivatives.second_m))
-            / (first_norm * first_norm * first_norm);
+        let curvature = norm(cross(
+            derivatives
+                .first_m
+                .with_canonical_storage(|values, _axes| *values),
+            derivatives
+                .second_m
+                .with_canonical_storage(|values, _axes| *values),
+        )) / (first_norm * first_norm * first_norm);
         if !curvature.is_finite() || curvature < 0.0 {
             return Err(invalid_result("OCCT curve curvature is invalid"));
         }
-        Ok(curvature)
+        runmat_geometry_core::physical::Curvature::try_new(curvature)
+            .map_err(|e| invalid_result(e.to_string()))
     }
 
     fn arc_length_m(
         &self,
         id: &CurveEvaluatorId,
         range: ParameterRange,
-        absolute_error_m: f64,
+        absolute_error_m: runmat_geometry_core::physical::Length,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<f64, GeometryEvaluationError> {
+    ) -> Result<runmat_geometry_core::physical::Length, GeometryEvaluationError> {
+        let absolute_error_m = absolute_error_m.canonical_value();
         if !absolute_error_m.is_finite() || absolute_error_m <= 0.0 {
             return Err(invalid_result(
                 "curve arc-length tolerance must be positive",
@@ -271,16 +297,19 @@ impl ExactCurveEvaluator for OcctExactEvaluator {
         if !length.is_finite() || length < 0.0 {
             return Err(invalid_result("OCCT curve arc length is invalid"));
         }
-        Ok(length)
+        runmat_geometry_core::physical::Length::try_new(length)
+            .map_err(|e| invalid_result(e.to_string()))
     }
 
     fn inverse_project(
         &self,
         id: &CurveEvaluatorId,
-        point_m: [f64; 3],
-        absolute_error_m: f64,
+        point_m: runmat_geometry_core::physical::Position,
+        absolute_error_m: runmat_geometry_core::physical::Length,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<CurveProjection, GeometryEvaluationError> {
+        let point_m = point_m.canonical_value();
+        let absolute_error_m = absolute_error_m.canonical_value();
         if point_m.iter().any(|value| !value.is_finite())
             || !absolute_error_m.is_finite()
             || absolute_error_m <= 0.0
@@ -299,19 +328,17 @@ impl ExactCurveEvaluator for OcctExactEvaluator {
         )
         .map_err(projection_error)?;
         control.checkpoint()?;
-        let result = CurveProjection {
-            parameter: value.parameter,
-            point_m: [value.point_x, value.point_y, value.point_z],
-            distance_m: value.distance,
-        };
-        if !result.parameter.is_finite()
-            || result.point_m.iter().any(|value| !value.is_finite())
-            || !result.distance_m.is_finite()
-            || result.distance_m < 0.0
-        {
-            return Err(invalid_result("OCCT curve projection result is invalid"));
-        }
-        Ok(result)
+        CurveProjection::from_parameter_coefficients(
+            value.parameter,
+            [value.point_x, value.point_y, value.point_z],
+            value.distance,
+            parameter_frame(
+                value.parameter_unit,
+                value.parameter_scale,
+                format!("occt:{}:{}", self.session_id, id.as_str()),
+                runmat_geometry_core::GeometryParameterAxis::Curve,
+            )?,
+        )
     }
 }
 
@@ -362,3 +389,22 @@ fn invalid_result(reason: impl Into<String>) -> GeometryEvaluationError {
 
 #[cfg(test)]
 mod tests;
+
+pub(super) fn parameter_frame(
+    unit: u8,
+    scale: f64,
+    evaluator: String,
+    axis: runmat_geometry_core::GeometryParameterAxis,
+) -> Result<runmat_geometry_core::GeometryParameterFrame, GeometryEvaluationError> {
+    use runmat_geometry_core::GeometryParameterFrame;
+    match unit {
+        0 => Ok(GeometryParameterFrame::native(evaluator, axis)),
+        1 => {
+            GeometryParameterFrame::length(scale).map_err(|error| invalid_result(error.to_string()))
+        }
+        2 => Ok(GeometryParameterFrame::radians()),
+        _ => Err(invalid_result(
+            "OCCT returned an unknown parameter unit tag",
+        )),
+    }
+}

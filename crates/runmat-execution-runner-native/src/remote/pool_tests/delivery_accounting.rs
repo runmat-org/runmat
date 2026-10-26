@@ -117,11 +117,8 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
         );
         let evidence = pool.task_execution_evidence(task_id).unwrap();
         let original = &evidence.attempts[0];
-        let terminal = original.terminal.as_ref().unwrap();
-        assert_eq!(
-            terminal.disposition,
-            runmat_execution_runner::AttemptDisposition::Lost
-        );
+        assert!(original.terminal.is_none());
+        let terminal = original.unverified_retirement.as_ref().unwrap();
         assert!(evidence.task.committed.is_none());
         assert!(pool.execution_object(&reference).unwrap().is_none());
         if foreign {

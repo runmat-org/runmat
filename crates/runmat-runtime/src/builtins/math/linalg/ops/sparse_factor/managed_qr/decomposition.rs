@@ -21,8 +21,15 @@ impl<T: SparseQrScalar> SparseQrDecomposition<T> {
         pivot: bool,
         runtime: &RuntimeContext,
     ) -> Result<Self, Error> {
-        let fence = HostAllocationReceipt::admit(Some(runtime), HostAllocationPlan::new(0, 0)?)?;
-        let mut work = Work::for_policy(runtime, fence.as_ref())?;
+        Self::factor_optional(sparse, pivot, Some(runtime)).await
+    }
+    pub(in crate::builtins::math::linalg) async fn factor_optional(
+        sparse: &SparseTensor,
+        pivot: bool,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<Self, Error> {
+        let fence = HostAllocationReceipt::admit(runtime, HostAllocationPlan::new(0, 0)?)?;
+        let mut work = Work::for_optional_policy(runtime, fence.as_ref())?;
         work.flush().await?;
         let input = factor::read(sparse, &mut work).await?;
         let qr = factor::decompose(
@@ -42,7 +49,13 @@ impl<T: SparseQrScalar> SparseQrDecomposition<T> {
         &self,
         runtime: &RuntimeContext,
     ) -> Result<(), HostAllocationError> {
-        super::super::managed_storage::Fence::checkpoint(
+        self.check_owner_optional(Some(runtime))
+    }
+    pub(in crate::builtins::math::linalg) fn check_owner_optional(
+        &self,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<(), HostAllocationError> {
+        super::super::managed_storage::Fence::checkpoint_optional(
             &self.fence.as_ref().map_or(
                 super::super::managed_storage::Fence::Unbounded,
                 super::super::managed_storage::Fence::Managed,
@@ -66,7 +79,14 @@ impl<T: SparseQrScalar> SparseQrDecomposition<T> {
         column: usize,
         runtime: &RuntimeContext,
     ) -> Result<(&[usize], &[T]), Error> {
-        self.check_owner(runtime)?;
+        self.r_column_optional(column, Some(runtime))
+    }
+    pub(in crate::builtins::math::linalg) fn r_column_optional(
+        &self,
+        column: usize,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<(&[usize], &[T]), Error> {
+        self.check_owner_optional(runtime)?;
         if column >= self.qr.cols {
             return Err(Error::DimensionMismatch);
         }
@@ -82,10 +102,20 @@ impl<T: SparseQrScalar> SparseQrDecomposition<T> {
         adjoint: bool,
         runtime: &RuntimeContext,
     ) -> Result<(), Error> {
+        self.apply_q_optional(columns, count, adjoint, Some(runtime))
+            .await
+    }
+    pub(in crate::builtins::math::linalg) async fn apply_q_optional(
+        &self,
+        columns: &mut [T],
+        count: usize,
+        adjoint: bool,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<(), Error> {
         if self.qr.rows.checked_mul(count) != Some(columns.len()) {
             return Err(Error::DimensionMismatch);
         }
-        let mut work = Work::for_policy(runtime, self.fence.as_ref())?;
+        let mut work = Work::for_optional_policy(runtime, self.fence.as_ref())?;
         work.flush().await?;
         let reflectors = self.qr.rows.min(self.qr.cols);
         for column in 0..count {

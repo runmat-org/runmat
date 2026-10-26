@@ -110,10 +110,14 @@ pub(super) fn validate_recovered_facets(
                                 format!("facet planarity predicate failed: {failure:?}"),
                             )
                         })?;
-                let source_coordinates = source_nodes.map(|source| source.coordinates_m);
+                let source_coordinates =
+                    source_nodes.map(|source| source.coordinates_m.canonical_value());
                 let coincident_at_resolution = coordinates_share_representable_location(
-                    node.coordinates_m,
-                    closest_point_on_triangle(node.coordinates_m, source_coordinates),
+                    node.coordinates_m.canonical_value(),
+                    closest_point_on_triangle(
+                        node.coordinates_m.canonical_value(),
+                        source_coordinates,
+                    ),
                 );
                 if exact_coplanarity != PredicateSign::Zero && !coincident_at_resolution {
                     return Err(invalid(

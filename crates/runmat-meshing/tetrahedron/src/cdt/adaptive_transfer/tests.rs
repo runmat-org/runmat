@@ -76,16 +76,16 @@ fn request() -> MeshingRequest {
             validation: "validation/current".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: metric(),
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 10.0,
@@ -94,7 +94,7 @@ fn request() -> MeshingRequest {
                 minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -139,7 +139,10 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
         .map(|(index, node)| SolverMeshNode {
             node_id: index as u64 + 1,
             stable_identity: node.identity,
-            coordinates_m: node.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
             provenance: vec![region.clone()],
             exact_parameters: Vec::new(),
         })
@@ -187,6 +190,11 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
         canonical_digest: StableDigest::ZERO,
         root_stage_manifest_digest: StableDigest::from_bytes([90; 32]),
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: StableDigest::from_bytes([91; 32]),
             geometry_revision: 1,
             persistent_mapping_version: 1,
@@ -429,7 +437,17 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         DelaunayAdaptiveTransferErrorKind::InvalidArtifact
     );
     let mut displaced = source.clone();
-    displaced.topology.nodes[0].coordinates_m[0] = 0.125;
+    {
+        let quantity_change = 0.125;
+        let quantity_index = 0;
+        let quantity_slot = &mut displaced.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     displaced.seal_canonical_digest().unwrap();
     assert_eq!(
         build_refinement_solver_adaptation(

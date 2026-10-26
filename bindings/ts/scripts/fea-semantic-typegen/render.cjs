@@ -46,13 +46,13 @@ function renderDeclaration(declaration, registry) {
   }
   if (declaration.kind === "struct") {
     if (hasSerde(declaration.attrs, "transparent") && declaration.shape === "tuple") {
-      return `export type ${declaration.name}${generics} = ${renderType(splitTopLevel(declaration.body)[0], registry, declaration.generics)};`;
+      return `export type ${declaration.name}${generics} = ${renderTupleFields(declaration.body, registry, declaration.generics)[0]};`;
     }
     if (declaration.shape === "named") {
       return `export interface ${declaration.name}${generics} ${renderFields(declaration.body, declaration.attrs, registry, declaration.generics)}`;
     }
     if (declaration.shape === "tuple") {
-      const members = splitTopLevel(declaration.body).map((value) => renderType(stripVisibility(value), registry, declaration.generics));
+      const members = renderTupleFields(declaration.body, registry, declaration.generics);
       return `export type ${declaration.name}${generics} = ${members.length === 1 ? members[0] : `[${members.join(", ")}]`};`;
     }
     return `export type ${declaration.name}${generics} = Record<never, never>;`;
@@ -69,14 +69,39 @@ function renderFields(body, containerAttrs, registry, generics) {
     const omission = serde(match[1], "skip_serializing_if");
     const optional = omission !== null;
     const omitsNone = option && omission === "Option::is_none";
-    const binary = serde(match[1], "with") === "serde_bytes";
-    if (binary && match[3].trim() !== "Vec<u8>") throw new Error("serde_bytes requires a byte vector");
-    const type = (binary ? "Uint8Array | number[]" : renderType(option ?? match[3].trim(), registry, generics)) + (option && !omitsNone ? " | null" : "");
+    const type = renderSerializedFieldType(match[3].trim(), match[1], registry, generics, omitsNone);
     const explicit = serde(match[1], "rename");
     const name = explicit ?? rename(match[2], renameAll);
     return [`  ${safeProperty(name)}${optional ? "?" : ""}: ${type};`];
   });
   return `{\n${fields.join("\n")}\n}`;
+}
+
+// Named fields, tuple variants, and transparent tuple structs share the same
+// Serde field adapters. Attributes describe the wire; they are not Rust types.
+function renderSerializedFieldType(raw, attrs, registry, generics, omitsNone = false) {
+  const option = unwrap(raw, "Option");
+  const adapter = serde(attrs, "with");
+  const binary = adapter === "serde_bytes";
+  const canonicalStorage = adapter === "runmat_types::physical::canonical_storage";
+  const storedQuantity = canonicalStorage ? raw.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*Quantity<([\s\S]+)>$/) : null;
+  if (canonicalStorage && !storedQuantity) throw new Error(`Canonical storage requires a shared Quantity<K,Storage>: ${raw}`);
+  const storageType = storedQuantity ? splitTopLevel(storedQuantity[1])[1] : null;
+  if (canonicalStorage && !storageType) throw new Error(`Canonical storage has no explicit shape: ${raw}`);
+  const canonicalScalar = ["runmat_types::physical::canonical_scalar", "runmat_types::physical::canonical_scalar::optional"].includes(adapter);
+  if (binary && raw !== "Vec<u8>") throw new Error("serde_bytes requires a byte vector");
+  const type = canonicalStorage ? renderType(storageType, registry, generics) : canonicalScalar ? "number" : binary ? "Uint8Array | number[]" : renderType(option ?? raw, registry, generics);
+  return type + (option && !omitsNone ? " | null" : "");
+}
+
+function renderTupleFields(body, registry, generics) {
+  return splitTopLevel(body).flatMap((raw) => {
+    const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)([\s\S]+)$/);
+    if (!match) throw new Error(`Unsupported serialized tuple field ${raw}`);
+    if (hasSerde(match[1], "skip") || hasSerde(match[1], "skip_serializing")) return [];
+    if (serde(match[1], "skip_serializing_if") !== null) throw new Error(`Conditional tuple field omission requires an explicit wire contract: ${raw}`);
+    return [renderSerializedFieldType(stripVisibility(match[2]), match[1], registry, generics)];
+  });
 }
 
 function renderEnum(declaration, registry) {
@@ -116,7 +141,7 @@ function parseVariant(raw) {
 function variantPayload(variant, declaration, registry) {
   if (variant.shape === "unit") return null;
   if (variant.shape === "named") return renderFields(variant.body, declaration.attrs, registry, declaration.generics);
-  const values = splitTopLevel(variant.body).map((value) => renderType(stripVisibility(value), registry, declaration.generics));
+  const values = renderTupleFields(variant.body, registry, declaration.generics);
   return values.length === 1 ? values[0] : `[${values.join(", ")}]`;
 }
 
@@ -130,9 +155,9 @@ function renderType(raw, registry, generics) {
   }
   const tuple = source.startsWith("(") && source.endsWith(")") ? splitTopLevel(source.slice(1, -1)) : null;
   if (tuple) return `[${tuple.map((value) => renderType(value, registry, generics)).join(", ")}]`;
-  for (const wrapper of ["Vec", "BTreeSet", "HashSet", "Box"]) {
+  for (const wrapper of ["Vec", "BTreeSet", "HashSet", "Box", "Arc"]) {
     const inner = unwrap(source, wrapper);
-    if (inner) return wrapper === "Box" ? renderType(inner, registry, generics) : `${renderType(inner, registry, generics)}[]`;
+    if (inner) return ["Box", "Arc"].includes(wrapper) ? renderType(inner, registry, generics) : `${renderType(inner, registry, generics)}[]`;
   }
   const option = unwrap(source, "Option");
   if (option) return `${renderType(option, registry, generics)} | null`;
@@ -143,6 +168,8 @@ function renderType(raw, registry, generics) {
       return `Record<${renderType(key, registry, generics)}, ${renderType(value, registry, generics)}>`;
     }
   }
+  const coordinate = source.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*CoordinateUnits<[^>]+>$/);
+  if (coordinate) return "LengthUnit"; // role is enforced by Rust, erased in serde
   const generic = source.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)<([\s\S]+)>$/);
   if (generic) return `${generic[1]}<${splitTopLevel(generic[2]).map((value) => renderType(value, registry, generics)).join(", ")}>`;
   const name = source.split("::").at(-1);

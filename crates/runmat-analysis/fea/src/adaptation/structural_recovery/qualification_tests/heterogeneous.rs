@@ -43,7 +43,7 @@ pub(super) fn solved_heterogeneous_tet4_stress_matches_an_independent_constituti
             .collect::<Vec<_>>();
         let coordinates = indices
             .iter()
-            .map(|index| projection.nodes[*index].coordinates_m)
+            .map(|index| projection.nodes[*index].coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         let origin = coordinates[0];
         assert_eq!(coordinates[1], [origin[0] + 1.0, origin[1], origin[2]]);
@@ -76,9 +76,12 @@ pub(super) fn solved_heterogeneous_tet4_stress_matches_an_independent_constituti
         else {
             panic!("reference fixture must use isotropic elasticity");
         };
-        let shear = mechanical.youngs_modulus_pa / (2.0 * (1.0 + mechanical.poisson_ratio));
-        let lambda = mechanical.youngs_modulus_pa * mechanical.poisson_ratio
-            / ((1.0 + mechanical.poisson_ratio) * (1.0 - 2.0 * mechanical.poisson_ratio));
+        let shear = mechanical.youngs_modulus_pa.canonical_value()
+            / (2.0 * (1.0 + mechanical.poisson_ratio.canonical_value()));
+        let lambda = mechanical.youngs_modulus_pa.canonical_value()
+            * mechanical.poisson_ratio.canonical_value()
+            / ((1.0 + mechanical.poisson_ratio.canonical_value())
+                * (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value()));
         let trace = strain[0] + strain[1] + strain[2];
         let expected = [
             lambda * trace + 2.0 * shear * strain[0],
@@ -168,7 +171,9 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
                     .unwrap()
             })
             .collect::<Vec<_>>();
-        let origin = mesh.topology.nodes[indices[0]].coordinates_m;
+        let origin = mesh.topology.nodes[indices[0]]
+            .coordinates_m
+            .canonical_value();
         for (corner, offset) in [
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
@@ -179,7 +184,9 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
         .enumerate()
         {
             assert_eq!(
-                mesh.topology.nodes[indices[corner]].coordinates_m,
+                mesh.topology.nodes[indices[corner]]
+                    .coordinates_m
+                    .canonical_value(),
                 std::array::from_fn(|axis| origin[axis] + offset[axis])
             );
         }
@@ -201,10 +208,13 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
         else {
             panic!("reference fixture must use isotropic elasticity");
         };
-        verified_elasticities.insert(mechanical.youngs_modulus_pa.to_bits());
-        let shear = mechanical.youngs_modulus_pa / (2.0 * (1.0 + mechanical.poisson_ratio));
-        let lambda = mechanical.youngs_modulus_pa * mechanical.poisson_ratio
-            / ((1.0 + mechanical.poisson_ratio) * (1.0 - 2.0 * mechanical.poisson_ratio));
+        verified_elasticities.insert(mechanical.youngs_modulus_pa.canonical_value().to_bits());
+        let shear = mechanical.youngs_modulus_pa.canonical_value()
+            / (2.0 * (1.0 + mechanical.poisson_ratio.canonical_value()));
+        let lambda = mechanical.youngs_modulus_pa.canonical_value()
+            * mechanical.poisson_ratio.canonical_value()
+            / ((1.0 + mechanical.poisson_ratio.canonical_value())
+                * (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value()));
         let nodal: [[f64; 3]; 10] = std::array::from_fn(|local| {
             std::array::from_fn(|axis| displacement[indices[local] * 3 + axis])
         });

@@ -127,7 +127,8 @@ impl RepeatedCallableVector {
     ) -> Result<Self, RuntimeError> {
         if !matches!(
             target,
-            Value::FunctionHandle(_)
+            Value::ScopedFunctionHandle(_)
+                | Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
                 | Value::BoundFunctionHandle(_)
