@@ -8,6 +8,10 @@ use crate::context::{
 use crate::execution::blocking_cpu::OwnedCpuJob;
 use crate::execution::blocking_cpu::RuntimeBlockingCpuService;
 
+#[cfg(all(test, target_arch = "wasm32"))]
+#[path = "owned_blocking/browser_tests.rs"]
+mod browser_tests;
+
 /// Values transferred to the physical owned CPU lane. Native jobs cross a
 /// thread boundary; the browser lane executes inline on its original worker.
 #[cfg(not(target_arch = "wasm32"))]
