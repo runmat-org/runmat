@@ -662,6 +662,18 @@ pub(super) fn assemble_linear_system_impl(
         solved_nodal_temperature_k,
         solid_energy,
     } = execution;
+    if structural_requirement.is_none() {
+        return Err(LinearAssemblyError::CouplingRealization(
+            "assembly requires an explicit structural formulation; other physics must use their physical assembly operators, not a synthetic shared RHS".into(),
+        ));
+    }
+    if electro_thermal_context.is_some()
+        && structural_requirement != Some(StructuralFormulationRequirement::SyntheticOperator)
+    {
+        return Err(LinearAssemblyError::CouplingRealization(
+            "electro-thermal structural coupling requires a solved physical electrical/thermal transfer; the legacy synthetic Joule-heating RHS is not a physical formulation".into(),
+        ));
+    }
     if solved_nodal_temperature_k.is_some()
         && (solver_mesh.is_none()
             || structural_requirement
@@ -3115,7 +3127,10 @@ mod tests {
         assert_eq!(summary.structural_moment_projection.len(), 1);
         let projection = &summary.structural_moment_projection[0];
         assert_eq!(projection.load_id, "moment_tip");
-        assert_eq!(projection.region_id, "tip");
+        assert_eq!(
+            projection.region_id,
+            runmat_meshing_core::fixtures::fixture_boundary_selection("tip")
+        );
         assert_eq!(projection.target_node_count, 3);
         assert!(projection.projection_applied);
         for residual in projection
@@ -3150,15 +3165,16 @@ mod tests {
 
         let err = assemble_physical_structural_system(&model, Some(mesh))
             .expect_err("strict solver mesh assembly should reject unmapped loads");
+        let missing_tip = runmat_meshing_core::fixtures::fixture_boundary_selection("missing_tip");
 
         assert!(matches!(
             err,
             LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(ref message))
-                if message.contains("load_tip") && message.contains("missing_tip")
+                if message.contains("load_tip") && message.contains(&missing_tip)
         ));
         let message = err.to_string();
         assert!(message.contains("load_id=load_tip"));
-        assert!(message.contains("region_id=missing_tip"));
+        assert!(message.contains(&format!("region_id={missing_tip}")));
     }
 
     #[test]
@@ -3187,7 +3203,10 @@ mod tests {
         ));
         let message = err.to_string();
         assert!(message.contains("`fixed_root`"));
-        assert!(message.contains("`missing_root`"));
+        assert!(message.contains(&format!(
+            "`{}`",
+            runmat_meshing_core::fixtures::fixture_boundary_selection("missing_root")
+        )));
     }
 
     #[test]
@@ -4203,7 +4222,9 @@ mod tests {
             error,
             LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(message))
                 if message.contains("missing_tip")
-                    && message.contains("not_a_connectivity_region")
+                    && message.contains(&runmat_meshing_core::fixtures::fixture_boundary_selection(
+                        "not_a_connectivity_region"
+                    ))
         ));
     }
 
