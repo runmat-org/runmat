@@ -3,7 +3,7 @@
 geometry bracket {
     file = "./geometry/bracket.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
+    region body : solid { select name "WallHook_30mm"; expect exactly_one }
     region top_face : face { select name "Top face"; expect exactly_one }
     region mounting_holes : face { select name "Mounting holes"; expect one_or_more }
     region corner_fillets : face { select name "Corner fillets"; expect one_or_more }
