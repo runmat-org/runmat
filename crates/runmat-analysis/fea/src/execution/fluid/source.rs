@@ -32,8 +32,88 @@ pub(crate) struct PreparedFluidSource {
     pub preparation_resident_bytes: u64,
 }
 
+/// Prepared sources retained per process. Preparation is a pure function of the authoring
+/// workload, the policies, the ceiling and the mesh content; every recovery, accuracy, state,
+/// publication and replay consumer of one study asks for the same source. A hit re-encodes the
+/// key from the caller's own values and recomputes the mesh's content digest, so it still binds
+/// the exact authority and mesh; the shared value is the one a fresh preparation produced from
+/// that same content after full validation. Failed preparations are never retained.
+const SOURCE_MEMO_CAPACITY: usize = 2;
+static SOURCE_MEMO: std::sync::Mutex<Vec<(Digest, std::sync::Arc<PreparedFluidSource>)>> =
+    std::sync::Mutex::new(Vec::new());
+const SOURCE_KEY_PREFIX: &[u8] = b"runmat-fluid-prepared-source-key/v1\0";
+
+#[derive(Serialize)]
+struct SourceKey<'a, T: Serialize> {
+    authority: &'a T,
+    model: &'a AnalysisModel,
+    geometry_policy: FiniteVolumeProjectionPolicy,
+    policy: CanonicalFluidPolicy,
+    ceiling: u64,
+    mesh_content_digest: runmat_meshing_core::StableDigest,
+}
+
 impl PreparedFluidSource {
+    /// The process's one prepared source for this authority and mesh content.
     pub(super) fn prepare<T: Serialize>(
+        authority: &T,
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+        geometry_policy: FiniteVolumeProjectionPolicy,
+        policy: CanonicalFluidPolicy,
+        ceiling: u64,
+    ) -> AnalysisExecutionResult<std::sync::Arc<Self>> {
+        let mesh_content_digest = mesh
+            .content_digest_with_cancellation(&crate::topology::ProjectionCancellation)
+            .map_err(invalid)?;
+        let key = Digest::sha256(
+            runmat_canonical_codec::encode_contract(
+                SOURCE_KEY_PREFIX,
+                "fluid-prepared-source-key",
+                &SourceKey {
+                    authority,
+                    model,
+                    geometry_policy,
+                    policy,
+                    ceiling,
+                    mesh_content_digest,
+                },
+                LIMITS,
+            )
+            .map_err(invalid)?,
+        );
+        if let Some(hit) = SOURCE_MEMO
+            .lock()
+            .ok()
+            .and_then(|memo| memo.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+        {
+            return Ok(hit);
+        }
+        let prepared = std::sync::Arc::new(Self::prepare_uncached(
+            authority,
+            model,
+            mesh,
+            geometry_policy,
+            policy,
+            ceiling,
+        )?);
+        // The admitted mesh's sealed digest is the one this key was built from.
+        if prepared.source.mesh_digest != mesh_content_digest {
+            return Err(invalid(
+                "prepared fluid source differs from its mesh content",
+            ));
+        }
+        if let Ok(mut memo) = SOURCE_MEMO.lock() {
+            memo.retain(|(k, _)| *k != key);
+            if memo.len() >= SOURCE_MEMO_CAPACITY {
+                memo.remove(0);
+            }
+            memo.push((key, prepared.clone()));
+        }
+        Ok(prepared)
+    }
+
+    fn prepare_uncached<T: Serialize>(
         authority: &T,
         model: &AnalysisModel,
         mesh: &SolverMeshArtifact,
@@ -97,8 +177,10 @@ impl PreparedFluidSource {
             invalid(format!(
                 "{error} (projection {projection}, geometry scratch {}, metadata 2x{metadata}, \
                  properties 2x{}, solver {} for {} cells)",
-                geometry.scratch_bytes, prepared.estimated_resident_bytes,
-                numerical.resident_bytes_upper_bound, geometry.cell_count
+                geometry.scratch_bytes,
+                prepared.estimated_resident_bytes,
+                numerical.resident_bytes_upper_bound,
+                geometry.cell_count
             ))
         })?;
         validate_model(model).map_err(invalid)?;

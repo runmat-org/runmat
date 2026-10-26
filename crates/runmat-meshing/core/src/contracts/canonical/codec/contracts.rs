@@ -208,6 +208,17 @@ impl SolverMeshArtifact {
         Ok(artifact)
     }
 
+    /// Recomputes the sealed identity digest from the artifact's current content without the
+    /// semantic payload validation. A caller that already admitted an artifact with this digest
+    /// through `validate_canonical*` uses it to authenticate that another value has the same
+    /// content; it never admits an artifact on its own.
+    pub fn content_digest_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<StableDigest, MeshingContractError> {
+        artifact_identity_digest_with_cancellation(self, cancellation)
+    }
+
     pub fn seal_canonical_digest(&mut self) -> Result<StableDigest, MeshingContractError> {
         self.seal_canonical_digest_with_cancellation(&crate::NeverCancelled)
     }

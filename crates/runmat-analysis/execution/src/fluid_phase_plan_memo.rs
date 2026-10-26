@@ -5,18 +5,23 @@
 //! asks for the same plan again. Rederiving it decodes and re-prepares the original fluid source
 //! each time. The memo keys each derivation by a digest of the request, the policy and every
 //! input object's descriptor and actual bytes (each chunk is rehashed on every call, so a hit
-//! still authenticates the exact content), and keeps one plan per phase kind, like the fluid
-//! resource projection cache. Failed derivations are never memoized.
+//! still authenticates the exact content), and keeps a small bounded set of plans per phase
+//! kind. Failed derivations are never memoized.
 use crate::*;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{Digest, DigestStream};
 use std::sync::Mutex;
 
-pub(crate) struct PlanMemo(Mutex<Option<(Digest, FeaResourcePlan)>>);
+/// Plans retained per phase kind. One study asks for several distinct plans of one kind (one per
+/// recovered result and per state publication), and alternating requests must not evict each
+/// other, so the memo keeps a small bounded set, most recent last.
+const PLAN_MEMO_CAPACITY: usize = 16;
+
+pub(crate) struct PlanMemo(Mutex<Vec<(Digest, FeaResourcePlan)>>);
 
 impl PlanMemo {
     pub(crate) const fn new() -> Self {
-        Self(Mutex::new(None))
+        Self(Mutex::new(Vec::new()))
     }
 
     pub(crate) fn get_or_derive(
@@ -28,14 +33,20 @@ impl PlanMemo {
         derive: impl FnOnce() -> AnalysisBridgeResult<FeaResourcePlan>,
     ) -> AnalysisBridgeResult<FeaResourcePlan> {
         let key = memo_key(domain, request, inputs, policy);
-        if let Some((cached, plan)) = self.0.lock().ok().as_deref().and_then(Option::as_ref) {
-            if *cached == key {
-                return Ok(plan.clone());
-            }
+        if let Some(plan) = self.0.lock().ok().and_then(|memo| {
+            memo.iter()
+                .find(|(cached, _)| *cached == key)
+                .map(|(_, plan)| plan.clone())
+        }) {
+            return Ok(plan);
         }
         let plan = derive()?;
-        if let Ok(mut last) = self.0.lock() {
-            *last = Some((key, plan.clone()));
+        if let Ok(mut memo) = self.0.lock() {
+            memo.retain(|(cached, _)| *cached != key);
+            if memo.len() >= PLAN_MEMO_CAPACITY {
+                memo.remove(0);
+            }
+            memo.push((key, plan.clone()));
         }
         Ok(plan)
     }
@@ -89,9 +100,18 @@ mod tests {
             .unwrap()]
         };
         let base = memo_key("fluid", b"request", &objects(&bytes), policy);
-        assert_eq!(base, memo_key("fluid", b"request", &objects(&bytes), policy));
-        assert_ne!(base, memo_key("fluid", b"other-request", &objects(&bytes), policy));
-        assert_ne!(base, memo_key("state", b"request", &objects(&bytes), policy));
+        assert_eq!(
+            base,
+            memo_key("fluid", b"request", &objects(&bytes), policy)
+        );
+        assert_ne!(
+            base,
+            memo_key("fluid", b"other-request", &objects(&bytes), policy)
+        );
+        assert_ne!(
+            base,
+            memo_key("state", b"request", &objects(&bytes), policy)
+        );
         let mut tampered = objects(&bytes);
         let last = tampered[0].objects.len() - 1;
         tampered[0].objects[last].bytes[0] ^= 1;
