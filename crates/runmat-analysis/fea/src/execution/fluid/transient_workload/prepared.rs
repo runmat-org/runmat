@@ -2,7 +2,7 @@ use super::*;
 use crate::{admission::AnalysisRunIdentity, physics::cfd::canonical::CanonicalFluidInitialState};
 pub struct PreparedFluidTransient<'a> {
     pub(crate) workload: &'a FluidTransientWorkload,
-    pub(crate) source: super::super::source::PreparedFluidSource,
+    pub(crate) source: std::sync::Arc<super::super::source::PreparedFluidSource>,
     pub(crate) initial: CanonicalFluidInitialState,
     pub(crate) formulation: AnalysisRunIdentity,
 }

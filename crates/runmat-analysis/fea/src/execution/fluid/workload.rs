@@ -256,7 +256,10 @@ impl FluidSteadyWorkload {
                     "transient conjugate heat transfer needs a uniform whole-model initial temperature",
                 ));
             };
-            if found.replace(t.canonical_value()).is_some() || !t.canonical_value().is_finite() || t.canonical_value() <= 0.0 {
+            if found.replace(t.canonical_value()).is_some()
+                || !t.canonical_value().is_finite()
+                || t.canonical_value() <= 0.0
+            {
                 return Err(invalid("one finite initial temperature"));
             }
         }
@@ -486,15 +489,21 @@ impl FluidSteadyWorkload {
             let schedule =
                 super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
             let times = schedule.points_s();
-            let first =
-                source.conjugate_heat_at(self, flow.face_volume_flux_m3_per_s.canonical_values(), times[0])?;
+            let first = source.conjugate_heat_at(
+                self,
+                flow.face_volume_flux_m3_per_s.canonical_values(),
+                times[0],
+            )?;
             let mut state = first.uniform_state(self.initial_temperature()?);
             drop(first);
             let mut steps = Vec::with_capacity(times.len() - 1);
             let mut departure = state.clone();
             for window in times.windows(2) {
-                let problem =
-                    source.conjugate_heat_at(self, flow.face_volume_flux_m3_per_s.canonical_values(), window[1])?;
+                let problem = source.conjugate_heat_at(
+                    self,
+                    flow.face_volume_flux_m3_per_s.canonical_values(),
+                    window[1],
+                )?;
                 let next = problem
                     .step_backward_euler(&state, window[1] - window[0])
                     .map_err(invalid)?;
@@ -538,7 +547,7 @@ impl FluidSteadyWorkload {
     pub(crate) fn prepare(
         &self,
         mesh: &SolverMeshArtifact,
-    ) -> AnalysisExecutionResult<PreparedFluidSource> {
+    ) -> AnalysisExecutionResult<std::sync::Arc<PreparedFluidSource>> {
         let ceiling = self.resident_ceiling()?;
         let metadata =
             serialized_materialization_resident_bytes_estimate(self, LIMITS).map_err(invalid)?;
