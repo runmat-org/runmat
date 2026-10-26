@@ -1,4 +1,5 @@
 use super::*;
+use runmat_canonical_codec::profile_serialized;
 
 #[test]
 fn complete_original_fluid_state_has_exact_profile_and_cold_source() {

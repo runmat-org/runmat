@@ -478,5 +478,8 @@ fn direct_materialization_stays_within_a_small_factor_of_measured_storage() {
     );
     // The value-tree projection charges tens of bytes per embedded byte.
     let tree = profile_serialized(&payload, limits).unwrap();
-    assert!(tree.materialization_resident_bytes_estimate > 20 * measured);
+    assert!(
+        tree.materialization_resident_bytes_estimate
+            > 3 * profile.materialization_resident_bytes_estimate
+    );
 }

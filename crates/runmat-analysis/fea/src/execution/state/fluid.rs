@@ -179,7 +179,7 @@ impl CanonicalSemanticState {
         validate_request(request, workload, mesh, result)?;
         let result_bytes = result.canonical_bytes()?;
         let topology = result.native_field_topology(workload, mesh)?;
-        fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes, &topology)?;
+        fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes)?;
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,
             declaration: request.declaration.clone(),
