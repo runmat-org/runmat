@@ -1,7 +1,7 @@
 ISO-10303-21;
 HEADER;
 FILE_DESCRIPTION(('Open CASCADE Model'),'2;1');
-FILE_NAME('Open CASCADE Shape Model','2026-10-25T06:10:48',('Author'),(
+FILE_NAME('Open CASCADE Shape Model','2026-10-26T09:50:11',('Author'),(
     'Open CASCADE'),'Open CASCADE STEP processor 7.9','Open CASCADE 7.9'
   ,'Unknown');
 FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
@@ -15,8 +15,7 @@ DATA;
 #4 = PRODUCT_DEFINITION_SHAPE('','',#5);
 #5 = PRODUCT_DEFINITION('design','',#6,#9);
 #6 = PRODUCT_DEFINITION_FORMATION('','',#7);
-#7 = PRODUCT('Open CASCADE STEP translator 7.9 3',
-  'Open CASCADE STEP translator 7.9 3','',(#8));
+#7 = PRODUCT('Pipe','Pipe','',(#8));
 #8 = PRODUCT_CONTEXT('',#2,'mechanical');
 #9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');
 #10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#113);
@@ -26,7 +25,7 @@ DATA;
 #14 = DIRECTION('',(1.,0.,-0.));
 #15 = MANIFOLD_SOLID_BREP('',#16);
 #16 = CLOSED_SHELL('',(#17,#105,#109));
-#17 = ADVANCED_FACE('',(#18),#31,.T.);
+#17 = ADVANCED_FACE('Wall',(#18),#31,.T.);
 #18 = FACE_BOUND('',#19,.T.);
 #19 = EDGE_LOOP('',(#20,#54,#77,#104));
 #20 = ORIENTED_EDGE('',*,*,#21,.F.);
@@ -126,11 +125,11 @@ PARAMETRIC_REPRESENTATION_CONTEXT() REPRESENTATION_CONTEXT('2D SPACE',''
 PARAMETRIC_REPRESENTATION_CONTEXT() REPRESENTATION_CONTEXT('2D SPACE',''
   ) );
 #104 = ORIENTED_EDGE('',*,*,#55,.T.);
-#105 = ADVANCED_FACE('',(#106),#43,.T.);
+#105 = ADVANCED_FACE('Outlet',(#106),#43,.T.);
 #106 = FACE_BOUND('',#107,.T.);
 #107 = EDGE_LOOP('',(#108));
 #108 = ORIENTED_EDGE('',*,*,#21,.T.);
-#109 = ADVANCED_FACE('',(#110),#93,.F.);
+#109 = ADVANCED_FACE('Inlet',(#110),#93,.F.);
 #110 = FACE_BOUND('',#111,.T.);
 #111 = EDGE_LOOP('',(#112));
 #112 = ORIENTED_EDGE('',*,*,#78,.F.);

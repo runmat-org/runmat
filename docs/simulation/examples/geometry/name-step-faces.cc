@@ -1,15 +1,21 @@
 // Writes authored names into an example STEP file: the part (product and solid) name and the
-// names of selected faces, as `ADVANCED_FACE('<name>', ...)`, so studies select by `name`
-// (DEF-276). Faces are numbered as RunMat's inspection numbers them (`face_000001` is face 1:
-// the kernel's face order in the file). The geometry is copied unchanged.
+// names of selected faces, edges and vertices, as `ADVANCED_FACE('<name>', ...)`,
+// `EDGE_CURVE('<name>', ...)` and `VERTEX_POINT('<name>', ...)`, so studies select by `name`
+// (DEF-276). Faces are numbered in the kernel's face order in the file; edges and vertices in
+// the kernel's unique edge and vertex order. The listing mode prints those numbers with each
+// entity's location, so pick entities by location. The geometry is copied unchanged.
 //
 // Build: clang++ -std=c++17 -I/opt/homebrew/opt/opencascade/include/opencascade name-step-faces.cc \
 //   -L/opt/homebrew/opt/opencascade/lib -Wl,-rpath,/opt/homebrew/opt/opencascade/lib \
 //   -lTKDESTEP -lTKXSBase -lTKBRep -lTKG3d -lTKMath -lTKernel -lTKXCAF -lTKLCAF -lTKCAF -lTKCDF \
 //   -lTKDE -lTKTopAlgo -o name-step-faces
 // Run:   ./name-step-faces in.step out.step "Beam" 1="Fixed end" 2="Loaded end"
-//        ./name-step-faces in.step            (lists faces: ordinal, centroid, normal, area)
+//        ./name-step-faces in.step out.step "Plate" 1="Plate" e1="South edge" v2="Base"
+//        ./name-step-faces in.step  (lists faces: ordinal, centroid, normal, area; edges:
+//                                    e<ordinal>, midpoint, length; vertices: v<ordinal>, point)
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <DESTEP_Parameters.hxx>
@@ -18,7 +24,9 @@
 #include <STEPCAFControl_Writer.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -56,6 +64,10 @@ int main(int argc, char** argv) {
   for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
     faces.push_back(TopoDS::Face(explorer.Current()));
   }
+  TopTools_IndexedMapOfShape edges;
+  TopTools_IndexedMapOfShape vertices;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
   if (argc == 2) {
     for (std::size_t index = 0; index < faces.size(); ++index) {
       GProp_GProps props;
@@ -72,6 +84,19 @@ int main(int argc, char** argv) {
       }
       std::printf("%3zu centroid (%9.3f %9.3f %9.3f) normal (%6.3f %6.3f %6.3f) area %10.3f\n",
                   index + 1, c.X(), c.Y(), c.Z(), n.X(), n.Y(), n.Z(), props.Mass());
+    }
+    for (int index = 1; index <= edges.Extent(); ++index) {
+      const TopoDS_Edge edge = TopoDS::Edge(edges(index));
+      BRepAdaptor_Curve curve(edge);
+      const gp_Pnt m = curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
+      GProp_GProps props;
+      BRepGProp::LinearProperties(edge, props);
+      std::printf("e%-2d midpoint (%9.3f %9.3f %9.3f) length %10.3f\n", index, m.X(), m.Y(),
+                  m.Z(), props.Mass());
+    }
+    for (int index = 1; index <= vertices.Extent(); ++index) {
+      const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vertices(index)));
+      std::printf("v%-2d point (%9.3f %9.3f %9.3f)\n", index, p.X(), p.Y(), p.Z());
     }
     return 0;
   }
@@ -90,14 +115,23 @@ int main(int argc, char** argv) {
   for (int arg = 4; arg < argc; ++arg) {
     const std::string spec = argv[arg];
     const auto equals = spec.find('=');
-    const std::size_t ordinal = std::stoul(spec.substr(0, equals));
-    if (equals == std::string::npos || ordinal == 0 || ordinal > faces.size()) {
-      std::cerr << "bad face spec " << spec << '\n';
+    const char kind = spec.empty() ? '\0' : spec[0];
+    const std::size_t start = (kind == 'e' || kind == 'v') ? 1 : 0;
+    const std::size_t count = kind == 'e' ? static_cast<std::size_t>(edges.Extent())
+                              : kind == 'v' ? static_cast<std::size_t>(vertices.Extent())
+                                            : faces.size();
+    const std::size_t ordinal =
+        equals == std::string::npos ? 0 : std::stoul(spec.substr(start, equals - start));
+    if (ordinal == 0 || ordinal > count) {
+      std::cerr << "bad entity spec " << spec << '\n';
       return 1;
     }
-    TDF_Label label = shapes->AddSubShape(part, faces[ordinal - 1]);
+    const TopoDS_Shape entity = kind == 'e'   ? edges(static_cast<int>(ordinal))
+                                : kind == 'v' ? vertices(static_cast<int>(ordinal))
+                                              : TopoDS_Shape(faces[ordinal - 1]);
+    TDF_Label label = shapes->AddSubShape(part, entity);
     if (label.IsNull()) {
-      std::cerr << "cannot label face " << ordinal << '\n';
+      std::cerr << "cannot label " << spec.substr(0, equals) << '\n';
       return 2;
     }
     TDataStd_Name::Set(label, spec.substr(equals + 1).c_str());

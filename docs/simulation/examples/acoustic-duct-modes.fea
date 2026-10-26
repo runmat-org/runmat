@@ -1,9 +1,9 @@
 geometry duct {
-    file = "./geometry/cantilever.step"
+    file = "./geometry/duct.step"
     units = mm
-    region air : solid { select id "solid_000001"; expect exactly_one }
-    region near_end : face { select id "face_000001"; expect exactly_one }
-    region far_end : face { select id "face_000002"; expect exactly_one }
+    region air : solid { select name "Duct"; expect exactly_one }
+    region near_end : face { select name "Near end"; expect exactly_one }
+    region far_end : face { select name "Far end"; expect exactly_one }
 }
 
 mesh duct on geometry.duct {

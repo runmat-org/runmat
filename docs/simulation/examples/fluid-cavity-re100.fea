@@ -4,12 +4,12 @@ geometry cavity {
     file = "./geometry/cavity-slab.step"
     units = m
     region fluid : cell { select result; expect exactly_one }
-    region left : face { select id "face_000001"; expect exactly_one }
-    region right : face { select id "face_000002"; expect exactly_one }
-    region bottom : face { select id "face_000003"; expect exactly_one }
-    region lid : face { select id "face_000004"; expect exactly_one }
-    region back : face { select id "face_000005"; expect exactly_one }
-    region front : face { select id "face_000006"; expect exactly_one }
+    region left : face { select name "Left wall"; expect exactly_one }
+    region right : face { select name "Right wall"; expect exactly_one }
+    region bottom : face { select name "Bottom wall"; expect exactly_one }
+    region lid : face { select name "Lid"; expect exactly_one }
+    region back : face { select name "Back"; expect exactly_one }
+    region front : face { select name "Front"; expect exactly_one }
 }
 
 mesh cavity on geometry.cavity {

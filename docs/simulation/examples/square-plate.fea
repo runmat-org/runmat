@@ -1,11 +1,11 @@
 geometry plate {
     file = "./geometry/square-plate.step"
     units = mm
-    region panel : face { select id "face_000001"; expect exactly_one }
-    region south : edge { select id "edge_000001"; expect exactly_one }
-    region east : edge { select id "edge_000002"; expect exactly_one }
-    region north : edge { select id "edge_000003"; expect exactly_one }
-    region west : edge { select id "edge_000004"; expect exactly_one }
+    region panel : face { select name "Plate"; expect exactly_one }
+    region south : edge { select name "South edge"; expect exactly_one }
+    region east : edge { select name "East edge"; expect exactly_one }
+    region north : edge { select name "North edge"; expect exactly_one }
+    region west : edge { select name "West edge"; expect exactly_one }
 }
 
 mesh plate on geometry.plate {
