@@ -1,5 +1,5 @@
 //! Original frame descriptors lifted from the Runtime constructor definitions.
-use crate::fea_contract::{errors::ERRORS, parameters::OUT_ANY};
+use crate::fea_contract::{descriptors::ERRORS, parameters::OUT_ANY};
 use crate::*;
 
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];

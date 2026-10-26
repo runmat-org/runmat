@@ -1,5 +1,5 @@
 //! Original reference-point descriptor; quantity validation stays in Runtime.
-use crate::fea_contract::{errors::ERRORS, parameters::OUT_ANY};
+use crate::fea_contract::{descriptors::ERRORS, parameters::OUT_ANY};
 use crate::*;
 const REFERENCE_POINT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {

@@ -1,5 +1,5 @@
 //! Unchanged descriptor/integer metadata lifted from Runtime values.rs.
-use crate::fea_contract::errors::ERRORS;
+use crate::fea_contract::descriptors::ERRORS;
 use crate::*;
 
 const QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
