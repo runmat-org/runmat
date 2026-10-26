@@ -7816,7 +7816,6 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
- "runmat-parser",
  "runmat-types",
  "schemars",
  "serde",
@@ -8843,7 +8842,6 @@ dependencies = [
  "tracing",
  "wasm-bindgen-test",
  "web-sys",
- "webbrowser 0.8.15",
  "wgpu",
  "winit",
 ]
