@@ -30,7 +30,7 @@ impl ContactPointBinding<'_> {
             || secondary != history.secondary_coordinates_m
             || relative != history.relative_material_vector_m
             || frame != history.frame
-            || gap != history.point.gap_m()
+            || gap != history.point.gap_m().canonical_value()
         {
             return Err(ContactHistoryError::InvalidHistory);
         }

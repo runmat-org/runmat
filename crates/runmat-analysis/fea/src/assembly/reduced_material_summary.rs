@@ -35,6 +35,6 @@ pub(super) fn structural_material_summary(model: &AnalysisModel) -> StructuralMa
         poisson_ratio: runmat_types::physical::PoissonRatio::new(avg_poisson_ratio),
         density_kg_per_m3: runmat_types::physical::MassDensity::new(avg_density_kg_per_m3),
         lame_lambda_pa,
-        shear_modulus_pa,
+        shear_modulus_pa: runmat_types::physical::ShearModulus::new(shear_modulus_pa),
     }
 }

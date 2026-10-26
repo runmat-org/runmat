@@ -561,7 +561,7 @@ fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
     let f = case(2, ReferenceCase::Couette, false);
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let r = p.solve().unwrap();
-    for w in &r.residual.cell_vorticity_per_s {
+    for w in r.residual.cell_vorticity_per_s.canonical_values() {
         assert!(norm(sub(*w, [0.0, 0.0, -1.0])) < 1e-6, "vorticity {w:?}");
     }
     let mu = f.material.dynamic_viscosity.canonical_value();
@@ -570,11 +570,17 @@ fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
         if face.neighbor.is_some() || face.centroid_m[1].abs() > 1e-12 {
             continue;
         }
-        let n = face.owner_area_vector_m2.map(|x| x / face.area_m2.canonical_value());
+        let n = face
+            .owner_area_vector_m2
+            .map(|x| x / face.area_m2.canonical_value());
         let t = r.residual.face_forces.viscous_traction_n.canonical_values()[i];
         let tn = geometry_ops::dot(t, n);
-        let shear: [f64; 3] = std::array::from_fn(|k| -(t[k] - tn * n[k]) / face.area_m2.canonical_value());
-        assert!(norm(sub(shear, [mu, 0.0, 0.0])) < 1e-6 * mu.max(1.0), "{shear:?}");
+        let shear: [f64; 3] =
+            std::array::from_fn(|k| -(t[k] - tn * n[k]) / face.area_m2.canonical_value());
+        assert!(
+            norm(sub(shear, [mu, 0.0, 0.0])) < 1e-6 * mu.max(1.0),
+            "{shear:?}"
+        );
         walls += 1;
     }
     assert!(walls > 0);
@@ -583,7 +589,10 @@ fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
 #[test]
 #[ignore = "convergence measurement, run with --ignored --nocapture"]
 fn measure_outer_iterations_against_refinement() {
-    for coupling in [PressureVelocityCoupling::Coupled, PressureVelocityCoupling::Segregated] {
+    for coupling in [
+        PressureVelocityCoupling::Coupled,
+        PressureVelocityCoupling::Segregated,
+    ] {
         for cells in [4, 8] {
             let mut f = case(cells, ReferenceCase::Duct, false);
             f.policy = CanonicalFluidPolicy::default();
@@ -614,10 +623,21 @@ fn coupled_solve_reaches_the_segregated_fixed_point_in_far_fewer_outer_iteration
     let mut f = case(4, ReferenceCase::Duct, false);
     f.policy = CanonicalFluidPolicy::default();
     f.policy.maximum_outer_iterations = 2000;
-    let coupled = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
+    let coupled = CanonicalFluidProblem::prepare(f.input())
+        .unwrap()
+        .solve()
+        .unwrap();
     f.policy.pressure_velocity_coupling = PressureVelocityCoupling::Segregated;
-    let segregated = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
-    for (u, v) in coupled.velocity_m_per_s.canonical_values().iter().zip(segregated.velocity_m_per_s.canonical_values()) {
+    let segregated = CanonicalFluidProblem::prepare(f.input())
+        .unwrap()
+        .solve()
+        .unwrap();
+    for (u, v) in coupled
+        .velocity_m_per_s
+        .canonical_values()
+        .iter()
+        .zip(segregated.velocity_m_per_s.canonical_values())
+    {
         assert!(norm(sub(*u, *v)) < 1e-6 * norm(*v).max(1e-3));
     }
     assert!(

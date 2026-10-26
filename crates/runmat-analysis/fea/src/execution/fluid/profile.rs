@@ -86,7 +86,11 @@ impl<'a, I: Iterator<Item = &'a str> + Clone> Serialize for BoundaryProfiles<I> 
 struct ResidualProfile<I> {
     boundary_balances: BoundaryProfiles<I>,
     face_forces: FaceForcesProfile,
-    cell_vorticity_per_s: Repeated<[f64; 3]>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    cell_vorticity_per_s: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::Vorticity,
+        Repeated<[f64; 3]>,
+    >,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     cell_momentum_n:
         runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Repeated<[f64; 3]>>,
@@ -185,7 +189,10 @@ fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalPr
                     _,
                 >::new(vector(faces)),
             },
-            cell_vorticity_per_s: vector(cells),
+            cell_vorticity_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Vorticity,
+                _,
+            >::new(vector(cells)),
             cell_momentum_n: runmat_types::physical::Quantity::<
                 runmat_types::physical::kind::Force,
                 _,
@@ -352,38 +359,49 @@ impl FluidSteadyWorkload {
                 velocity: vec![0.0; structural],
                 acceleration: vec![0.0; structural],
             };
-            let shape = RetainedShape::<(), (), (), (), _>::FluidStructureTransient(
-                FluidStructureTransientShape {
-                    start_time_s: 0.0,
-                    departure_time_s: 0.0,
-                    departure_displacement_m: vector(source.source.nodes.len()),
-                    departure_structure: state(),
-                    departure_flow: crate::physics::fluid_structure::FluidStructureFlowState {
-                        velocity_m_per_s: runmat_types::physical::Quantity::new(vec![[0.0; 3]; cells]),
-                        pressure_reference_pa: runmat_types::physical::Quantity::new(vec![0.0; cells]),
-                        pressure_fluctuation_pa: runmat_types::physical::Quantity::new(vec![0.0; cells]),
-                        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(vec![0.0; faces]),
-                    },
-                    departure_load: scalar(structural),
-                    displacement_m: vector(source.source.nodes.len()),
-                    structure: state(),
-                    flow,
-                    steps: Repeated {
-                        sample: crate::physics::fluid_structure::FluidStructureStepEvidence {
-                            time_s: 0.0,
-                            coupling_iterations: 0,
-                            interface_displacement_relative_residual: 0.0,
-                            interface_force_n: [0.0; 3],
-                            interface_work_j: 0.0,
-                            strain_energy_j: 0.0,
-                            kinetic_energy_j: 0.0,
-                            structural_dynamic_relative_residual: 0.0,
+            let shape =
+                RetainedShape::<(), (), (), (), _>::FluidStructureTransient(
+                    FluidStructureTransientShape {
+                        start_time_s: 0.0,
+                        departure_time_s: 0.0,
+                        departure_displacement_m: vector(source.source.nodes.len()),
+                        departure_structure: state(),
+                        departure_flow: crate::physics::fluid_structure::FluidStructureFlowState {
+                            velocity_m_per_s: runmat_types::physical::Quantity::new(vec![
+                                [0.0; 3];
+                                cells
+                            ]),
+                            pressure_reference_pa: runmat_types::physical::Quantity::new(vec![
+                                0.0;
+                                cells
+                            ]),
+                            pressure_fluctuation_pa: runmat_types::physical::Quantity::new(
+                                vec![0.0; cells],
+                            ),
+                            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(
+                                vec![0.0; faces],
+                            ),
                         },
-                        count: schedule.points_s().len() - 1,
+                        departure_load: scalar(structural),
+                        displacement_m: vector(source.source.nodes.len()),
+                        structure: state(),
+                        flow,
+                        steps: Repeated {
+                            sample: crate::physics::fluid_structure::FluidStructureStepEvidence {
+                                time_s: 0.0,
+                                coupling_iterations: 0,
+                                interface_displacement_relative_residual: 0.0,
+                                interface_force_n: [0.0; 3],
+                                interface_work_j: 0.0,
+                                strain_energy_j: 0.0,
+                                kinetic_energy_j: 0.0,
+                                structural_dynamic_relative_residual: 0.0,
+                            },
+                            count: schedule.points_s().len() - 1,
+                        },
+                        energy_relative_residual: 0.0,
                     },
-                    energy_relative_residual: 0.0,
-                },
-            );
+                );
             let data = source_data(self, source, reservation, identity, shape)?;
             return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
         }
@@ -502,18 +520,48 @@ mod tests {
                 outer_iterations: 123,
                 linear_iterations: 1234567,
                 residual: CanonicalFluidResidual {
-                    cell_vorticity_per_s: vec![[0.0; 3]; cells],
+                    cell_vorticity_per_s: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Vorticity,
+                        _,
+                    >::new(vec![[0.0; 3]; cells]),
                     boundary_balances: vec![
                             crate::physics::cfd::canonical::CanonicalFluidBoundaryBalance {
                                 authority_id: "pressure_β".into(),
                                 face_count: u64::MAX,
-                                area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(f64::MAX),
-                                volume_flow_rate_m3_per_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::VolumeFlowRate,_>::new(-f64::MAX),
-                                mass_flow_rate_kg_per_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::MassFlowRate,_>::new(f64::MIN_POSITIVE),
-                                advective_momentum_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
-                                viscous_traction_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
-                                pressure_traction_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
-                                pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<runmat_types::physical::kind::Force,_>::new(v),
+                                area_m2: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::Area,
+                                    _,
+                                >::new(f64::MAX),
+                                volume_flow_rate_m3_per_s: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::VolumeFlowRate,
+                                    _,
+                                >::new(
+                                    -f64::MAX
+                                ),
+                                mass_flow_rate_kg_per_s: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::MassFlowRate,
+                                    _,
+                                >::new(
+                                    f64::MIN_POSITIVE
+                                ),
+                                advective_momentum_n: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::Force,
+                                    _,
+                                >::new(v),
+                                viscous_traction_n: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::Force,
+                                    _,
+                                >::new(v),
+                                pressure_traction_n: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::Force,
+                                    _,
+                                >::new(v),
+                                pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
+                                    runmat_types::physical::kind::Force,
+                                    _,
+                                >::new(
+                                    v
+                                ),
                             };
                             faces
                         ],

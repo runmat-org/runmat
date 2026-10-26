@@ -177,12 +177,12 @@ impl VolumeMeshLayout {
         let FiniteVolumeCellSelection::Regions(regions) = &fluid.selection else {
             return Err(invalid("a fluid subset of the mesh is selected by region"));
         };
-        Ok(Some([fluid.cells.len(), fluid.faces.len()].map(|entities| {
-            RecoveredFieldSupport::Regions {
+        Ok(Some([fluid.cells.len(), fluid.faces.len()].map(
+            |entities| RecoveredFieldSupport::Regions {
                 regions: regions.clone(),
                 entities,
-            }
-        })))
+            },
+        )))
     }
 
     pub(super) fn derive(
@@ -229,7 +229,9 @@ impl VolumeMeshLayout {
             ));
         }
         if faces.len() != fluid.faces.len() {
-            return Err(invalid("fluid faces differ from the mesh faces of fluid cells"));
+            return Err(invalid(
+                "fluid faces differ from the mesh faces of fluid cells",
+            ));
         }
         Ok(Self {
             counts: counts(projection, complete.faces.len()),
@@ -247,9 +249,15 @@ impl VolumeMeshLayout {
         fluid: &FiniteVolumeTopology,
         coupling: super::workload::FluidCoupling,
     ) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
-        let [support, faces_support] = Self::supports(projection, fluid)?
-            .unwrap_or([RecoveredFieldSupport::Complete, RecoveredFieldSupport::Complete]);
-        with_supports(field_definition_inventory(coupling)?, &support, &faces_support)
+        let [support, faces_support] = Self::supports(projection, fluid)?.unwrap_or([
+            RecoveredFieldSupport::Complete,
+            RecoveredFieldSupport::Complete,
+        ]);
+        with_supports(
+            field_definition_inventory(coupling)?,
+            &support,
+            &faces_support,
+        )
     }
 
     /// Native definitions of one workload on this layout.
@@ -268,7 +276,13 @@ impl VolumeMeshLayout {
     fn face_values(&self, values: &[f64]) -> Vec<f64> {
         self.faces
             .iter()
-            .map(|&(face, reversed)| if reversed { -values[face] } else { values[face] })
+            .map(|&(face, reversed)| {
+                if reversed {
+                    -values[face]
+                } else {
+                    values[face]
+                }
+            })
             .collect()
     }
 }
@@ -279,7 +293,8 @@ fn face_frames(fluid: &FiniteVolumeTopology) -> Vec<([f64; 3], f64)> {
         .iter()
         .map(|face| {
             (
-                face.owner_area_vector_m2.map(|x| x / face.area_m2.canonical_value()),
+                face.owner_area_vector_m2
+                    .map(|x| x / face.area_m2.canonical_value()),
                 face.area_m2.canonical_value(),
             )
         })
@@ -304,10 +319,7 @@ fn with_supports(
         .collect()
 }
 
-fn counts(
-    projection: &AnalysisProjection,
-    oriented_faces: usize,
-) -> RecoveredFieldEntityCounts {
+fn counts(projection: &AnalysisProjection, oriented_faces: usize) -> RecoveredFieldEntityCounts {
     RecoveredFieldEntityCounts {
         nodes: projection.nodes.len(),
         volume_elements: projection.elements.len(),
@@ -365,7 +377,9 @@ pub fn fluid_native_field_definitions(
 ) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
     request.validate()?;
     if !matches!(request.topology, FieldTopologyIdentity::VolumeMesh { .. }) {
-        return Err(invalid("fluid native fields live on the canonical volume mesh"));
+        return Err(invalid(
+            "fluid native fields live on the canonical volume mesh",
+        ));
     }
     let coupling = request
         .plan
@@ -381,7 +395,9 @@ pub fn fluid_native_field_definitions(
         .unwrap_or(super::workload::FluidCoupling::Standalone);
     let inventory = field_definition_inventory(coupling)?;
     if inventory.len() != request.plan.requirements.len() {
-        return Err(invalid("fluid recovery plan differs from the native inventory"));
+        return Err(invalid(
+            "fluid recovery plan differs from the native inventory",
+        ));
     }
     let definitions = inventory
         .into_iter()
@@ -466,7 +482,7 @@ impl FluidSteadySolverResult {
         original: &'s crate::physics::cfd::canonical::CanonicalFluidResult,
     ) -> Vec<Box<dyn Iterator<Item = f64> + 's>> {
         let viscous = &original.residual.face_forces.viscous_traction_n;
-        let vorticity = &original.residual.cell_vorticity_per_s;
+        let vorticity = original.residual.cell_vorticity_per_s.canonical_values();
         let mut sources: Vec<Box<dyn Iterator<Item = f64> + 's>> = vec![
             Box::new(
                 layout
@@ -474,7 +490,12 @@ impl FluidSteadySolverResult {
                     .iter()
                     .flat_map(|&cell| original.velocity_m_per_s.canonical_values()[cell]),
             ),
-            Box::new(layout.cells.iter().map(|&cell| original.pressure_pa.canonical_values()[cell])),
+            Box::new(
+                layout
+                    .cells
+                    .iter()
+                    .map(|&cell| original.pressure_pa.canonical_values()[cell]),
+            ),
             Box::new(layout.faces.iter().map(|&(face, reversed)| {
                 let q = original.face_volume_flux_m3_per_s.canonical_values()[face];
                 if reversed {
@@ -613,11 +634,8 @@ impl FluidSteadySolverResult {
         if fields.fields().len() != expected.len()
             || expected.len() != definitions.len() * samples.len()
             || fields.entity_counts() != layout.counts
-            || fields
-                .fields()
-                .iter()
-                .zip(expected)
-                .any(|(field, (sample, definition, mut values))| {
+            || fields.fields().iter().zip(expected).any(
+                |(field, (sample, definition, mut values))| {
                     field.definition() != definition
                         || field.sample() != sample
                         || field.storage().as_host_f64().is_none_or(|stored| {
@@ -630,7 +648,8 @@ impl FluidSteadySolverResult {
                                     .map(|value| Some(value.to_bits()))
                                     .chain(std::iter::once(None)))
                         })
-                })
+                },
+            )
         {
             return Err(invalid(
                 "fluid fields differ from the original native cell U/p, face q or coupled values",

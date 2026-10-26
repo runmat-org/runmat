@@ -64,6 +64,16 @@ export type AccuracyTolerance = { relative: number }
   canonical_value: number;
 } };
 
+export type AcousticImpedanceLaw = {
+  frequencies_hz: number[];
+  resistance_pa_s_per_m: number[];
+  reactance_pa_s_per_m: number[];
+law: "table" }
+  | {
+  flow_resistivity_pa_s_per_m2: number;
+  thickness_m: number;
+law: "delany_bazley" };
+
 export interface AcousticIntensity {
   watts_per_square_meter: number;
 }
@@ -321,6 +331,9 @@ export interface AuthoredBoundary {
   kind: AuthoredBoundaryKind;
 }
 
+export type AuthoredBoundaryCoefficient<Q> = { constant: Q }
+  | { model_input: AuthoredNumericExpression };
+
 export type AuthoredBoundaryKind = { structural_pressure: {
   value: PrescribedValue<Pressure>;
 } }
@@ -329,17 +342,23 @@ export type AuthoredBoundaryKind = { structural_pressure: {
 } }
   | { thermal_convection: {
   ambient_temperature: PrescribedValue<Temperature>;
-  coefficient: HeatTransferCoefficient;
+  coefficient: AuthoredBoundaryCoefficient<HeatTransferCoefficient>;
 } }
   | { thermal_radiation: {
   ambient_temperature: PrescribedValue<Temperature>;
-  emissivity: SurfaceEmissivity;
+  emissivity: AuthoredBoundaryCoefficient<SurfaceEmissivity>;
 } }
   | "magnetic_insulation"
   | "acoustic_rigid_wall"
   | "acoustic_radiation"
+  | { acoustic_spherical_radiation: {
+  center_m: [number, number, number];
+} }
   | { acoustic_impedance: {
   impedance: SpecificAcousticImpedance;
+} }
+  | { acoustic_impedance_law: {
+  law: AcousticImpedanceLaw;
 } }
   | { fluid_outlet_pressure: {
   value: PrescribedValue<Pressure>;
@@ -518,7 +537,10 @@ export type AuthoredExcitationKind = "force"
   | "wall_motion";
 
 export type AuthoredExcitationTarget = { region: AuthoredRegionSource }
-  | "whole_model";
+  | "whole_model"
+  | { reference_point: {
+  constraint_id: string;
+} };
 
 export interface AuthoredExecutionPolicy {
   module_path: string;
@@ -544,6 +566,7 @@ export type AuthoredFieldProjection = "magnitude"
   | "real"
   | "imaginary"
   | "phase"
+  | "level"
   | { principal: AuthoredPrincipalSelection }
   | "von_mises";
 
@@ -946,7 +969,8 @@ export type AuthoredSpatialReduction = "integral"
   | "resultant"
   | { moment: {
   about: Position;
-} };
+} }
+  | "normal_flux";
 
 export interface AuthoredStructuralConstraintEquation {
   terms: AuthoredStructuralConstraintEquationTerm[];
@@ -1184,7 +1208,8 @@ export type ComplexRepresentation = "real"
   | "imaginary"
   | "magnitude"
   | "phase_radians"
-  | "complex";
+  | "complex"
+  | "sound_pressure_level";
 
 export interface ComplexSpectralDensity {
   real: number;
@@ -1433,7 +1458,7 @@ export type ExcitationTarget = { region: RegionTarget }
 
 export interface ExecutionResourceLimits {
   workers: InclusiveCountRange | null;
-  cpu_threads_per_worker: number;
+  cpu_threads_per_worker: number | null;
   maximum_memory_bytes_per_worker: number | null;
   accelerators: AcceleratorPreference;
 }
@@ -1666,6 +1691,7 @@ export type FeaSymbolKind = "geometry"
   | "study"
   | "sweep"
   | "execution"
+  | "table"
   | "function";
 
 export type FeaWorkspaceEdit = {
@@ -1731,6 +1757,38 @@ export interface GeneralBeamSection {
   outer_fiber_z_m: number;
   torsion_outer_radius_m: number;
 }
+
+export type GeneralizedNewtonianLaw = {
+  consistency_pa_s_n: number;
+  power_index: number;
+  minimum_shear_rate_per_s: number;
+law: "power_law" }
+  | {
+  zero_shear_viscosity_pa_s: number;
+  infinite_shear_viscosity_pa_s: number;
+  relaxation_time_s: number;
+  power_index: number;
+  transition_exponent: number;
+law: "carreau_yasuda" }
+  | {
+  zero_shear_viscosity_pa_s: number;
+  infinite_shear_viscosity_pa_s: number;
+  time_constant_s: number;
+  rate_index: number;
+law: "cross" }
+  | {
+  yield_stress_pa: number;
+  consistency_pa_s_n: number;
+  power_index: number;
+  regularization_s: number;
+  minimum_shear_rate_per_s: number;
+law: "herschel_bulkley" }
+  | {
+  yield_stress_pa: number;
+  plastic_viscosity_pa_s: number;
+  regularization_s: number;
+  minimum_shear_rate_per_s: number;
+law: "casson" };
 
 export interface GeneratedGeometryArgument {
   parameter: string;
@@ -2109,6 +2167,7 @@ export interface ImportedGeometryDefinition {
   topology_digest: GeometryDigest;
   capabilities: GeometryAuthoringCapabilities;
   exchange: Ap242ExchangeInventory | null;
+  shared_interfaces?: boolean;
 }
 
 export interface InclusiveCountRange {
@@ -2220,7 +2279,12 @@ status: "format_convention" }
   | {
   declaration: LengthUnitDeclaration;
   source: string;
-status: "explicit_fallback" };
+status: "explicit_fallback" }
+  | {
+  declaration: LengthUnitDeclaration;
+  declared: LengthUnitDeclaration[];
+  source: string;
+status: "authored_override" };
 
 export interface MagneticFieldIntensity {
   amperes_per_meter: number;
@@ -2275,7 +2339,13 @@ export interface MaterialElectricalModel {
 
 export type MaterialFluidModel = {
   dynamic_viscosity: DynamicViscosity;
-kind: "incompressible_newtonian" };
+kind: "incompressible_newtonian" }
+  | {
+  law: GeneralizedNewtonianLaw;
+kind: "generalized_newtonian" }
+  | {
+  law: PorousMediumLaw;
+kind: "porous_medium" };
 
 export interface MaterialMechanicalModel {
   youngs_modulus_pa: number;
@@ -2334,26 +2404,38 @@ export interface MeshDefinition {
   settings: MeshingRequestSettings;
 }
 
+export type MeshDimension = "solid"
+  | "surface"
+  | "curve";
+
+export interface MeshSizeControl {
+  control_id: string;
+  region_id: string;
+  target: MeshSizeControlTarget;
+  target_size_m: number;
+}
+
+export type MeshSizeControlTarget = "solid"
+  | "face"
+  | "edge";
+
 export interface MeshingRequestSettings {
   element_order: ElementOrder;
+  dimension?: MeshDimension;
   deterministic_seed: number;
   target_edge_length_m: number;
   maximum_chordal_deviation_m: number;
   maximum_grading_ratio: number;
-  resources: MeshingResourceBudget;
+  limits: MeshingSizeLimits;
   cancellation: CancellationPolicy;
+  cells_across_gap?: number;
+  size_controls?: MeshSizeControl[];
 }
 
-export interface MeshingResourceBudget {
+export interface MeshingSizeLimits {
   maximum_nodes: number;
   maximum_elements: number;
-  maximum_memory_bytes: number;
-  maximum_scratch_bytes: number;
-  maximum_wall_time_ms: number;
-  maximum_artifact_bytes: number;
-  maximum_search_work: number;
   maximum_recursion_depth: number;
-  maximum_iterations: number;
 }
 
 export type ModalCombination = "srss"
@@ -2510,6 +2592,7 @@ export type ObservationQuantity = "displacement"
   | "magnetic_field_intensity"
   | "acoustic_pressure"
   | "acoustic_particle_velocity"
+  | "acoustic_intensity"
   | "sound_pressure_level"
   | "fluid_pressure"
   | "fluid_velocity"
@@ -2679,6 +2762,12 @@ export interface PoissonRatio {
   ratio: number;
 }
 
+export interface PorousMediumLaw {
+  permeability_m2: number;
+  inertial_coefficient_per_m: number;
+  porosity: number;
+}
+
 export interface Position {
   meters: [number, number, number];
 }
@@ -2695,7 +2784,8 @@ export interface Pressure {
 }
 
 export type ProcedureSettings = "none"
-  | { structural_random_response: StructuralRandomResponseSettings };
+  | { structural_random_response: StructuralRandomResponseSettings }
+  | { structural_nonlinear: StructuralNonlinearSettings };
 
 export interface ProcedureStep {
   step_id: ProcedureStepId;
@@ -2795,6 +2885,7 @@ export type QuantityKind = "length"
   | "traction_displacement_stiffness"
   | "curvature"
   | "time_derivative_rate"
+  | "vorticity"
   | "time"
   | "mass"
   | "energy"
@@ -3280,7 +3371,8 @@ export type SpatialReduction = "none"
   | "resultant"
   | { moment: {
   about: Position;
-} };
+} }
+  | "normal_flux";
 
 export interface SpecificAcousticImpedance {
   pascal_seconds_per_meter: number;
@@ -3390,6 +3482,8 @@ export type StateKind = "structural_primary"
   | "electromagnetic_static"
   | "electromagnetic_complex"
   | "acoustic_complex"
+  | "acoustic_modes"
+  | "acoustic_pressure"
   | "fluid"
   | "moving_mesh"
   | "modal_basis"
@@ -3437,7 +3531,8 @@ export type StateUse = "physical_initial_state"
   | "initial_guess"
   | "modal_basis"
   | "coupled_interface"
-  | "restart";
+  | "restart"
+  | "heat_source";
 
 export type StaticElectricalEquation = "electrostatics"
   | "steady_conduction";
@@ -3466,7 +3561,14 @@ export type StructuralKinematicHistory = { acceleration_driven: {
   reconstruction: StructuralMotionReconstruction;
 } };
 
+export type StructuralKinematics = "small_strain"
+  | "large_deformation";
+
 export type StructuralMotionReconstruction = "piecewise_linear_acceleration_exact";
+
+export interface StructuralNonlinearSettings {
+  kinematics: StructuralKinematics;
+}
 
 export interface StructuralRandomResponseSettings {
   modal_damping_ratio: number;
@@ -3631,6 +3733,10 @@ export interface VolumeFlowRate {
 
 export interface VolumetricHeatCapacity {
   joules_per_cubic_meter_kelvin: number;
+}
+
+export interface Vorticity {
+  per_second: number;
 }
 
 export interface YieldStress {

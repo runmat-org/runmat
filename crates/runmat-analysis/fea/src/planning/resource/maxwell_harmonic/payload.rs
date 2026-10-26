@@ -176,12 +176,17 @@ pub(super) fn profile(
         .iter()
         .filter(|c| matches!(c, runmat_analysis_core::AnalysisConstraint::Electrical(_)))
         .map(|c| c.constraint_id().to_string())
-        .chain(w.model.excitations.iter().filter_map(|action| match action {
-            runmat_analysis_core::ExcitationAction::ElectricCurrent(value) => {
-                Some(value.excitation_id.0.clone())
-            }
-            _ => None,
-        }))
+        .chain(
+            w.model
+                .excitations
+                .iter()
+                .filter_map(|action| match action {
+                    runmat_analysis_core::ExcitationAction::ElectricCurrent(value) => {
+                        Some(value.excitation_id.0.clone())
+                    }
+                    _ => None,
+                }),
+        )
         .collect();
     let element_vector = MaxwellElementVector {
         element_identity: stable,
@@ -291,9 +296,9 @@ pub(super) fn profile(
                 .iter()
                 .map(|label| MaxwellDriveResponse {
                     drive_id: label.clone(),
-                    voltage_v: zero,
-                    current_a: zero,
-                    complex_power_va: zero,
+                    voltage_v: runmat_types::physical::Quantity::new(zero),
+                    current_a: runmat_types::physical::Quantity::new(zero),
+                    complex_power_va: runmat_types::physical::Quantity::new(zero),
                 })
                 .collect(),
             electric_energy_j: runmat_types::physical::Quantity::<

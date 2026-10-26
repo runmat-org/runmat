@@ -62,8 +62,8 @@ pub(super) fn compute(
         shear_modulus_pa: material.shear_modulus_pa(),
     };
     let geometry = BeamElementGeometry {
-        node_i_m: structural.nodes[explicit_i].coordinates_m.canonical_value(),
-        node_j_m: structural.nodes[explicit_j].coordinates_m.canonical_value(),
+        node_i_m: structural.nodes[explicit_i].coordinates_m,
+        node_j_m: structural.nodes[explicit_j].coordinates_m,
         reference_axis: beam.reference_axis,
     };
     let frame = geometry

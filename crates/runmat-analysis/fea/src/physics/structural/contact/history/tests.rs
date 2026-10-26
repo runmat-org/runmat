@@ -104,8 +104,11 @@ impl Fixture {
         PenaltyContactLaw::derive(
             model,
             ContactPenaltyPolicy {
-                normal_stiffness_pa_per_m: 10000.0,
-                tangential_stiffness_pa_per_m: Some(10000.0),
+                normal_stiffness_pa_per_m:
+                    runmat_types::physical::TractionDisplacementStiffness::new(10000.0),
+                tangential_stiffness_pa_per_m: Some(
+                    runmat_types::physical::TractionDisplacementStiffness::new(10000.0),
+                ),
             },
         )
         .unwrap()
@@ -219,11 +222,17 @@ fn objective_contact_history_has_zero_rigid_slip_work_force_and_moment_defects()
         near(
             trial
                 .point_response()
-                .frictional_dissipation_increment_j_per_m2,
+                .frictional_dissipation_increment_j_per_m2
+                .canonical_value(),
             0.0,
             1e-10,
         );
-        for q in trial.point_response().trial_state.tangential_traction_pa() {
+        for q in trial
+            .point_response()
+            .trial_state
+            .tangential_traction_pa()
+            .canonical_value()
+        {
             near(q, 0.0, 1e-10);
         }
         let force = f.force(&trial);

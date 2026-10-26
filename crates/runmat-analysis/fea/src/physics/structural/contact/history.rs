@@ -132,7 +132,11 @@ impl<'a> ContactPointBinding<'a> {
         } = self.configuration(primary_face_index, primary_barycentric, positions_m)?;
         let point = self
             .law
-            .update(gap, [0.0; 2], &self.law.initial_state())?
+            .update(
+                runmat_types::physical::Length::new(gap),
+                runmat_types::physical::Quantity::new([0.0; 2]),
+                &self.law.initial_state(),
+            )?
             .trial_state;
         Ok(ContactMaterialPointHistory {
             schema: 1,

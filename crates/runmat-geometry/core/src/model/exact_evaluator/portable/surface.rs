@@ -165,9 +165,15 @@ fn evaluate_surface(
             ..
         } => {
             let (radial, tangent) = radial_frame(x_axis, y_axis, uv[0]);
-            let (sine, cosine) = semi_angle_rad.sin_cos();
+            let (sine, cosine) = semi_angle_rad.canonical_value().sin_cos();
             SurfaceDerivativeCoefficients {
-                point_m: add_three(apex_m, axis, uv[1] * cosine, &radial, uv[1] * sine),
+                point_m: add_three(
+                    apex_m.canonical_values(),
+                    axis,
+                    uv[1] * cosine,
+                    &radial,
+                    uv[1] * sine,
+                ),
                 du_m: scale(&tangent, uv[1] * sine),
                 dv_m: add_scaled(&[0.0; 3], axis, cosine, &radial, sine),
                 duu_m: scale(&radial, -uv[1] * sine),

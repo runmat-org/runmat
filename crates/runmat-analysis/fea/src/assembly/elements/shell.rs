@@ -33,7 +33,8 @@ pub struct ShellMaterial {
     pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub poisson_ratio: runmat_types::physical::PoissonRatio,
-    pub shear_modulus_pa: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub shear_modulus_pa: runmat_types::physical::ShearModulus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -88,7 +89,7 @@ impl ShellSection {
 impl ShellMaterial {
     pub fn validate(self) -> Result<(), ShellElementError> {
         if positive_finite(self.youngs_modulus_pa.canonical_value())
-            && positive_finite(self.shear_modulus_pa)
+            && positive_finite(self.shear_modulus_pa.canonical_value())
             && self.poisson_ratio.canonical_value().is_finite()
             && self.poisson_ratio.canonical_value() > -1.0
             && self.poisson_ratio.canonical_value() < 0.5

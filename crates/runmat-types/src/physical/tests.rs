@@ -648,3 +648,22 @@ fn checked_storage_map_preserves_spec_and_rejects_nonfinite_output() {
         })
         .is_err());
 }
+
+#[test]
+fn vorticity_is_its_own_per_second_kind_distinct_from_rates_and_angular_velocity() {
+    let omega = Vorticity::new(3.5);
+    assert_eq!(omega.kind(), QuantityKind::Vorticity);
+    assert_ne!(QuantityKind::Vorticity, QuantityKind::TimeDerivativeRate);
+    assert_ne!(QuantityKind::Vorticity, QuantityKind::AngularVelocity);
+    assert_eq!(omega.angle_power(), 0);
+    assert_eq!(omega.canonical_value(), 3.5);
+    let per_second = parse_unit_expression("s^-1").unwrap();
+    assert!(Unit::<kind::Vorticity>::try_from_definition(per_second).is_ok());
+    assert_eq!(
+        Unit::<kind::Vorticity>::try_from_definition(parse_unit_expression("rad/s").unwrap()),
+        Err(UnitError::AngleMismatch)
+    );
+    let field = Quantity::<kind::Vorticity, Vec<f64>>::try_new(vec![0.0, -1.25, 4.0]).unwrap();
+    assert_eq!(field.canonical_values(), &[0.0, -1.25, 4.0]);
+    assert!(Quantity::<kind::Vorticity, Vec<f64>>::try_new(vec![f64::NAN]).is_err());
+}

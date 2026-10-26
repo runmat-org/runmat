@@ -24,8 +24,10 @@ impl StructuralElementMaterial {
         })
     }
 
-    pub fn shear_modulus_pa(self) -> f64 {
-        self.youngs_modulus_pa.canonical_value()
-            / (2.0 * (1.0 + self.poisson_ratio.canonical_value()))
+    pub fn shear_modulus_pa(self) -> runmat_types::physical::ShearModulus {
+        runmat_types::physical::ShearModulus::new(
+            self.youngs_modulus_pa.canonical_value()
+                / (2.0 * (1.0 + self.poisson_ratio.canonical_value())),
+        )
     }
 }

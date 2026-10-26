@@ -100,9 +100,7 @@ pub(super) fn prepare_inputs(
                 .get(&node.stable_identity)
                 .map(|&index| rows_by_node[index])
                 .filter(|rows| rows.iter().all(|row| *row != usize::MAX))
-                .ok_or_else(|| {
-                    FeaRunError::Assembly("contact node has no translation rows".into())
-                })
+                .ok_or_else(|| FeaRunError::Assembly("contact node has no translation rows".into()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let youngs = model
@@ -144,10 +142,13 @@ pub(super) fn prepare_inputs(
         let normal = enforcement.penalty_stiffness_scale * NORMAL_PENALTY_FACTOR * youngs / size;
         controls.push(ContactInterfacePolicy {
             penalty: ContactPenaltyPolicy {
-                normal_stiffness_pa_per_m: normal,
+                normal_stiffness_pa_per_m:
+                    runmat_types::physical::TractionDisplacementStiffness::new(normal),
                 tangential_stiffness_pa_per_m: match contact.friction {
                     ContactFriction::Frictionless => None,
-                    ContactFriction::Coulomb { .. } => Some(normal),
+                    ContactFriction::Coulomb { .. } => Some(
+                        runmat_types::physical::TractionDisplacementStiffness::new(normal),
+                    ),
                 },
             },
             pairing: BoundaryPairingPolicy {

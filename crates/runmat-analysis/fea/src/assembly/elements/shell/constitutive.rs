@@ -111,12 +111,16 @@ pub(crate) fn homogeneous_constitutive(
             bending: scale3(plane_stress, (top.powi(3) - bottom.powi(3)) / 3.0),
             transverse_shear: [
                 [
-                    material.shear_modulus_pa * thickness * section.shear_correction,
+                    material.shear_modulus_pa.canonical_value()
+                        * thickness
+                        * section.shear_correction,
                     0.0,
                 ],
                 [
                     0.0,
-                    material.shear_modulus_pa * thickness * section.shear_correction,
+                    material.shear_modulus_pa.canonical_value()
+                        * thickness
+                        * section.shear_correction,
                 ],
             ],
             drilling_stiffness_per_area: FORMULATION_DRILLING_SCALE

@@ -52,6 +52,15 @@ pub use input::{solve_canonical_static, validate_canonical_input};
 pub use response::{MagneticFieldSample, MagnetostaticResponse};
 
 use runmat_meshing_core::StableDigest;
+
+/// One grounded exterior face held at a known tangential magnetic vector potential (Wb/m).
+pub type PrescribedVectorPotential = (
+    StableDigest,
+    runmat_types::physical::Quantity<
+        runmat_types::physical::kind::MagneticVectorPotential,
+        [f64; 3],
+    >,
+);
 /// CODATA 2022 vacuum permeability, SI H/m (not an exact SI defining constant).
 pub use runmat_types::physical::VACUUM_MAGNETIC_PERMEABILITY as VACUUM_PERMEABILITY_H_PER_M;
 use thiserror::Error;
@@ -91,7 +100,7 @@ pub enum MagnetostaticError {
 pub fn solve_grounded_volume(
     projection: &AnalysisProjection,
     grounded_faces: &[StableDigest],
-    prescribed_potential: &[(StableDigest, [f64; 3])],
+    prescribed_potential: &[PrescribedVectorPotential],
     volumes: &[MagneticVolumeData],
     residual_target: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
@@ -117,7 +126,7 @@ pub fn solve_grounded_volume(
 pub fn solve_grounded_volume_with_plan(
     projection: &AnalysisProjection,
     volumes: &[MagneticVolumeData],
-    prescribed_potential: &[(StableDigest, [f64; 3])],
+    prescribed_potential: &[PrescribedVectorPotential],
     residual_target: f64,
     plan: &MagneticSystemPlan,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {

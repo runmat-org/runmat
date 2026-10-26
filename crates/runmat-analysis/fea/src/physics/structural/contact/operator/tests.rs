@@ -82,7 +82,9 @@ impl Fixture {
         mesh.validate().unwrap();
         let projection = AnalysisProjection::derive(&mesh).unwrap();
         let target = |name: &str| {
-            let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
+            let mut target = RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),
+            );
             let entity = projection
                 .boundary_faces
                 .iter()
@@ -126,8 +128,11 @@ impl Fixture {
     pub(crate) fn control(friction: bool) -> ContactInterfacePolicy {
         ContactInterfacePolicy {
             penalty: ContactPenaltyPolicy {
-                normal_stiffness_pa_per_m: 10000.,
-                tangential_stiffness_pa_per_m: friction.then_some(10000.),
+                normal_stiffness_pa_per_m:
+                    runmat_types::physical::TractionDisplacementStiffness::new(10000.),
+                tangential_stiffness_pa_per_m: friction.then_some(
+                    runmat_types::physical::TractionDisplacementStiffness::new(10000.),
+                ),
             },
             pairing: BoundaryPairingPolicy {
                 narrow: crate::topology::BoundarySearchPolicy {

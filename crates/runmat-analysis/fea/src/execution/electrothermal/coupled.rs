@@ -94,7 +94,8 @@ pub fn electrical_part(model: &AnalysisModel, step: &ProcedureStep) -> AnalysisM
     let mut electrical = ProcedureStep::electromagnetic_static(id.clone());
     electrical.accuracy = step.accuracy.clone();
     electrical.excitation_case_selection = step.excitation_case_selection.clone();
-    part.sequence = AnalysisSequence::from_steps(model.sequence.sequence_id.clone(), vec![electrical]);
+    part.sequence =
+        AnalysisSequence::from_steps(model.sequence.sequence_id.clone(), vec![electrical]);
     part.electromagnetic = Some(ElectromagneticDomain::Static {
         equation: StaticElectricalEquation::SteadyConduction,
     });
@@ -121,7 +122,9 @@ pub fn electrical_part(model: &AnalysisModel, step: &ProcedureStep) -> AnalysisM
 pub fn thermal_part(model: &AnalysisModel, step: &ProcedureStep) -> AnalysisModel {
     let mut part = model.clone();
     let mut thermal = match step.procedure {
-        AnalysisProcedure::TransientResponse => ProcedureStep::thermal_transient(step.step_id.0.clone()),
+        AnalysisProcedure::TransientResponse => {
+            ProcedureStep::thermal_transient(step.step_id.0.clone())
+        }
         _ => ProcedureStep::thermal_steady(step.step_id.0.clone()),
     };
     thermal.independent_domain = step.independent_domain.clone();
@@ -182,7 +185,9 @@ fn prune_cases(model: &mut AnalysisModel) {
     for case in &mut model.excitation_cases {
         case.action_ids.retain(|id| present.contains(id));
     }
-    model.excitation_cases.retain(|case| !case.action_ids.is_empty());
+    model
+        .excitation_cases
+        .retain(|case| !case.action_ids.is_empty());
     let cases: std::collections::BTreeSet<_> = model
         .excitation_cases
         .iter()
@@ -273,15 +278,25 @@ pub fn element_temperatures(
         .collect()
 }
 
+/// One time point of a per-element heat generation density, in canonical element order.
+pub type ElementHeatSourceSample = (
+    runmat_types::physical::Time,
+    runmat_types::physical::Quantity<runmat_types::physical::kind::HeatGenerationDensity, Vec<f64>>,
+);
+
 fn element_heat_signal(
     signal_id: &str,
     mesh_digest: runmat_execution::Digest,
-    samples: &[(f64, Vec<f64>)],
+    samples: &[ElementHeatSourceSample],
     transient: bool,
 ) -> PhysicalSignal {
     let tensor = |values: &[f64]| SignalValue::Tensor {
         shape: vec![values.len(), 1],
-        values: values.iter().copied().map(HeatGenerationDensity::new).collect(),
+        values: values
+            .iter()
+            .copied()
+            .map(HeatGenerationDensity::new)
+            .collect(),
     };
     let representation = if transient && samples.len() > 1 {
         SignalRepresentation::Tabulated(TabulatedSignal {
@@ -289,14 +304,17 @@ fn element_heat_signal(
             knots: samples
                 .iter()
                 .map(|(time, values)| {
-                    SignalKnot::continuous(*time, SignalOrdinate::Real(tensor(values)))
+                    SignalKnot::continuous(
+                        time.canonical_value(),
+                        SignalOrdinate::Real(tensor(values.canonical_values())),
+                    )
                 })
                 .collect(),
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::HoldEndpoint,
         })
     } else {
-        SignalRepresentation::Constant(tensor(&samples[0].1))
+        SignalRepresentation::Constant(tensor(samples[0].1.canonical_values()))
     };
     PhysicalSignal::HeatGenerationDensity(Signal {
         signal_id: SignalId(signal_id.into()),
@@ -326,13 +344,17 @@ pub fn bind_element_heat_source(
     step_id: &str,
     source_id: &str,
     mesh_digest: runmat_execution::Digest,
-    samples: &[(f64, Vec<f64>)],
+    samples: &[ElementHeatSourceSample],
     transient: bool,
 ) -> AnalysisExecutionResult<()> {
     if samples.is_empty()
-        || samples
-            .iter()
-            .any(|(time, values)| !time.is_finite() || values.iter().any(|v| !v.is_finite() || *v < 0.0))
+        || samples.iter().any(|(time, values)| {
+            !time.canonical_value().is_finite()
+                || values
+                    .canonical_values()
+                    .iter()
+                    .any(|v| !v.is_finite() || *v < 0.0)
+        })
     {
         return Err(invalid("heat source values must be finite and nonnegative"));
     }
@@ -345,11 +367,16 @@ pub fn bind_element_heat_source(
             .iter()
             .any(|a| a.excitation().excitation_id.0 == action_id)
     {
-        return Err(invalid("the heat source identifier collides with an authored one"));
+        return Err(invalid(
+            "the heat source identifier collides with an authored one",
+        ));
     }
-    model
-        .signals
-        .push(element_heat_signal(&signal_id, mesh_digest, samples, transient));
+    model.signals.push(element_heat_signal(
+        &signal_id,
+        mesh_digest,
+        samples,
+        transient,
+    ));
     model
         .excitations
         .push(ExcitationAction::HeatGeneration(AnalysisExcitation {
@@ -379,7 +406,7 @@ pub fn bind_element_heat_source(
 fn bind_joule(
     template: &ThermalWorkload,
     mesh: &SolverMeshArtifact,
-    samples: &[(f64, Vec<f64>)],
+    samples: &[ElementHeatSourceSample],
 ) -> AnalysisExecutionResult<ThermalWorkload> {
     let transient = matches!(
         template.procedure,
@@ -472,8 +499,10 @@ pub fn execute_coupled_electrothermal(
             else {
                 return Err(invalid("conduction response expected"));
             };
-            // The authored heat source carries canonical W/m^3 values.
-            samples.push((*time, joule_density_w_per_m3.canonical_values().clone()));
+            samples.push((
+                runmat_types::physical::Time::new(*time),
+                joule_density_w_per_m3.clone(),
+            ));
             electrical.push(ElectrothermalElectricalSample {
                 time_s: *time,
                 element_temperature_k: element_temperature.clone(),

@@ -9,14 +9,20 @@ const LAW_LIMITS: runmat_canonical_codec::CanonicalLimits =
 mod frame;
 mod state;
 mod update;
+use runmat_types::physical::{kind, Length, Pressure, Quantity, TractionDisplacementStiffness};
 pub use state::{ContactPointMode, ContactPointResponse, ContactPointState};
+
+/// Tangential relative material motion in the contact frame's two tangent directions.
+pub type TangentialMotion = Quantity<kind::Length, [f64; 2]>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContactPenaltyPolicy {
-    pub normal_stiffness_pa_per_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub normal_stiffness_pa_per_m: TractionDisplacementStiffness,
     /// None for frictionless; strictly positive for Coulomb, including coefficient zero.
-    pub tangential_stiffness_pa_per_m: Option<f64>,
+    #[serde(default, with = "runmat_types::physical::canonical_scalar::optional")]
+    pub tangential_stiffness_pa_per_m: Option<TractionDisplacementStiffness>,
 }
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum ContactPointError {
@@ -49,8 +55,8 @@ impl PenaltyContactLaw {
         if crate::is_fea_cancelled() {
             return Err(ContactPointError::Cancelled);
         }
-        if !policy.normal_stiffness_pa_per_m.is_finite() || policy.normal_stiffness_pa_per_m <= 0.0
-        {
+        let normal = policy.normal_stiffness_pa_per_m.canonical_value();
+        if !normal.is_finite() || normal <= 0.0 {
             return Err(ContactPointError::InvalidPolicy);
         }
         let coefficient = match model.friction {
@@ -67,7 +73,7 @@ impl PenaltyContactLaw {
                 }
                 if policy
                     .tangential_stiffness_pa_per_m
-                    .is_none_or(|k| !k.is_finite() || k <= 0.0)
+                    .is_none_or(|k| !k.canonical_value().is_finite() || k.canonical_value() <= 0.0)
                 {
                     return Err(ContactPointError::InvalidPolicy);
                 }
@@ -113,21 +119,28 @@ impl PenaltyContactLaw {
     pub fn initial_state(&self) -> ContactPointState {
         ContactPointState {
             law_identity: self.identity,
-            gap_m: 0.0,
-            tangential_traction_pa: [0.0; 2],
-            inelastic_slip_m: [0.0; 2],
-            accumulated_sliding_distance_m: 0.0,
-            frictional_work_j_per_m2: 0.0,
+            gap_m: Length::new(0.0),
+            tangential_traction_pa: Quantity::new([0.0; 2]),
+            inelastic_slip_m: Quantity::new([0.0; 2]),
+            accumulated_sliding_distance_m: Length::new(0.0),
+            frictional_work_j_per_m2: runmat_types::physical::SurfaceEnergyDensity::new(0.0),
         }
     }
-    pub(crate) fn normal_pressure_at_gap(&self, gap_m: f64) -> Result<f64, ContactPointError> {
+    pub(crate) fn normal_pressure_at_gap(
+        &self,
+        gap: Length,
+    ) -> Result<Pressure, ContactPointError> {
+        self.normal_pressure_at_canonical_gap(gap.canonical_value())
+            .map(Pressure::new)
+    }
+    fn normal_pressure_at_canonical_gap(&self, gap_m: f64) -> Result<f64, ContactPointError> {
         if !gap_m.is_finite() {
             return Err(ContactPointError::InvalidInput);
         }
         let pressure = if gap_m >= 0. {
             0.
         } else {
-            -self.policy.normal_stiffness_pa_per_m * gap_m
+            -self.policy.normal_stiffness_pa_per_m.canonical_value() * gap_m
         };
         if !pressure.is_finite() {
             return Err(ContactPointError::NonFiniteResponse);
@@ -136,10 +149,12 @@ impl PenaltyContactLaw {
     }
     pub fn update(
         &self,
-        gap_m: f64,
-        relative_tangential_increment_m: [f64; 2],
+        gap: Length,
+        relative_tangential_increment: TangentialMotion,
         committed: &ContactPointState,
     ) -> Result<ContactPointResponse, ContactPointError> {
+        let gap_m = gap.canonical_value();
+        let relative_tangential_increment_m = relative_tangential_increment.canonical_value();
         if crate::is_fea_cancelled() {
             return Err(ContactPointError::Cancelled);
         }

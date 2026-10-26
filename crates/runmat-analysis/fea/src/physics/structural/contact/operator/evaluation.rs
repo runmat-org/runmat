@@ -110,7 +110,8 @@ impl CanonicalContactOperator<'_> {
                 total += binding.reference_point().area_weight_m2
                     * state.point_history()[ordinal]
                         .point()
-                        .frictional_work_j_per_m2();
+                        .frictional_work_j_per_m2()
+                        .canonical_value();
                 if !total.is_finite() || total < 0. {
                     return Err(ContactOperatorError::Invalid);
                 }
@@ -226,7 +227,7 @@ impl ContactAssemblyDiagnostics {
         }
         self.maximum_penetration_m = self
             .maximum_penetration_m
-            .max((-response.trial_state.gap_m()).max(0.0));
+            .max((-response.trial_state.gap_m().canonical_value()).max(0.0));
         for (total, value) in [
             (
                 &mut self.normal_elastic_energy_j,
@@ -249,7 +250,7 @@ impl ContactAssemblyDiagnostics {
                 response.separation_release_energy_j_per_m2,
             ),
         ] {
-            *total += weight * value;
+            *total += weight * value.canonical_value();
             if !total.is_finite() || *total < 0.0 {
                 return Err(ContactOperatorError::Invalid);
             }

@@ -131,11 +131,11 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
 
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Cone {
-            apex_m: [0.0; 3],
+            apex_m: runmat_types::physical::Quantity::new([0.0; 3]),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             axis: [0.0, 0.0, 1.0],
-            semi_angle_rad: std::f64::consts::FRAC_PI_4,
+            semi_angle_rad: runmat_types::physical::Angle::new(std::f64::consts::FRAC_PI_4),
             domains: [
                 range(-std::f64::consts::PI, std::f64::consts::PI),
                 range(0.5, 3.0),
@@ -379,4 +379,35 @@ fn surface_failures_preserve_domain_kernel_and_budget_categories() {
         )
         .unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::BudgetExceeded);
+}
+
+#[test]
+fn cone_typed_position_and_angle_preserve_canonical_numeric_definition_wire() {
+    let definition = ExactSurfaceDefinition::Cone {
+        apex_m: runmat_types::physical::Quantity::new([1.0, 2.0, 3.0]),
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+        axis: [0.0, 0.0, 1.0],
+        semi_angle_rad: runmat_types::physical::Angle::new(std::f64::consts::FRAC_PI_4),
+        domains: [
+            ParameterRange {
+                start: 0.0,
+                end: std::f64::consts::TAU,
+            },
+            ParameterRange {
+                start: 0.0,
+                end: 2.0,
+            },
+        ],
+    };
+    let wire = serde_json::to_value(&definition).unwrap();
+    assert_eq!(wire["apex_m"], serde_json::json!([1.0, 2.0, 3.0]));
+    assert_eq!(
+        wire["semi_angle_rad"],
+        serde_json::json!(std::f64::consts::FRAC_PI_4)
+    );
+    assert_eq!(
+        serde_json::from_value::<ExactSurfaceDefinition>(wire).unwrap(),
+        definition
+    );
 }

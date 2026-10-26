@@ -35,7 +35,11 @@ pub struct ThermalStudyPlanningPolicy {
 pub struct ElementHeatSource {
     pub step_id: String,
     pub source_id: String,
-    pub element_density_w_per_m3: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub element_density_w_per_m3: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::HeatGenerationDensity,
+        Vec<f64>,
+    >,
 }
 
 impl ElementHeatSource {
@@ -54,7 +58,10 @@ impl ElementHeatSource {
             &self.step_id,
             &self.source_id,
             runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
-            &[(0.0, self.element_density_w_per_m3.clone())],
+            &[(
+                runmat_types::physical::Time::new(0.0),
+                self.element_density_w_per_m3.clone(),
+            )],
             transient,
         )
     }

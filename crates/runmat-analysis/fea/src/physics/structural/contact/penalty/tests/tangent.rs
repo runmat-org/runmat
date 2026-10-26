@@ -7,7 +7,11 @@ use super::*;
 fn local_consistent_tangent_matches_two_step_sizes_in_all_smooth_regimes() {
     let law = law(0.3);
     let accepted = law
-        .update(-0.01, [0.01, -0.005], &law.initial_state())
+        .update(
+            runmat_types::physical::Length::new(-0.01),
+            runmat_types::physical::Quantity::new([0.01, -0.005]),
+            &law.initial_state(),
+        )
         .unwrap()
         .trial_state;
     for (gap, increment, mode) in [
@@ -15,7 +19,13 @@ fn local_consistent_tangent_matches_two_step_sizes_in_all_smooth_regimes() {
         (-0.02, [0.001, -0.002], ContactPointMode::Stick),
         (-0.01, [0.08, 0.06], ContactPointMode::Slip),
     ] {
-        let response = law.update(gap, increment, &accepted).unwrap();
+        let response = law
+            .update(
+                runmat_types::physical::Length::new(gap),
+                runmat_types::physical::Quantity::new(increment),
+                &accepted,
+            )
+            .unwrap();
         assert_eq!(response.mode, mode);
         for h in [1.0e-6, 1.0e-7] {
             for column in 0..3 {
@@ -30,14 +40,27 @@ fn local_consistent_tangent_matches_two_step_sizes_in_all_smooth_regimes() {
                     pg += h;
                     mg -= h;
                 }
-                let a = law.update(pg, plus, &accepted).unwrap();
-                let b = law.update(mg, minus, &accepted).unwrap();
+                let a = law
+                    .update(
+                        runmat_types::physical::Length::new(pg),
+                        runmat_types::physical::Quantity::new(plus),
+                        &accepted,
+                    )
+                    .unwrap();
+                let b = law
+                    .update(
+                        runmat_types::physical::Length::new(mg),
+                        runmat_types::physical::Quantity::new(minus),
+                        &accepted,
+                    )
+                    .unwrap();
                 for row in 0..3 {
-                    let difference = (a.internal_traction_local_pa[row]
-                        - b.internal_traction_local_pa[row])
+                    let difference = (a.internal_traction_local_pa.canonical_value()[row]
+                        - b.internal_traction_local_pa.canonical_value()[row])
                         / (2.0 * h);
                     assert!(
-                        (difference - response.tangent_pa_per_m[row][column]).abs()
+                        (difference - response.tangent_pa_per_m.canonical_value()[row][column])
+                            .abs()
                             < 1.0e-6 * 10_000.0,
                         "mode={mode:?} row={row} column={column} h={h}"
                     );
@@ -45,8 +68,8 @@ fn local_consistent_tangent_matches_two_step_sizes_in_all_smooth_regimes() {
             }
         }
         if mode == ContactPointMode::Slip {
-            assert!(response.tangent_pa_per_m[0][2].abs() > 1.0);
-            assert_eq!(response.tangent_pa_per_m[2][0], 0.0);
+            assert!(response.tangent_pa_per_m.canonical_value()[0][2].abs() > 1.0);
+            assert_eq!(response.tangent_pa_per_m.canonical_value()[2][0], 0.0);
         }
     }
 }

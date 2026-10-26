@@ -12,7 +12,7 @@ fn material() -> ShellMaterial {
     ShellMaterial {
         youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
         poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
-        shear_modulus_pa: 76.9e9,
+        shear_modulus_pa: runmat_types::physical::ShearModulus::new(76.9e9),
     }
 }
 

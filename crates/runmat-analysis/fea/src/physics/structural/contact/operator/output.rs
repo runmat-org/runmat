@@ -15,8 +15,8 @@ impl CanonicalContactOperator<'_> {
                     return Err(ContactOperatorError::Cancelled);
                 }
                 let original = state.point_history()[ordinal].point();
-                pressure.push(point.normal_pressure_pa(original)?);
-                gap.push(original.gap_m());
+                pressure.push(point.normal_pressure_pa(original)?.canonical_value());
+                gap.push(original.gap_m().canonical_value());
                 ordinal += 1;
             }
         }
