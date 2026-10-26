@@ -730,6 +730,7 @@ impl WebRenderer {
         access.with_shared(|emission| self.render_current_scene_with_emission(emission))?
     }
 
+    #[tracing::instrument(name = "plot.present", skip_all)]
     fn render_current_scene_with_emission(
         &mut self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,

@@ -11,10 +11,13 @@ pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = runmat_runtime::native::PROGRAM_RUNT
 /// This is constructed by Core—the layer that composes the parser/compiler,
 /// runtime, and builtin catalog—so lower-level test and execution contracts do
 /// not invent placeholder fingerprints.
+#[tracing::instrument(name = "runtime.environment", skip_all)]
 pub fn program_environment(compatibility_mode: CompatMode) -> ProgramEnvironment {
     runmat_runtime::builtins::wasm_registry::register_all();
-    let runtime_fingerprint = runmat_runtime::native::linked_runtime_fingerprint();
-    let catalog_fingerprint = runmat_runtime::native::linked_catalog_fingerprint();
+    let runtime_fingerprint = tracing::info_span!("runtime.environment.runtime_fingerprint")
+        .in_scope(runmat_runtime::native::linked_runtime_fingerprint);
+    let catalog_fingerprint = tracing::info_span!("runtime.environment.catalog_fingerprint")
+        .in_scope(runmat_runtime::native::linked_catalog_fingerprint);
     ProgramEnvironment::new(
         PROGRAM_SEMANTIC_SCHEMA,
         PROGRAM_COMPILER_SCHEMA,

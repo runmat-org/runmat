@@ -456,6 +456,10 @@ impl SelectedGraphPrimary {
         })
     }
 
+    #[tracing::instrument(
+        name = "runtime.executable.canonical_graph", skip_all,
+        fields(cached = self.canonical.get().is_some())
+    )]
     pub(in crate::session) fn canonical_v3(&self) -> Result<Arc<[u8]>, String> {
         self.canonical
             .get_or_init(|| {
