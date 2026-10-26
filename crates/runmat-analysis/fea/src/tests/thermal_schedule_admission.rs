@@ -20,7 +20,6 @@ fn workload() -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
@@ -102,7 +101,7 @@ fn preflight_inventory_matches_actual_retained_fields_and_expanded_solve() {
         let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
         let schedule = workload.solve_schedule().unwrap();
         assert_eq!(schedule.points_s(), &[0.0, 0.2, 0.5, 0.65, 1.0]);
-        let facts = ThermalHistoryResourceFacts::derive(&mesh, &schedule).unwrap();
+        let facts = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
         let result = workload.execute(&mesh).unwrap();
         assert_eq!(result.time_points_s, schedule.points_s());
         assert_eq!(result.residual_norms.len(), schedule.solve_count());
@@ -150,7 +149,7 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
     workload.model.sequence.steps[0].observations.clear();
     workload.procedure = ThermalProcedureControl::BackwardEuler { snapshot_count: 5 };
     let history =
-        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap()).unwrap();
+        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap(), &[]).unwrap();
     let error = history.require_fits(439).unwrap_err();
     assert!(
         matches!(
@@ -237,7 +236,6 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
                 Some(&mesh),
                 runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
                 runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap(),
         )
@@ -310,6 +308,11 @@ fn deferred_primary_fields_do_not_reserve_unexecuted_dynamic_histories() {
         .accuracy
         .resources
         .maximum_samples = 1_000_000;
+    // An authored memory ceiling: the default is unbounded (machine capacity applies at placement).
+    input.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 8 << 30;
     for request in &mut input.model.sequence.steps[0].observations {
         if let runmat_analysis_core::ObservationRequest::History(spec) = request {
             spec.sampling = runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement;

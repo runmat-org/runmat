@@ -65,7 +65,7 @@ pub(super) async fn native_conformance() {
         ],
     };
     let host =
-        MeshingHostWorkload::new(workload, identity, meshing_request, access, Some(document))
+        MeshingHostWorkload::new(workload, identity, meshing_request, super::fixture_ceilings(), access, Some(document))
             .unwrap();
     let request = host
         .prepare_program_request(revision(), std::slice::from_ref(input.root_input()))

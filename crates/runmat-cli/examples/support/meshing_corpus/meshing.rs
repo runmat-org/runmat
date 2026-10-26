@@ -200,7 +200,7 @@ fn run_once(
         deterministic_seed: request.seed,
         ..MeshingRequestSettings::default()
     };
-    settings.resources.maximum_elements = request.maximum_elements;
+    settings.limits.maximum_elements = request.maximum_elements;
     let result = mesh_source_with_native_execution(NativeMeshingSourceRequest {
         source: source.to_path_buf(),
         import_options: import_options(units, &admission.healing),

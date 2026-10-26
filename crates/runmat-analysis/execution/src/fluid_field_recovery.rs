@@ -169,8 +169,6 @@ pub fn prepare_fluid_field_recovery(
         return Err(invalid("fluid source numerical lineage differs"));
     }
     let request = result.native_field_request(&workload, &mesh)?;
-    let layout = result.native_field_topology(&workload, &mesh)?;
-    let layout_bytes = layout.canonical_bytes().map_err(invalid)?;
     let object = |kind, id, bytes: &[u8]| {
         prepare_analysis_objects(
             kind,
@@ -190,11 +188,6 @@ pub fn prepare_fluid_field_recovery(
         source_inputs.remove(0),
         source_inputs.remove(0),
         p.source_result,
-        object(
-            AnalysisNumericalObjectKind::FieldSourceBinding,
-            Digest::sha256(&layout_bytes),
-            &layout_bytes,
-        )?,
     ];
     let resource_plan =
         build_prepared_fluid_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
@@ -225,13 +218,27 @@ pub fn prepare_fluid_field_recovery(
     })
 }
 
+/// Memoized per exact request, input content and policy: every stage of a study asks for the
+/// same plan, and each derivation decodes and re-prepares the original fluid source.
 pub fn build_prepared_fluid_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
+    static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
+        crate::fluid_phase_plan_memo::PlanMemo::new();
+    MEMO.get_or_derive("fluid-field-recovery", &request.canonical_bytes()?, inputs, policy, || {
+        derive_prepared_fluid_field_recovery_resource_plan(request, inputs, policy)
+    })
+}
+
+fn derive_prepared_fluid_field_recovery_resource_plan(
+    request: &FieldRecoveryRequest,
+    inputs: &[PreparedAnalysisObjects],
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
     admission::validate_inventory_shape(inputs)?;
-    if inputs.len() == 6 {
+    if inputs.len() == 5 {
         let carried = crate::decode_admitted_resource_plan(
             unique(inputs, AnalysisNumericalObjectKind::ResourcePlan)?,
             policy.inventory_limits(),
@@ -248,8 +255,6 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
     let workload = FluidSteadyWorkload::from_canonical_bytes(&w_input.payload())?;
     let mesh = SolverMeshArtifact::canonical_decode(&m_input.payload()).map_err(invalid)?;
     let result = decode_fluid_recovery_source(w_input, m_input, r_input)?;
-    let layout = result.native_field_topology(&workload, &mesh)?;
-    let layout_bytes = layout.canonical_bytes().map_err(invalid)?;
     if result.native_field_request(&workload, &mesh)? != *request {
         return Err(invalid(
             "fluid recovery request differs from exact original native inventory",
@@ -276,11 +281,6 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
             result.identity()?.digest(),
             result.canonical_bytes()?,
         ),
-        (
-            AnalysisNumericalObjectKind::FieldSourceBinding,
-            Digest::sha256(&layout_bytes),
-            layout_bytes,
-        ),
     ] {
         let canonical = prepare_analysis_objects(
             kind,
@@ -296,7 +296,7 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
         )?;
         if unique(inputs, kind)? != &canonical {
             return Err(invalid(
-                "fluid recovery source/layout closure or chunk policy differs",
+                "fluid recovery source closure or chunk policy differs",
             ));
         }
     }
@@ -323,7 +323,7 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
             output_set: projected_output_set_resource_facts(),
         },
     )?;
-    if inputs.len() == 6 {
+    if inputs.len() == 5 {
         let canonical = crate::portable_task_support::resource_plan_objects(
             &plan,
             policy.chunk_bytes(),

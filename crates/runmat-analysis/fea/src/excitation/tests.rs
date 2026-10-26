@@ -137,6 +137,9 @@ fn realizes_typed_force_signal() {
     ));
 }
 
+// witness: FEA-SHARED-EXCITATION-001/conservative_spatial_realization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Realization preserves exact multi-entity region targets.
 #[test]
 fn realization_preserves_exact_multi_entity_region_targets() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -146,13 +149,13 @@ fn realization_preserves_exact_multi_entity_region_targets() {
         panic!("fixture force must be region-scoped");
     };
     let entities = ["face:0", "face:1"]
-        .map(
-            |source_topology_id| runmat_geometry_core::PersistentEntityId {
-                kind: runmat_geometry_core::PersistentEntityKind::Face,
-                source_topology_id: source_topology_id.into(),
-                assembly_path: vec!["root".into()],
-            },
-        )
+        .map(|source_topology_id| {
+            runmat_geometry_core::PersistentEntityId::new(
+                runmat_geometry_core::PersistentEntityKind::Face,
+                source_topology_id.into(),
+                vec!["root".into()],
+            )
+        })
         .to_vec();
     target.bind_resolved_entities(entities.clone()).unwrap();
 
@@ -272,6 +275,10 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
     ));
 }
 
+// witness: FEA-SHARED-EXCITATION-001/governed_excitation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Static excitation accepts only coordinate-independent tables; the constant, step and
+//   frequency-dependent cases of the corpus are not all covered.
 #[test]
 fn static_excitation_accepts_only_coordinate_independent_tables() {
     for domain in [
@@ -308,6 +315,10 @@ fn static_excitation_accepts_only_coordinate_independent_tables() {
     );
 }
 
+// witness: FEA-SHARED-EXCITATION-001/dimensioned_signal_contract @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Typed tabulated force signal at time 0.5 selects distinct left and right endpoint
+//   vectors; no generator freezing, spatial integration or placement equivalence.
 #[test]
 fn step_interpolation_selects_the_documented_side_of_an_interval() {
     let mut model = tabulated_force_model(
@@ -455,7 +466,7 @@ fn event_inventory_ignores_unreferenced_signal_jumps() {
                 constraint_id: "inactive_constraint".into(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::NormalDisplacement {
-                    target: runmat_analysis_core::RegionTarget::boundary("fixed"),
+                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fixed")),
                     value: runmat_analysis_core::PrescribedValue::Signal(displacement_id),
                 },
             },
@@ -625,6 +636,9 @@ fn rejects_scalar_force_without_a_direction() {
     );
 }
 
+// witness: FEA-SHARED-EXCITATION-001/conservative_spatial_realization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Reference-point force and moment action identity is preserved.
 #[test]
 fn preserves_reference_point_force_and_moment_action_identity() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);

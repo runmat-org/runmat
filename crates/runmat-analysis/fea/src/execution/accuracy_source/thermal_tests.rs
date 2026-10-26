@@ -7,7 +7,7 @@ use crate::{
 };
 use runmat_analysis_core::{
     AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance, AnalysisSequence,
-    FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
+    ProcedureStep, Temperature, ThermalDomain,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
@@ -35,7 +35,6 @@ fn receipt_with_energy(
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };
@@ -83,13 +82,9 @@ fn conservation_accuracy_does_not_improve_when_power_units_shrink() {
         let evaluated = evaluate_accuracy(&request.plan, &evidence).unwrap();
         assert_eq!(evaluated.report().status, AccuracyStatus::NotSatisfied);
         assert_eq!(
-            publication_gate(
-                &request.plan,
-                FormulationRequirement::Production,
-                &evaluated
-            )
-            .unwrap()
-            .decision,
+            publication_gate(&request.plan, &evaluated)
+                .unwrap()
+                .decision,
             PublicationDecision::Block
         );
     }
@@ -110,14 +105,13 @@ fn request(
     receipt: &ThermalNumericalReceiptArtifact,
     criteria: Vec<AccuracyCriterion>,
 ) -> AccuracyEvaluationRequest {
-    let mut plan = AccuracyPlan::experimental_baseline("thermal_accuracy");
+    let mut plan = AccuracyPlan::baseline("thermal_accuracy");
     plan.criteria = criteria;
     AccuracyEvaluationRequest::new(
         receipt.receipt().producer,
         AccuracySourceKind::Thermal,
         receipt.source_result(),
         None,
-        FormulationRequirement::Production,
         plan,
     )
     .unwrap()
@@ -168,13 +162,9 @@ fn thermal_receipt_adapter_preserves_identity_and_supported_residual_evidence() 
         let evaluated = evaluate_accuracy(&request.plan, &evidence).unwrap();
         assert_eq!(evaluated.report().status, AccuracyStatus::Satisfied);
         assert_eq!(
-            publication_gate(
-                &request.plan,
-                FormulationRequirement::Production,
-                &evaluated
-            )
-            .unwrap()
-            .decision,
+            publication_gate(&request.plan, &evaluated)
+                .unwrap()
+                .decision,
             PublicationDecision::Allow
         );
         let mut stricter = request.plan.clone();
@@ -182,9 +172,7 @@ fn thermal_receipt_adapter_preserves_identity_and_supported_residual_evidence() 
         let evaluated = evaluate_accuracy(&stricter, &evidence).unwrap();
         assert_eq!(evaluated.report().status, AccuracyStatus::NotSatisfied);
         assert_eq!(
-            publication_gate(&stricter, FormulationRequirement::Production, &evaluated)
-                .unwrap()
-                .decision,
+            publication_gate(&stricter, &evaluated).unwrap().decision,
             PublicationDecision::Block
         );
     }
@@ -216,13 +204,9 @@ fn thermal_receipt_cannot_supply_discretization_or_reference_accuracy() {
         let evaluated = evaluate_accuracy(&request.plan, &evidence).unwrap();
         assert_eq!(evaluated.report().status, AccuracyStatus::Indeterminate);
         assert_eq!(
-            publication_gate(
-                &request.plan,
-                FormulationRequirement::Production,
-                &evaluated
-            )
-            .unwrap()
-            .decision,
+            publication_gate(&request.plan, &evaluated)
+                .unwrap()
+                .decision,
             PublicationDecision::Block
         );
     }
@@ -268,15 +252,8 @@ fn thermal_receipt_rejects_different_source_kind_result_and_producer() {
             other_producer,
         ),
     ] {
-        let request = AccuracyEvaluationRequest::new(
-            producer,
-            kind,
-            result,
-            None,
-            FormulationRequirement::Production,
-            plan.clone(),
-        )
-        .unwrap();
+        let request =
+            AccuracyEvaluationRequest::new(producer, kind, result, None, plan.clone()).unwrap();
         assert!(source.evidence(&request).is_err());
     }
     assert!(AccuracySourceReceipt::from_canonical_bytes(

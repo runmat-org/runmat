@@ -1,7 +1,7 @@
 //! Geometry-derived face constraints retain the principal physical directions.
 //! The original samples and constructive geometry acceptance remain unchanged.
 use super::{
-    cross, curvature_target_size, geometry_error, normalize, relations::TopologyRelations,
+    cross, curvature_target_size, geometry_error, norm, normalize, relations::TopologyRelations,
 };
 use super::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{
@@ -14,6 +14,15 @@ use runmat_meshing_core::{
 };
 
 use runmat_meshing_size::metric::DirectionalMetricEnvelope;
+
+/// One regular boundary sample of a face: where an edge's pcurve lands on it, with the unit
+/// surface normal there (orientation as parameterized; consumers use it up to sign).
+#[derive(Clone, Debug)]
+pub(super) struct FaceNormalSample {
+    pub face_id: runmat_geometry_core::PersistentEntityId,
+    pub point_m: [f64; 3],
+    pub normal: [f64; 3],
+}
 
 pub(super) struct FaceMetricSamples<'a> {
     base: DirectionalMetricEnvelope,
@@ -60,7 +69,7 @@ impl<'a> FaceMetricSamples<'a> {
         evaluator: &(impl ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
         control: &dyn GeometryEvaluationControl,
         parameter: f64,
-    ) -> Result<Vec<[f64; 3]>, SharedCurveError> {
+    ) -> Result<Vec<FaceNormalSample>, SharedCurveError> {
         let mut normals = Vec::new();
         for coedge in relations.edge_coedges(&edge.id) {
             let face = relations.face(&coedge.face_id);
@@ -88,8 +97,6 @@ impl<'a> FaceMetricSamples<'a> {
             let derivatives = raw
                 .transformed(&transform)
                 .map_err(|error| geometry_error(edge, error))?;
-            let curvature = surface_principal_curvature(&derivatives)
-                .map_err(|error| geometry_error(edge, error))?;
             let failure = || {
                 SharedCurveError::new(
                     SharedCurveErrorKind::GeometryEvaluation(
@@ -100,13 +107,29 @@ impl<'a> FaceMetricSamples<'a> {
                 )
                 .for_edge(&edge.id)
             };
+            // At a parameterization singularity (a sphere pole, a cone apex) the surface
+            // derivatives span no tangent plane, so the sample has no normal or principal frame.
+            // The edge's other samples carry the face's curvature and its normal for feature
+            // detection.
             let du = derivatives
                 .du_m
                 .with_canonical_storage(|values, _axes| *values);
             let dv = derivatives
                 .dv_m
                 .with_canonical_storage(|values, _axes| *values);
-            normals.push(normalize(cross(du, dv)).ok_or_else(failure)?);
+            let area = cross(du, dv);
+            let scale = norm(du).powi(2) + norm(dv).powi(2);
+            if !(norm(area) > SINGULAR_PARAMETERIZATION_RATIO * scale) {
+                continue;
+            }
+            let normal = normalize(area).ok_or_else(failure)?;
+            let curvature = surface_principal_curvature(&derivatives)
+                .map_err(|error| geometry_error(edge, error))?;
+            normals.push(FaceNormalSample {
+                face_id: face.id.clone(),
+                point_m: derivatives.point_m.canonical_value(),
+                normal,
+            });
             if curvature.minimum_1_per_m.canonical_value() == 0.0
                 && curvature.maximum_1_per_m.canonical_value() == 0.0
             {
@@ -114,14 +137,12 @@ impl<'a> FaceMetricSamples<'a> {
             }
             let physical =
                 |uv: [f64; 2]| std::array::from_fn(|axis| du[axis] * uv[0] + dv[axis] * uv[1]);
-            let first = normalize(physical(curvature.minimum_direction_uv)).ok_or_else(failure)?;
-            let second = physical(curvature.maximum_direction_uv);
-            let projection: f64 = first.iter().zip(second).map(|(a, b)| a * b).sum();
-            // At an umbilic the geometry API may return a nonorthogonal UV
-            // basis. Orthonormalize in physical space, where curvature acts.
-            let second = normalize(std::array::from_fn(|axis| {
-                second[axis] - projection * first[axis]
-            }))
+            let (first, second) = principal_frame(
+                physical(curvature.minimum_direction_uv),
+                physical(curvature.maximum_direction_uv),
+                du,
+                normal,
+            )
             .ok_or_else(failure)?;
             let index = self
                 .faces
@@ -171,5 +192,62 @@ impl<'a> FaceMetricSamples<'a> {
                 })
             })
             .collect()
+    }
+}
+
+/// Area element below this fraction of the squared derivative scale marks a parameterization
+/// singularity: at a sphere pole one derivative is roundoff (~1e-16 of the other).
+const SINGULAR_PARAMETERIZATION_RATIO: f64 = 1.0e-10;
+
+/// Orthonormal physical principal directions from the curvature solver's UV directions mapped to
+/// physical space. At an umbilic the solver may return a nonorthogonal basis, so the second
+/// direction is orthogonalized against the first. Near an umbilic (a spherical blend corner)
+/// both directions come back nearly parallel and their difference is roundoff; every tangent
+/// direction is then principal and the two curvatures agree, so the tangent direction orthogonal
+/// to the first is exact.
+pub(super) fn principal_frame(
+    minimum: [f64; 3],
+    maximum: [f64; 3],
+    du: [f64; 3],
+    normal: [f64; 3],
+) -> Option<([f64; 3], [f64; 3])> {
+    let first = normalize(minimum).or_else(|| normalize(du))?;
+    let projection: f64 = first.iter().zip(maximum).map(|(a, b)| a * b).sum();
+    let remainder: [f64; 3] = std::array::from_fn(|axis| maximum[axis] - projection * first[axis]);
+    let scale = norm(maximum);
+    let second = if norm(remainder) > 1.0e-8 * scale {
+        normalize(remainder)?
+    } else {
+        normalize(cross(normal, first))?
+    };
+    Some((first, second))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::principal_frame;
+
+    fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+        left.iter().zip(right).map(|(a, b)| a * b).sum()
+    }
+
+    #[test]
+    fn umbilic_points_with_parallel_principal_directions_get_an_orthonormal_tangent_frame() {
+        // A spherical fillet corner: the solver returned the same direction twice.
+        let normal = [0.0, 0.0, 1.0];
+        let direction = [0.6, 0.8, 0.0];
+        for maximum in [direction, [0.6 + 1.0e-14, 0.8, 0.0], [0.0; 3]] {
+            let (first, second) = principal_frame(direction, maximum, [1.0, 0.0, 0.0], normal)
+                .expect("an umbilic still has a tangent frame");
+            assert!((dot(first, first) - 1.0).abs() < 1e-12);
+            assert!((dot(second, second) - 1.0).abs() < 1e-12);
+            assert!(dot(first, second).abs() < 1e-12);
+            assert!(dot(second, normal).abs() < 1e-12);
+        }
+        // Distinct directions are only orthogonalized.
+        let (first, second) =
+            principal_frame([1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [1.0, 0.0, 0.0], normal).unwrap();
+        assert_eq!(first, [1.0, 0.0, 0.0]);
+        assert!((second[1] - 1.0).abs() < 1e-12);
     }
 }

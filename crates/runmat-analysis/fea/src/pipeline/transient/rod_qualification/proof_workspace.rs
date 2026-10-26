@@ -27,7 +27,6 @@ fn direct_block_workspace_covers_actual_mass_and_newmark_proofs_for_both_orders(
                 step_id: model.sequence.steps[0].step_id.clone(),
                 model,
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver: StructuralTransientSolverPlan::Direct,
                 time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
                 residual_target: 1.0e-10,
@@ -36,7 +35,14 @@ fn direct_block_workspace_covers_actual_mass_and_newmark_proofs_for_both_orders(
                 super::super::prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
             let request = StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
             let plan = build_structural_transient_block_resource_plan(
-                &workload, &mesh, None, &request, None, None, None,
+                &workload,
+                &mesh,
+                None,
+                &request,
+                None,
+                None,
+                None,
+                crate::planning::resource::LocalExecutionPlan::serial(),
             )
             .unwrap();
             let FeaResourceDemand::StructuralTransientBlock(demand) = &plan.input.demand else {

@@ -17,6 +17,11 @@ impl GeometryEvaluationControl for ObservedWork {
         self.checkpoint()
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An adaptive sampling demand exceeding the explicit cap rejects before independent
+//   geometry evaluation or report allocation. Overflow rejects conservatively. The lower bound
+//   never authorizes skipping required samples or deeper quality-driven refinement.
 #[test]
 fn insufficient_adaptive_sample_budget_rejects_before_geometry_work() {
     let fixture = fixture(None);

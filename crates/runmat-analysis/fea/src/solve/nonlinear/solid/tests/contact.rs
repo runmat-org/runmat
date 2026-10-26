@@ -64,11 +64,18 @@ impl CoupledFixture {
             material.plastic = None;
         }
         for assignment in &mut model.material_assignments {
-            assignment.assigned_material_id = match assignment.selected_region_id().unwrap() {
-                "tip_steel" => "mat_steel",
-                "mid_aluminum" => "mat_aluminum",
-                "polymer_segment" => "mat_polymer",
-                other => panic!("region {other}"),
+            assignment.assigned_material_id = {
+                let region = assignment.selected_region_id().unwrap();
+                let fixture = runmat_meshing_core::fixtures::fixture_region;
+                if region == fixture("tip_steel") {
+                    "mat_steel"
+                } else if region == fixture("mid_aluminum") {
+                    "mat_aluminum"
+                } else if region == fixture("polymer_segment") {
+                    "mat_polymer"
+                } else {
+                    panic!("region {region}")
+                }
             }
             .into();
         }
@@ -177,12 +184,7 @@ impl CoupledFixture {
     ) -> super::super::contact::SolidContactCoupling<'a> {
         super::super::contact::SolidContactCoupling {
             operator,
-            solve_policy: GeneralSolvePolicy {
-                relative_tolerance: policy().linear_relative_tolerance,
-                restart: 8,
-                maximum_iterations: 32,
-                uniqueness: crate::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            },
+            solve_policy: GeneralSolvePolicy::bounded(policy().linear_relative_tolerance),
             maximum_additional_resident_bytes: 100_000_000,
             maximum_geometry_trials_per_advance: 10000,
             maximum_symbolic_scalar_operations: 100_000_000,

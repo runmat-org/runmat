@@ -7,17 +7,14 @@ fn digest(byte: u8) -> StableDigest {
 }
 
 fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, id.into(), vec!["root".into()])
 }
 
 pub(super) fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -36,10 +33,12 @@ pub(super) fn request() -> MeshingRequest {
             maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -61,21 +60,16 @@ pub(super) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
+        size_controls: Vec::new(),
     }
 }
 
@@ -212,6 +206,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
 pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact.resolved_request.canonical_digest().unwrap(),
         artifact_digest: artifact.canonical_digest,
@@ -264,6 +259,8 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
             achieved_maximum_size_m: 0.09,
             clipped_contribution_count: 0,
             rejected_contribution_count: 0,
+            control_id: None,
+            achieved: None,
         }],
         resources: MeshingResourceUsage {
             generated_nodes: 4,
@@ -296,6 +293,10 @@ fn artifact_identity_excludes_the_physical_validation_manifest_layout() {
     second.validate().unwrap();
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/mesh_evidence_artifact @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A mesh artifact and its evidence round-trip with complete canonical topology;
+//   per-stage counters and quality distributions are asserted in sibling tests.
 #[test]
 fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
     let artifact = artifact();

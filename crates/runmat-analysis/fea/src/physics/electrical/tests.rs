@@ -36,7 +36,7 @@ pub(crate) fn model(equation: StaticElectricalEquation) -> AnalysisModel {
         "electrical",
         vec![ProcedureStep::electromagnetic_static("potential")],
     );
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -61,14 +61,7 @@ pub(crate) fn prescribe(model: &mut AnalysisModel, id: String, target: RegionTar
 }
 
 fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalElectricalResponse {
-    solve_canonical_static(
-        model,
-        mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-11,
-    )
-    .unwrap()
+    solve_canonical_static(model, mesh, "potential", 1e-11).unwrap()
 }
 
 fn coefficient(equation: StaticElectricalEquation) -> f64 {
@@ -87,6 +80,14 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
+// witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Tet4/Tet10 homogeneous slab capacitor and conductor potentials, fields, terminal
+//   flux, energy and Joule power; not arbitrary geometry or nonlinear material.
+// witness: FEA-EM-SCALAR-001/recovery @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Same slab constitutive vectors and global terminal/energy identities; no general
+//   charge-density reconstruction claim.
 #[test]
 fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_and_energy() {
     for equation in [
@@ -99,13 +100,13 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
             prescribe(
                 &mut model,
                 "left".into(),
-                RegionTarget::boundary("slab_left"),
+                RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 0.0,
             );
             prescribe(
                 &mut model,
                 "right".into(),
-                RegionTarget::boundary("slab_right"),
+                RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                 2.0,
             );
             let response = solve(&model, &mesh);
@@ -166,6 +167,10 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
     }
 }
 
+// witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Both orders, aligned two-material slab series capacitance/resistance and interface
+//   flux; no curved interface claim.
 #[test]
 fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux_continuity() {
     for equation in [
@@ -210,22 +215,22 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
                 electrical.relative_permittivity.canonical_value() * (4.0),
             );
             model.materials.push(second);
-            model.material_assignments[0].target = PropertyRegionTarget::solid("layer_left");
+            model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("layer_left"));
             let mut second = model.material_assignments[0].clone();
-            second.target = PropertyRegionTarget::solid("layer_right");
+            second.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("layer_right"));
             second.expected_material_id = "second".into();
             second.assigned_material_id = "second".into();
             model.material_assignments.push(second);
             prescribe(
                 &mut model,
                 "left".into(),
-                RegionTarget::boundary("slab_left"),
+                RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 0.0,
             );
             prescribe(
                 &mut model,
                 "right".into(),
-                RegionTarget::boundary("slab_right"),
+                RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                 1.0,
             );
             let response = solve(&model, &mesh);
@@ -294,7 +299,7 @@ fn constant_gauge_potential_produces_exactly_zero_field_and_power() {
         prescribe(
             &mut model,
             "left".into(),
-            RegionTarget::boundary("slab_left"),
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
             1e6,
         );
         let response = solve(&model, &mesh);
@@ -319,6 +324,11 @@ fn constant_gauge_potential_produces_exactly_zero_field_and_power() {
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Static harmonic polynomial potential x²-y² for both scalar equations: Tet10 exact
+//   field/energy and Tet4 refinement across three meshes; harmonic polynomial is not harmonic
+//   Maxwell.
 #[test]
 fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
     // phi=x^2-y^2 is harmonic: no fabricated volume charge/current is needed.
@@ -403,95 +413,56 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
     }
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction/tet4/numerical_kernel;
+//   boundary: Tet4 rejects missing anchor, conflicting potentials, floating conductor, bad
+//   material, target and wrong harmonic intent; rejection is not implementation of floating
+//   conductors.
 #[test]
 fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed() {
     let mesh = mesh(ElementOrder::Tet4, 2);
     let mut model = model(StaticElectricalEquation::SteadyConduction);
-    assert!(solve_canonical_static(
-        &model,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&model, &mesh, "potential", 1e-8).is_err());
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         0.0,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &model,
-        &mesh,
-        "potential",
-        FormulationRequirement::Production,
-        1e-8
-    )
-    .is_err());
     let mut bad = model.clone();
     bad.materials[0]
         .electrical
         .as_mut()
         .unwrap()
         .conductivity_s_per_m = runmat_types::physical::ElectricalConductivity::new(0.0);
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     prescribe(
         &mut bad,
         "conflict".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.constraints
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "floating".into(),
             kind: ElectricalConstraintKind::FloatingConductor {
-                target: RegionTarget::boundary("slab_right"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             },
         }));
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     prescribe(
         &mut bad,
@@ -499,32 +470,342 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         RegionTarget::point("node:999999"),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.sequence.steps.push(bad.sequence.steps[0].clone());
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.material_assignments.clear();
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
+}
+
+// witness: FEA-EM-INPUTS-002/scalar_potential_inputs @
+//   electrostatic|electrical_conduction/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: A terminal_voltage load holds its terminal like a prescribed potential for
+//   electrostatics and steady conduction on two-cell Tet4 and Tet10 slabs; terminal current,
+//   charge, equipotential and floating inputs are separate tests.
+// witness: FEA-EM-INPUT-001/excitation @ electrostatic|electrical_conduction/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: A constant terminal-voltage signal on a face reproduces the prescribed-potential
+//   field exactly on Tet4 and Tet10 slabs; no time history or phasor.
+#[test]
+fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential_on(order);
+    }
+}
+
+fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential_on(order: ElementOrder) {
+    for equation in [
+        StaticElectricalEquation::Electrostatics,
+        StaticElectricalEquation::SteadyConduction,
+    ] {
+        let mesh = mesh(order, 2);
+        let mut constrained = model(equation);
+        prescribe(&mut constrained, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+        let mut driven = constrained.clone();
+        prescribe(&mut constrained, "right".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")), 2.5);
+        driven.signals.push(PhysicalSignal::ElectricPotential(Signal {
+            signal_id: SignalId("supply".into()),
+            shape: SignalShape::Scalar,
+            frame: None,
+            representation: SignalRepresentation::Constant(SignalValue::Scalar(
+                ElectricPotential::new(2.5),
+            )),
+            precision: SignalPrecision::Real64,
+            provenance: SignalProvenance::Authored,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+        }));
+        driven
+            .excitations
+            .push(ExcitationAction::TerminalVoltage(AnalysisExcitation {
+                excitation_id: ExcitationId("supply".into()),
+                target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: ExcitationDistribution::PreserveResultant,
+                kinematics: ExcitationKinematics::FixedFrame,
+                signal_id: SignalId("supply".into()),
+                active_step_ids: vec!["potential".into()],
+                combination_group: None,
+                projection: ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: false,
+                    relative_tolerance: 1e-12,
+                },
+            }));
+        driven.excitation_cases.push(ExcitationCase {
+            case_id: ExcitationCaseId("supply".into()),
+            action_ids: vec![ExcitationId("supply".into())],
+            activation: ExcitationCaseActivation::Always,
+        });
+        let expected = solve(&constrained, &mesh);
+        let actual = solve(&driven, &mesh);
+        for (a, b) in actual.potential_v.canonical_values().iter().zip(expected.potential_v.canonical_values()) {
+            assert!((a - b).abs() <= 1e-12 * 2.5, "{a} vs {b}");
+        }
+        assert_relative(
+            actual.terminal_work.canonical_value(),
+            expected.terminal_work.canonical_value(),
+            1e-10,
+        );
+    }
+}
+
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction|electrostatic/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: Integral-current (conduction) and uncharged floating (electrostatic) terminals
+//   reach the common potential and current balance of Tet4 and Tet10 slabs; no charged
+//   floating conductor.
+// witness: FEA-EM-INPUTS-002/scalar_potential_inputs @
+//   electrostatic|electrical_conduction/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Electric current terminal and floating inputs close the terminal current balance
+//   on Tet4 and Tet10 slabs; no charged floating conductor or equipotential set.
+#[test]
+fn integral_current_and_floating_terminals_find_their_common_potential() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        integral_current_and_floating_terminals_find_their_common_potential_on(order);
+    }
+}
+
+fn integral_current_and_floating_terminals_find_their_common_potential_on(order: ElementOrder) {
+    let mesh = mesh(order, 2);
+    // Reference: 1 V across the slab gives the terminal current I1, so R = 1/I1.
+    let mut reference = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut reference, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+    prescribe(&mut reference, "right".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")), 1.0);
+    let unit = solve(&reference, &mesh);
+    let i1 = unit
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap()
+        .outward_flux
+        .canonical_value()
+        .abs();
+    // A 2.5 A integral current into the right terminal holds it at 2.5 R.
+    let mut driven = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut driven, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+    driven
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "right".into(),
+            kind: ElectricalConstraintKind::IntegralCurrent {
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                value: PrescribedValue::Constant(ElectricCurrent::new(2.5)),
+            },
+        }));
+    let response = solve(&driven, &mesh);
+    let terminal = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap();
+    assert_relative(-terminal.outward_flux.canonical_value(), 2.5, 1e-8);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let right_potentials: Vec<f64> = terminal
+        .ordered_node_ids
+        .iter()
+        .map(|id| {
+            let index = projection.nodes.iter().position(|n| n.node_id == *id).unwrap();
+            response.potential_v.canonical_values()[index]
+        })
+        .collect();
+    for potential in right_potentials {
+        assert_relative(potential, 2.5 / i1, 1e-8);
+    }
+    // An uncharged floating electrode carries no net flux.
+    let mut floating = model(StaticElectricalEquation::Electrostatics);
+    prescribe(&mut floating, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 3.0);
+    floating
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "right".into(),
+            kind: ElectricalConstraintKind::FloatingConductor {
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            },
+        }));
+    let response = solve(&floating, &mesh);
+    let terminal = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap();
+    assert!(terminal.outward_flux.canonical_value().abs() <= 1e-9 * 3.0 * coefficient(StaticElectricalEquation::Electrostatics));
+    // With no net flux the whole slab sits at the anchor potential.
+    assert!(response.potential_v.canonical_values().iter().all(|v| (v - 3.0).abs() < 1e-8));
+}
+
+// witness: FEA-EM-INPUT-001/excitation @ electrical_conduction/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: A face current density realizes its integrated normal current as the grounded
+//   terminal's outward flux on Tet4 and Tet10 slabs; no time history.
+#[test]
+fn face_current_density_injects_its_normal_flux() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        face_current_density_injects_its_normal_flux_on(order);
+    }
+}
+
+fn face_current_density_injects_its_normal_flux_on(order: ElementOrder) {
+    let mesh = mesh(order, 2);
+    let mut model = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut model, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+    model.signals.push(PhysicalSignal::ElectricCurrentDensity(Signal {
+        signal_id: SignalId("j".into()),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Vector3([
+            ElectricCurrentDensity::new(-4.0),
+            ElectricCurrentDensity::new(0.0),
+            ElectricCurrentDensity::new(0.0),
+        ])),
+        precision: SignalPrecision::Real64,
+        provenance: SignalProvenance::Authored,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+    }));
+    model
+        .excitations
+        .push(ExcitationAction::CurrentDensity(AnalysisExcitation {
+            excitation_id: ExcitationId("j".into()),
+            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("j".into()),
+            active_step_ids: vec!["potential".into()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1e-12,
+            },
+        }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id: ExcitationCaseId("j".into()),
+        action_ids: vec![ExcitationId("j".into())],
+        activation: ExcitationCaseActivation::Always,
+    });
+    let response = solve(&model, &mesh);
+    // Flux into the slab through the right face equals the current through the grounded left face.
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let area: f64 = projection
+        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")))
+        .map(|face| face.area_m2.canonical_value())
+        .sum();
+    let left = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "left")
+        .unwrap();
+    assert_relative(left.outward_flux.canonical_value(), 4.0 * area, 1e-8);
+}
+
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrostatic/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: A charged slab with a translation-periodic right face matches the same slab grounded
+//   on both faces to 1e-8 on Tet4 and Tet10, and the grounded face carries the full flux; terminal
+//   voltage, floating and integral-current constraints are separate tests.
+#[test]
+fn periodic_faces_share_their_potential() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        periodic_faces_share_their_potential_on(order);
+    }
+}
+
+fn periodic_faces_share_their_potential_on(order: ElementOrder) {
+    // A charged slab grounded on both faces, against the same slab grounded on the left and
+    // periodic (by translation) on the right: the right face carries the left face's potential,
+    // so the fields agree.
+    let mesh = mesh(order, 2);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mean_x = |target: &str| {
+        let xs: Vec<f64> = projection
+            .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
+            .flat_map(|face| face.node_indices.iter().map(|&n| projection.nodes[n].coordinates_m.canonical_value()[0]))
+            .collect();
+        xs.iter().sum::<f64>() / xs.len() as f64
+    };
+    let shift = mean_x("slab_right") - mean_x("slab_left");
+    let both = charge_density::charged_model(1e-6, 0.0);
+    let mut periodic = both.clone();
+    periodic.constraints.retain(|c| c.constraint_id() != "right");
+    periodic
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "periodic".into(),
+            kind: ElectricalConstraintKind::Periodic(PeriodicConstraint {
+                pair: PairedConstraint {
+                    primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                    secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                    pairing: PairingPolicy::GeometricTolerance(Length::new(1e-9)),
+                },
+                transform: PeriodicTransform::Translation(Translation::new([shift, 0.0, 0.0])),
+            }),
+        }));
+    let expected = solve(&both, &mesh);
+    let actual = solve(&periodic, &mesh);
+    let scale = expected.potential_v.canonical_values().iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    assert!(scale > 0.0);
+    for (a, b) in actual.potential_v.canonical_values().iter().zip(expected.potential_v.canonical_values()) {
+        assert!((a - b).abs() <= 1e-8 * scale, "{a} vs {b}");
+    }
+    // All the charge's flux leaves through the grounded face once the periodic face's share
+    // is passed on to it.
+    let left = actual.terminals.iter().find(|t| t.constraint_id == "left").unwrap();
+    let total: f64 = expected.terminals.iter().map(|t| t.outward_flux.canonical_value()).sum();
+    assert!((left.outward_flux.canonical_value() - total).abs() <= 1e-8 * total.abs());
+}
+
+// witness: FEA-EM-QUALIFICATION-001/references @ electrical_conduction/tet10/numerical_kernel; coverage: partial;
+//   boundary: The validation table's steady-current check: copper (59.6 MS/m) with 1 mV across a
+//   1 m bar gives the uniform current density sigma V / L, the Joule power V^2 / R from the loss
+//   density and the terminal current, on a Tet10 slab; one geometry, no curved conductors.
+#[test]
+fn copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r() {
+    const SIGMA: f64 = 59.6e6;
+    const VOLTS: f64 = 1e-3;
+    let mesh = mesh(ElementOrder::Tet10, 2);
+    let mut model = model(StaticElectricalEquation::SteadyConduction);
+    model.materials[0].electrical.as_mut().unwrap().conductivity_s_per_m = runmat_types::physical::Quantity::new(SIGMA);
+    prescribe(&mut model, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+    prescribe(&mut model, "right".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")), VOLTS);
+    let response = solve(&model, &mesh);
+    // Unit cube: L = 1 m, A = 1 m^2, R = L / (sigma A).
+    let ElectricalConstitutiveResponse::SteadyConduction {
+        current_density_a_per_m2,
+        total_joule_power_w,
+        ..
+    } = &response.constitutive
+    else {
+        panic!("steady conduction response expected");
+    };
+    let expected_j = SIGMA * VOLTS;
+    for density in current_density_a_per_m2.canonical_values() {
+        assert!((density[0].abs() - expected_j).abs() <= 1e-9 * expected_j, "{density:?}");
+        assert!(density[1].abs() + density[2].abs() <= 1e-9 * expected_j);
+    }
+    let expected_power = VOLTS * VOLTS * SIGMA;
+    assert!((total_joule_power_w.canonical_value() - expected_power).abs() <= 1e-9 * expected_power);
+    let current = response
+        .terminals
+        .iter()
+        .find(|terminal| terminal.constraint_id == "right")
+        .unwrap()
+        .outward_flux
+        .canonical_value()
+        .abs();
+    assert!((current * VOLTS - expected_power).abs() <= 1e-9 * expected_power);
+    assert_eq!(response.operator_proof, ElectricalOperatorProof::LocalEnergy);
 }

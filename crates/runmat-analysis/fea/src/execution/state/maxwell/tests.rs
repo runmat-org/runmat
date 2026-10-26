@@ -27,7 +27,7 @@ fn workload() -> MaxwellHarmonicWorkload {
             AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: id.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(id),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(id))),
                 },
             })
         })
@@ -52,8 +52,8 @@ fn workload() -> MaxwellHarmonicWorkload {
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 
@@ -101,7 +101,7 @@ fn both_orders_cold_complex_state_retains_original_electric_fields_and_exact_pro
                 *mesh.canonical_digest.bytes(),
             ))
             .unwrap();
-        let actual = runmat_canonical_codec::profile_serialized(
+        let actual = runmat_canonical_codec::profile_serialized_shape(
             &profiles,
             CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
         )

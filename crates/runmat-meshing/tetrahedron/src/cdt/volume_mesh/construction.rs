@@ -80,7 +80,7 @@ fn construct_with_observer(
         let mut component_options = options;
         component_options.refinement.maximum_insertions = remaining_insertions;
         let mut mesh = construct_component_mesh(
-            &component.region,
+            (!component.joined_regions).then_some(&component.region),
             component.constraints,
             metric_request,
             &frame,
@@ -88,7 +88,7 @@ fn construct_with_observer(
             cancellation,
             observer,
         )?;
-        let insertion_count = mesh.refinement_insertions.len() as u64;
+        let insertion_count = mesh.refinement_insertions().count() as u64;
         remaining_insertions = remaining_insertions.saturating_sub(insertion_count);
         components::remap_facet_insertions(
             &mut mesh.facet_recovery_insertions,

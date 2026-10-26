@@ -11,13 +11,10 @@ pub(super) fn recover(
     assembly: &ElectricalAssembly,
     potential: &[f64],
 ) -> Result<RecoveredElectrical, ElectricalStaticError> {
-    let mut result = RecoveredElectrical {
-        electric_field: Vec::new(),
-        flux: Vec::new(),
-        squared_field_integral: Vec::new(),
-        volumes: Vec::new(),
-    };
-    for element in &assembly.projection.elements {
+    let elements = &assembly.projection.elements;
+    // Independent per-element recovery on the admitted pool, collected in element order.
+    let recovered = crate::algebra::element_assembly::ordered_map_range(elements.len(), |index| {
+        let element = &elements[index];
         let mut average = [0.0; 3];
         let mut square = 0.0;
         let mut volume = 0.0;
@@ -49,7 +46,7 @@ pub(super) fn recover(
                 "invalid field recovery".into(),
             ));
         }
-        let coefficient = assembly.coefficients.canonical_values()[result.volumes.len()];
+        let coefficient = assembly.coefficients.canonical_values()[index];
         if average
             .iter()
             .any(|value| !(value * coefficient).is_finite())
@@ -58,8 +55,18 @@ pub(super) fn recover(
                 "nonfinite constitutive flux".into(),
             ));
         }
-        result.electric_field.push(average);
-        result.flux.push(average.map(|value| coefficient * value));
+        Ok((average, average.map(|value| coefficient * value), square, volume))
+    });
+    let mut result = RecoveredElectrical {
+        electric_field: Vec::with_capacity(elements.len()),
+        flux: Vec::with_capacity(elements.len()),
+        squared_field_integral: Vec::with_capacity(elements.len()),
+        volumes: Vec::with_capacity(elements.len()),
+    };
+    for item in recovered {
+        let (field, flux, square, volume) = item?;
+        result.electric_field.push(field);
+        result.flux.push(flux);
         result.squared_field_integral.push(square);
         result.volumes.push(volume);
     }

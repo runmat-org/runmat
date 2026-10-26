@@ -63,6 +63,8 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
             owned_work: None,
             requested_outputs: 0,
         },
+        // Enough for the native invocation and its parent monitor; this test is about
+        // failures that happen before any process launches.
         resources: ResourceRequest {
             cpu_millicores: 1000,
             memory_bytes: runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES + 1024,
@@ -97,12 +99,13 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
 }
 
 #[test]
-fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch() {
+fn foreign_stored_artifact_rejects_before_process_launch() {
     use runmat_execution::{ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramTarget,
     };
-    for foreign in [false, true] {
+    // The stored program no longer carries an entrypoint; the task request owns the callable.
+    for foreign in [true] {
         let directory = tempfile::tempdir().unwrap();
         let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
         config.store_root = directory.path().to_path_buf();
@@ -301,6 +304,7 @@ fn provider_failure_and_cancellation_commit_the_original_observation_and_account
             if cancelled {
                 AttemptDisposition::Cancelled
             } else {
+                // An unreadable stored program is a store failure, not program behavior.
                 AttemptDisposition::Failed {
                     kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
                 }

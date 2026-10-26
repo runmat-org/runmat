@@ -326,10 +326,8 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
     let mut resolved_request = request();
     resolved_request.tolerance = document.tolerance;
     resolved_request.quality.curve.minimum_metric_edge_length = 1.0e-6;
-    resolved_request.resources.maximum_nodes = 10_000;
-    resolved_request.resources.maximum_elements = 10_000;
-    resolved_request.resources.maximum_search_work = 1_000_000;
-    resolved_request.resources.maximum_iterations = 1_000_000;
+    resolved_request.limits.maximum_nodes = 10_000;
+    resolved_request.limits.maximum_elements = 10_000;
     let exact_input = MeshingInputRef {
         kind: MeshingInputKind::ExactGeometry,
         digest: StableDigest::from_bytes(*input.root_input().logical_digest.bytes()),
@@ -473,7 +471,19 @@ fn host(
             },
         ],
     };
-    MeshingHostWorkload::new(workload, identity, resolved_request, access, Some(document)).unwrap()
+    MeshingHostWorkload::new(
+        workload,
+        identity,
+        resolved_request,
+        runmat_meshing_core::MeshingExecutionCeilings {
+            maximum_search_work: 1_000_000,
+            maximum_iterations: 1_000_000,
+            ..super::fixture_ceilings()
+        },
+        access,
+        Some(document),
+    )
+    .unwrap()
 }
 
 fn seed_exact_input(store: &mut impl CacheExport, input: &PreparedExactGeometryInput) {

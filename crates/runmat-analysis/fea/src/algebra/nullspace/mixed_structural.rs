@@ -112,7 +112,13 @@ fn mixed_components(
         .enumerate()
         .map(|(index, node)| (node.node_id, index))
         .collect::<BTreeMap<_, _>>();
-    let solid_components = solid_face_connected_components(mesh, &node_by_id)?;
+    // Sheet and wire meshes carry no volume elements: their nodes connect only through the
+    // shells and beams realized on them.
+    let solid_components = if mesh.topology.volume_elements.is_empty() {
+        Vec::new()
+    } else {
+        solid_face_connected_components(mesh, &node_by_id)?
+    };
     let explicit_by_id = structural
         .nodes
         .iter()

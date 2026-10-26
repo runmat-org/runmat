@@ -64,7 +64,7 @@ fn solve_face_normal_offset(angle: f64) {
             constraint_id: "face_normal_offset".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::NormalDisplacement {
-                target: RegionTarget::boundary("face:1"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1")),
                 value: PrescribedValue::Constant(Displacement::new(-offset_m)),
             },
         }),

@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisSequence, DirectionalCombination, FormulationRequirement, IndependentDomain,
-    ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy as SpectrumTruncationPolicy,
-    ProcedureStep, ReferenceStatePolicy, ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy,
+    AnalysisSequence, DirectionalCombination, IndependentDomain, ModalCombination,
+    ModalTruncationCorrection, ModalTruncationPolicy as SpectrumTruncationPolicy, ProcedureStep,
+    ReferenceStatePolicy, ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy,
     SequenceDependencyReason, SpectrumAbscissa, SpectrumConstruction, SpectrumDamping,
     SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
     SpectrumInterpolation, SpectrumResponse, StateTransition, StateTransitionMethod, StateUse,
@@ -35,7 +35,7 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::resource::ResourceAccounting;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
@@ -54,6 +54,7 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
     .unwrap();
     let fanout = prepare_structural_modal_response_spectrum_fanout(
         StructuralModalResponseSpectrumFanoutPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("response-spectrum-study"),
             frozen_project_digest: None,
             program_revision: revision(),
@@ -90,6 +91,7 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
     entries.reverse();
     let task = prepare_structural_modal_response_spectrum_assembly(
         StructuralModalResponseSpectrumAssemblyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("response-spectrum-study"),
             frozen_project_digest: None,
             program_revision: revision(),
@@ -145,7 +147,6 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -158,7 +159,6 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         model,
         step_id: response_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
     };
     let workloads = StructuralStudyWorkloads::HeterogeneousSequence {
@@ -468,24 +468,20 @@ fn fixture() -> (
     model.response_spectra = spectra;
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let volume_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: model.material_assignments[0]
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     for (face_index, region) in [(0, "root"), (1, "tip"), (3, "dynamic_force")] {
         mesh.topology.boundary_faces[face_index]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: region.into(),
-                assembly_path: vec!["root".into()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                region.into(),
+                vec!["root".into()],
+            ));
         mesh.topology.boundary_faces[face_index].provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -494,7 +490,6 @@ fn fixture() -> (
         model: model.clone(),
         step_id: modal.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -533,7 +528,6 @@ fn fixture() -> (
             model,
             step_id: response.step_id,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             modal_basis_transition: transition,
         },
@@ -592,14 +586,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("response-spectrum-graph"),
         digest("response-spectrum-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("response-spectrum-runtime"),
-            digest("response-spectrum-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

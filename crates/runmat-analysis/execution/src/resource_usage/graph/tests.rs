@@ -85,8 +85,8 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
             ),
             inputs: Vec::new(),
             outputs: OutputContract {
-                requested_outputs: 0,
                 owned_work: None,
+                requested_outputs: 0,
             },
             resources,
             retry: RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },

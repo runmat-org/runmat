@@ -289,7 +289,8 @@ pub use self::figure_scene::{
 #[cfg(feature = "plot-core")]
 pub use self::geometry_scene::{
     append_geometry_scene_chunks, clone_geometry_scene, close_geometry_scene,
-    export_geometry_scene, import_geometry_scene, import_geometry_scene_payload,
+    encode_geometry_figure_scene, export_geometry_scene, import_geometry_scene,
+    import_geometry_scene_payload,
     present_geometry_scene_on_surface, replace_geometry_scene,
 };
 #[cfg(feature = "plot-core")]

@@ -1,62 +1,7 @@
 use super::*;
-
-const SPEC_INPUTS: [BuiltinParamDescriptor; 15] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Observation identifier.",
-    ),
-    required(
-        "quantity",
-        BuiltinParamType::Any,
-        "Typed observation quantity.",
-    ),
-    required("target", BuiltinParamType::Any, "Typed observation target."),
-    required(
-        "sourceLocation",
-        BuiltinParamType::Any,
-        "Typed source field location.",
-    ),
-    required(
-        "outputLocation",
-        BuiltinParamType::Any,
-        "Typed output field location.",
-    ),
-    required("recovery", BuiltinParamType::Any, "Typed recovery policy."),
-    required(
-        "component",
-        BuiltinParamType::Any,
-        "Typed component or invariant.",
-    ),
-    required("frame", BuiltinParamType::Any, "Typed coordinate frame."),
-    required("sign", BuiltinParamType::Any, "Typed sign convention."),
-    required(
-        "complexRepresentation",
-        BuiltinParamType::Any,
-        "Typed complex representation.",
-    ),
-    required("sampling", BuiltinParamType::Any, "Typed sampling policy."),
-    required(
-        "reduction",
-        BuiltinParamType::Any,
-        "Typed reduction policy.",
-    ),
-    required("storage", BuiltinParamType::Any, "Typed storage policy."),
-    required(
-        "purpose",
-        BuiltinParamType::Any,
-        "Typed observation purpose.",
-    ),
-    required(
-        "cost",
-        BuiltinParamType::Any,
-        "Typed observation cost estimate.",
-    ),
-];
-descriptor!(FIELD_DESCRIPTOR, FIELD_SIGNATURES, "observation = fea.Observation.field(id, quantity, target, sourceLocation, outputLocation, recovery, component, frame, sign, complexRepresentation, sampling, reduction, storage, purpose, cost)", &SPEC_INPUTS);
-descriptor!(HISTORY_DESCRIPTOR, HISTORY_SIGNATURES, "observation = fea.Observation.history(id, quantity, target, sourceLocation, outputLocation, recovery, component, frame, sign, complexRepresentation, sampling, reduction, storage, purpose, cost)", &SPEC_INPUTS);
-descriptor!(PROBE_DESCRIPTOR, PROBE_SIGNATURES, "observation = fea.Observation.probe(id, quantity, target, sourceLocation, outputLocation, recovery, component, frame, sign, complexRepresentation, sampling, reduction, storage, purpose, cost)", &SPEC_INPUTS);
-descriptor!(REDUCTION_OBSERVATION_DESCRIPTOR, REDUCTION_OBSERVATION_SIGNATURES, "observation = fea.Observation.reduction(id, quantity, target, sourceLocation, outputLocation, recovery, component, frame, sign, complexRepresentation, sampling, reduction, storage, purpose, cost)", &SPEC_INPUTS);
+use runmat_builtins::fea_contract::study_types::descriptors::{
+    monitor_cadence::*, monitor_stop_condition::*, observation::*,
+};
 
 fn canonical_shape(quantity: ObservationQuantity) -> ObservationValueShape {
     quantity.canonical_value_shape()
@@ -101,7 +46,7 @@ fn observation(
         sign_convention: policy::sign(name, &args[8])?,
         complex_representation: policy::complex_representation(name, &args[9])?,
         sampling: sampling.value,
-        reduction: from_typed_value(name, REDUCTION_CLASS, &args[11])?,
+        reduction: optional_typed_value(name, REDUCTION_CLASS, &args[11])?,
         storage: object_payload(name, &args[12], STORAGE_CLASS)?,
         purpose: policy::purpose(name, &args[13])?,
         cost: object_payload(name, &args[14], COST_CLASS)?,
@@ -116,62 +61,42 @@ fn observation(
 }
 macro_rules! observation_builtin {
     ($function:ident, $name:literal, $descriptor:ident, $form:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed analysis observation request.", keywords = "fea,observation,field,history,probe,reduction,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::requests")]
-        pub async fn $function(args: Vec<Value>) -> BuiltinResult<Value> { observation($name, args, $form) }
+        #[runtime_builtin(name = $name, binding_variant = "default", builtin_path = "crate::builtins::fea::observations::requests")]
+        pub async fn $function(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
+            study_outputs(&$descriptor, $name)?;
+            observation($name, args, $form)
+        }
     };
 }
 observation_builtin!(
     field,
     "fea.Observation.field",
-    FIELD_DESCRIPTOR,
+    FEA_OBSERVATION_FIELD_DESCRIPTOR,
     ObservationForm::Field
 );
 observation_builtin!(
     history,
     "fea.Observation.history",
-    HISTORY_DESCRIPTOR,
+    FEA_OBSERVATION_HISTORY_DESCRIPTOR,
     ObservationForm::History
 );
 observation_builtin!(
     probe,
     "fea.Observation.probe",
-    PROBE_DESCRIPTOR,
+    FEA_OBSERVATION_PROBE_DESCRIPTOR,
     ObservationForm::Probe
 );
 observation_builtin!(
     reduction_observation,
     "fea.Observation.reduction",
-    REDUCTION_OBSERVATION_DESCRIPTOR,
+    FEA_OBSERVATION_REDUCTION_DESCRIPTOR,
     ObservationForm::Reduction
 );
 
-const DIAGNOSTIC_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Diagnostic observation identifier.",
-    ),
-    required("kind", BuiltinParamType::Any, "Typed diagnostic kind."),
-    required("sampling", BuiltinParamType::Any, "Typed sampling policy."),
-    required(
-        "retention",
-        BuiltinParamType::Any,
-        "Typed retention policy.",
-    ),
-];
-descriptor!(
-    DIAGNOSTIC_DESCRIPTOR,
-    DIAGNOSTIC_SIGNATURES,
-    "observation = fea.Observation.diagnostic(id, kind, sampling, retention)",
-    &DIAGNOSTIC_INPUTS
-);
 #[runtime_builtin(
     name = "fea.Observation.diagnostic",
-    category = "fea",
-    summary = "Create a typed diagnostic observation request.",
-    keywords = "fea,observation,diagnostic,typed",
-    descriptor(DIAGNOSTIC_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn diagnostic(
@@ -181,6 +106,7 @@ pub async fn diagnostic(
     retention: Value,
 ) -> BuiltinResult<Value> {
     const NAME: &str = "fea.Observation.diagnostic";
+    study_outputs(&FEA_OBSERVATION_DIAGNOSTIC_DESCRIPTOR, NAME)?;
     let sampling: TypedStudyValue<SamplingPolicy> =
         object_payload(NAME, &sampling, SAMPLING_CLASS)?;
     let retention: TypedStudyValue<RetentionPolicy> =
@@ -197,33 +123,16 @@ pub async fn diagnostic(
     )
 }
 
-const CADENCE_ACCEPTED_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "interval",
-    BuiltinParamType::NumericScalar,
-    "Positive accepted-increment interval.",
-)];
-descriptor!(
-    CADENCE_ACCEPTED_DESCRIPTOR,
-    CADENCE_ACCEPTED_SIGNATURES,
-    "cadence = fea.MonitorCadence.acceptedIncrements(interval)",
-    &CADENCE_ACCEPTED_INPUTS
-);
-descriptor!(
-    CADENCE_WALL_DESCRIPTOR,
-    CADENCE_WALL_SIGNATURES,
-    "cadence = fea.MonitorCadence.wallSeconds(interval)",
-    &ONE_VALUE
-);
 #[runtime_builtin(
     name = "fea.MonitorCadence.acceptedIncrements",
-    category = "fea",
-    summary = "Evaluate a monitor every bounded number of accepted increments.",
-    keywords = "fea,observation,monitor,cadence,typed",
-    descriptor(CADENCE_ACCEPTED_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn cadence_accepted(interval: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_MONITOR_CADENCE_ACCEPTED_INCREMENTS_DESCRIPTOR,
+        "fea.MonitorCadence.acceptedIncrements",
+    )?;
     to_typed_value(
         "fea.MonitorCadence.acceptedIncrements",
         CADENCE_CLASS,
@@ -234,15 +143,12 @@ pub async fn cadence_accepted(interval: Value) -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.MonitorCadence.wallSeconds",
-    category = "fea",
-    summary = "Evaluate a monitor at a wall-clock cadence.",
-    keywords = "fea,observation,monitor,cadence,typed",
-    descriptor(CADENCE_WALL_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn cadence_wall(interval: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorCadence.wallSeconds";
+    study_outputs(&FEA_MONITOR_CADENCE_WALL_SECONDS_DESCRIPTOR, NAME)?;
     to_typed_value(
         NAME,
         CADENCE_CLASS,
@@ -252,69 +158,15 @@ pub async fn cadence_wall(interval: Value) -> BuiltinResult<Value> {
     )
 }
 
-const STOP_THRESHOLD_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "quantity",
-        BuiltinParamType::Any,
-        "Typed threshold quantity.",
-    ),
-    required(
-        "canonicalValue",
-        BuiltinParamType::NumericScalar,
-        "Finite threshold in canonical units.",
-    ),
-];
-const STOP_CHANGE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "quantity",
-        BuiltinParamType::Any,
-        "Typed threshold quantity.",
-    ),
-    required(
-        "canonicalValue",
-        BuiltinParamType::NumericScalar,
-        "Finite change threshold in canonical units.",
-    ),
-    required(
-        "consecutive",
-        BuiltinParamType::NumericScalar,
-        "Positive consecutive-sample count.",
-    ),
-];
-descriptor!(
-    STOP_NONE_DESCRIPTOR,
-    STOP_NONE_SIGNATURES,
-    "condition = fea.MonitorStopCondition.none()",
-    &NO_INPUTS
-);
-descriptor!(
-    STOP_LESS_DESCRIPTOR,
-    STOP_LESS_SIGNATURES,
-    "condition = fea.MonitorStopCondition.lessThan(quantity, canonicalValue)",
-    &STOP_THRESHOLD_INPUTS
-);
-descriptor!(
-    STOP_GREATER_DESCRIPTOR,
-    STOP_GREATER_SIGNATURES,
-    "condition = fea.MonitorStopCondition.greaterThan(quantity, canonicalValue)",
-    &STOP_THRESHOLD_INPUTS
-);
-descriptor!(STOP_CHANGE_DESCRIPTOR, STOP_CHANGE_SIGNATURES, "condition = fea.MonitorStopCondition.absoluteChangeBelow(quantity, canonicalValue, consecutive)", &STOP_CHANGE_INPUTS);
 #[runtime_builtin(
     name = "fea.MonitorStopCondition.none",
-    category = "fea",
-    summary = "Create a progress-only monitor with no stop condition.",
-    keywords = "fea,observation,monitor,stop,typed",
-    descriptor(STOP_NONE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_none() -> BuiltinResult<Value> {
-    to_typed_value::<Option<MonitorStopCondition>>(
-        "fea.MonitorStopCondition.none",
-        STOP_CLASS,
-        None,
-    )
+    const NAME: &str = "fea.MonitorStopCondition.none";
+    study_outputs(&FEA_MONITOR_STOP_CONDITION_NONE_DESCRIPTOR, NAME)?;
+    absent_typed_value(NAME, STOP_CLASS)
 }
 fn threshold(
     name: &'static str,
@@ -328,15 +180,12 @@ fn threshold(
 }
 #[runtime_builtin(
     name = "fea.MonitorStopCondition.lessThan",
-    category = "fea",
-    summary = "Stop when a scalar observation is below a typed threshold.",
-    keywords = "fea,observation,monitor,stop,threshold,typed",
-    descriptor(STOP_LESS_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_less(quantity: Value, value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorStopCondition.lessThan";
+    study_outputs(&FEA_MONITOR_STOP_CONDITION_LESS_THAN_DESCRIPTOR, NAME)?;
     to_typed_value(
         NAME,
         STOP_CLASS,
@@ -347,15 +196,12 @@ pub async fn stop_less(quantity: Value, value: Value) -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.MonitorStopCondition.greaterThan",
-    category = "fea",
-    summary = "Stop when a scalar observation exceeds a typed threshold.",
-    keywords = "fea,observation,monitor,stop,threshold,typed",
-    descriptor(STOP_GREATER_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_greater(quantity: Value, value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorStopCondition.greaterThan";
+    study_outputs(&FEA_MONITOR_STOP_CONDITION_GREATER_THAN_DESCRIPTOR, NAME)?;
     to_typed_value(
         NAME,
         STOP_CLASS,
@@ -366,11 +212,7 @@ pub async fn stop_greater(quantity: Value, value: Value) -> BuiltinResult<Value>
 }
 #[runtime_builtin(
     name = "fea.MonitorStopCondition.absoluteChangeBelow",
-    category = "fea",
-    summary = "Stop after a scalar observation remains below a change threshold.",
-    keywords = "fea,observation,monitor,stop,change,typed",
-    descriptor(STOP_CHANGE_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_change(
@@ -379,6 +221,10 @@ pub async fn stop_change(
     consecutive: Value,
 ) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorStopCondition.absoluteChangeBelow";
+    study_outputs(
+        &FEA_MONITOR_STOP_CONDITION_ABSOLUTE_CHANGE_BELOW_DESCRIPTOR,
+        NAME,
+    )?;
     to_typed_value(
         NAME,
         STOP_CLASS,
@@ -389,37 +235,9 @@ pub async fn stop_change(
     )
 }
 
-const MONITOR_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Monitor observation identifier.",
-    ),
-    required(
-        "sourceObservationId",
-        BuiltinParamType::StringScalar,
-        "Scalar source observation identifier.",
-    ),
-    required("cadence", BuiltinParamType::Any, "Typed monitor cadence."),
-    required(
-        "stop",
-        BuiltinParamType::Any,
-        "Typed optional stop condition.",
-    ),
-];
-descriptor!(
-    MONITOR_DESCRIPTOR,
-    MONITOR_SIGNATURES,
-    "observation = fea.Observation.monitor(id, sourceObservationId, cadence, stop)",
-    &MONITOR_INPUTS
-);
 #[runtime_builtin(
     name = "fea.Observation.monitor",
-    category = "fea",
-    summary = "Create a bounded scalar solver monitor.",
-    keywords = "fea,observation,monitor,solver,typed",
-    descriptor(MONITOR_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn monitor(
@@ -429,9 +247,9 @@ pub async fn monitor(
     stop: Value,
 ) -> BuiltinResult<Value> {
     const NAME: &str = "fea.Observation.monitor";
+    study_outputs(&FEA_OBSERVATION_MONITOR_DESCRIPTOR, NAME)?;
     let cadence: TypedStudyValue<MonitorCadence> = object_payload(NAME, &cadence, CADENCE_CLASS)?;
-    let stop: TypedStudyValue<Option<MonitorStopCondition>> =
-        object_payload(NAME, &stop, STOP_CLASS)?;
+    let stop = optional_typed_value::<MonitorStopCondition>(NAME, STOP_CLASS, &stop)?;
     to_typed_value(
         NAME,
         OBSERVATION_CLASS,
@@ -443,7 +261,7 @@ pub async fn monitor(
                 source,
             )?),
             cadence: cadence.value,
-            stop: stop.value,
+            stop,
         }),
     )
 }

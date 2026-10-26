@@ -1,11 +1,14 @@
 use crate::{
-    algebra::{apply_k, dot_scoped, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
-    constraints::{AffineConstraintReduction, AffineTransposeIndex},
+    algebra::{PreparedRealLinearSystem, ScopedSpmvError},
+    constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
     solve::linear::{ScopedLinearSolveSettings, StructuralLinearSystemView},
-    solve::{backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult},
+    solve::{
+        backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult,
+        preconditioner::SpdPreconditionerKind, shared_sparse,
+    },
 };
 
 use super::backend::linear_algebra::LinearAlgebraBackend;
@@ -14,103 +17,117 @@ pub(super) fn solve_affine_constraint_system(
     summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
+    _algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
-    solve_affine_constraint_system_with_apply(
+    solve_affine_constraint_system_with_settings(
         summary,
         reduction,
         requested_backend,
-        algebra_backend,
         initial_guess,
-        (
-            |full: &[f64]| Ok(apply_k(summary.operator, full)),
-            |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
-            None,
-        ),
         ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
     )
-    .expect("reference sparse application is infallible for an assembled system")
 }
 
 pub(super) fn solve_affine_constraint_system_with_execution(
     summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
+    _algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
     admission: Option<&SolverAdmissionResourcePolicy>,
+    preconditioner: SpdPreconditionerKind,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
-    solve_affine_constraint_system_with_apply(
+    let mut settings = ScopedLinearSolveSettings::with_default_tolerance(plan, admission);
+    settings.preparation = preparation;
+    // A planned proof without a factor (a supplied preparation) solves with the planned
+    // preconditioner; otherwise the proving factor, when one exists, solves.
+    let kind = if settings.preparation.is_some() {
+        preconditioner
+    } else {
+        SpdPreconditionerKind::Auto
+    };
+    Ok(solve_affine_constraint_system_with_kind(
         summary,
         reduction,
         requested_backend,
-        algebra_backend,
         initial_guess,
-        (
-            |full: &[f64]| {
-                if plan.is_serial() {
-                    Ok(apply_k(summary.operator, full))
-                } else {
-                    spmv_scoped(summary.operator.operators().stiffness(), full, plan)
-                }
-            },
-            |left: &[f64], right: &[f64]| {
-                if plan.is_serial() {
-                    Ok(algebra_backend.dot(left, right))
-                } else {
-                    dot_scoped(left, right, plan)
-                }
-            },
-            Some(plan),
-        ),
-        ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
-    )
+        settings,
+        kind,
+    ))
 }
 
-fn solve_affine_constraint_system_with_apply(
+/// Solves the affine-reduced SPD system `Tᵀ K T u = Tᵀ (f − K c)` through the shared sparse layer
+/// (the coercivity-proving Cholesky factor of the reduced operator is the direct solver) and
+/// expands `x = T u + c`.
+fn solve_affine_constraint_system_with_settings(
     summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
-    operations: (
-        impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
-        impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
-        Option<LocalExecutionPlan>,
-    ),
     settings: ScopedLinearSolveSettings<'_>,
-) -> Result<LinearSolveResult, ScopedSpmvError> {
+) -> LinearSolveResult {
+    solve_affine_constraint_system_with_kind(
+        summary,
+        reduction,
+        requested_backend,
+        initial_guess,
+        settings,
+        SpdPreconditionerKind::Auto,
+    )
+}
+
+fn solve_affine_constraint_system_with_kind(
+    summary: &StructuralLinearSystemView<'_>,
+    reduction: &AffineConstraintReduction,
+    requested_backend: LinearAlgebraBackendKind,
+    initial_guess: Option<&[f64]>,
+    settings: ScopedLinearSolveSettings<'_>,
+    kind: SpdPreconditionerKind,
+) -> LinearSolveResult {
     let admission = settings.admission;
     let reuse = settings.preparation;
-    let (apply_full, dot, vector_plan) = operations;
+    let plan = settings.plan;
+    let tolerance = settings.relative_tolerance;
     let expected_reduction = summary
         .constraint_matrix
         .as_ref()
         .and_then(|matrix| matrix.affine_reduction().ok());
     if expected_reduction.as_ref() != Some(reduction) {
-        return Ok(rejected_affine_system(
+        return rejected_affine_system(
             summary,
             "affine reduction differs from the canonical resolved constraint matrix",
-        ));
+        );
     }
-    let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system(
-        summary.operator.operators().stiffness(),
+    let stiffness = summary.operator.operators().stiffness();
+    let derived_support;
+    let reduced_support = match summary.planned_reduced_support {
+        Some(planned) => planned,
+        None => match reduction.reduce_sparse_pattern(stiffness.pattern()) {
+            Ok(pattern) => {
+                derived_support = pattern;
+                &derived_support
+            }
+            Err(error) => return rejected_affine_system(summary, &error.to_string()),
+        },
+    };
+    let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system_on_support(
+        stiffness,
+        reduced_support,
         summary.operator.load(),
     ) {
         Ok(reduced) => reduced,
-        Err(error) => return Ok(rejected_affine_system(summary, &error.to_string())),
+        Err(error) => return rejected_affine_system(summary, &error.to_string()),
     };
-    let mut reduced_solution = initial_guess
-        .map(|guess| {
-            reduction
-                .free_dof_indices
-                .iter()
-                .map(|dof| guess.get(*dof).copied().unwrap_or(0.0))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| vec![0.0; reduction.reduced_dof_count]);
+    let reduced_guess = initial_guess.map(|guess| {
+        reduction
+            .free_dof_indices
+            .iter()
+            .map(|dof| guess.get(*dof).copied().unwrap_or(0.0))
+            .collect::<Vec<_>>()
+    });
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_AFFINE_CONSTRAINT_REDUCTION".into(),
         severity: FeaDiagnosticSeverity::Info,
@@ -130,7 +147,8 @@ fn solve_affine_constraint_system_with_apply(
     }
 
     if reduction.reduced_dof_count == 0 {
-        return Ok(LinearSolveResult {
+        return LinearSolveResult {
+            spectral_estimate: None,
             iterations: 0,
             residual_norm: 0.0,
             relative_residual: Some(0.0),
@@ -141,184 +159,156 @@ fn solve_affine_constraint_system_with_apply(
             device_apply_k_attempt_count: 0,
             accelerator_evidence: None,
             solution: reduction.offset.clone(),
-            solver_method: SolverMethod::MatrixFreePcg,
+            solver_method: SolverMethod::SparseDirectCholesky,
             preconditioner: SolverPreconditioner::None,
             diagnostics,
-        });
+        };
     }
 
-    let preparation = match reuse {
+    let reduced_dofs = reduction.reduced_dof_count;
+    let reduced_pattern_entries = reduced_operator.pattern().column_indices().len();
+    let preparation = shared_sparse::with_plan(plan, move || match reuse {
         Some(reuse) => PreparedRealLinearSystem::try_new_reusing(
             reduced_operator,
-            reduced_rhs.clone(),
-            vec![false; reduction.reduced_dof_count],
+            reduced_rhs,
+            vec![false; reduced_dofs],
             reuse,
         ),
         None => PreparedRealLinearSystem::try_new(
             reduced_operator,
-            reduced_rhs.clone(),
-            vec![false; reduction.reduced_dof_count],
+            reduced_rhs,
+            vec![false; reduced_dofs],
         ),
-    };
+    });
     let prepared = match preparation {
         Ok(prepared) => prepared,
-        Err(error) => return Ok(rejected_affine_system(summary, &error.to_string())),
+        Err(error) => return rejected_affine_system(summary, &error.to_string()),
     };
     if let Some(admission) = admission {
         let accepted = prepared
             .admissibility()
             .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
         if !accepted {
-            return Ok(rejected_affine_system(
+            let exact = prepared
+                .admissibility()
+                .map(|evidence| evidence.coercivity().work_counts());
+            return rejected_affine_system(
                 summary,
-                "exact reduced-solver work exceeds the admitted resource envelope",
-            ));
-        }
-    }
-    drop(prepared);
-    let transpose_index = match vector_plan
-        .filter(|plan| !plan.is_serial())
-        .map(|_| AffineTransposeIndex::try_new(reduction))
-        .transpose()
-    {
-        Ok(index) => index,
-        Err(error) => return Ok(rejected_affine_system(summary, &error.to_string())),
-    };
-
-    let applied_initial = apply_reduced_operator(
-        reduction,
-        &reduced_solution,
-        &apply_full,
-        vector_plan,
-        transpose_index.as_ref(),
-    )?;
-    let mut residual = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-        crate::algebra::vector_sub_scoped(&reduced_rhs, &applied_initial, plan)?
-    } else {
-        algebra_backend.vec_sub(&reduced_rhs, &applied_initial)
-    };
-    drop(applied_initial);
-    let mut direction = residual.clone();
-    let mut residual_squared = dot(&residual, &residual)?;
-    let right_hand_side_norm = dot(&reduced_rhs, &reduced_rhs)?.sqrt();
-    let initial_residual_norm = residual_squared.sqrt();
-    let reference_norm = if right_hand_side_norm > 0.0 {
-        right_hand_side_norm
-    } else {
-        initial_residual_norm
-    };
-    let tolerance = 1.0e-8;
-    let maximum_iterations = reduction.reduced_dof_count.saturating_mul(4).max(256);
-    let mut iterations = 0_u32;
-    let mut converged = initial_residual_norm <= tolerance * reference_norm;
-
-    while !converged && (iterations as usize) < maximum_iterations {
-        if crate::is_fea_cancelled() {
-            diagnostics.push(FeaDiagnostic {
-                code: "FEA_SOLVER_CANCELLED".into(),
-                severity: FeaDiagnosticSeverity::Warning,
-                message: "affine reduced solve cancelled".into(),
-            });
-            break;
-        }
-        let operator_direction = apply_reduced_operator(
-            reduction,
-            &direction,
-            &apply_full,
-            vector_plan,
-            transpose_index.as_ref(),
-        )?;
-        let denominator = dot(&direction, &operator_direction)?;
-        if !denominator.is_finite() || denominator <= 0.0 {
-            diagnostics.push(FeaDiagnostic {
-                code: "FEA_AFFINE_REDUCED_BREAKDOWN".into(),
-                severity: FeaDiagnosticSeverity::Warning,
-                message: format!(
-                    "reduced conjugate-gradient operator lost positive definiteness at iteration {}",
-                    iterations + 1
+                &format!(
+                    "exact reduced-solver work (dimension, factor nonzeros, updates, bytes) {exact:?} on a reduced pattern of {} entries (planned support: {}) exceeds the admitted resource envelope {admission:?}",
+                    reduced_pattern_entries,
+                    summary.planned_reduced_support.is_some(),
                 ),
-            });
-            break;
-        }
-        let alpha = residual_squared / denominator;
-        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-            crate::algebra::axpy_scoped(alpha, &direction, &mut reduced_solution, plan)?;
-            crate::algebra::axpy_scoped(-alpha, &operator_direction, &mut residual, plan)?;
-        } else {
-            algebra_backend.axpy(alpha, &direction, &mut reduced_solution);
-            algebra_backend.axpy(-alpha, &operator_direction, &mut residual);
-        }
-        let next_residual_squared = dot(&residual, &residual)?;
-        iterations += 1;
-        converged = next_residual_squared.sqrt() <= tolerance * reference_norm;
-        if converged {
-            break;
-        }
-        let beta = next_residual_squared / residual_squared;
-        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-            crate::algebra::direction_update_scoped(&residual, &mut direction, beta, plan)?;
-        } else {
-            for (direction, residual) in direction.iter_mut().zip(&residual) {
-                *direction = *residual + beta * *direction;
-            }
-        }
-        residual_squared = next_residual_squared;
-    }
-
-    // Publish convergence from the physical reduced equation, not only the
-    // recursively updated residual, which can drift after many CG steps.
-    let applied_solution = apply_reduced_operator(
-        reduction,
-        &reduced_solution,
-        &apply_full,
-        vector_plan,
-        transpose_index.as_ref(),
-    )?;
-    if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-        crate::algebra::subtract_into_scoped(&reduced_rhs, &applied_solution, &mut residual, plan)?;
-    } else {
-        for ((residual_value, right_hand_side), applied) in
-            residual.iter_mut().zip(&reduced_rhs).zip(&applied_solution)
-        {
-            *residual_value = right_hand_side - applied;
+            );
         }
     }
-    drop(applied_solution);
-    let residual_norm = dot(&residual, &residual)?.sqrt();
-    converged = residual_norm <= tolerance * reference_norm;
-    if !converged {
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    // The elastic rigidity proof guarantees a node-major three-DOF solid; when the reduction keeps
+    // whole nodes, multigrid aggregates nodal 3×3 blocks.
+    let elastic = prepared
+        .admissibility()
+        .is_some_and(|evidence| evidence.coercivity().proved_by_elastic_rigidity());
+    let block_size = if elastic && keeps_whole_nodes(reduction) { 3 } else { 1 };
+    let strategy = shared_sparse::resolve_spd_strategy(
+        kind,
+        prepared.dof_count(),
+        prepared.matrix().values().len(),
+        block_size,
+        factor.is_some(),
+    );
+    let device = shared_sparse::multigrid_device(requested_backend, strategy);
+    let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
+        matrix: prepared.matrix(),
+        rhs: prepared.rhs(),
+        initial_guess: reduced_guess.as_deref(),
+        relative_tolerance: tolerance,
+        plan,
+        strategy,
+        block_size,
+        factor: factor.as_deref(),
+        device,
+    });
+    if outcome.cancelled {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_CANCELLED".into(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "affine reduced solve cancelled".into(),
+        });
+    } else if !outcome.converged {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_AFFINE_CG_NOT_CONVERGED".into(),
             severity: FeaDiagnosticSeverity::Warning,
             message: format!(
-                "affine reduced cg stopped after {iterations}/{maximum_iterations} iterations with residual_norm={residual_norm} relative_residual={} tolerance={tolerance}",
-                residual_norm / reference_norm,
+                "affine reduced {} did not reach tolerance {tolerance}: {}",
+                strategy.label(),
+                outcome.failure.as_deref().unwrap_or("residual above tolerance"),
             ),
         });
     }
     diagnostics.push(FeaDiagnostic {
         code: "FEA_SOLVER_METHOD".into(),
         severity: FeaDiagnosticSeverity::Info,
-        message: "solver=pcg space=affine_reduced preconditioner=none matrix_free=true".into(),
-    });
-    Ok(LinearSolveResult {
-        iterations,
-        residual_norm,
-        relative_residual: crate::solve::convergence::relative_residual(
-            residual_norm,
-            reference_norm,
+        message: format!(
+            "{} space=affine_reduced block_size={block_size}",
+            strategy.label()
         ),
-        converged,
+    });
+    if outcome.device_preconditioner {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_DEVICE_PRECONDITIONER".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solver=flexible_cg preconditioner=device_amg_inner_cg inner_steps={} inner_precision=f32 outer_precision=f64",
+                shared_sparse::DEVICE_INNER_CG_STEPS
+            ),
+        });
+    } else if device.is_some() {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_DEVICE_FALLBACK".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: "the provider could not hold the multigrid hierarchy; the host multigrid ran"
+                .into(),
+        });
+    }
+    let (solver_method, preconditioner) = strategy.provenance();
+    let solution = match expand(reduction, &outcome.solution, Some(plan)) {
+        Ok(solution) => solution,
+        Err(error) => return rejected_affine_system(summary, &error.to_string()),
+    };
+    LinearSolveResult {
+        spectral_estimate: outcome.spectral_estimate,
+        iterations: outcome.iterations,
+        residual_norm: outcome.residual_norm,
+        relative_residual: crate::solve::convergence::relative_residual(
+            outcome.residual_norm,
+            outcome.reference_norm,
+        ),
+        converged: outcome.converged && !outcome.cancelled,
         host_sync_count: 0,
-        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        solver_backend: if outcome.device_preconditioner {
+            LinearAlgebraBackendKind::Accelerator
+        } else {
+            LinearAlgebraBackendKind::CpuReference
+        },
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
         accelerator_evidence: None,
-        solution: expand(reduction, &reduced_solution, vector_plan)?,
-        solver_method: SolverMethod::MatrixFreePcg,
-        preconditioner: SolverPreconditioner::None,
+        solution,
+        solver_method,
+        preconditioner,
         diagnostics,
-    })
+    }
+}
+
+/// The reduction keeps every node's three DOFs or none, so reduced DOFs form nodal triples.
+fn keeps_whole_nodes(reduction: &AffineConstraintReduction) -> bool {
+    reduction.free_dof_indices.len() % 3 == 0
+        && reduction.free_dof_indices.chunks_exact(3).all(|triple| {
+            triple[0] % 3 == 0 && triple[1] == triple[0] + 1 && triple[2] == triple[0] + 2
+        })
 }
 
 fn rejected_affine_system(
@@ -326,6 +316,7 @@ fn rejected_affine_system(
     message: &str,
 ) -> LinearSolveResult {
     LinearSolveResult {
+        spectral_estimate: None,
         iterations: 0,
         residual_norm: summary
             .operator
@@ -342,29 +333,13 @@ fn rejected_affine_system(
         device_apply_k_attempt_count: 0,
         accelerator_evidence: None,
         solution: vec![0.0; summary.dof_count],
-        solver_method: SolverMethod::MatrixFreePcg,
+        solver_method: SolverMethod::SparseDirectCholesky,
         preconditioner: SolverPreconditioner::None,
         diagnostics: vec![FeaDiagnostic {
             code: "FEA_INVALID_AFFINE_SOLVER_ADMISSION".into(),
             severity: FeaDiagnosticSeverity::Error,
             message: message.into(),
         }],
-    }
-}
-
-fn apply_reduced_operator(
-    reduction: &AffineConstraintReduction,
-    reduced: &[f64],
-    apply_full: &impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
-    plan: Option<LocalExecutionPlan>,
-    transpose_index: Option<&AffineTransposeIndex>,
-) -> Result<Vec<f64>, ScopedSpmvError> {
-    let full = expand_linear(reduction, reduced, plan)?;
-    let applied = apply_full(&full)?;
-    if let (Some(plan), Some(index)) = (plan.filter(|plan| !plan.is_serial()), transpose_index) {
-        index.apply(reduction, &applied, plan)
-    } else {
-        Ok(transpose_apply(reduction, &applied))
     }
 }
 
@@ -420,44 +395,24 @@ fn recovery_row(reduction: &AffineConstraintReduction, reduced: &[f64], row: usi
         .sum()
 }
 
-fn transpose_apply(reduction: &AffineConstraintReduction, full: &[f64]) -> Vec<f64> {
-    let mut reduced = vec![0.0; reduction.reduced_dof_count];
-    for (row, value) in full.iter().copied().enumerate() {
-        let start = reduction.recovery_row_offsets[row];
-        let end = reduction.recovery_row_offsets[row + 1];
-        for entry in start..end {
-            reduced[reduction.recovery_column_indices[entry]] +=
-                reduction.recovery_coefficients[entry] * value;
-        }
-    }
-    reduced
-}
-
 pub(super) fn solve_affine_constraint_system_reusing(
     summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
+    _algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     reuse: &mut crate::algebra::LinearPreparationReuse,
 ) -> LinearSolveResult {
     let mut settings =
         ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None);
     settings.preparation = Some(reuse);
-    solve_affine_constraint_system_with_apply(
+    solve_affine_constraint_system_with_settings(
         summary,
         reduction,
         requested_backend,
-        algebra_backend,
         initial_guess,
-        (
-            |full: &[f64]| Ok(apply_k(summary.operator, full)),
-            |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
-            None,
-        ),
         settings,
     )
-    .expect("reference sparse application is infallible for an assembled system")
 }
 
 #[cfg(test)]

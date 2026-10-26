@@ -165,7 +165,7 @@ fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for
     for target in [
         RegionTarget::point("node:1"),
         RegionTarget::point("node:102"),
-        RegionTarget::boundary("root"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
     ] {
         let profile = mixed_target_workspace_profile(&target, &mesh, structural).unwrap();
         let selected =

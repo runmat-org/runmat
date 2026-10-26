@@ -30,6 +30,7 @@ pub struct MeshCommand {
     pub element_order: MeshElementOrderArg,
     pub maximum_elements: u64,
     pub deterministic_seed: u64,
+    pub shared_interfaces: bool,
     pub force: bool,
     pub json: bool,
 }
@@ -101,19 +102,21 @@ fn meshing_settings(command: &MeshCommand) -> MeshingRequestSettings {
         ),
         ..MeshingRequestSettings::default()
     };
-    settings.resources.maximum_elements = command.maximum_elements;
+    settings.limits.maximum_elements = command.maximum_elements;
     settings
 }
 
 fn import_options(command: &MeshCommand) -> ExactCadImportOptions {
-    ExactCadImportOptions {
+    let mut options = ExactCadImportOptions {
         source_units: Some(match command.source_units {
             MeshSourceUnitsArg::Meter => LengthUnit::Meter,
             MeshSourceUnitsArg::Millimeter => LengthUnit::Millimeter,
             MeshSourceUnitsArg::Inch => LengthUnit::Inch,
         }),
         ..ExactCadImportOptions::default()
-    }
+    };
+    options.analysis.healing.shared_interfaces = command.shared_interfaces;
+    options
 }
 
 fn print_result(

@@ -115,6 +115,10 @@ pub(super) fn execute_structural_frequency_entry(
             )?,
             output_set: projected_output_set_resource_facts(),
         },
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan != expected_resource_plan {
@@ -123,21 +127,23 @@ pub(super) fn execute_structural_frequency_entry(
         ));
     }
     drop(compiled);
-    let result = match prestress_state {
-        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::execute_prestressed_structural_frequency_entry(
-            &workload,
-            &mesh,
-            &request,
-            state,
-            modal_state,
-        )?,
-        None => runmat_analysis_fea::pipeline::structural_frequency::execute_structural_frequency_entry(
-            &workload,
-            &mesh,
-            &request,
-            modal_state,
-        )?,
-    };
+    let result = super::with_admitted_cpu_pool(&resource_plan, || {
+        Ok(match prestress_state {
+            Some(state) => runmat_analysis_fea::pipeline::structural_frequency::execute_prestressed_structural_frequency_entry(
+                &workload,
+                &mesh,
+                &request,
+                state,
+                modal_state,
+            )?,
+            None => runmat_analysis_fea::pipeline::structural_frequency::execute_structural_frequency_entry(
+                &workload,
+                &mesh,
+                &request,
+                modal_state,
+            )?,
+        })
+    })?;
     Ok(vec![AnalysisKernelOutput::whole(
         AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
         result.identity().digest(),

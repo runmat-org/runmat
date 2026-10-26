@@ -312,7 +312,7 @@ fn logical_identity_is_independent_of_inline_or_object_placement() {
 #[test]
 fn frozen_value_payload_v1_reference_is_rejected_before_use() {
     let reference = ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"stale-value"]),
         logical_digest: Digest::sha256(b"stale-value"),
         encoded_length: 1,
@@ -329,7 +329,7 @@ fn frozen_value_payload_v1_reference_is_rejected_before_use() {
     assert!(matches!(
         error,
         runmat_execution::ContractError::UnsupportedSchema {
-            actual: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            actual: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             supported: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         }
     ));

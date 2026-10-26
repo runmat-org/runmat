@@ -191,11 +191,11 @@ fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
 #[test]
 fn recovery_estimator_preserves_stress_jumps_across_region_sides() {
     let mut artifact = two_tetrahedron_artifact();
-    let second_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "region_b".to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    };
+    let second_region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "region_b".to_owned(),
+        vec!["root".to_owned()],
+    );
     artifact.topology.volume_elements[1].region_id = second_region.clone();
     artifact.topology.regions[0].element_ids = vec![1];
     artifact.topology.regions.push(MeshRegion {
@@ -251,6 +251,10 @@ fn tetrahedron10_volume_uses_curved_midside_geometry() {
     assert!((volume - 1.0 / 6.0).abs() > 1.0e-3);
 }
 
+// witness: FEA-ADAPTATION-LOOP-001/family_estimator_canonical_order @
+//   adaptive_analysis/tet10/numerical_kernel; coverage: partial;
+//   boundary: The Tet10 integration-point structural recovery estimator preserves a linear
+//   recovery; stress-jump and marking behavior are other tests.
 #[test]
 fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
     let artifact = artifact(ElementOrder::Tet10);

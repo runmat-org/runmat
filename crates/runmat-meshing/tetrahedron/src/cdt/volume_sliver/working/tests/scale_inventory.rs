@@ -60,11 +60,11 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
                 DelaunayFacetProvenance {
                     node_identities: identities,
                     chart_id: identity(u64::MAX - 1000),
-                    entity_ids: vec![PersistentEntityId {
-                        kind: PersistentEntityKind::Face,
-                        source_topology_id: "representative-outer-boundary".into(),
-                        assembly_path: Vec::new(),
-                    }],
+                    entity_ids: vec![PersistentEntityId::new(
+                        PersistentEntityKind::Face,
+                        "representative-outer-boundary".into(),
+                        Vec::new(),
+                    )],
                     region_ids: vec![region("representative-working-region")],
                 }
             })
@@ -76,10 +76,12 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
         provenance.facets.len()
     );
     let mut request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     if scoped {
         request
@@ -187,8 +189,7 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
             quality,
             provenance,
             facet_recovery_insertions: Vec::new(),
-            refinement_insertions: Vec::new(),
-            sliver_mutations: Vec::new(),
+            quality_mutations: Vec::new(),
         }],
         &request,
         crate::cdt::DelaunayVolumeMeshOptions {

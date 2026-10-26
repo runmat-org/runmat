@@ -17,6 +17,7 @@ pub(super) fn declaration_kind(keyword: FeaKeyword) -> Option<FeaDeclarationKind
         FeaKeyword::Study => FeaDeclarationKind::Study,
         FeaKeyword::Sweep => FeaDeclarationKind::Sweep,
         FeaKeyword::Execution => FeaDeclarationKind::Execution,
+        FeaKeyword::Table => FeaDeclarationKind::Table,
         _ => return None,
     })
 }

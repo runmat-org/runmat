@@ -39,7 +39,6 @@ pub struct AccuracyPreparation {
     pub source_context_inputs: Vec<PreparedAnalysisObjects>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
-    pub formulation_requirement: runmat_analysis_core::FormulationRequirement,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -71,6 +70,7 @@ pub fn prepare_accuracy(
         AccuracySourceKind::MaxwellHarmonic => AnalysisWorkKind::SolveMaxwellHarmonic,
         AccuracySourceKind::Thermal => AnalysisWorkKind::SolveThermal,
         AccuracySourceKind::AcousticHarmonic => AnalysisWorkKind::SolveAcousticHarmonic,
+        AccuracySourceKind::AcousticResponse => AnalysisWorkKind::SolveAcousticResponse,
         AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
         AccuracySourceKind::StructuralModalResponseSpectrum => {
             AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
@@ -116,7 +116,17 @@ pub fn prepare_accuracy(
         ));
     }
     let source_result = numerical_receipt.source_result();
-    if preparation.source_observations.is_some() == preparation.step.observations.is_empty() {
+    // A sampled source (one frequency of an acoustic sweep) publishes observations only at the
+    // coordinates its authored observations sample; its source context checks that exactly.
+    let sampled_source = matches!(
+        preparation.source_kind,
+        runmat_analysis_fea::execution::AccuracySourceKind::AcousticHarmonic
+    );
+    if (preparation.source_observations.is_some() && preparation.step.observations.is_empty())
+        || (!sampled_source
+            && preparation.source_observations.is_none()
+            && !preparation.step.observations.is_empty())
+    {
         return Err(AnalysisBridgeError::Invalid(
             "accuracy observation publication presence differs from authored declarations".into(),
         ));
@@ -129,7 +139,6 @@ pub fn prepare_accuracy(
         preparation.source_kind,
         source_result,
         preparation.source_observations.as_ref(),
-        preparation.formulation_requirement,
         preparation.step.accuracy.clone(),
     )?;
     if !matches!(
@@ -138,6 +147,7 @@ pub fn prepare_accuracy(
             | AccuracySourceKind::NonlinearSolid
             | AccuracySourceKind::FluidSteady
             | AccuracySourceKind::AcousticHarmonic
+            | AccuracySourceKind::AcousticResponse
             | AccuracySourceKind::ElectricalStatic
             | AccuracySourceKind::Magnetostatic
             | AccuracySourceKind::MaxwellHarmonic
@@ -299,19 +309,14 @@ pub fn import_accuracy(
     import_source::validate_original_evidence(prepared, &artifact)?;
     let expected_evaluation = evaluate_accuracy(&prepared.request.plan, artifact.evidence())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_gate = publication_gate(
-        &prepared.request.plan,
-        prepared.request.formulation_requirement,
-        &expected_evaluation,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_gate = publication_gate(&prepared.request.plan, &expected_evaluation)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if artifact.identity().digest() != output.logical_identity
         || artifact.evaluation_request != prepared.request.identity()
         || artifact.producer != prepared.request.producer
         || artifact.source_kind != prepared.request.source_kind
         || artifact.source_result != prepared.request.source_result
         || artifact.source_observations != prepared.request.source_observations
-        || artifact.formulation_requirement != prepared.request.formulation_requirement
         || artifact.evaluation() != &expected_evaluation
         || artifact.gate() != &expected_gate
     {

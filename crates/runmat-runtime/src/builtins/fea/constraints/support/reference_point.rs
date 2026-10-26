@@ -8,7 +8,8 @@ use crate::class_registry::declaration::{
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_analysis_core::{Position, ReferencePoint};
 
-const REFERENCE_POINT_CLASS: &str = "fea.ReferencePoint";
+const REFERENCE_POINT_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_REFERENCE_POINT_CLASS.display_name();
 const REFERENCE_POINT_FIELDS: &[&str] = &["reference_point_id", "position"];
 #[runtime_builtin(
     name = "fea.ReferencePoint.fromCoordinates",
@@ -21,6 +22,10 @@ pub async fn reference_point_from_coordinates_builtin(
     id: runmat_value::Utf8Text,
     position: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_REFERENCE_POINT_FROM_COORDINATES_DESCRIPTOR,
+        "fea.ReferencePoint.fromCoordinates",
+    )?;
     validate_id("fea.ReferencePoint.fromCoordinates", id.as_str())?;
     position_meters("fea.ReferencePoint.fromCoordinates", &position)?;
     ensure_reference_point_class_registered();
@@ -47,7 +52,10 @@ pub(crate) fn reference_point_from_value(
             format!("expected {REFERENCE_POINT_CLASS}"),
         ));
     };
-    if object.class_name().display_name() != REFERENCE_POINT_CLASS {
+    if !object
+        .class_name()
+        .is(runmat_builtins::fea_contract::model_types::classes::FEA_REFERENCE_POINT_CLASS)
+    {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

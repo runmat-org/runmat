@@ -214,6 +214,10 @@ model invalid_temperature {
         .any(|diagnostic| diagnostic.message.contains("zero kelvin")));
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/initial_conditions @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Unknown or physics-incompatible initial state is rejected at study check; the closed
+//   initial-condition kind list is not enumerated.
 #[test]
 fn studies_reject_unknown_or_physics_incompatible_initial_state() {
     let source = r#"

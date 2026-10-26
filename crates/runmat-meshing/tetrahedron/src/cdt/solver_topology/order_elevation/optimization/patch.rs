@@ -132,8 +132,8 @@ pub(in crate::cdt::solver_topology::order_elevation) fn repair_corner_star(
                         match jacobian::validate_elements(
                             topology,
                             incident.iter().copied(),
-                            input.request.resources.maximum_search_work,
-                            input.request.resources.maximum_recursion_depth,
+                            jacobian::ELEMENT_SEARCH_WORK,
+                            input.request.limits.maximum_recursion_depth,
                             options.cancellation_check_interval,
                             cancellation,
                             jacobian::ValidationWork {

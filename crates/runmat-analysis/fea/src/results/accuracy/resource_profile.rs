@@ -1,4 +1,5 @@
-//! Pre-evaluation admission projection; never evaluates a criterion or constructs a report.
+//! Admission projection for accuracy evaluation. Workspace comes from a shape projection; the
+//! output bound also covers the exact encoding of the artifact the evaluator produces.
 
 use std::mem::size_of;
 
@@ -61,9 +62,15 @@ pub fn accuracy_evaluation_resource_profile(
         )?,
         add(typed, size_of::<AccuracyArtifact>() as u64)?,
     )?;
+    // The output bound comes from the same typed encoding the evaluator emits: evaluation is a
+    // pure function of the request and its authenticated evidence, so encoding the artifact it
+    // produces gives the exact size. The shape projection remains a floor for workspace sizing.
+    let exact = evaluate_accuracy_artifact(request, evidence.to_vec())
+        .and_then(|artifact| artifact.canonical_bytes())
+        .map(|bytes| bytes.len() as u64)?;
     Ok(AccuracyEvaluationResourceProfile {
         workspace_bytes_upper_bound: workspace,
-        output_encoded_bytes_upper_bound: output.encoded_bytes_upper_bound,
+        output_encoded_bytes_upper_bound: output.encoded_bytes_upper_bound.max(exact),
     })
 }
 
@@ -91,7 +98,7 @@ struct Projection<'a> {
 
 impl Serialize for Projection<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(11))?;
+        let mut map = serializer.serialize_map(Some(10))?;
         map.serialize_entry("schema_version", &2_u16)?;
         map.serialize_entry("identity", &Digest::sha256([]))?;
         map.serialize_entry("evaluation_request", &self.request.identity())?;
@@ -99,10 +106,6 @@ impl Serialize for Projection<'_> {
         map.serialize_entry("source_kind", &self.request.source_kind)?;
         map.serialize_entry("source_result", &self.request.source_result)?;
         map.serialize_entry("source_observations", &self.request.source_observations)?;
-        map.serialize_entry(
-            "formulation_requirement",
-            &self.request.formulation_requirement,
-        )?;
         map.serialize_entry("evidence", &self.evidence)?;
         map.serialize_entry("evaluation", &EvaluationProjection(self))?;
         map.serialize_entry("gate", &GateProjection(self.longest_id()))?;
@@ -240,8 +243,7 @@ mod tests {
             crate::execution::AccuracySourceKind::StructuralLinear,
             result,
             None,
-            FormulationRequirement::Experimental,
-            AccuracyPlan::experimental_baseline("resource accuracy"),
+            AccuracyPlan::baseline("resource accuracy"),
         )
         .unwrap();
         let evidence = AccuracyEvidence::new(
@@ -298,7 +300,6 @@ mod tests {
             request.source_kind,
             request.source_result,
             None,
-            request.formulation_requirement,
             plan,
         )
         .unwrap();
@@ -339,7 +340,6 @@ mod tests {
             request.source_kind,
             request.source_result,
             None,
-            FormulationRequirement::Production,
             plan,
         )
         .unwrap();

@@ -89,11 +89,9 @@ use runmat_analysis_fea::results::observation::{
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 #[cfg(test)]
-use runmat_analysis_fea::{run_linear_static_with_prepared_constraint_plan, LinearStaticSolveOptions};
-#[cfg(test)]
-use runmat_analysis_fea::execution::{SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact, StructuralModalSolverResult};
-#[cfg(test)]
-use runmat_analysis_fea::results::field::structural_static_observable_field_definitions;
+use runmat_analysis_fea::execution::{
+    SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact,
+};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 mod accuracy_evaluation;
@@ -102,6 +100,7 @@ mod acoustic_harmonic;
 mod buckling;
 #[cfg(test)]
 mod buckling_tests;
+mod acoustic_response;
 mod electrical_static;
 mod field_recovery;
 mod fluid_steady;
@@ -148,6 +147,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
                 acoustic_frequency_assembly::execute(invocation)
             }
             AnalysisWorkKind::SolveElectricalStatic => electrical_static::execute(invocation),
+            AnalysisWorkKind::SolveAcousticResponse => acoustic_response::execute(invocation),
             AnalysisWorkKind::SolveMagnetostatic => magnetostatic::execute(invocation),
             AnalysisWorkKind::SolveMaxwellHarmonic => maxwell_harmonic::execute(invocation),
             AnalysisWorkKind::SolveFluidSteady => fluid_steady::execute(invocation),
@@ -294,6 +294,31 @@ fn execute_result_publication(
         result.identity().digest(),
         result.canonical_bytes()?,
     )])
+}
+
+/// Runs one kernel's numerical work on the admitted CPU pool sized by its resource plan.
+///
+/// The declared plan's CPU request is the single thread authority: host planning derived it
+/// from the admitted local execution plan and the kernel has already proven it converges
+/// from authoritative inputs. Progress context and tracing span follow the work onto the pool.
+fn with_admitted_cpu_pool<T: Send>(
+    resource_plan: &FeaResourcePlan,
+    work: impl FnOnce() -> AnalysisBridgeResult<T> + Send,
+) -> AnalysisBridgeResult<T> {
+    let threads = usize::from(
+        runmat_analysis_fea::planning::resource::LocalThreadCount::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        .get(),
+    );
+    let progress = runmat_analysis_fea::progress::capture_fea_progress_context();
+    let span = tracing::Span::current();
+    runmat_cpu_execution::with_cpu_pool(threads, || {
+        let _progress = runmat_analysis_fea::replace_fea_progress_context(progress);
+        span.in_scope(work)
+    })
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
 }
 
 fn unique_input<'a>(

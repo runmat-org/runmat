@@ -207,6 +207,7 @@ pub fn syntax_diagnostics(
                 path: path.clone(),
                 span: diagnostic.span,
             }),
+            label: None,
             related: Vec::new(),
             availability: SourceAvailability::Available,
         })

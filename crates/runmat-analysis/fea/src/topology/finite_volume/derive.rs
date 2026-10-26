@@ -4,9 +4,9 @@ use super::{
         AnalysisProjection,
     },
     geometry::{self, FACE_CORNERS, RELATIVE_TOLERANCE},
-    FiniteVolumeBoundarySource, FiniteVolumeCell, FiniteVolumeFace, FiniteVolumeIncidence,
-    FiniteVolumeProjectionError as Error, FiniteVolumeProjectionPolicy as Policy,
-    FiniteVolumeReservation, FiniteVolumeTopology,
+    FiniteVolumeBoundarySource, FiniteVolumeCell, FiniteVolumeCellSelection, FiniteVolumeFace,
+    FiniteVolumeIncidence, FiniteVolumeProjectionError as Error,
+    FiniteVolumeProjectionPolicy as Policy, FiniteVolumeReservation, FiniteVolumeTopology,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{BoundaryFaceRole, StableDigest};
@@ -16,11 +16,18 @@ use std::collections::BTreeMap;
 pub(super) fn reserve(
     source: &AnalysisProjection,
     policy: Policy,
+    selection: &FiniteVolumeCellSelection,
 ) -> Result<FiniteVolumeReservation, Error> {
+    let selected = || {
+        source
+            .elements
+            .iter()
+            .filter(|e| selection.includes(&e.region_id))
+    };
     reserve_regions(
-        source.elements.len(),
+        selected().count(),
         source.boundary_faces.len(),
-        source.elements.iter().map(|e| &e.region_id),
+        selected().map(|e| &e.region_id),
         policy,
     )
 }
@@ -52,7 +59,7 @@ fn reserve_regions<'a>(
         (incidences, policy.max_face_incidences, "face incidences"),
         (boundaries, policy.max_boundary_faces, "boundary faces"),
     ] {
-        if count > maximum {
+        if maximum.is_some_and(|maximum| count > maximum) {
             return Err(Error::Limit(name));
         }
     }
@@ -77,7 +84,7 @@ fn reserve_regions<'a>(
             .ok_or(Error::Overflow)?;
         for component in &region.assembly_path {
             region_visits = region_visits.checked_add(1).ok_or(Error::Overflow)?;
-            if region_visits > policy.max_traversal_operations {
+            if policy.max_traversal_operations.is_some_and(|m| region_visits > m) {
                 return Err(Error::Limit("traversal operations"));
             }
             bytes = bytes.checked_add(component.len()).ok_or(Error::Overflow)?;
@@ -85,7 +92,7 @@ fn reserve_regions<'a>(
                 .checked_add(component.len())
                 .ok_or(Error::Overflow)?;
         }
-        if bytes > policy.max_scratch_bytes {
+        if policy.max_scratch_bytes.is_some_and(|m| bytes > m) {
             return Err(Error::Limit("scratch bytes"));
         }
     }
@@ -93,10 +100,10 @@ fn reserve_regions<'a>(
         .checked_add(region_visits)
         .and_then(|v| v.checked_add(region_bytes))
         .ok_or(Error::Overflow)?;
-    if bytes > policy.max_scratch_bytes {
+    if policy.max_scratch_bytes.is_some_and(|m| bytes > m) {
         return Err(Error::Limit("scratch bytes"));
     }
-    if operations > policy.max_traversal_operations {
+    if policy.max_traversal_operations.is_some_and(|m| operations > m) {
         return Err(Error::Limit("traversal operations"));
     }
     Ok(FiniteVolumeReservation {
@@ -133,9 +140,15 @@ pub(super) fn checked_counts(
 pub(super) fn derive(
     source: &AnalysisProjection,
     policy: Policy,
+    selection: FiniteVolumeCellSelection,
 ) -> Result<FiniteVolumeTopology, Error> {
-    let reservation = reserve(source, policy)?;
-    let mut order = (0..source.elements.len()).collect::<Vec<_>>();
+    let reservation = reserve(source, policy, &selection)?;
+    let mut order = (0..source.elements.len())
+        .filter(|&i| selection.includes(&source.elements[i].region_id))
+        .collect::<Vec<_>>();
+    if order.is_empty() {
+        return Err(Error::Invalid("region selection contains no cells"));
+    }
     order.sort_by_key(|&i| source.elements[i].stable_identity);
     if order
         .windows(2)
@@ -206,9 +219,19 @@ pub(super) fn derive(
             }
         }
     }
+    let selected = |element: usize| selection.includes(&source.elements[element].region_id);
     for (boundary_index, boundary) in source.boundary_faces.iter().enumerate() {
         geometry::validate_boundary_nodes(source, &boundary.node_indices)?;
         let key = geometry::key(source, &boundary.node_indices)?;
+        let included = boundary
+            .adjacent_element_indices
+            .iter()
+            .filter(|&&e| selected(e))
+            .count();
+        if included == 0 {
+            // Wholly outside the selected cell complex: neither its face nor its law.
+            continue;
+        }
         let face = faces
             .get_mut(&key)
             .ok_or(Error::Invalid("boundary without volume face"))?;
@@ -222,10 +245,13 @@ pub(super) fn derive(
                 | BoundaryFaceRole::ContactPrimary
                 | BoundaryFaceRole::ContactSecondary
         );
-        if role_is_exterior != exterior {
+        // An interface face whose other side is excluded bounds the selected complex.
+        let selected_interface =
+            boundary.role == BoundaryFaceRole::ConformalInterface && included == 1;
+        if (role_is_exterior || selected_interface) != exterior {
             return Err(Error::Invalid("boundary role/incidence mismatch"));
         }
-        let expected = if exterior { 1 } else { 2 };
+        let expected = if role_is_exterior { 1 } else { 2 };
         if boundary.adjacent_element_indices.len() != expected
             || !boundary
                 .adjacent_element_indices
@@ -238,36 +264,14 @@ pub(super) fn derive(
         {
             return Err(Error::Invalid("boundary original adjacency mismatch"));
         }
-        if boundary.centroid_m.iter().any(|v| !v.is_finite())
-            || !geometry::close_scalar(
-                boundary.area_m2.canonical_value(),
-                face.area_m2.canonical_value(),
-                face.area_m2.canonical_value(),
-            )
-            || geometry::length(subtract(boundary.centroid_m, face.centroid_m))
-                > RELATIVE_TOLERANCE * face.area_m2.canonical_value().sqrt()
+        // Face geometry has one source: the finite-volume face computed from its cell's
+        // nodes, which closes every cell exactly. The mesh boundary record supplies identity,
+        // role and adjacency only; its own geometry may carry curved-surface data, so it is
+        // checked for orientation, never for equality with the flat face.
+        if role_is_exterior
+            && !(dot(boundary.oriented_area_vector_m2, face.owner_area_vector_m2) > 0.0)
         {
-            return Err(Error::Invalid("boundary geometry mismatch"));
-        }
-        // Interfaces may have their own canonical orientation; exterior must be outward.
-        let normal_difference = if exterior {
-            subtract(boundary.oriented_area_vector_m2, face.owner_area_vector_m2)
-        } else {
-            let sign = if dot(boundary.oriented_area_vector_m2, face.owner_area_vector_m2) >= 0.0 {
-                1.0
-            } else {
-                -1.0
-            };
-            subtract(
-                boundary.oriented_area_vector_m2,
-                face.owner_area_vector_m2.map(|v| sign * v),
-            )
-        };
-        if normal_difference.iter().any(|v| !v.is_finite())
-            || geometry::length(normal_difference)
-                > RELATIVE_TOLERANCE * face.area_m2.canonical_value()
-        {
-            return Err(Error::Invalid("boundary area-vector mismatch"));
+            return Err(Error::Invalid("exterior boundary face is not outward"));
         }
         face.boundary_source = Some(FiniteVolumeBoundarySource {
             projection_boundary_index: boundary_index,
@@ -321,12 +325,13 @@ pub(super) fn derive(
             return Err(Error::Invalid("cell closure or conservative volume"));
         }
     }
-    let geometry_digest = identity(source, &cells, &faces);
+    let geometry_digest = identity(source, &selection, &cells, &faces);
     Ok(FiniteVolumeTopology {
         mesh_digest: source.mesh_digest,
         projection_digest: source.projection_digest,
         geometry_digest,
         policy,
+        selection,
         reservation,
         cells,
         faces,
@@ -335,6 +340,7 @@ pub(super) fn derive(
 
 fn identity(
     source: &AnalysisProjection,
+    selection: &FiniteVolumeCellSelection,
     cells: &[FiniteVolumeCell],
     faces: &[FiniteVolumeFace],
 ) -> Digest {
@@ -342,6 +348,18 @@ fn identity(
     hash.update(b"runmat-finite-volume-source-bound-geometry/v1\0");
     hash.update(source.mesh_digest.bytes());
     hash.update(source.projection_digest.bytes());
+    // The whole-mesh complex keeps its established identity; a subset binds its regions.
+    if let FiniteVolumeCellSelection::Regions(regions) = selection {
+        hash.update(b"region-selection\0");
+        hash.update((regions.len() as u64).to_le_bytes());
+        for region in regions {
+            hash.update(format!("{:?}", region.kind).as_bytes());
+            for part in std::iter::once(&region.source_topology_id).chain(&region.assembly_path) {
+                hash.update((part.len() as u64).to_le_bytes());
+                hash.update(part.as_bytes());
+            }
+        }
+    }
     hash.update((cells.len() as u64).to_le_bytes());
     hash.update((faces.len() as u64).to_le_bytes());
     for cell in cells {

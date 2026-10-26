@@ -3,9 +3,9 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement,
-    MaterialElasticityModel, PrescribedStructuralDofs, PrescribedValue, RegionTarget,
-    StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+    AnalysisConstraint, CoordinateFrame, Displacement, MaterialElasticityModel,
+    PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_meshing_core::{
     fixtures::{connected_quadratic_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh},
@@ -97,7 +97,6 @@ fn connected_tet4_and_tet10_exact_coercivity_proofs_fit_preassembly_envelopes() 
         )
         .unwrap();
         let options = LinearStaticSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..LinearStaticSolveOptions::default()
         };
@@ -106,7 +105,6 @@ fn connected_tet4_and_tet10_exact_coercivity_proofs_fit_preassembly_envelopes() 
             step_id: model.sequence.steps[0].step_id.clone(),
             model: model.clone(),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: options.formulation_requirement,
             preconditioner: options.preconditioner_kind,
             algebra_backend: options.algebra_backend_kind,
             observation_execution: ObservationExecutionPolicy::serial(),

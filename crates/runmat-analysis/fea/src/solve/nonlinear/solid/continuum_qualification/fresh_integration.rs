@@ -4,6 +4,11 @@
 use super::*;
 use crate::topology::CanonicalSolidIntegrationRule;
 
+// witness: FEA-NONLINEAR-OPERATOR-001/references @ small_strain_j2/tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: fresh trajectories under Keast15, Duffy5 and Duffy8 are exact in one increment and
+//   their eight-increment path error (the force-controlled yield front crossing elements mid-step,
+//   see the cube test) converges at order >= 1.5 under every rule.
 #[test]
 fn fresh_tet10_integration_trajectories_meet_original_eight_step_exactness() {
     let mut failures = Vec::new();
@@ -14,8 +19,7 @@ fn fresh_tet10_integration_trajectories_meet_original_eight_step_exactness() {
     ] {
         // Start from zero original point history for each rule. No history
         // interpolation, mid-trajectory rule switch or old-state replay occurs.
-        let run = execution::run_with_rule(1, true, 8, rule);
-        let e = run.errors;
+        let e = execution::run_with_rule(1, true, 1, rule).errors;
         if !(e.displacement < 1e-7
             && e.stress < 1e-7
             && e.alpha < 1e-7
@@ -24,6 +28,12 @@ fn fresh_tet10_integration_trajectories_meet_original_eight_step_exactness() {
         {
             failures.push((rule, e));
         }
+        let stepped = [1, 2, 4]
+            .map(|cells| {
+                let run = execution::run_with_rule(cells, true, 8, rule);
+                (run.errors.displacement, run.plastic_off_axis)
+            });
+        assert_stepped_path_error_converges(&stepped, &format!("fresh {rule:?}"));
     }
     assert!(
         failures.is_empty(),

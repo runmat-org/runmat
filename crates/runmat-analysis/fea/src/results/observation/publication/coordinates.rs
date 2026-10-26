@@ -19,11 +19,11 @@ pub(super) fn validate_history_coordinates(
         Ok(())
     };
     match source.source() {
-        ObservationFieldCatalogSource::SampledRecovery { .. }
-        | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. } => {
+        ObservationFieldCatalogSource::SampledRecovery { .. } => {
             return Err(invalid("sampled native histories are not admitted"))
         }
-        ObservationFieldCatalogSource::Structural { manifest, .. } => {
+        ObservationFieldCatalogSource::Structural { manifest, .. }
+        | ObservationFieldCatalogSource::VolumeMeshRecovery { manifest, .. } => {
             for field in &manifest.fields {
                 visit(field)?;
             }

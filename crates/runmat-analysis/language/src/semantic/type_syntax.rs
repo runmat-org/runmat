@@ -70,6 +70,9 @@ pub fn parse_type_syntax(source: &str) -> Result<FeaType, TypeSyntaxError> {
         "thermal_conductivity" => {
             FeaType::Quantity((PhysicalDimension::THERMAL_CONDUCTIVITY).into())
         }
+        "heat_transfer_coefficient" => {
+            FeaType::Quantity(PhysicalDimension::HEAT_TRANSFER_COEFFICIENT.into())
+        }
         "electric_potential" => FeaType::Quantity((PhysicalDimension::ELECTRIC_POTENTIAL).into()),
         "electric_current" => FeaType::Quantity((PhysicalDimension::ELECTRIC_CURRENT).into()),
         "magnetic_flux_density" => {

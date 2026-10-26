@@ -6,7 +6,6 @@
 use super::{MaxwellCurrentSample, MaxwellError, MaxwellFieldSample, MaxwellVolumeData};
 use crate::{
     results::field::{SampledOrientedEdge, VolumeFieldIntegrationSample},
-    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::AnalysisModel;
@@ -97,84 +96,50 @@ fn from_counts(
     metadata: u64,
     selected: u64,
 ) -> Result<MaxwellNumericalReservation, MaxwellError> {
-    // Lowest-order corner-edge E, including affine Tet10. Sharing and PEC only
-    // reduce these bounds; no magnetic gauge or saddle dimensions are imported.
+    // Lowest-order corner-edge E, including affine Tet10. Grounding only reduces these.
     let edges = mul(elements, 6)?;
-    let dimension = mul(edges, 2)?;
+    let dimension = edges;
     let samples = mul(elements, 15)?;
-    let entries = mul(elements, 4 * 36)?;
-    let host_dimension =
-        usize::try_from(dimension).map_err(|_| resource("host dimension overflow"))?;
-    for value in [edges, samples, entries] {
-        let bytes = mul(value, 1024)?;
-        if bytes > isize::MAX as u64 {
-            return Err(resource("host allocation envelope overflow"));
-        }
-    }
-    // Raw metadata, validation, selected material clones/audits, exact exterior
-    // face ownership, edge maps, row trees and vector growth. Sum every phase.
+    let entries = mul(elements, 36)?;
     let topology = sum(&[
         16_384,
-        mul(projection, 8)?,
-        mul(metadata, 8)?,
-        mul(mul(elements, selected)?, 8)?,
-        mul(nodes, 2048)?,
-        mul(edges, 4096)?,
-        mul(elements, 8192)?,
-        mul(faces, 2048)?,
+        mul(projection, 2)?,
+        mul(metadata, 4)?,
+        mul(mul(elements, selected)?, 2)?,
+        mul(nodes, 512)?,
+        mul(edges, 256)?,
+        mul(elements, 1024)?,
+        mul(faces, 256)?,
     ])?;
-    // Eight slots cover growing compiled/retained copies and independently
-    // regenerated cold validation sampling. Identity codecs are charged below.
+    // Input sampling, compiled sources/laws and the retained response, each kept twice
+    // (solve and cold re-evaluation), plus canonical identity encodings.
     let payload = sum(&[
         8192,
-        mul(mul(nodes, 8)?, 32)?,
-        mul(mul(elements, 8)?, 160)?,
-        slots::<SampledOrientedEdge>(edges, 8)?,
-        slots::<VolumeFieldIntegrationSample>(samples, 8)?,
-        slots::<MaxwellCurrentSample>(samples, 8)?,
-        slots::<MaxwellFieldSample>(samples, 8)?,
-        slots::<MaxwellVolumeData>(elements, 8)?,
-        mul(edges, 8 * (64 + 16))?,
+        slots::<SampledOrientedEdge>(edges, 2)?,
+        slots::<VolumeFieldIntegrationSample>(samples, 2)?,
+        slots::<MaxwellCurrentSample>(samples, 2)?,
+        slots::<MaxwellFieldSample>(samples, 2)?,
+        slots::<MaxwellVolumeData>(elements, 2)?,
+        mul(edges, 64)?,
     ])?;
-    // A deliberately loose byte-per-logical-byte encoding allowance for owned
-    // input/response identities and canonical validation temporaries (numeric
-    // JSON values/digest text/container structure), not a transport guarantee.
-    let retained = mul(payload, 16)?;
-    // All four real complex blocks per local 6x6 contribution. Charge support
-    // BTree nodes, exact/rederived plans, planned assemblers and finished CSR.
-    let matrices = sum(&[mul(entries, 1024)?, mul(add(dimension, 1)?, 512)?])?;
-    let recurrence = if host_dimension == 0 {
-        0
-    } else {
-        let iterations = host_dimension
-            .checked_mul(40)
-            .map(|n| n.max(128))
-            .filter(|n| u32::try_from(*n).is_ok())
-            .ok_or_else(|| resource("shared GMRES iteration counter overflow"))?;
-        GmresWorkEnvelope::derive(
-            host_dimension,
-            GmresPolicy {
-                relative_tolerance: 1e-10,
-                restart: host_dimension.min(128),
-                maximum_iterations: iterations,
-            },
-        )
-        .map_err(|e| resource(format!("shared GMRES envelope: {e:?}")))?
-        .resident_bytes_upper_bound
-    };
-    // Element basis/moment quadrature, source sums, corner-gradient charge tests,
-    // all original RHS/solution/SpMV/residual buffers outside shared recurrence.
+    let retained = mul(payload, 3)?;
+    // Triplets, compressed columns and the sparse LU factors. Nested-dissection fill of
+    // a 3D edge-element operator grows like n^(4/3); 16 complex entries per n^(4/3)
+    // bounds L and U together for the meshes this kernel factors.
+    let fill = (dimension as f64).powf(4.0 / 3.0) * 16.0 * 32.0;
+    if !fill.is_finite() || fill > u64::MAX as f64 / 4.0 {
+        return Err(resource("sparse factor envelope overflow"));
+    }
     let numerical = sum(&[
-        matrices,
-        recurrence,
-        mul(dimension, 16 * 16)?,
-        mul(nodes, 1024)?,
-        mul(elements, 16_384)?,
+        mul(entries, 3 * 32)?,
+        fill as u64,
+        mul(dimension, 16 * 8)?,
+        mul(nodes, 256)?,
         65_536,
     ])?;
     Ok(MaxwellNumericalReservation {
         edge_count_upper_bound: edges,
-        real_block_dimension_upper_bound: dimension,
+        real_block_dimension_upper_bound: mul(dimension, 2)?,
         support_entries_upper_bound: entries,
         quadrature_sample_count: samples,
         topology_and_properties_bytes: topology,

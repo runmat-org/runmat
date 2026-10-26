@@ -94,31 +94,48 @@ pub(super) fn resolve_probe(
                 )),
             }
         }
-        FieldLocation::Element => {
+        FieldLocation::Element | FieldLocation::Cell => {
             let elements = topology.elements(field_domain)?;
-            let mut matches = elements
+            // A point at an element's centroid names that element even outside a solid volume
+            // (sampled and face element domains).
+            let mut exact = elements
                 .iter()
                 .enumerate()
                 .filter(|(_, element)| element.centroid_m == position.canonical_value());
-            match (matches.next(), matches.next()) {
-                (Some((index, _)), None) => elements_target(
+            if let (Some((index, _)), None) = (exact.next(), exact.next()) {
+                return elements_target(
                     selected_indices(std::iter::once(index), maximum)?,
                     field_domain,
                     topology,
                     maximum,
-                ),
-                (None, _) => Err(target_error(
-                    spec,
-                    "point does not exactly coincide with an admitted element centroid",
-                )),
-                _ => Err(target_error(
-                    spec,
-                    "point matches multiple element centroids",
-                )),
+                );
             }
+            // Otherwise a point samples the native value of the volume element containing it.
+            let projection =
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "element point samples require admitted solid topology",
+                    ))?;
+            let location = projection
+                .locate_volume_point(position.canonical_value())?
+                .ok_or_else(|| target_error(spec, "point lies outside the admitted solid topology"))?;
+            let index = elements
+                .iter()
+                .position(|element| element.identity == location.element_identity)
+                .ok_or_else(|| {
+                    target_error(spec, "containing element is absent from the field domain")
+                })?;
+            elements_target(
+                selected_indices(std::iter::once(index), maximum)?,
+                field_domain,
+                topology,
+                maximum,
+            )
         }
         _ => Err(ObservationError::Unsupported(
-            "this evaluator accepts only nodal and element probes",
+            "this evaluator accepts only nodal, element and cell probes",
         )),
     }
 }

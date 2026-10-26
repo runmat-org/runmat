@@ -12,127 +12,83 @@ use runmat_analysis_core::{
 use super::*;
 use crate::builtins::fea::study_policies::observation as policy;
 use crate::builtins::fea::study_values::{
-    from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
-    TypedStudyValue, VALUE_FIELD,
+    from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, TypedStudyValue, VALUE_FIELD,
 };
 use crate::builtins::geometry::region::region_ref_from_value;
 
-pub(super) const TARGET_CLASS: &str = "fea.ObservationTarget";
-pub(super) const SAMPLING_CLASS: &str = "fea.SamplingPolicy";
-pub(super) const EVENT_CLASS: &str = "fea.ObservationEvent";
-pub(super) const REDUCTION_CLASS: &str = "fea.ReductionPolicy";
-pub(super) const PRECISION_CLASS: &str = "fea.SignalPrecision";
-pub(super) const COMPRESSION_CLASS: &str = "fea.CompressionPolicy";
-pub(super) const RETENTION_CLASS: &str = "fea.RetentionPolicy";
-pub(super) const STORAGE_CLASS: &str = "fea.ObservationStorage";
-pub(super) const COST_CLASS: &str = "fea.ObservationCost";
-pub(super) const CADENCE_CLASS: &str = "fea.MonitorCadence";
-pub(super) const STOP_CLASS: &str = "fea.MonitorStopCondition";
-pub(super) const OBSERVATION_CLASS: &str = "fea.Observation";
-
-const STORAGE_FIELDS: &[&str] = &["precision", "compression", "retention", "partial_access"];
-const COST_FIELDS: &[&str] = &[
-    "operation_count",
-    "peak_resident_bytes",
-    "stored_bytes",
-    "transfer_bytes",
-    "collective_count",
-];
-const OBSERVATION_FIELDS: &[&str] = &["value"];
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const ONE_VALUE: [BuiltinParamDescriptor; 1] = [required(
-    "value",
-    BuiltinParamType::NumericScalar,
-    "Finite policy value.",
-)];
-const VALUES: [BuiltinParamDescriptor; 1] = [required(
-    "values",
-    BuiltinParamType::NumericArray,
-    "Finite sampling coordinates.",
-)];
-const INTERVAL: [BuiltinParamDescriptor; 3] = [
-    required("start", BuiltinParamType::NumericScalar, "Interval start."),
-    required("end", BuiltinParamType::NumericScalar, "Interval end."),
-    required(
-        "interval",
-        BuiltinParamType::NumericScalar,
-        "Positive interval.",
-    ),
-];
-const ADAPTIVE: [BuiltinParamDescriptor; 3] = [
-    required(
-        "minimumInterval",
-        BuiltinParamType::NumericScalar,
-        "Positive minimum interval.",
-    ),
-    required(
-        "maximumSamples",
-        BuiltinParamType::NumericScalar,
-        "Positive maximum sample count.",
-    ),
-    required(
-        "relativeChange",
-        BuiltinParamType::NumericScalar,
-        "Positive relative-change threshold.",
-    ),
-];
-const LATEST: [BuiltinParamDescriptor; 1] = [required(
-    "count",
-    BuiltinParamType::NumericScalar,
-    "Positive retained-sample count.",
-)];
-const NUMERIC_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "sampling, storage, or cost value",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Counts and byte estimates remain exact; physical coordinates and tolerances cross once into binary64.",
-}];
-const NUMERIC_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typed observation policy",
-        inputs: &NUMERIC_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Observation authoring constructs immutable host values.",
-    }];
-const STRUCTURAL_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "This constructor accepts identifiers and typed FEA values only.",
+use runmat_builtins::fea_contract::study_types::{
+    classes::{
+        FEA_COMPRESSION_POLICY_CLASS, FEA_MONITOR_CADENCE_CLASS, FEA_MONITOR_STOP_CONDITION_CLASS,
+        FEA_OBSERVATION_CLASS, FEA_OBSERVATION_COST_CLASS, FEA_OBSERVATION_EVENT_CLASS,
+        FEA_OBSERVATION_STORAGE_CLASS, FEA_OBSERVATION_TARGET_CLASS, FEA_REDUCTION_POLICY_CLASS,
+        FEA_RETENTION_POLICY_CLASS, FEA_SAMPLING_POLICY_CLASS, FEA_SIGNAL_PRECISION_CLASS,
+    },
+    FEA_STUDY_TYPE_ERROR_OUTPUTS,
 };
 
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
+pub(super) const TARGET_CLASS: &str = FEA_OBSERVATION_TARGET_CLASS.display_name();
+pub(super) const SAMPLING_CLASS: &str = FEA_SAMPLING_POLICY_CLASS.display_name();
+pub(super) const EVENT_CLASS: &str = FEA_OBSERVATION_EVENT_CLASS.display_name();
+pub(super) const REDUCTION_CLASS: &str = FEA_REDUCTION_POLICY_CLASS.display_name();
+pub(super) const PRECISION_CLASS: &str = FEA_SIGNAL_PRECISION_CLASS.display_name();
+pub(super) const COMPRESSION_CLASS: &str = FEA_COMPRESSION_POLICY_CLASS.display_name();
+pub(super) const RETENTION_CLASS: &str = FEA_RETENTION_POLICY_CLASS.display_name();
+pub(super) const STORAGE_CLASS: &str = FEA_OBSERVATION_STORAGE_CLASS.display_name();
+pub(super) const COST_CLASS: &str = FEA_OBSERVATION_COST_CLASS.display_name();
+pub(super) const CADENCE_CLASS: &str = FEA_MONITOR_CADENCE_CLASS.display_name();
+pub(super) const STOP_CLASS: &str = FEA_MONITOR_STOP_CONDITION_CLASS.display_name();
+pub(super) const OBSERVATION_CLASS: &str = FEA_OBSERVATION_CLASS.display_name();
+
+const STORAGE_FIELDS: &[&str] = &["precision", "compression", "retention", "partial_access"];
+/// `fea.ObservationCost` is the tagged `ObservationCostPolicy` (`mode` + `limit`).
+const COST_FIELDS: &[&str] = &["mode", "limit"];
+const OBSERVATION_FIELDS: &[&str] = &["value"];
+
+/// Typed study constructors return exactly one value; the catalog descriptor
+/// is the single authority for that bound.
+pub(in crate::builtins::fea) fn study_outputs(
+    descriptor: &'static BuiltinDescriptor,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    crate::output_count::validate_fixed_outputs(descriptor, &FEA_STUDY_TYPE_ERROR_OUTPUTS, builtin)
+}
+
+/// Absent typed choice such as `fea.ReductionPolicy.none()`: the registered
+/// `value` property holds an empty double, so `isempty(policy.value)` is true
+/// and the object satisfies its immutable-value schema.
+fn absent_typed_value(builtin: &'static str, class_name: &'static str) -> BuiltinResult<Value> {
+    let mut value = to_typed_value::<Option<()>>(builtin, class_name, None)?;
+    if let Value::Object(object) = &mut value {
+        let empty = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|message| builtin_error(builtin, &ERROR_INTERNAL, message))?;
+        crate::builtins::fea::object_api::replace(
+            builtin,
+            object,
+            VALUE_FIELD[0],
+            Value::Tensor(empty),
+        )?;
+    }
+    Ok(value)
+}
+
+/// Decode an optional typed choice; an empty (or missing) `value` is absent.
+fn optional_typed_value<T: DeserializeOwned>(
+    builtin: &'static str,
+    class_name: &'static str,
+    value: &Value,
+) -> BuiltinResult<Option<T>> {
+    if let Value::Object(object) = value {
+        if object.class_name().display_name() == class_name
+            && object
+                .properties()
+                .get(VALUE_FIELD[0])
+                .is_none_or(|payload| matches!(payload, Value::Tensor(tensor) if tensor.len() == 0))
+        {
+            return Ok(None);
+        }
+    }
+    from_typed_value::<Option<T>>(builtin, class_name, value)
 }
 
 fn numeric_values(name: &'static str, value: &Value) -> BuiltinResult<Vec<f64>> {
@@ -162,6 +118,8 @@ pub(crate) mod requests;
 pub(crate) mod sampling;
 pub(crate) mod storage;
 pub(crate) mod targets;
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 pub(super) use requests::field;
@@ -175,174 +133,181 @@ pub(super) use storage::{
 #[cfg(test)]
 pub(super) use targets::target_whole;
 
+const OBSERVATION_STUDY_CLASSES: [ImmutableStudyClass; 12] = [
+    ImmutableStudyClass {
+        class_name: TARGET_CLASS,
+        type_identity: "runmat.fea.observation-target",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("boundary", "fea.ObservationTarget.boundary"),
+            ("volume", "fea.ObservationTarget.volume"),
+            ("point", "fea.ObservationTarget.point"),
+            ("path", "fea.ObservationTarget.path"),
+            ("interface", "fea.ObservationTarget.interface"),
+            ("port", "fea.ObservationTarget.port"),
+            ("connector", "fea.ObservationTarget.connector"),
+            ("constraint", "fea.ObservationTarget.constraint"),
+            ("wholeModel", "fea.ObservationTarget.wholeModel"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: SAMPLING_CLASS,
+        type_identity: "runmat.fea.sampling-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("finalSample", "fea.SamplingPolicy.finalSample"),
+            (
+                "everyAcceptedIncrement",
+                "fea.SamplingPolicy.everyAcceptedIncrement",
+            ),
+            ("timeSeconds", "fea.SamplingPolicy.timeSeconds"),
+            (
+                "timeIntervalSeconds",
+                "fea.SamplingPolicy.timeIntervalSeconds",
+            ),
+            ("frequencyHertz", "fea.SamplingPolicy.frequencyHertz"),
+            (
+                "frequencyIntervalHertz",
+                "fea.SamplingPolicy.frequencyIntervalHertz",
+            ),
+            ("loadFactors", "fea.SamplingPolicy.loadFactors"),
+            (
+                "loadFactorInterval",
+                "fea.SamplingPolicy.loadFactorInterval",
+            ),
+            (
+                "studyParameterValues",
+                "fea.SamplingPolicy.studyParameterValues",
+            ),
+            ("modeIndices", "fea.SamplingPolicy.modeIndices"),
+            ("event", "fea.SamplingPolicy.event"),
+            ("adaptive", "fea.SamplingPolicy.adaptive"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: EVENT_CLASS,
+        type_identity: "runmat.fea.observation-event",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("firstYield", "fea.ObservationEvent.firstYield"),
+            (
+                "contactStatusChange",
+                "fea.ObservationEvent.contactStatusChange",
+            ),
+            ("peakResponse", "fea.ObservationEvent.peakResponse"),
+            (
+                "convergenceFailure",
+                "fea.ObservationEvent.convergenceFailure",
+            ),
+            (
+                "accuracyCriterionCrossing",
+                "fea.ObservationEvent.accuracyCriterionCrossing",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: REDUCTION_CLASS,
+        type_identity: "runmat.fea.reduction-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("none", "fea.ReductionPolicy.none"),
+            ("new", "fea.ReductionPolicy.new"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: PRECISION_CLASS,
+        type_identity: "runmat.fea.signal-precision",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("real32", "fea.SignalPrecision.real32"),
+            ("real64", "fea.SignalPrecision.real64"),
+            ("complex64", "fea.SignalPrecision.complex64"),
+            ("complex128", "fea.SignalPrecision.complex128"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: COMPRESSION_CLASS,
+        type_identity: "runmat.fea.compression-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("lossless", "fea.CompressionPolicy.lossless"),
+            ("errorBounded", "fea.CompressionPolicy.errorBounded"),
+            ("none", "fea.CompressionPolicy.none"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: RETENTION_CLASS,
+        type_identity: "runmat.fea.retention-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("canonical", "fea.RetentionPolicy.canonical"),
+            (
+                "untilDependentsComplete",
+                "fea.RetentionPolicy.untilDependentsComplete",
+            ),
+            ("latestSamples", "fea.RetentionPolicy.latestSamples"),
+            ("explicitSamples", "fea.RetentionPolicy.explicitSamples"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STORAGE_CLASS,
+        type_identity: "runmat.fea.observation-storage",
+        fields: STORAGE_FIELDS,
+        methods: &[("new", "fea.ObservationStorage.new")],
+    },
+    ImmutableStudyClass {
+        class_name: COST_CLASS,
+        type_identity: "runmat.fea.observation-cost",
+        fields: COST_FIELDS,
+        methods: &[("new", "fea.ObservationCost.new")],
+    },
+    ImmutableStudyClass {
+        class_name: CADENCE_CLASS,
+        type_identity: "runmat.fea.monitor-cadence",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "acceptedIncrements",
+                "fea.MonitorCadence.acceptedIncrements",
+            ),
+            ("wallSeconds", "fea.MonitorCadence.wallSeconds"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STOP_CLASS,
+        type_identity: "runmat.fea.monitor-stop-condition",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("none", "fea.MonitorStopCondition.none"),
+            ("lessThan", "fea.MonitorStopCondition.lessThan"),
+            ("greaterThan", "fea.MonitorStopCondition.greaterThan"),
+            (
+                "absoluteChangeBelow",
+                "fea.MonitorStopCondition.absoluteChangeBelow",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: OBSERVATION_CLASS,
+        type_identity: "runmat.fea.observation",
+        fields: OBSERVATION_FIELDS,
+        methods: &[
+            ("field", "fea.Observation.field"),
+            ("history", "fea.Observation.history"),
+            ("probe", "fea.Observation.probe"),
+            ("reduction", "fea.Observation.reduction"),
+            ("diagnostic", "fea.Observation.diagnostic"),
+            ("monitor", "fea.Observation.monitor"),
+        ],
+    },
+];
+
 pub(super) fn ensure_observation_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            TARGET_CLASS,
-            "runmat.fea.observation-target",
-            VALUE_FIELD,
-            &[
-                ("boundary", "fea.ObservationTarget.boundary"),
-                ("volume", "fea.ObservationTarget.volume"),
-                ("point", "fea.ObservationTarget.point"),
-                ("path", "fea.ObservationTarget.path"),
-                ("interface", "fea.ObservationTarget.interface"),
-                ("port", "fea.ObservationTarget.port"),
-                ("connector", "fea.ObservationTarget.connector"),
-                ("constraint", "fea.ObservationTarget.constraint"),
-                ("wholeModel", "fea.ObservationTarget.wholeModel"),
-            ],
-        );
-        register_immutable_class(
-            SAMPLING_CLASS,
-            "runmat.fea.sampling-policy",
-            VALUE_FIELD,
-            &[
-                ("finalSample", "fea.SamplingPolicy.finalSample"),
-                (
-                    "everyAcceptedIncrement",
-                    "fea.SamplingPolicy.everyAcceptedIncrement",
-                ),
-                ("timeSeconds", "fea.SamplingPolicy.timeSeconds"),
-                (
-                    "timeIntervalSeconds",
-                    "fea.SamplingPolicy.timeIntervalSeconds",
-                ),
-                ("frequencyHertz", "fea.SamplingPolicy.frequencyHertz"),
-                (
-                    "frequencyIntervalHertz",
-                    "fea.SamplingPolicy.frequencyIntervalHertz",
-                ),
-                ("loadFactors", "fea.SamplingPolicy.loadFactors"),
-                (
-                    "loadFactorInterval",
-                    "fea.SamplingPolicy.loadFactorInterval",
-                ),
-                (
-                    "studyParameterValues",
-                    "fea.SamplingPolicy.studyParameterValues",
-                ),
-                ("modeIndices", "fea.SamplingPolicy.modeIndices"),
-                ("event", "fea.SamplingPolicy.event"),
-                ("adaptive", "fea.SamplingPolicy.adaptive"),
-            ],
-        );
-        register_immutable_class(
-            EVENT_CLASS,
-            "runmat.fea.observation-event",
-            VALUE_FIELD,
-            &[
-                ("firstYield", "fea.ObservationEvent.firstYield"),
-                (
-                    "contactStatusChange",
-                    "fea.ObservationEvent.contactStatusChange",
-                ),
-                ("peakResponse", "fea.ObservationEvent.peakResponse"),
-                (
-                    "convergenceFailure",
-                    "fea.ObservationEvent.convergenceFailure",
-                ),
-                (
-                    "accuracyCriterionCrossing",
-                    "fea.ObservationEvent.accuracyCriterionCrossing",
-                ),
-            ],
-        );
-        register_immutable_class(
-            REDUCTION_CLASS,
-            "runmat.fea.reduction-policy",
-            VALUE_FIELD,
-            &[
-                ("none", "fea.ReductionPolicy.none"),
-                ("new", "fea.ReductionPolicy.new"),
-            ],
-        );
-        register_immutable_class(
-            PRECISION_CLASS,
-            "runmat.fea.signal-precision",
-            VALUE_FIELD,
-            &[
-                ("real32", "fea.SignalPrecision.real32"),
-                ("real64", "fea.SignalPrecision.real64"),
-                ("complex64", "fea.SignalPrecision.complex64"),
-                ("complex128", "fea.SignalPrecision.complex128"),
-            ],
-        );
-        register_immutable_class(
-            COMPRESSION_CLASS,
-            "runmat.fea.compression-policy",
-            VALUE_FIELD,
-            &[
-                ("lossless", "fea.CompressionPolicy.lossless"),
-                ("errorBounded", "fea.CompressionPolicy.errorBounded"),
-                ("none", "fea.CompressionPolicy.none"),
-            ],
-        );
-        register_immutable_class(
-            RETENTION_CLASS,
-            "runmat.fea.retention-policy",
-            VALUE_FIELD,
-            &[
-                ("canonical", "fea.RetentionPolicy.canonical"),
-                (
-                    "untilDependentsComplete",
-                    "fea.RetentionPolicy.untilDependentsComplete",
-                ),
-                ("latestSamples", "fea.RetentionPolicy.latestSamples"),
-                ("explicitSamples", "fea.RetentionPolicy.explicitSamples"),
-            ],
-        );
-        register_immutable_class(
-            STORAGE_CLASS,
-            "runmat.fea.observation-storage",
-            STORAGE_FIELDS,
-            &[("new", "fea.ObservationStorage.new")],
-        );
-        register_immutable_class(
-            COST_CLASS,
-            "runmat.fea.observation-cost",
-            COST_FIELDS,
-            &[("new", "fea.ObservationCost.new")],
-        );
-        register_immutable_class(
-            CADENCE_CLASS,
-            "runmat.fea.monitor-cadence",
-            VALUE_FIELD,
-            &[
-                (
-                    "acceptedIncrements",
-                    "fea.MonitorCadence.acceptedIncrements",
-                ),
-                ("wallSeconds", "fea.MonitorCadence.wallSeconds"),
-            ],
-        );
-        register_immutable_class(
-            STOP_CLASS,
-            "runmat.fea.monitor-stop-condition",
-            VALUE_FIELD,
-            &[
-                ("none", "fea.MonitorStopCondition.none"),
-                ("lessThan", "fea.MonitorStopCondition.lessThan"),
-                ("greaterThan", "fea.MonitorStopCondition.greaterThan"),
-                (
-                    "absoluteChangeBelow",
-                    "fea.MonitorStopCondition.absoluteChangeBelow",
-                ),
-            ],
-        );
-        register_immutable_class(
-            OBSERVATION_CLASS,
-            "runmat.fea.observation",
-            OBSERVATION_FIELDS,
-            &[
-                ("field", "fea.Observation.field"),
-                ("history", "fea.Observation.history"),
-                ("probe", "fea.Observation.probe"),
-                ("reduction", "fea.Observation.reduction"),
-                ("diagnostic", "fea.Observation.diagnostic"),
-                ("monitor", "fea.Observation.monitor"),
-            ],
-        );
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(FEA_OBSERVATION_TARGET_CLASS);
+    SCHEMAS.call_once(|| register_immutable_schemas(&OBSERVATION_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| {
+        register_immutable_runtime_classes(&OBSERVATION_STUDY_CLASSES);
     });
 }

@@ -151,6 +151,7 @@ fn resolved_face_metric_rejects_unknown_scopes_and_queries() {
 
 fn request(face_id: &PersistentEntityId) -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -168,6 +169,7 @@ fn request(face_id: &PersistentEntityId) -> MetricFieldRequest {
                 yz: 0.0,
             },
         }],
+        cells_across_gap: None,
     }
 }
 
@@ -246,9 +248,5 @@ impl GeometryEvaluationControl for Control {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }

@@ -1,7 +1,7 @@
 //! Reliable-residual PCG state over borrowed admitted slices.
 use super::scale::ScaledPositive;
-use super::{Arithmetic, PcgContinuation, PcgOperation, PcgOutcome, PcgWork};
-use crate::krylov::{Control, KrylovFailure};
+use super::{Arithmetic, PcgContinuation, PcgOperation, PcgOperations, PcgOutcome, PcgWork};
+use crate::krylov::KrylovFailure;
 mod completion;
 
 #[derive(Clone, Copy)]
@@ -52,14 +52,31 @@ pub(super) struct RecurrenceState<'a, T, A> {
     second_preconditioner: bool,
     phase: Phase,
     best_certificate: Option<ScaledPositive>,
+    /// Flexible mode: the residual before the latest update (Polak–Ribière β).
+    previous: Option<&'a mut [T]>,
     arithmetic: std::marker::PhantomData<A>,
+}
+
+impl<T, A> RecurrenceState<'_, T, A> {
+    fn record_beta(&mut self, beta: f64) {
+        if let Some(coefficients) = self.work.coefficients.as_deref_mut() {
+            coefficients.beta.push(beta);
+        }
+    }
+
+    /// A reliable residual restart starts a new Lanczos segment.
+    fn restart_coefficients(&mut self) {
+        if let Some(coefficients) = self.work.coefficients.as_deref_mut() {
+            coefficients.restart();
+        }
+    }
 }
 
 fn invalid<E>(message: &'static str) -> KrylovFailure<E> {
     KrylovFailure::Invalid(message)
 }
 
-async fn copy<T: Copy, C: Control>(
+async fn copy<T: Copy, C: PcgOperations<T>>(
     to: &mut [T],
     from: &[T],
     checkpoint: &mut C,
@@ -86,6 +103,11 @@ struct ScaledDot {
 }
 
 impl ScaledDot {
+    /// The real part as a plain number (flexible β; ranges where it overflows stop the
+    /// recurrence as a breakdown).
+    fn value(&self) -> f64 {
+        self.real * self.left * self.right
+    }
     fn positive(&self) -> Option<ScaledPositive> {
         ScaledPositive::from_factors(self.real, self.left, self.right)
     }
@@ -99,13 +121,26 @@ impl ScaledDot {
 }
 
 /// Scale-separated Hermitian product shared by both drivers.
-async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, C: Control>(
+async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, C: PcgOperations<T>>(
     left: &[T],
     right: &[T],
     checkpoint: &mut C,
 ) -> Result<ScaledDot, KrylovFailure<C::Error>> {
     if left.len() != right.len() {
         return Err(invalid("PCG dot-product extents differ"));
+    }
+    if let Some((real, imaginary, absolute_sum)) = checkpoint.native_dot(left, right) {
+        checkpoint
+            .cooperate(left.len() as u64)
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        return Ok(ScaledDot {
+            real,
+            imaginary,
+            absolute_sum,
+            left: 1.0,
+            right: 1.0,
+        });
     }
     let mut left_scale: f64 = 0.0;
     let mut right_scale: f64 = 0.0;
@@ -159,16 +194,22 @@ async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, C: Control>(
 }
 
 impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
-    pub(super) async fn new<C: Control>(
+    pub(super) async fn new<C: PcgOperations<T>>(
         rhs: &'a [T],
         initial: Option<&[T]>,
         tolerance: f64,
         maximum_iterations: usize,
         work: PcgWork<'a, T>,
         preconditioners: (bool, bool),
+        previous: Option<&'a mut [T]>,
         checkpoint: &mut C,
     ) -> Result<Self, KrylovFailure<C::Error>> {
         let (first_preconditioner, second_preconditioner) = preconditioners;
+        let mut work = work;
+        if let Some(coefficients) = work.coefficients.as_deref_mut() {
+            coefficients.restart();
+            coefficients.flexible = previous.is_some();
+        }
         let n = rhs.len();
         let residual_capacity = maximum_iterations
             .checked_add(1)
@@ -217,24 +258,32 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
             second_preconditioner,
             phase: Phase::InitialProduct,
             best_certificate: None,
+            previous,
             arithmetic: std::marker::PhantomData,
         })
     }
 
-    async fn after_initial_product<C: Control>(
+    async fn after_initial_product<C: PcgOperations<T>>(
         &mut self,
         output: &[T],
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
-        for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-            if index % 1024 == 0 {
-                checkpoint
-                    .cooperate((self.rhs.len() - index).min(1024) as u64)
-                    .await
-                    .map_err(KrylovFailure::Operation)?;
+        if checkpoint.native_residual(self.rhs, &output[..self.rhs.len()], &mut *self.work.residual) {
+            checkpoint
+                .cooperate(self.rhs.len() as u64)
+                .await
+                .map_err(KrylovFailure::Operation)?;
+        } else {
+            for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
+                if index % 1024 == 0 {
+                    checkpoint
+                        .cooperate((self.rhs.len() - index).min(1024) as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                }
+                self.work.residual[index] = self.rhs[index];
+                A::subtract_scaled(&mut self.work.residual[index], 1.0, value);
             }
-            self.work.residual[index] = self.rhs[index];
-            A::subtract_scaled(&mut self.work.residual[index], 1.0, value);
         }
         let rhs_squared = dot::<T, A, C>(self.rhs, self.rhs, &mut *checkpoint)
             .await?
@@ -284,7 +333,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         Ok(())
     }
 
-    async fn after_preconditioner<C: Control>(
+    async fn after_preconditioner<C: PcgOperations<T>>(
         &mut self,
         stage: PreconditionerStage,
         output: &[T],
@@ -324,22 +373,39 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 }
             }
             PreconditionerStage::Following { prior } => {
-                let Some(beta) = next_rho.ratio(prior.rho) else {
+                let beta = match self.previous.as_deref() {
+                    // Flexible: β = (⟨r, z⟩ − ⟨r_old, z⟩) / ⟨r_old, z_old⟩.
+                    Some(previous) => {
+                        let cross = dot::<T, A, C>(previous, output, &mut *checkpoint).await?;
+                        let value = (next_rho.value() - cross.value()) / prior.rho.value();
+                        value.is_finite().then_some(value)
+                    }
+                    None => next_rho.ratio(prior.rho),
+                };
+                let Some(beta) = beta else {
                     let residual_count = prior.index + 2;
                     return self
                         .complete_best(4, prior, residual_count, &mut *checkpoint)
                         .await;
                 };
-                for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-                    if index % 1024 == 0 {
-                        checkpoint
-                            .cooperate((self.rhs.len() - index).min(1024) as u64)
-                            .await
-                            .map_err(KrylovFailure::Operation)?;
+                self.record_beta(beta);
+                if checkpoint.native_direction(&mut *self.work.direction, &output[..self.rhs.len()], beta) {
+                    checkpoint
+                        .cooperate(self.rhs.len() as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                } else {
+                    for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
+                        if index % 1024 == 0 {
+                            checkpoint
+                                .cooperate((self.rhs.len() - index).min(1024) as u64)
+                                .await
+                                .map_err(KrylovFailure::Operation)?;
+                        }
+                        let previous = self.work.direction[index];
+                        self.work.direction[index] = value;
+                        A::add_scaled(&mut self.work.direction[index], beta, previous);
                     }
-                    let previous = self.work.direction[index];
-                    self.work.direction[index] = value;
-                    A::add_scaled(&mut self.work.direction[index], beta, previous);
                 }
                 Iteration {
                     rhs_squared: prior.rhs_squared,
@@ -350,6 +416,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 }
             }
             PreconditionerStage::Restart { prior } => {
+                self.restart_coefficients();
                 copy(&mut *self.work.direction, output, &mut *checkpoint).await?;
                 Iteration {
                     rho: next_rho,
@@ -362,7 +429,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         Ok(())
     }
 
-    async fn after_direction_product<C: Control>(
+    async fn after_direction_product<C: PcgOperations<T>>(
         &mut self,
         mut iteration: Iteration,
         output: &[T],
@@ -378,18 +445,38 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
+        if let Some(coefficients) = self.work.coefficients.as_deref_mut() {
+            coefficients.alpha.push(alpha);
+        }
+        if let Some(previous) = self.previous.as_deref_mut() {
+            copy(previous, &*self.work.residual, &mut *checkpoint).await?;
+        }
         let mut progressed = false;
-        for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-            if index % 1024 == 0 {
-                checkpoint
-                    .cooperate((self.rhs.len() - index).min(1024) as u64)
-                    .await
-                    .map_err(KrylovFailure::Operation)?;
+        if let Some(native) = checkpoint.native_step(
+            &mut *self.work.x,
+            &mut *self.work.residual,
+            &*self.work.direction,
+            &output[..self.rhs.len()],
+            alpha,
+        ) {
+            progressed = native;
+            checkpoint
+                .cooperate(self.rhs.len() as u64)
+                .await
+                .map_err(KrylovFailure::Operation)?;
+        } else {
+            for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
+                if index % 1024 == 0 {
+                    checkpoint
+                        .cooperate((self.rhs.len() - index).min(1024) as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                }
+                let previous = self.work.x[index];
+                A::add_scaled(&mut self.work.x[index], alpha, self.work.direction[index]);
+                progressed |= self.work.x[index] != previous;
+                A::subtract_scaled(&mut self.work.residual[index], alpha, value);
             }
-            let previous = self.work.x[index];
-            A::add_scaled(&mut self.work.x[index], alpha, self.work.direction[index]);
-            progressed |= self.work.x[index] != previous;
-            A::subtract_scaled(&mut self.work.residual[index], alpha, value);
         }
         let Some(residual_squared) =
             dot::<T, A, C>(&*self.work.residual, &*self.work.residual, &mut *checkpoint)
@@ -448,16 +535,24 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
-        for index in 0..self.rhs.len() {
-            if index % 1024 == 0 {
-                checkpoint
-                    .cooperate((self.rhs.len() - index).min(1024) as u64)
-                    .await
-                    .map_err(KrylovFailure::Operation)?;
+        self.record_beta(beta);
+        if checkpoint.native_direction(&mut *self.work.direction, &*self.work.residual, beta) {
+            checkpoint
+                .cooperate(self.rhs.len() as u64)
+                .await
+                .map_err(KrylovFailure::Operation)?;
+        } else {
+            for index in 0..self.rhs.len() {
+                if index % 1024 == 0 {
+                    checkpoint
+                        .cooperate((self.rhs.len() - index).min(1024) as u64)
+                        .await
+                        .map_err(KrylovFailure::Operation)?;
+                }
+                let previous = self.work.direction[index];
+                self.work.direction[index] = self.work.residual[index];
+                A::add_scaled(&mut self.work.direction[index], beta, previous);
             }
-            let previous = self.work.direction[index];
-            self.work.direction[index] = self.work.residual[index];
-            A::add_scaled(&mut self.work.direction[index], beta, previous);
         }
         // The synchronous kernel computes beta and updates the direction even
         // at the limit, so its breakdown disposition remains unchanged.
@@ -478,7 +573,7 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
 }
 
 impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
-    pub(super) async fn preconditioner_failed<C: Control>(
+    pub(super) async fn preconditioner_failed<C: PcgOperations<T>>(
         &mut self,
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
@@ -525,7 +620,7 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
         }
     }
 
-    pub(super) async fn accept<C: Control>(
+    pub(super) async fn accept<C: PcgOperations<T>>(
         &mut self,
         output: &[T],
         checkpoint: &mut C,

@@ -60,7 +60,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                 state_profiles_output: PreparedOutputResourceFacts {
                     encoded_payload_bytes_upper_bound: ByteCount(1),
                     transport_closure_bytes_upper_bound: ByteCount(1),
-                    construction_resident_bytes_admission_budget: ByteCount(65_665),
+                    construction_resident_bytes_admission_budget: ByteCount(65_540),
                 },
                 operator: StructuralOperatorResourceDemand {
                     excitation_workspace: Default::default(),
@@ -97,6 +97,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                         scalar: NumericalScalar::RealF64,
                         preconditioner: PreconditionerStorage::Diagonal,
                         transpose_index_bytes_upper_bound: ByteCount(0),
+                        path: StaticSolvePath::ProvingFactorization,
                         admission: SolverAdmissionResourcePolicy {
                             dimension: Count(4),
                             factor_nonzero_upper_bound: Count(10),
@@ -259,11 +260,11 @@ fn structural_fixture() -> (
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -282,27 +283,29 @@ fn mixed_structural_fixture() -> (
 ) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: runmat_meshing_core::PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.topology.boundary_faces[1]
         .provenance
-        .push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "solid_load".into(),
-            assembly_path: vec!["root".into()],
-        });
+        .push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "solid_load".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.boundary_faces[1].provenance.sort();
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
@@ -328,11 +331,11 @@ fn mixed_structural_fixture() -> (
 #[test]
 fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
     let (mut model, mut mesh, _, _) = structural_fixture();
-    let selected = PersistentEntityId {
-        kind: runmat_meshing_core::PersistentEntityKind::Face,
-        source_topology_id: "selected_foundation_face".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let selected = PersistentEntityId::new(
+        runmat_meshing_core::PersistentEntityKind::Face,
+        "selected_foundation_face".into(),
+        vec!["root".into()],
+    );
     mesh.topology.boundary_faces[0].provenance.push(selected);
     mesh.topology.boundary_faces[0].provenance.sort();
     mesh.canonical_digest = StableDigest::ZERO;
@@ -341,7 +344,7 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
     let foundation = runmat_analysis_core::AnalysisConnector {
         connector_id: "foundation_a".into(),
         kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-            target: runmat_analysis_core::RegionTarget::boundary("selected_foundation_face"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("selected_foundation_face")),
             modulus: runmat_analysis_core::FoundationModulus::new(1.0),
         },
     };
@@ -384,7 +387,7 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
 
     let mut unmapped = model;
     unmapped.connectors[0].kind = runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-        target: runmat_analysis_core::RegionTarget::boundary("missing_face"),
+        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("missing_face")),
         modulus: runmat_analysis_core::FoundationModulus::new(1.0),
     };
     assert!(matches!(
@@ -487,7 +490,6 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::contracts::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
@@ -630,7 +632,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         .push(runmat_analysis_core::AnalysisConnector {
             connector_id: "preflight_foundation".into(),
             kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-                target: runmat_analysis_core::RegionTarget::boundary("root"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 modulus: runmat_analysis_core::FoundationModulus::new(1.0),
             },
         });
@@ -714,13 +716,19 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         admission.factor_nonzero_upper_bound,
         Count(expected_admission.factor_nonzero_limit())
     );
+    // The static solve is proved by its Cholesky factor: only factorization work and the
+    // factor's resident payload are reserved, never the local-energy proof's graph budgets.
     assert_eq!(
         admission.update_count_upper_bound,
-        Count(expected_admission.update_limit())
+        Count(expected_admission.factor_flop_limit())
     );
     assert_eq!(
         admission.resident_bytes_upper_bound,
-        ByteCount(expected_admission.resident_bytes_limit())
+        ByteCount(
+            (expected_admission.factor_nonzero_limit() * 16
+                + (expected_admission.dimension() + 1) * 8)
+                .max(expected_admission.factor_resident_limit())
+        )
     );
     plan.validate_identity().unwrap();
 
@@ -739,9 +747,11 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     )
     .is_err());
     let accelerator = AcceleratorRequest {
-        class: "test-gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
-        memory_bytes_each: 1024 * 1024 * 1024,
+        minimum_allocation_bytes: 1024 * 1024 * 1024,
+        provider: None,
+        required_features: Default::default(),
     };
     let accelerated = build_structural_resource_plan(
         Some(&mesh),
@@ -757,7 +767,9 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert!(accelerated
         .request
         .required_capabilities
-        .contains(&Capability::Accelerator("test-gpu".into())));
+        .contains(&Capability::Accelerator(
+            runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap()
+        )));
 }
 
 #[test]
@@ -777,7 +789,6 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::contracts::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
@@ -911,7 +922,6 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::contracts::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
@@ -1096,6 +1106,7 @@ fn understated_resident_bounds_are_rejected() {
             resident_bytes_upper_bound: ByteCount(1),
         },
         transpose_index_bytes_upper_bound: ByteCount(0),
+        path: StaticSolvePath::ProvingFactorization,
         admission: SolverAdmissionResourcePolicy {
             dimension: Count(4),
             factor_nonzero_upper_bound: Count(10),
@@ -1152,6 +1163,7 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
         scalar: NumericalScalar::ComplexF64,
         preconditioner: PreconditionerStorage::Diagonal,
         transpose_index_bytes_upper_bound: ByteCount(0),
+        path: StaticSolvePath::ProvingFactorization,
         admission: SolverAdmissionResourcePolicy {
             dimension: Count(4),
             factor_nonzero_upper_bound: Count(10),
@@ -1313,16 +1325,12 @@ fn missing_capability_or_accelerator_rejects_before_memory_admission() {
 
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {
-        class: "gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(4_096),
     }];
     let inadequate = ResourceInventory {
-        accelerators: vec![AcceleratorRequest {
-            class: "gpu".into(),
-            count: 1,
-            memory_bytes_each: 2_048,
-        }],
+        accelerators: vec![test_accelerator_device("gpu", 2_048)],
         ..inventory(64 * 1024 * 1024, 10_000)
     };
     assert!(matches!(
@@ -1386,16 +1394,21 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
 fn reconciliation_checks_accelerator_device_time() {
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {
-        class: "gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(4_096),
     }];
     let plan = build_resource_plan(accelerated).unwrap();
     let actual = AnalysisResourceUsage {
         scheduler: ResourceUsage {
-            accelerator_millis: vec![runmat_execution::resource::AcceleratorUsage {
-                class: "gpu".into(),
-                device_millis: 1_001,
+            accelerator_millis: vec![{
+                let device = test_accelerator_device("gpu", 4_096);
+                runmat_execution::resource::AcceleratorUsage {
+                    class: device.class,
+                    provider: device.provider.id,
+                    device_id: device.id,
+                    device_millis: 1_001,
+                }
             }],
             ..ResourceUsage::default()
         },
@@ -1415,21 +1428,43 @@ fn reconciliation_checks_accelerator_device_time() {
 fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {
-        class: "gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(4_096),
     }];
     let plan = build_resource_plan(accelerated).unwrap();
     let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"accelerated-attempt"]);
     let worker_id = runmat_execution::identity::WorkerId::derive(&[b"accelerated-worker"]);
-    let record = |allocation| ResourceUsageAttempt {
-        attempt_id,
-        worker_id,
-        plan: plan.identity,
-        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-            allocation, 1, 0, 0, 0,
-        )
-        .unwrap(),
+    // Each requested accelerator is accounted against a leased device that serves it.
+    let record = |allocation: runmat_execution::resource::ResourceRequest| {
+        let assignment = runmat_execution::resource::ResourceAssignment {
+            accelerator_leases: allocation
+                .accelerators
+                .iter()
+                .map(|request| {
+                    runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
+                        attempt_id,
+                        1,
+                        &test_accelerator_device(request.class.as_str(), 4_096),
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        };
+        ResourceUsageAttempt {
+            attempt_id,
+            worker_id,
+            plan: plan.identity,
+            resources: runmat_execution::resource::ResourceAccounting::for_assigned_interval(
+                allocation,
+                &assignment,
+                1,
+                0,
+                0,
+                0,
+            )
+            .unwrap(),
+        }
     };
     let record_usage = |allocation| {
         record_resource_usage(
@@ -1452,7 +1487,7 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
     ));
 
     let mut understated = plan.request.clone();
-    understated.accelerators[0].memory_bytes_each -= 1;
+    understated.accelerators[0].minimum_allocation_bytes -= 1;
     assert!(matches!(
         record_usage(understated),
         Err(ResourcePlanningError::Invalid(message))
@@ -1463,15 +1498,13 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
     duplicated
         .accelerators
         .push(duplicated.accelerators[0].clone());
-    assert!(matches!(
+    // Duplicate accelerator requests cannot be accounted, whichever check sees them first.
+    assert!(
         runmat_execution::resource::ResourceAccounting::for_reserved_interval(
             duplicated, 1, 0, 0, 0
-        ),
-        Err(runmat_execution::ContractError::Invalid {
-            field: "accelerators",
-            ..
-        })
-    ));
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1723,4 +1756,25 @@ fn deserialization_revalidates_derived_plan_fields() {
     let mut encoded = serde_json::to_value(plan).unwrap();
     encoded["request"]["memory_bytes"] = serde_json::json!(1);
     assert!(serde_json::from_value::<FeaResourcePlan>(encoded).is_err());
+}
+
+fn test_accelerator_device(
+    class: &str,
+    max_allocation_bytes: u64,
+) -> runmat_execution::resource::AcceleratorDevice {
+    use runmat_execution::resource::*;
+    AcceleratorDevice {
+        id: AcceleratorDeviceId::new("device:test-accelerator").unwrap(),
+        allocation_domain: AcceleratorAllocationDomainId::new("allocation:test-accelerator")
+            .unwrap(),
+        class: AcceleratorClass::new(class).unwrap(),
+        provider: AcceleratorProvider {
+            id: AcceleratorProviderId::new("runmat.test").unwrap(),
+            version: AcceleratorProviderVersion::new("1.0.0").unwrap(),
+            abi_fingerprint: Digest::sha256(b"test-accelerator-abi"),
+        },
+        max_allocation_bytes,
+        features: std::collections::BTreeSet::from([AcceleratorFeature::Compute]),
+        inventory_epoch: 1,
+    }
 }

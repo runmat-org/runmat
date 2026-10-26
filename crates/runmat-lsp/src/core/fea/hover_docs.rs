@@ -280,6 +280,12 @@ fn dimension_help(
             "W/(m*K)",
             "`15 W/(m*K)`, `0.2 W/(m*K)`",
         )
+    } else if dimension == PhysicalDimension::HEAT_TRANSFER_COEFFICIENT {
+        (
+            "heat transfer coefficient",
+            "W/(m^2*K)",
+            "`10 W/m^2/K`, `35 W/(m^2*K)`",
+        )
     } else if dimension == PhysicalDimension::SPECIFIC_HEAT {
         ("specific heat", "J/(kg*K)", "`900 J/(kg*K)`")
     } else if dimension == PhysicalDimension::ELECTRICAL_CONDUCTIVITY {

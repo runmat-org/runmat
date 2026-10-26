@@ -99,8 +99,7 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
 fn thermal_selection_is_sample_local_and_rejects_foreign_coordinates() {
     use crate::{ComputeBackend, ThermalProcedureControl};
     use runmat_analysis_core::{
-        AnalysisSequence, FormulationRequirement, ProcedureStep, ProcedureStepId, Temperature,
-        ThermalDomain,
+        AnalysisSequence, ProcedureStep, ProcedureStepId, Temperature, ThermalDomain,
     };
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
     let mut model =
@@ -119,7 +118,6 @@ fn thermal_selection_is_sample_local_and_rejects_foreign_coordinates() {
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };

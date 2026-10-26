@@ -9,8 +9,9 @@ use super::{
     CheckedFeaStatementKind, CheckedGeometryInspection,
 };
 use crate::{
-    BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey,
-    FeaSymbolKind, FeaSymbolOrigin, GeometryInspectionCapability, LogicalSourcePath,
+    BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
+    FeaDiagnosticSeverity, FeaSymbolKey, FeaSymbolKind, FeaSymbolOrigin,
+    GeometryInspectionCapability, LogicalSourcePath,
 };
 use runmat_geometry_core::{
     Ap242ParameterAccess, CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType,
@@ -33,14 +34,20 @@ pub fn lower_geometry_definitions(
         if identity.1.kind != FeaSymbolKind::Geometry {
             continue;
         }
-        let initial_errors = diagnostics.len();
+        let error_count = |diagnostics: &[FeaDiagnostic]| {
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity == FeaDiagnosticSeverity::Error)
+                .count()
+        };
+        let initial_errors = error_count(diagnostics);
         let definition = definition(
             bound,
             declaration,
             inspections.get(&(identity.0.clone(), identity.1.name.clone())),
             diagnostics,
         );
-        if diagnostics.len() == initial_errors {
+        if error_count(diagnostics) == initial_errors {
             let Some(definition) = definition else {
                 continue;
             };
@@ -110,6 +117,13 @@ fn definition(
             error(declaration, file_span, message, diagnostics);
             return None;
         };
+        if inspection
+            .facts
+            .capabilities
+            .contains(&GeometryInspectionCapability::PersistentIds)
+        {
+            check_authored_names(declaration, &regions, inspection, diagnostics);
+        }
         imported_source(declaration, inspection, diagnostics)?
     } else if let Some(statements) = construct {
         if declaration.source.is_some() {
@@ -148,16 +162,6 @@ fn definition(
             diagnostics,
         )?
     };
-    if let GeometryDefinitionSource::Imported(imported) = &source {
-        for region in &regions {
-            if let GeometryRegionSelector::Name(name) = &region.selector {
-                match &imported.named_selections {
-                    Some(metadata) => if let Err(reason) = metadata.selection(name, region.role) { error(declaration, declaration.span, reason.to_string(), diagnostics); },
-                    None => error(declaration, declaration.span, format!("Named selection `{name}` is not saved for this CAD asset. Select its geometry and save the selection before continuing."), diagnostics),
-                }
-            }
-        }
-    }
     Some(GeometryDefinition {
         module_path: declaration.module.as_str().to_string(),
         geometry_id: declaration.key.name.clone(),
@@ -193,20 +197,103 @@ fn imported_source(
         ImportedGeometryDefinition {
             preview_extent_m: inspection.facts.preview_extent_m,
             named_selections: inspection.facts.named_selections.clone(),
-            unit_evidence: inspection
-                .facts
-                .unit_evidence
-                .clone()
-                .resolve_fallback(units, "authored geometry units"),
+            // Authored units are authoritative over a different file declaration, which the
+            // evidence keeps as provenance.
+            unit_evidence: match units {
+                Some(authored) => inspection
+                    .facts
+                    .unit_evidence
+                    .clone()
+                    .apply_authored(authored, "authored geometry units")
+                    .unwrap_or_else(|unresolved| unresolved),
+                None => inspection.facts.unit_evidence.clone(),
+            },
             logical_path: inspection.source_path.as_str().to_string(),
             format,
-            unit_fallback: units,
+            authored_units: units,
             content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
             topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
             capabilities: capabilities(inspection),
             exchange: inspection.facts.exchange.clone(),
+            shared_interfaces: imported_interfaces(declaration, diagnostics),
         },
     )))
+}
+
+/// `interfaces = shared` joins touching bodies so their coincident faces become one shared face
+/// (a conformal multi-body mesh); `interfaces = separate` (the default) keeps each part's faces.
+fn imported_interfaces(
+    declaration: &CheckedFeaDeclaration,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> bool {
+    let Some(value) = assignment(&declaration.statements, "interfaces") else {
+        return false;
+    };
+    match &value.kind {
+        CheckedExpressionKind::Enum(policy) if policy == "shared" => true,
+        CheckedExpressionKind::Enum(policy) if policy == "separate" => false,
+        _ => {
+            error(
+                declaration,
+                value.span,
+                "geometry interfaces must be `shared` or `separate`",
+                diagnostics,
+            );
+            false
+        }
+    }
+}
+
+/// A `select name` must match a name the inspected source carries for that role.
+fn check_authored_names(
+    declaration: &CheckedFeaDeclaration,
+    regions: &[GeometryRegionDefinition],
+    inspection: &CheckedGeometryInspection,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    for region in regions {
+        let GeometryRegionSelector::Name(name) = &region.selector else {
+            continue;
+        };
+        if let Some(metadata) = inspection.facts.named_selections.as_ref().filter(|metadata| metadata.regions.iter().any(|region| region.region_id == *name)) {
+            if let Err(reason) = metadata.selection(name, region.role) {
+                error(declaration, declaration.span, reason.to_string(), diagnostics);
+            }
+            continue;
+        }
+        let role = match region.role {
+            GeometryRegionRole::Face => "face",
+            GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",
+            GeometryRegionRole::Vertex | GeometryRegionRole::Edge => continue,
+        };
+        let available = inspection
+            .facts
+            .authored_names
+            .get(role)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if available.iter().any(|candidate| candidate == name) {
+            continue;
+        }
+        let message = if available.is_empty() {
+            format!(
+                "region `{}` selects {role} name \"{name}\", but `{}` names no {role}s",
+                region.region_id, inspection.source_path
+            )
+        } else {
+            format!(
+                "region `{}` selects {role} name \"{name}\", which `{}` does not carry; named {role}s: {}",
+                region.region_id,
+                inspection.source_path,
+                available
+                    .iter()
+                    .map(|candidate| format!("\"{candidate}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        error(declaration, declaration.span, message, diagnostics);
+    }
 }
 
 fn named_block<'a>(
@@ -319,10 +406,10 @@ fn imported_units(
         );
         return None;
     };
-    match unit.as_str() {
-        "m" | "meter" | "meters" => Some(LengthUnit::Meter),
-        "mm" | "millimeter" | "millimeters" => Some(LengthUnit::Millimeter),
-        "in" | "inch" | "inches" => Some(LengthUnit::Inch),
+    let authored = match unit.as_str() {
+        "m" | "meter" | "meters" => LengthUnit::Meter,
+        "mm" | "millimeter" | "millimeters" => LengthUnit::Millimeter,
+        "in" | "inch" | "inches" => LengthUnit::Inch,
         _ => {
             error(
                 declaration,
@@ -330,8 +417,52 @@ fn imported_units(
                 format!("unsupported geometry unit system `{unit}`"),
                 diagnostics,
             );
-            None
+            return None;
         }
+    };
+    let evidence = &inspection.facts.unit_evidence;
+    let declared = evidence.overridden_declared_unit().or_else(|| {
+        matches!(
+            evidence,
+            runmat_geometry_core::physical::LengthUnitEvidence::Declared { .. }
+        )
+        .then(|| evidence.uniform_unit())
+        .flatten()
+    });
+    if let Some(declared) = declared.filter(|declared| *declared != authored) {
+        // Authored units are authoritative; an override of the file's own declaration is
+        // reported, never silent.
+        diagnostics.push(FeaDiagnostic {
+            severity: FeaDiagnosticSeverity::Warning,
+            ..FeaDiagnostic::error(
+                "fea.semantic.geometry_units_override",
+                format!(
+                    "geometry `{}` authors `units = {}` but its file declares {}; coordinates are read in {}",
+                    declaration.key.name,
+                    unit,
+                    unit_name(declared),
+                    unit_name(authored),
+                ),
+                FeaDiagnosticPhase::Lowering,
+                Some(FeaDiagnosticLocation {
+                    path: declaration.module.clone(),
+                    span: value.span,
+                }),
+            )
+        });
+    }
+    Some(authored)
+}
+
+fn unit_name(units: LengthUnit) -> String {
+    if units == LengthUnit::Meter {
+        "meters".into()
+    } else if units == LengthUnit::Millimeter {
+        "millimeters".into()
+    } else if units == LengthUnit::Inch {
+        "inches".into()
+    } else {
+        format!("a {} m length unit", units.meters_per_unit())
     }
 }
 

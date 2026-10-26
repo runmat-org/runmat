@@ -3,6 +3,8 @@ use super::*;
 
 #[path = "acoustic/duct.rs"]
 mod duct;
+#[path = "acoustic/response.rs"]
+mod response;
 
 #[test]
 fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog() {
@@ -96,7 +98,6 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             retained.identity.family(),
             runmat_analysis_core::PhysicsFamily::Acoustic
         );
-        assert!(!retained.production_publishable);
         let runmat_runtime::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(
             numerical,
         ) = &retained.numerical_result
@@ -187,7 +188,15 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             .iter()
             .map(|entry| {
                 assert_eq!(entry.states.len(), 1);
-                let state = entry.states[0].clone();
+                // The run record keeps a reference; the state is persisted once as binary.
+                let reference = &entry.states[0];
+                reference.verify_identity().unwrap();
+                let state =
+                    runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
+                        &fs::read(&reference.artifact_path).unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(state.identity, reference.identity);
                 assert_eq!(state.kind, runmat_analysis_core::StateKind::AcousticComplex);
                 assert_eq!(
                     state
@@ -347,7 +356,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.cavity
-    formulation = experimental
     analysis sound { acoustic harmonic { frequencies = [0.2] Hz } }
 }
 "#;
@@ -358,12 +366,10 @@ fn field_values(
     field_id: &str,
     frequency: f64,
 ) -> Vec<f64> {
-    let selection = runmat_runtime::analysis::AnalysisFieldSelection {
-        field_id: field_id.into(),
-        sample: Some(
-            runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(frequency),
-        ),
-    };
+    let selection = runmat_runtime::analysis::AnalysisFieldSelection::new(
+        field_id,
+        Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(frequency)),
+    );
     let mut values = Vec::new();
     let mut offset = 0;
     let total = loop {

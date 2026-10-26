@@ -163,9 +163,20 @@ fn evaluate_triangle(
     let area_vector = cross(first, second);
     let double_area = norm(area_vector);
     if !double_area.is_finite() || double_area <= 0.0 {
+        let corners = corners.map(|vertex| {
+            (
+                vertex.pslg_vertex_index,
+                vertex.evaluation.uv,
+                vertex.evaluation.point_m,
+                vertex.point_m,
+            )
+        });
         return Err(invalid(
             face_id,
-            "triangle has zero or invalid physical area",
+            format!(
+                "triangle has zero or invalid physical area (corners as pslg index, uv, \
+                 surface point, realized point: {corners:?})"
+            ),
         ));
     }
     let unit_normal = scale(area_vector, double_area.recip());

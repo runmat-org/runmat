@@ -665,7 +665,7 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution::{ProgramEnvironment, ProgramRevision};
+    use runmat_execution::ProgramRevision;
     use runmat_execution_artifact::cache::FilesystemObjectStore;
     use runmat_geometry_core::GeometryTolerancePolicy;
     use runmat_meshing_core::{resolve_meshing_request, MeshingRequestSettings};
@@ -673,25 +673,18 @@ mod tests {
     use super::*;
 
     fn face(source: &str, occurrence: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: source.into(),
-            assembly_path: vec!["root".into(), occurrence.into()],
-        }
+        PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            source.into(),
+            vec!["root".into(), occurrence.into()],
+        )
     }
 
     fn revision() -> ProgramRevision {
         ProgramRevision::new(
             Digest::sha256(b"exact-root-graph"),
             Digest::sha256(b"exact-root-source"),
-            ProgramEnvironment::new(
-                1,
-                1,
-                Digest::sha256(b"exact-root-runtime"),
-                Digest::sha256(b"exact-root-catalog"),
-                "matlab",
-            )
-            .unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap()
     }
@@ -816,11 +809,11 @@ mod tests {
         )
         .is_err());
 
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: "solid".into(),
-            assembly_path: vec!["root".into()],
-        };
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            "solid".into(),
+            vec!["root".into()],
+        );
         validate_source_entity_order(
             &BTreeMap::from([(0, region)]),
             PersistentEntityKind::Region,
@@ -977,11 +970,8 @@ mod tests {
         request.quality.volume.maximum_metric_edge_length = 2.0;
         request.quality.volume.maximum_radius_edge_ratio = 10.0;
         request.quality.volume.minimum_scaled_jacobian = 0.01;
-        request.resources.maximum_nodes = 10_000;
-        request.resources.maximum_elements = 10_000;
-        request.resources.maximum_search_work = 1_000_000;
-        request.resources.maximum_iterations = 1_000_000;
-        request.resources.maximum_wall_time_ms = 180_000;
+        request.limits.maximum_nodes = 10_000;
+        request.limits.maximum_elements = 10_000;
         let prepared = prepare_exact_meshing_root(ExactMeshingRootPreparation {
             program_revision: revision.clone(),
             artifact_access: access.clone(),
@@ -1029,9 +1019,7 @@ mod tests {
             cpu_millicores: 1_000,
             memory_bytes: 1 << 30,
             scratch_bytes: 1 << 30,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 180_000,
         };
         let inventory = ResourceInventory {
@@ -1044,6 +1032,7 @@ mod tests {
         let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-exact-root-scope"]);
         let pool_id = runmat_execution::PoolId::derive(&[b"remote-exact-root-pool"]);
         let worker = WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: runmat_execution::identity::WorkerId::derive(&[b"remote-exact-root-worker"]),
             pool_id,
             resources: inventory.clone(),

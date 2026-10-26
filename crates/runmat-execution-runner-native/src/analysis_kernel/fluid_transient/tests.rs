@@ -45,7 +45,6 @@ fn fixture() -> (FluidTransientWorkload, SolverMeshArtifact) {
         FluidTransientWorkload {
             model,
             step_id: ProcedureStepId("advance".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             policy: steady.policy,
             geometry_policy: steady.geometry_policy,
             initial_fields: Vec::new(),
@@ -60,6 +59,7 @@ fn task(
 ) -> PreparedFluidTransientTask {
     let d = Digest::sha256("native-original-transient");
     prepare_fluid_transient_task(FluidTransientTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: d,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(
@@ -159,6 +159,10 @@ fn child(
     )
     .unwrap()
 }
+// witness: FEA-FLUID-TRANSIENT-001/producer_exit @
+//   incompressible_laminar_transient/canonical_tetrahedra/native_process;
+//   boundary: Child actually exits before new consumers resume; uniform translation and
+//   substitution/budget rejection only.
 #[test]
 fn terminated_native_producers_preserve_original_history_and_admission_rejects_substitution() {
     let (workload, mesh) = fixture();
@@ -183,12 +187,17 @@ fn terminated_native_producers_preserve_original_history_and_admission_rejects_s
     let split = child(&request, &mesh);
     split.recover(&workload, &mesh).unwrap();
     assert_eq!(
-        split.original_results().collect::<Vec<_>>(),
-        full.original_results().collect::<Vec<_>>()
+        split.intervals().collect::<Vec<_>>(),
+        full.intervals().collect::<Vec<_>>()
     );
-    for original in split.original_results() {
-        for velocity in &original.velocity_m_per_s {
-            assert_eq!(*velocity, [1., 0., 0.]);
+    assert_eq!(split.retained_results().last(), full.retained_results().last());
+    for (_, original) in split.retained_results() {
+        // Uniform translation is reproduced to the solver's rounding, not bit-exactly.
+        for velocity in original.velocity_m_per_s.canonical_values() {
+            let error = (0..3)
+                .map(|k| (velocity[k] - [1., 0., 0.][k]).abs())
+                .fold(0.0, f64::max);
+            assert!(error < 1e-12, "{velocity:?}");
         }
     }
     let prepared = task(request.clone(), mesh.clone(), 8192);

@@ -24,7 +24,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
     ProgramExecutionObject, ProgramExecutionObjectClosure, ProgramExecutionObjectLocation,
-    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::control::{
@@ -325,6 +325,7 @@ impl DriverControlPlane for DurableControl {
                 .map(|id| artifact_download(id, state.artifacts.get(id).unwrap())),
             cancellation_requested: false,
             driver_resources: self.resources.clone(),
+            driver_accelerator_devices: Vec::new(),
             desired_worker_count: 1,
             worker_resources: self.resources.clone(),
         })
@@ -607,6 +608,7 @@ impl DriverControlPlane for DurableControl {
         allocation_lease_id: &str,
         endpoint_fingerprint: &str,
         run_key_envelope: &[u8],
+        _ready_v1: bool,
     ) -> runmat_execution_transport_native::TransportResult<()> {
         let worker = self.workers.get(&authority.fencing_token).unwrap();
         let evidence = worker.endpoint_identity.as_ref().unwrap();
@@ -643,6 +645,11 @@ fn exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_repla
     assert!(run_actual_driver_replacement(ExactStudyFamily::MeshingRoot).is_none());
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; features: occt-native;
+//   coverage: partial;
+//   boundary: Exact meshing admission retries and cancels after an actual encrypted driver
+//   replacement.
 #[test]
 fn exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement() {
     assert!(run_actual_driver_replacement_with_interruption(
@@ -666,6 +673,11 @@ fn exact_meshing_admission_deadline_expires_before_replacement_dispatch() {
     .is_none());
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; features: occt-native;
+//   coverage: partial;
+//   boundary: The retry budget is exhausted after two driver losses; worker-process loss and
+//   transfer resumption are covered by the process-conformance target.
 #[test]
 fn exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses() {
     assert!(run_actual_driver_replacement_with_interruption(
@@ -963,6 +975,7 @@ async fn actual_driver_replacement_case(
         RemoteDriverConfig {
             authority: first_authority,
             endpoint_identity_file: identity_path.clone(),
+            ready_v1: false,
         },
         control.clone(),
     );
@@ -1139,6 +1152,7 @@ async fn actual_driver_replacement_case(
         RemoteDriverConfig {
             authority: second_authority,
             endpoint_identity_file: identity_path.clone(),
+            ready_v1: false,
         },
         control.clone(),
     );
@@ -1177,6 +1191,7 @@ async fn actual_driver_replacement_case(
             RemoteDriverConfig {
                 authority: driver_authority(3, third_relay.http_base()),
                 endpoint_identity_file: identity_path,
+                ready_v1: false,
             },
             control.clone(),
         );

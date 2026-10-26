@@ -1,9 +1,8 @@
 use super::*;
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisSequence, ElectricPotential, ElectricalConstraint,
-    ElectricalConstraintKind, ElectromagneticDomain, FormulationRequirement,
-    MaterialElectricalModel, PrescribedValue, ProcedureStep, RegionTarget,
-    StaticElectricalEquation,
+    ElectricalConstraintKind, ElectromagneticDomain, MaterialElectricalModel, PrescribedValue,
+    ProcedureStep, RegionTarget, StaticElectricalEquation,
 };
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
@@ -46,7 +45,7 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "pressure".into(),
             kind: ElectricalConstraintKind::PrescribedPotential {
-                target: RegionTarget::boundary(face),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                 value: PrescribedValue::Constant(ElectricPotential::new(1.0)),
             },
         }));
@@ -55,7 +54,6 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -64,10 +62,13 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
         solver_mesh_digest: mesh.canonical_digest,
     };
     let policy = ElectricalStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
+        element_temperature_k: None,
+        operating_time_s: None,
     };
-    let workload = plan_electrical_study(&compiled, policy).unwrap();
+    let workload = plan_electrical_study(&compiled, policy.clone()).unwrap();
     ElectricalStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: 16 << 30,
         product: ElectricalStudyProduct { compiled, workload },
         policy,
         mesh,
@@ -98,9 +99,6 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
 fn electrical_standalone_coordinator_rejects_foreign_mesh_policy_and_definition() {
     let mut input = preparation();
     input.product.compiled.solver_mesh_digest = StableDigest::ZERO;
-    assert!(ElectricalStudyCoordinator::new(input).is_err());
-    let mut input = preparation();
-    input.policy.formulation_requirement = FormulationRequirement::Production;
     assert!(ElectricalStudyCoordinator::new(input).is_err());
     let mut input = preparation();
     input.product.compiled.model.geometry_revision += 1;

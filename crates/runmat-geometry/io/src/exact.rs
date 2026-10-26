@@ -45,6 +45,14 @@ pub struct ImportedExactCad {
     /// Kernel-authored mapping from display-import face ordinals to exact persistent faces.
     /// This selector metadata does not enter canonical geometry identity.
     pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    /// Names the CAD author gave to faces and solids (STEP face names, solid names, part product
+    /// names), in precedence order. A face that shared interfaces made from several authored
+    /// faces carries all of their names, the smallest owning solid's first. Like
+    /// `source_face_ids`, this selector metadata does not enter canonical geometry identity.
+    pub entity_names: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    /// Presentation layers (STEP `PRESENTATION_LAYER_ASSIGNMENT`) on faces and solids; a solid
+    /// also carries its part's layers. Selector metadata outside canonical geometry identity.
+    pub entity_tags: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
     /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
     /// the imported object prevents closure construction from claiming a different tolerance or
     /// healing policy than the one under which topology was produced.
@@ -83,29 +91,172 @@ pub(crate) fn exact_import_units(
     ),
     GeometryImportError,
 > {
-    let evidence = crate::source_units::inspect_source_units(path, bytes, format)
-        .resolve_fallback(options.source_units, "explicit exact-import source units");
+    use runmat_geometry_core::physical::{CoordinateUnits, LengthUnitEvidence};
+    let inspected = crate::source_units::inspect_source_units(path, bytes, format);
+    let authored = options.source_units_authority == SourceUnitsAuthority::Authored;
+    let exchange = match format {
+        OcctCadFormat::Step => "STEP",
+        OcctCadFormat::Iges => "IGES",
+        OcctCadFormat::Brep => "BREP",
+    };
+    // STEP and IGES readers resolve file-declared units into a stable millimetre kernel
+    // representation, which keeps kernel tolerances independent of the caller's units. An
+    // authoritative authored unit reinterprets the coordinates of a file that declares a
+    // different single length unit: the reader stays in millimetres and the kernel coordinate
+    // scale becomes millimetres x authored/declared. A STEP or IGES file that declares no length
+    // unit, several different ones, or an unsupported one cannot be reinterpreted and is
+    // refused. BREP declares nothing and uses the explicit `source_units`.
+    let evidence = match (authored, options.source_units, format) {
+        (true, Some(unit), OcctCadFormat::Step | OcctCadFormat::Iges) => {
+            match inspected.apply_authored(unit, "authored geometry units") {
+                Ok(evidence @ (LengthUnitEvidence::Declared { .. }
+                | LengthUnitEvidence::AuthoredOverride { .. })) => evidence,
+                Ok(_) | Err(_) => {
+                    return Err(GeometryImportError::UnresolvedUnits(format!(
+                        "authored {} units cannot be applied: the {exchange} file declares no single resolvable length unit (none, or several different ones)",
+                        unit.symbol()
+                    )))
+                }
+            }
+        }
+        (_, fallback, _) => {
+            inspected.resolve_fallback(fallback, "explicit exact-import source units")
+        }
+    };
     evidence
         .validate()
         .map_err(|e| GeometryImportError::InvalidOptions(e.to_string()))?;
     if !evidence.physical_scale_resolved() {
-        return Err(GeometryImportError::InvalidOptions("CAD source units are missing, unsupported or conflicting; explicit fallback units are admitted only for unitless formats".into()));
+        return Err(GeometryImportError::UnresolvedUnits(format!(
+            "{exchange} source length units are missing, unsupported or conflicting; explicit fallback units are admitted only for unitless formats"
+        )));
     }
     let kernel_unit = match format {
-        OcctCadFormat::Step | OcctCadFormat::Iges => LengthUnit::Millimeter,
+        OcctCadFormat::Step | OcctCadFormat::Iges => match evidence.overridden_declared_unit() {
+            Some(declared) => LengthUnit::from_meters_per_unit(
+                LengthUnit::Millimeter.meters_per_unit() * evidence
+                    .uniform_unit()
+                    .expect("authored override carries its unit")
+                    .meters_per_unit()
+                    / declared.meters_per_unit(),
+            )
+            .ok_or_else(|| {
+                GeometryImportError::InvalidOptions(
+                    "authored/declared unit ratio is not a finite positive length".into(),
+                )
+            })?,
+            None => LengthUnit::Millimeter,
+        },
         OcctCadFormat::Brep => evidence.uniform_unit().ok_or_else(|| {
-            GeometryImportError::InvalidOptions("BREP source length unit is required".into())
+            GeometryImportError::InvalidOptions(
+                "exact CAD import requires explicit source units".into(),
+            )
         })?,
     };
-    Ok((
-        evidence,
-        runmat_geometry_core::physical::CoordinateUnits::new(kernel_unit),
-    ))
+    Ok((evidence, CoordinateUnits::new(kernel_unit)))
+}
+
+#[cfg(any(
+    feature = "occt-native",
+    all(target_arch = "wasm32", feature = "occt-wasm-host")
+))]
+/// Length unit the exchange reader converts declared coordinates into: STEP and IGES read into
+/// millimetres; unitless BREP keeps its explicit source unit.
+pub(crate) fn exchange_reader_unit(
+    format: OcctCadFormat,
+    kernel_units: runmat_geometry_core::physical::CoordinateUnits<
+        runmat_geometry_core::physical::KernelCoordinates,
+    >,
+) -> LengthUnit {
+    match format {
+        OcctCadFormat::Step | OcctCadFormat::Iges => LengthUnit::Millimeter,
+        OcctCadFormat::Brep => kernel_units.unit(),
+    }
 }
 
 impl ImportedExactCad {
     pub fn analysis_options(&self) -> &ExactCadAnalysisOptions {
         &self.analysis
+    }
+
+    /// Entities of one region role whose authored names include `name` (exact, case-sensitive).
+    /// A `cell` is selected through the name of its solid. Naming nothing is an error that lists
+    /// the names the source does carry for that role, so a misspelled selector fails clearly.
+    pub fn entities_named(
+        &self,
+        role: runmat_geometry_core::GeometryRegionRole,
+        name: &str,
+    ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, String> {
+        self.select_authored(&self.entity_names, "named", role, name)
+    }
+
+    /// Entities of one region role carrying the presentation layer `tag`, selected like names.
+    pub fn entities_tagged(
+        &self,
+        role: runmat_geometry_core::GeometryRegionRole,
+        tag: &str,
+    ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, String> {
+        self.select_authored(&self.entity_tags, "tagged", role, tag)
+    }
+
+    fn select_authored(
+        &self,
+        authored: &BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+        verb: &str,
+        role: runmat_geometry_core::GeometryRegionRole,
+        value: &str,
+    ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, String> {
+        use runmat_geometry_core::{GeometryRegionRole, PersistentEntityKind};
+        let kind = match role {
+            GeometryRegionRole::Vertex => PersistentEntityKind::Vertex,
+            GeometryRegionRole::Edge => PersistentEntityKind::Edge,
+            GeometryRegionRole::Face => PersistentEntityKind::Face,
+            GeometryRegionRole::Solid | GeometryRegionRole::Cell => PersistentEntityKind::Solid,
+        };
+        let candidates = authored
+            .iter()
+            .filter(|(id, _)| id.kind == kind)
+            .collect::<Vec<_>>();
+        let matched = candidates
+            .iter()
+            .filter(|(_, values)| values.iter().any(|candidate| candidate == value))
+            .map(|(id, _)| (*id).clone())
+            .collect::<Vec<_>>();
+        let mut selected = if role == GeometryRegionRole::Cell {
+            self.topology
+                .regions
+                .iter()
+                .filter(|region| matched.contains(&region.solid_id))
+                .map(|region| region.id.clone())
+                .collect::<Vec<_>>()
+        } else {
+            matched
+        };
+        if selected.is_empty() {
+            let role_name = format!("{role:?}").to_lowercase();
+            let mut available = candidates
+                .iter()
+                .flat_map(|(_, values)| values.iter().cloned())
+                .collect::<Vec<_>>();
+            available.sort();
+            available.dedup();
+            return Err(if available.is_empty() {
+                format!(
+                    "no {role_name} is {verb} \"{value}\"; the source has no {verb} {role_name}s"
+                )
+            } else {
+                format!(
+                    "no {role_name} is {verb} \"{value}\"; {verb} {role_name}s: {}",
+                    available
+                        .iter()
+                        .map(|candidate| format!("\"{candidate}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+        }
+        selected.sort();
+        Ok(selected)
     }
 
     pub fn representation_digest(&self) -> [u8; 32] {
@@ -216,6 +367,7 @@ impl Default for ExactCadAnalysisOptions {
                 consolidate_duplicates: false,
                 repair_tolerance_scale_gaps: false,
                 simplify_short_edges_and_sliver_faces: false,
+                shared_interfaces: false,
             },
         }
     }
@@ -225,10 +377,32 @@ pub(crate) fn exact_representation_digest(representation: &[u8]) -> [u8; 32] {
     Sha256::digest(representation).into()
 }
 
+/// How an exact import treats `ExactCadImportOptions::source_units`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceUnitsAuthority {
+    /// `source_units` applies only to formats without a declared unit (BREP); STEP and IGES
+    /// keep the unit they declare.
+    #[default]
+    UndeclaredFallback,
+    /// `source_units` is the authored coordinate unit (`units` in a `.fea` geometry block). It
+    /// overrides a different single length unit declared by a STEP file; the import records the
+    /// declared unit as provenance.
+    Authored,
+}
+
+impl SourceUnitsAuthority {
+    fn is_fallback(&self) -> bool {
+        *self == Self::UndeclaredFallback
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExactCadImportOptions {
     pub source_units: Option<LengthUnit>,
+    #[serde(default, skip_serializing_if = "SourceUnitsAuthority::is_fallback")]
+    pub source_units_authority: SourceUnitsAuthority,
     /// Geometry identity, tolerance, and healing authority for this import. These settings are
     /// inseparable from the exact topology produced by the kernel.
     pub analysis: ExactCadAnalysisOptions,
@@ -250,6 +424,7 @@ impl Default for ExactCadImportOptions {
     fn default() -> Self {
         Self {
             source_units: None,
+            source_units_authority: SourceUnitsAuthority::UndeclaredFallback,
             analysis: ExactCadAnalysisOptions::default(),
             max_representation_bytes: 512 * 1024 * 1024,
             max_entities: 10_000_000,

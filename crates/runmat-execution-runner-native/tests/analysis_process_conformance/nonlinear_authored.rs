@@ -8,12 +8,11 @@ use runmat_execution_artifact::{
 use runmat_execution_runner_native::{
     execute_prepared_fea_study_locally, nonlinear_solid_study_completion_from_source,
     prepare_checked_fea_study, CompletedFeaStudyResult, LocalFeaExecutionOptions,
-    PreparedFeaStudyRoot,
+    StudyRootPlanning,
 };
 use runmat_runtime::analysis::FeaRootSelector;
 
-const SOURCE: &str =
-    include_str!("../../../../docs/simulation/examples/small-strain-j2-experimental.fea");
+const SOURCE: &str = include_str!("../../../../docs/simulation/examples/small-strain-j2.fea");
 
 pub(super) async fn run() {
     let mut original_history_failures = Vec::new();
@@ -35,8 +34,6 @@ pub(super) async fn run() {
             include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
         )
         .unwrap();
-        std::fs::create_dir_all(directory.path().join("geometry/.runmat/geometry")).unwrap();
-        std::fs::write(directory.path().join("geometry/.runmat/geometry/box.brep.json"), include_bytes!("../../../../docs/simulation/examples/geometry/.runmat/geometry/box.brep.json")).unwrap();
         let path = directory.path().join("plastic.fea");
         std::fs::write(
             &path,
@@ -74,7 +71,7 @@ pub(super) async fn run() {
             prepare_checked_fea_study(&checked, resolved, &[], "original-authored-j2", &options)
                 .await
                 .unwrap();
-        let PreparedFeaStudyRoot::Nonlinear(root) = &prepared.root else {
+        let StudyRootPlanning::NonlinearSolid(root) = &prepared.root.planning else {
             panic!("J2 was sent to a linear root");
         };
         assert_eq!(root.controls.increment_count, 12);
@@ -194,7 +191,6 @@ pub(super) async fn run() {
             history.load_factors.len(),
             cold.terminal_block.checkpoint.work().accepted_increments()
         );
-        assert!(publication.steps.iter().all(|s| !s.production_publishable));
         println!("authored CAD/native/cold J2 transport checks passed quadratic={quadratic}, nodes={}, elements={}, accepted={}",
             mesh.topology.nodes.len(), mesh.topology.volume_elements.len(), history.load_factors.len());
     }

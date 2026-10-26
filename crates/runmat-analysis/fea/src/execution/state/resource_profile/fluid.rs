@@ -11,13 +11,11 @@ pub(super) fn profile(
     super::super::fluid::validate_request(request, workload, mesh, result)?;
     let result_bytes = result.canonical_bytes()?;
     let topology = result.native_field_topology(workload, mesh)?;
-    super::super::fluid::fluid_state_publication_workspace_bytes(
-        workload,
-        mesh,
-        &result_bytes,
-        &topology,
-    )?;
-    profile_state_payload(
+    super::super::fluid::fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes)?;
+    // The state is owned typed storage built and encoded by the direct codec (no value tree):
+    // charge its direct materialization, so the embedded result bytes cost their typed decode
+    // rather than value-tree nodes.
+    profile_state_payload_direct(
         request,
         &Tagged {
             kind: "fluid",

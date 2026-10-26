@@ -82,7 +82,7 @@ impl Fixture {
         mesh.validate().unwrap();
         let projection = AnalysisProjection::derive(&mesh).unwrap();
         let target = |name: &str| {
-            let mut target = RegionTarget::boundary(name);
+            let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
             let entity = projection
                 .boundary_faces
                 .iter()

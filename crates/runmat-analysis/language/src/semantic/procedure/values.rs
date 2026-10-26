@@ -2,10 +2,31 @@ use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaStatement, CheckedFeaStatementKind,
 };
 
+thread_local! {
+    /// Member names a procedure lowering asked for; anything else in the block is unknown.
+    static READ_MEMBERS: std::cell::RefCell<Option<std::collections::BTreeSet<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `lower` while recording every member name it reads with [`assignment`].
+pub fn track_members<T>(lower: impl FnOnce() -> T) -> (T, std::collections::BTreeSet<String>) {
+    let previous = READ_MEMBERS.with(|cell| cell.replace(Some(Default::default())));
+    let value = lower();
+    let read = READ_MEMBERS
+        .with(|cell| cell.replace(previous))
+        .unwrap_or_default();
+    (value, read)
+}
+
 pub fn assignment<'a>(
     statements: &'a [CheckedFeaStatement],
     name: &str,
 ) -> Option<&'a CheckedExpression> {
+    READ_MEMBERS.with(|cell| {
+        if let Some(read) = cell.borrow_mut().as_mut() {
+            read.insert(name.to_string());
+        }
+    });
     for statement in statements {
         match &statement.kind {
             CheckedFeaStatementKind::Assignment { target, value, .. }

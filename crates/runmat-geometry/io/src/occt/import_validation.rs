@@ -50,6 +50,17 @@ impl GeometryEvaluationControl for ImportEvaluationControl<'_> {
     fn consume_allocation_bytes(&self, count: u64) -> Result<(), GeometryEvaluationError> {
         consume(&self.allocation_bytes, count, "allocation-byte")
     }
+
+    /// The allocation budget bounds live validation storage. Released reservations return to
+    /// it; otherwise every temporary of a long validation stays charged and curved parts run
+    /// out of budget although their live storage is small.
+    fn release_allocation_bytes(&self, count: u64) {
+        let _ =
+            self.allocation_bytes
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
+                    Some(available.saturating_add(count))
+                });
+    }
 }
 
 pub(super) fn map_validation_error(error: GeometryEvaluationError) -> GeometryImportError {

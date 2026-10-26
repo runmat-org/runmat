@@ -1,7 +1,7 @@
 ISO-10303-21;
 HEADER;
 FILE_DESCRIPTION(('Open CASCADE Model'),'2;1');
-FILE_NAME('Open CASCADE Shape Model','2026-10-08T22:14:42',('Author'),(
+FILE_NAME('Open CASCADE Shape Model','2026-10-20T18:29:01',('Author'),(
     'Open CASCADE'),'Open CASCADE STEP processor 7.9','Open CASCADE 7.9'
   ,'Unknown');
 FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
@@ -15,8 +15,7 @@ DATA;
 #4 = PRODUCT_DEFINITION_SHAPE('','',#5);
 #5 = PRODUCT_DEFINITION('design','',#6,#9);
 #6 = PRODUCT_DEFINITION_FORMATION('','',#7);
-#7 = PRODUCT('Open CASCADE STEP translator 7.9 1',
-  'Open CASCADE STEP translator 7.9 1','',(#8));
+#7 = PRODUCT('Tuning fork','Tuning fork','',(#8));
 #8 = PRODUCT_CONTEXT('',#2,'mechanical');
 #9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');
 #10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#969);
@@ -27,7 +26,7 @@ DATA;
 #15 = MANIFOLD_SOLID_BREP('',#16);
 #16 = CLOSED_SHELL('',(#17,#137,#213,#289,#365,#441,#517,#593,#669,#745,
     #821,#892,#939,#954));
-#17 = ADVANCED_FACE('',(#18),#32,.T.);
+#17 = ADVANCED_FACE('Stem end',(#18),#32,.T.);
 #18 = FACE_BOUND('',#19,.T.);
 #19 = EDGE_LOOP('',(#20,#55,#83,#111));
 #20 = ORIENTED_EDGE('',*,*,#21,.T.);

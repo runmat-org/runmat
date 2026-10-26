@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    validate_model_sequence, AnalysisModel, AnalysisProcedure, FormulationRequirement,
-    PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace, StateKind, StateSource, StateUse,
+    validate_model_sequence, AnalysisModel, AnalysisProcedure, PhysicsFamily, ProcedureStep,
+    ProcedureStepId, SolutionSpace, StateKind, StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -81,7 +81,6 @@ pub struct StructuralTransientWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub solver: StructuralTransientSolverPlan,
     pub time_step_policy: StructuralTimeStepPolicy,
     pub residual_target: f64,
@@ -187,7 +186,6 @@ impl StructuralTransientWorkload {
 
     pub fn solve_options(&self, solver_mesh: SolverMeshArtifact) -> TransientSolveOptions {
         TransientSolveOptions {
-            formulation_requirement: self.formulation_requirement,
             time_step_policy: self.time_step_policy,
             residual_target: self.residual_target,
             progress_operation: "fea.solve_structural_transient_block".into(),
@@ -361,7 +359,6 @@ impl StructuralTransientCheckpointScope {
         let solver_options_digest = contract_digest(
             "solver-options",
             &(
-                input.workload.formulation_requirement,
                 &input.workload.solver,
                 input.workload.time_step_policy,
                 input.workload.residual_target,

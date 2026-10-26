@@ -27,11 +27,11 @@ fn publication_case(side: u32, thin: bool) {
                 DelaunayFacetProvenance {
                     node_identities,
                     chart_id: identity(u64::MAX - 1000),
-                    entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                        kind: runmat_geometry_core::PersistentEntityKind::Face,
-                        source_topology_id: "representative-outer-boundary".into(),
-                        assembly_path: Vec::new(),
-                    }],
+                    entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                        runmat_geometry_core::PersistentEntityKind::Face,
+                        "representative-outer-boundary".into(),
+                        Vec::new(),
+                    )],
                     region_ids: vec![region("representative-working-region")],
                 }
             })
@@ -39,10 +39,12 @@ fn publication_case(side: u32, thin: bool) {
     };
     provenance.facets.sort_by_key(|face| face.node_identities);
     let metric = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = crate::cdt::evaluate_delaunay_volume_quality(
         &topology,
@@ -57,8 +59,7 @@ fn publication_case(side: u32, thin: bool) {
         provenance,
         quality,
         facet_recovery_insertions: Vec::new(),
-        refinement_insertions: Vec::new(),
-        sliver_mutations: Vec::new(),
+        quality_mutations: Vec::new(),
     };
     let preparation = VolumeMeshEncoding::preparation_bytes(&mesh).unwrap();
     let prepared = VolumeMeshEncoding::new(&mesh, &Control).unwrap();

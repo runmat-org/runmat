@@ -1,7 +1,7 @@
 //! Explicit, mesh-bound integration inventory for canonical solid history.
 //!
 //! A rule identifies point ownership; it does not certify integration convergence.
-//! In particular, the positive Duffy alternatives remain experimental envelopes.
+//! In particular, the positive Duffy alternatives remain unadmitted envelopes.
 
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -16,7 +16,7 @@ use super::quadrature::{
     GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT, KEAST_FIFTEEN,
 };
 
-const SCHEMA_VERSION: u16 = 1;
+const SCHEMA_VERSION: u16 = 2;
 mod resources;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +79,9 @@ pub struct CanonicalSolidIntegrationElement {
     pub element_id: u64,
     pub stable_identity: StableDigest,
     pub order: ElementOrder,
+    /// The element's own rule: the requested rule for straight-sided elements, and for a curved
+    /// Tet10 the converged rule of the shared Tet10 element-validity rule.
+    pub rule: CanonicalSolidIntegrationRule,
     pub node_count: usize,
     pub point_count: usize,
     pub point_offset: usize,
@@ -144,11 +147,13 @@ impl CanonicalSolidIntegrationPlan {
                     "solid integration node inventory differs from its order".into(),
                 ));
             }
-            let point_count = rule.point_count();
+            let element_rule = element_rule(mesh, element, rule)?;
+            let point_count = element_rule.point_count();
             elements.push(CanonicalSolidIntegrationElement {
                 element_id: element.element_id,
                 stable_identity: element.stable_identity,
                 order: element.order,
+                rule: element_rule,
                 node_count,
                 point_count,
                 point_offset: total_point_count,
@@ -233,6 +238,67 @@ impl CanonicalSolidIntegrationPlan {
     pub fn total_point_node_count(&self) -> usize {
         self.total_point_node_count
     }
+}
+
+/// The rule that integrates one element. A curved Tet10 integrates with the quadrature the
+/// shared Tet10 element-validity rule converged on (`runmat_meshing_core::
+/// tetrahedron10_stiffness_moments`), never with a fixed rule; straight-sided elements use the
+/// requested rule. An element the shared rule rejects has no admissible quadrature.
+fn element_rule(
+    mesh: &SolverMeshArtifact,
+    element: &runmat_meshing_core::SolverVolumeElement,
+    requested: CanonicalSolidIntegrationRule,
+) -> Result<CanonicalSolidIntegrationRule, SolidIntegrationPlanError> {
+    let Some(coordinates) = tet10_coordinates(mesh, element)? else {
+        return Ok(requested);
+    };
+    if runmat_meshing_core::tetrahedron10_is_affine(&coordinates) {
+        return Ok(requested);
+    }
+    match runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates) {
+        Ok(moments) => Ok(curved_rule(moments.rule).unwrap_or(requested)),
+        Err(invalidity) => Err(SolidIntegrationPlanError::Mesh(format!(
+            "element {} fails the shared Tet10 element-validity rule: {invalidity:?}",
+            element.element_id
+        ))),
+    }
+}
+
+/// The plan rule carrying the shared rule's converged tensor quadrature.
+pub(crate) fn curved_rule(
+    rule: runmat_meshing_core::Tet10StiffnessRule,
+) -> Option<CanonicalSolidIntegrationRule> {
+    match rule {
+        runmat_meshing_core::Tet10StiffnessRule::Affine => None,
+        runmat_meshing_core::Tet10StiffnessRule::GaussTwelve => {
+            Some(CanonicalSolidIntegrationRule::Duffy12)
+        }
+        runmat_meshing_core::Tet10StiffnessRule::GaussSixteen => {
+            Some(CanonicalSolidIntegrationRule::Duffy16)
+        }
+    }
+}
+
+/// A Tet10 element's node coordinates in canonical order, or `None` for other orders.
+pub(super) fn tet10_coordinates(
+    mesh: &SolverMeshArtifact,
+    element: &runmat_meshing_core::SolverVolumeElement,
+) -> Result<Option<[[f64; 3]; 10]>, SolidIntegrationPlanError> {
+    if element.order != ElementOrder::Tet10 {
+        return Ok(None);
+    }
+    let mut coordinates = [[0.0; 3]; 10];
+    for (slot, node_id) in coordinates.iter_mut().zip(&element.node_ids) {
+        let index = mesh
+            .topology
+            .nodes
+            .binary_search_by_key(node_id, |node| node.node_id)
+            .map_err(|_| {
+                SolidIntegrationPlanError::Mesh("solid integration node is absent".into())
+            })?;
+        *slot = mesh.topology.nodes[index].coordinates_m.canonical_value();
+    }
+    Ok(Some(coordinates))
 }
 
 fn accumulate_counts(

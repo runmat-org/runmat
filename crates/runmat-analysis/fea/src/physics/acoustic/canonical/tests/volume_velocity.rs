@@ -43,7 +43,7 @@ fn duct(
     }
     mesh.seal_canonical_digest().unwrap();
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     // Positive physical incoming flow is negative outward-normal flow.
     let q = if phase {
         [0.4 / 6.0, -1.0 / 6.0]
@@ -62,7 +62,7 @@ fn duct(
         .push(ExcitationAction::VolumeVelocity(action));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "matched".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -77,17 +77,16 @@ fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalAcousticR
         "acoustic",
         Frequency::new(0.2),
         AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
-            restart: 128,
-            maximum_iterations: 8192,
+            ..Default::default()
         },
         1e-8,
     )
     .unwrap()
 }
 
+// witness: FEA-ACOUSTIC-SOURCE-001/resultant @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Area scaling, complex phase and independent flow/power refinement on slab fixtures.
 #[test]
 fn total_volume_flow_area_phase_rotation_and_power_refine_against_continuum() {
     let mut count = 0;
@@ -299,7 +298,7 @@ fn total_volume_flow_rejects_overlapping_sources_in_both_action_orders() {
         let (mut model, mesh) = duct(2, false, 1.0, false);
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "conflict".into(),
-            target: RegionTarget::boundary("slab_left"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
             operator,
         });
         let result = solve_canonical_harmonic(
@@ -326,7 +325,7 @@ fn total_volume_flow_rejects_prescribed_pressure_on_its_patch() {
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: "prescribed_source_patch".into(),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary("slab_left"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                     value: PrescribedValue::Constant(Pressure::new(0.0)),
                 },
             }));
@@ -358,11 +357,11 @@ fn total_volume_flow_rejects_periodic_and_bloch_primary_or_secondary_patches() {
                 let ExcitationAction::VolumeVelocity(action) = &mut model.excitations[0] else {
                     unreachable!()
                 };
-                action.target = ExcitationTarget::Region(RegionTarget::boundary(source_side));
+                action.target = ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(source_side))));
                 let periodic = PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary("slab_left"),
-                        secondary: RegionTarget::boundary("slab_right"),
+                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),

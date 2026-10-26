@@ -113,8 +113,10 @@ fn project(
     let storage = storage::Storage::for_input(&input);
     storage.slots::<runmat_meshing_core::SolverMeshProjection>(1)?;
     let linear = construction::construct(&input, options, cancellation)?;
-    let result = match input.request.element_order {
-        runmat_meshing_core::ElementOrder::Tet4 => linear,
+    let (result, elevation) = match input.request.element_order {
+        runmat_meshing_core::ElementOrder::Tet4 => {
+            (linear, runmat_meshing_core::SolverElevationReport::default())
+        }
         runmat_meshing_core::ElementOrder::Tet10 => {
             order_elevation::elevate(&input, linear, options, cancellation)?
         }
@@ -147,6 +149,7 @@ fn project(
         .map_err(error::solver)?;
     storage.charge(request_bytes)?;
     ValidatedSolverMeshTopology::new(result, input.request.clone(), cancellation)
+        .map(|topology| topology.with_elevation_report(elevation))
         .map_err(error::solver)
 }
 

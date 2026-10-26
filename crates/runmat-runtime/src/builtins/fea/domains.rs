@@ -5,42 +5,6 @@ use crate::builtins::fea::values::{
 };
 use runmat_analysis_core::ThermalDomain;
 
-const TYPED_DOMAIN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Typed FEA domain constructors accept dimensioned quantity objects; integer handling belongs to those quantity constructors.",
-};
-
-const REFERENCE_TEMPERATURE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "reference_temperature",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Typed fea.Temperature used as the constitutive reference state.",
-}];
-macro_rules! domain_descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:ident) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &$inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-domain_descriptor!(
-    THERMAL_DOMAIN_DESCRIPTOR,
-    THERMAL_DOMAIN_SIGNATURES,
-    "domain = fea.ThermalDomain.atReferenceTemperature(referenceTemperature)",
-    REFERENCE_TEMPERATURE_INPUTS
-);
-
 fn domain_object<T: Serialize>(
     builtin: &'static str,
     class_name: &'static str,
@@ -51,14 +15,14 @@ fn domain_object<T: Serialize>(
 
 #[runtime_builtin(
     name = "fea.ThermalDomain.atReferenceTemperature",
-    category = "fea",
-    summary = "Create a standalone thermal domain at a typed reference temperature.",
-    keywords = "fea,domain,thermal,temperature,typed",
-    descriptor(crate::builtins::fea::domains::THERMAL_DOMAIN_DESCRIPTOR),
-    integer_audit(TYPED_DOMAIN_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::domains"
 )]
 pub async fn thermal_domain_builtin(reference_temperature: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_THERMAL_DOMAIN_AT_REFERENCE_TEMPERATURE_DESCRIPTOR,
+        "fea.ThermalDomain.atReferenceTemperature",
+    )?;
     domain_object(
         "fea.ThermalDomain.atReferenceTemperature",
         FEA_THERMAL_DOMAIN_CLASS,
@@ -79,6 +43,10 @@ pub async fn thermal_domain_builtin(reference_temperature: Value) -> BuiltinResu
     builtin_path = "crate::builtins::fea::domains"
 )]
 pub async fn thermomechanical_domain_builtin(reference_temperature: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_THERMO_MECHANICAL_DOMAIN_AT_REFERENCE_TEMPERATURE_DESCRIPTOR,
+        "fea.ThermoMechanicalDomain.atReferenceTemperature",
+    )?;
     domain_object(
         "fea.ThermoMechanicalDomain.atReferenceTemperature",
         FEA_THERMOMECHANICAL_DOMAIN_CLASS,
@@ -99,6 +67,10 @@ pub async fn thermomechanical_domain_builtin(reference_temperature: Value) -> Bu
     builtin_path = "crate::builtins::fea::domains"
 )]
 pub async fn electrothermal_domain_builtin(reference_temperature: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_ELECTRO_THERMAL_DOMAIN_AT_REFERENCE_TEMPERATURE_DESCRIPTOR,
+        "fea.ElectroThermalDomain.atReferenceTemperature",
+    )?;
     domain_object(
         "fea.ElectroThermalDomain.atReferenceTemperature",
         FEA_ELECTROTHERMAL_DOMAIN_CLASS,
@@ -119,6 +91,10 @@ pub async fn electrothermal_domain_builtin(reference_temperature: Value) -> Buil
     builtin_path = "crate::builtins::fea::domains"
 )]
 pub async fn electromagnetic_domain_builtin(frequency: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_ELECTROMAGNETIC_DOMAIN_AT_FREQUENCY_DESCRIPTOR,
+        "fea.ElectromagneticDomain.atFrequency",
+    )?;
     domain_object(
         "fea.ElectromagneticDomain.atFrequency",
         FEA_ELECTROMAGNETIC_DOMAIN_CLASS,
@@ -143,6 +119,10 @@ pub async fn fluid_domain_builtin(
     dynamic_viscosity: Value,
     turbulence_intensity: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_FLUID_DOMAIN_NEWTONIAN_DESCRIPTOR,
+        "fea.FluidDomain.newtonian",
+    )?;
     domain_object(
         "fea.FluidDomain.newtonian",
         FEA_FLUID_DOMAIN_CLASS,
@@ -165,6 +145,8 @@ pub async fn fluid_domain_builtin(
                 TURBULENCE_INTENSITY_CLASS,
                 "ratio",
             )?),
+            rheology: None,
+            porous_zones: Vec::new(),
         },
     )
 }

@@ -81,9 +81,17 @@ fn conservative_wire_bound_does_not_reject_a_valid_small_integer_payload() {
     // (including its envelope) gives a wire bound below the unchanged 64MiB cap.
     let block = encode_contract(PLAN_PREFIX, PLAN_DOMAIN, &&[0u8; 1024][..], PLAN_LIMITS).unwrap();
     assert!(block.len() * 8192 + 1024 < 64 * 1024 * 1024);
+    // Exact integer widths keep the profile of real values under the cap, so the
+    // plan admits the payload; only a shape profile reserves full integer range.
     let profile = runmat_canonical_codec::profile_serialized(&Blocks, PROFILE_LIMITS).unwrap();
-    assert!(profile.encoded_bytes_upper_bound > 64 * 1024 * 1024);
-    assert!(runmat_canonical_codec::profile_serialized(&Blocks, PLAN_LIMITS).is_err());
+    assert!(profile.encoded_bytes_upper_bound < 64 * 1024 * 1024);
+    assert!(runmat_canonical_codec::profile_serialized(&Blocks, PLAN_LIMITS).is_ok());
+    assert!(
+        runmat_canonical_codec::profile_serialized_shape(&Blocks, PROFILE_LIMITS)
+            .unwrap()
+            .encoded_bytes_upper_bound
+            > profile.encoded_bytes_upper_bound
+    );
     assert_eq!(
         canonical_value_workspace_bytes(&Blocks).unwrap(),
         profile.materialization_resident_bytes_estimate

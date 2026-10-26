@@ -7,11 +7,7 @@ use crate::{
 };
 
 fn entity(name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(PersistentEntityKind::Edge, name.into(), vec!["root".into()])
 }
 
 fn valid() -> TopologyValidity {
@@ -47,6 +43,7 @@ fn report() -> GeometryHealingReport {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: true,
+            shared_interfaces: false,
         },
         tolerance: crate::GeometryTolerancePolicy {
             source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),

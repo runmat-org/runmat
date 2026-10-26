@@ -49,6 +49,12 @@ fn components(count: usize) -> (FacetedSolid, FacetedSolidModel) {
     model.shell_count = solid.shells.len() as u64;
     (solid, model)
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Analytic disconnected tetrahedra at 1/16/256 components have linear requested
+//   validation scratch, exact/short admission and complete release. Vertex/triangle/shell
+//   permutations preserve valid topology. This excludes native CAD meshing, accuracy of a numerical
+//   study and physical memory measurements.
 #[test]
 fn flat_validator_scratch_scales_linearly_releases_and_preserves_unordered_inputs() {
     let mut unit_peak = 0;

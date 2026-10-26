@@ -1,4 +1,4 @@
-//! Authored CAD, actual native completed closure and cold replay. Experimental only.
+//! Authored CAD, actual native completed closure and cold replay.
 //! Independent separated Fourier reference, not another RunMat solve.
 #[path = "maxwell_authored/replay.rs"]
 mod replay;
@@ -66,7 +66,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.field
-    formulation = experimental
     analysis phasor {
         electromagnetic harmonic { frequencies = [159154.94309189534 Hz] }
         accuracy { algebraic_relative_tolerance = 1e-10 }
@@ -130,12 +129,12 @@ pub(super) async fn run() {
         let response = result.completion.result.response();
         assert_eq!(
             response.angular_frequency_rad_per_s,
-            FREQUENCY * std::f64::consts::TAU
+            runmat_types::physical::Quantity::new(FREQUENCY * std::f64::consts::TAU)
         );
         assert!(response.relative_physical_residual <= 1e-10);
         assert!(response.relative_complex_power_error <= 1e-9);
         assert!(response.relative_charge_continuity_residual <= 1e-9);
-        let power_error = (response.ohmic_power_w / exact_power - 1.0).abs();
+        let power_error = (response.ohmic_power_w.canonical_value() / exact_power - 1.0).abs();
         assert!(
             power_error < 0.9,
             "independent Fourier ohmic-power error={power_error}"
@@ -146,7 +145,10 @@ pub(super) async fn run() {
         for sample in &response.samples {
             let exact = reference_fields(sample.position_m[0], sample.position_m[2], 255);
             let coarse = reference_fields(sample.position_m[0], sample.position_m[2], 127);
-            for (field, actual) in [sample.electric_field_v_per_m, sample.flux_density_t]
+            for (field, actual) in [
+                sample.electric_field_v_per_m.canonical_value(),
+                sample.flux_density_t.canonical_value(),
+            ]
                 .iter()
                 .enumerate()
             {
@@ -261,9 +263,7 @@ pub(super) async fn run() {
             .unwrap(),
         )
         .unwrap();
-        let policy = runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        };
+        let policy = runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {};
         let mut wrong = actual.compiled.clone();
         wrong.model.sequence.steps[0].restart =
             runmat_analysis_core::RestartPolicy::ResumeCheckpoint {

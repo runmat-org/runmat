@@ -10,7 +10,8 @@ use crate::{
         FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
         FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
-        FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+        FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, FEA_FIELD_STRUCTURAL_NODAL_STRESS,
+        FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
         FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_ROTATION,
         FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
         FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
@@ -214,6 +215,13 @@ pub fn structural_observable_field_definitions(
             ObservationValueShape::Scalar,
         ),
         (
+            FEA_FIELD_STRUCTURAL_NODAL_STRESS,
+            ObservationQuantity::Stress,
+            FieldLocation::Node,
+            RecoveredFieldEntityDomain::Nodes,
+            ObservationValueShape::SymmetricTensor3,
+        ),
+        (
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
             ObservationQuantity::StrainEnergy,
             FieldLocation::Element,
@@ -316,7 +324,9 @@ pub fn structural_observable_field_definitions(
         .into_iter()
         .map(
             |(field_id, quantity, location, entity_domain, value_shape)| {
-                if field_id == FEA_FIELD_STRUCTURAL_NODAL_VON_MISES {
+                if field_id == FEA_FIELD_STRUCTURAL_NODAL_VON_MISES
+                    || field_id == FEA_FIELD_STRUCTURAL_NODAL_STRESS
+                {
                     RecoveredFieldDefinition::new_derived(
                         field_id,
                         quantity,

@@ -50,7 +50,6 @@ fn portable_thermal_result_separates_physical_source_from_transport_commitment()
             model: model.clone(),
             step_id: retained.transition().consumer_step_id.clone(),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
             algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             observation_execution: crate::results::observation::ObservationExecutionPolicy::serial(

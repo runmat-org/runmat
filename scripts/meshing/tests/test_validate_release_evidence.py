@@ -36,8 +36,8 @@ class ReleaseEvidenceValidationTests(unittest.TestCase):
 
     def test_rejects_promotion_without_evidence_dependency(self):
         path = self.mutated_workflow(
-            "needs: [build-and-test, meshing-release-evidence, build-release]",
-            "needs: [build-and-test, build-release]",
+            "needs: [release-validation, meshing-release-evidence, build-release]",
+            "needs: [release-validation, build-release]",
         )
         with self.assertRaisesRegex(ReleaseEvidenceError, "promotion"):
             validate_workflow(path)

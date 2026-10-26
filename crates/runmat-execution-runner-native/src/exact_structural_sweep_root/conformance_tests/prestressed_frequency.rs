@@ -111,9 +111,7 @@ async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
             .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {
@@ -192,6 +190,7 @@ async fn run_exact_study(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"prestressed-frequency-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"prestressed-frequency-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"prestressed-frequency-worker"]),
         pool_id,
         resources: inventory.clone(),
@@ -338,7 +337,6 @@ fn box_prestressed_frequency_workloads() -> runmat_analysis_execution::Structura
         model: preload.model.clone(),
         step_id: ProcedureStepId("prestressed_frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
@@ -457,7 +455,6 @@ fn box_prestressed_modal_frequency_workloads() -> runmat_analysis_execution::Str
         model: preload.model.clone(),
         step_id: ProcedureStepId("prestressed_modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(2),
@@ -469,7 +466,6 @@ fn box_prestressed_modal_frequency_workloads() -> runmat_analysis_execution::Str
         model: preload.model.clone(),
         step_id: ProcedureStepId("prestressed_frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),

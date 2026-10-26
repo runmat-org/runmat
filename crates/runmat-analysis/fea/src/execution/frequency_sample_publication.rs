@@ -374,13 +374,7 @@ fn validate_observations(
     topology: FieldTopologyIdentity,
 ) -> AnalysisExecutionResult<()> {
     let source_matches = match observations.source {
-        ObservationFieldSource::FiniteVolumeRecovery {
-            recovery_request,
-            artifact,
-            numerical_source,
-            topology: source_topology,
-        }
-        | ObservationFieldSource::SampledRecovery {
+        ObservationFieldSource::SampledRecovery {
             recovery_request,
             artifact,
             numerical_source,
@@ -405,12 +399,31 @@ fn validate_observations(
                         topology: source_topology,
                     }
         }
+        ObservationFieldSource::VolumeMeshRecovery {
+            recovery_request,
+            artifact,
+            numerical_source,
+            topology: source_topology,
+            ..
+        } => {
+            recovery_request == sample.recovery_request.identity()
+                && artifact == sample.fields.identity
+                && numerical_source == sample.fields.source
+                && source_topology == topology
+        }
         ObservationFieldSource::ThermalResult { .. } => false,
+    };
+    // Volume-mesh plans address the mesh's analysis projection, named by the source.
+    let observation_topology = match observations.source {
+        ObservationFieldSource::VolumeMeshRecovery { .. } => {
+            observations.source.observation_topology_digest()
+        }
+        _ => topology.discretization_digest(),
     };
     let coordinate = RecoveredFieldSample::FrequencyHertz(sample.entry.frequency_hz());
     if !source_matches
         || observations.producer != producer
-        || observations.topology_digest != topology.discretization_digest()
+        || observations.topology_digest != observation_topology
         || observations
             .results
             .iter()

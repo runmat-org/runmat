@@ -27,7 +27,7 @@ pub(super) const OBSERVATION_PREFIX: &[u8] = b"runmat-fea-observation/v1\0";
 // unchanged because their numerical contracts did not change.
 const OBSERVATION_ARTIFACT_PREFIX: &[u8] = b"runmat-fea-observation-artifact/v2\0";
 pub(crate) const OBSERVATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

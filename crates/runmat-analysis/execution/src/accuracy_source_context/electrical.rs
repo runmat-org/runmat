@@ -5,9 +5,9 @@ use runmat_analysis_fea::{
     execution::{
         AccuracyEvaluationRequest, AnalysisNumericalObjectKind as Kind,
         ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult, ElectricalStaticWorkload,
-        SequenceIdentity, StepIdentity,
+        ObservationHistorySourceContext, SequenceIdentity, StepIdentity,
     },
-    results::observation::ObservationPublicationCatalog,
+    results::observation::{ObservationFieldCatalogSource, ObservationPublicationCatalog},
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
@@ -18,9 +18,9 @@ pub(super) fn validate(
     observations: Option<&ObservationPublicationCatalog>,
     inputs: &[&PreparedAnalysisObjects],
 ) -> AnalysisBridgeResult<()> {
-    if observations.is_some() || inputs.len() != 3 {
+    if inputs.len() != 3 {
         return Err(AnalysisBridgeError::Identity(
-            "electrical accuracy requires exact workload, mesh and retained result, without unsupported observations",
+            "electrical accuracy requires exact workload, mesh and retained result",
         ));
     }
     let unique = |kind| -> AnalysisBridgeResult<&PreparedAnalysisObjects> {
@@ -71,12 +71,32 @@ pub(super) fn validate(
     )?;
     if producer != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != workload.formulation_requirement
-        || !step.observations.is_empty()
+        || observations.is_some() == step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(
             "electrical accuracy differs from authored requirements",
         ));
+    }
+    if let Some(catalog) = observations {
+        catalog.validate_source_result(
+            request.producer,
+            request.source_kind,
+            request.source_result,
+        )?;
+        catalog.validate_for(step, ObservationHistorySourceContext::VolumeMesh { mesh: &mesh })?;
+        let ObservationFieldCatalogSource::VolumeMeshRecovery {
+            recovery_request, ..
+        } = catalog.source().source()
+        else {
+            return Err(AnalysisBridgeError::Identity(
+                "electrical accuracy observations require the original volume-mesh recovery",
+            ));
+        };
+        if recovery_request.as_ref() != &result.native_field_request(&workload, &mesh)? {
+            return Err(AnalysisBridgeError::Identity(
+                "electrical accuracy observations differ from original native result",
+            ));
+        }
     }
     Ok(())
 }

@@ -47,6 +47,9 @@ pub struct FluidSteadyResourceProjection {
     /// Source preparation, original numerical reserve, profile/decode and encode
     /// lifetimes summed conservatively; scheduler fixed/transport costs are separate.
     pub phase_resident_bytes_upper_bound: ByteCount,
+    /// The same lifetimes with the numerical verification bound in place of the solve
+    /// reserve: re-preparing and verifying a retained result runs no linear solve.
+    pub verification_phase_resident_bytes_upper_bound: ByteCount,
 }
 
 fn invalid(error: impl std::fmt::Display) -> ResourcePlanningError {
@@ -56,7 +59,35 @@ fn invalid(error: impl std::fmt::Display) -> ResourcePlanningError {
 /// Derive authentic local support and wire facts before scheduler task construction.
 /// `prepare` admits its owned projection/property expansion under the authored
 /// accuracy ceiling; the additional serialization envelope is admitted here.
+///
+/// The projection is a pure function of the workload's and mesh's content identities, and
+/// every phase of one study (plan, worker reauthentication, recovery, publication) asks for
+/// it again. The process keeps the last derivation keyed by those identities so the original
+/// support is prepared once per process instead of once per caller.
 pub fn derive_fluid_steady_resource_projection(
+    workload: &FluidSteadyWorkload,
+    mesh: &SolverMeshArtifact,
+) -> Result<FluidSteadyResourceProjection, ResourcePlanningError> {
+    type Key = (Digest, Digest);
+    static LAST: std::sync::Mutex<Option<(Key, FluidSteadyResourceProjection)>> =
+        std::sync::Mutex::new(None);
+    let key = (
+        workload.identity().map_err(invalid)?.digest(),
+        Digest::from_bytes(*mesh.canonical_digest.bytes()),
+    );
+    if let Some((cached, projection)) = LAST.lock().ok().as_deref().and_then(Option::as_ref) {
+        if *cached == key {
+            return Ok(projection.clone());
+        }
+    }
+    let projection = derive_projection(workload, mesh)?;
+    if let Ok(mut last) = LAST.lock() {
+        *last = Some((key, projection.clone()));
+    }
+    Ok(projection)
+}
+
+fn derive_projection(
     workload: &FluidSteadyWorkload,
     mesh: &SolverMeshArtifact,
 ) -> Result<FluidSteadyResourceProjection, ResourcePlanningError> {
@@ -68,11 +99,11 @@ pub fn derive_fluid_steady_resource_projection(
     let properties = source.property_identity.clone();
     let property_audit_digest = source.property_audit_digest;
     let source_preparation_resident_bytes = source.preparation_resident_bytes;
-    // The execution-owned profile may rederive original support. Do not retain a
-    // second set of numerical stencils/property projections while it does so.
-    drop(problem);
+    // The execution-owned result profile reads the support prepared here.
+    let result = workload
+        .result_encoding_profile_prepared(mesh, &source, problem)
+        .map_err(invalid)?;
     drop(source);
-    let result = workload.result_encoding_profile(mesh).map_err(invalid)?;
     let workload_profile = profile_serialized(workload, LIMITS).map_err(invalid)?;
     let mesh_profile = profile_serialized(mesh, LIMITS).map_err(invalid)?;
     let input_profiles = admission::add(
@@ -83,10 +114,18 @@ pub fn derive_fluid_steady_resource_projection(
         workload_profile.encoded_bytes_upper_bound,
         mesh_profile.encoded_bytes_upper_bound,
     )?;
+    let decoded_inputs = admission::add(input_profiles, input_buffers)?;
     let phase_resident = admission::phase_resident_bytes(
         numerical.resident_bytes_upper_bound,
         source_preparation_resident_bytes,
-        admission::add(input_profiles, input_buffers)?,
+        decoded_inputs,
+        result.encoded_bytes_upper_bound,
+        result.materialization_resident_bytes_estimate,
+    )?;
+    let verification_phase_resident = admission::phase_resident_bytes(
+        numerical.verification_resident_bytes_upper_bound,
+        source_preparation_resident_bytes,
+        decoded_inputs,
         result.encoded_bytes_upper_bound,
         result.materialization_resident_bytes_estimate,
     )?;
@@ -104,14 +143,10 @@ pub fn derive_fluid_steady_resource_projection(
             .map_err(|_| ResourcePlanningError::Overflow("fluid mesh wire length"))?,
     )?;
     let actual_decode_resident_bytes = admission::add(
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
-            &workload_bytes,
-        )
-        .map_err(invalid)?,
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
-            &mesh_bytes,
-        )
-        .map_err(invalid)?,
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&workload_bytes)
+            .map_err(invalid)?,
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&mesh_bytes)
+            .map_err(invalid)?,
     )?;
     drop(workload_bytes);
     drop(mesh_bytes);
@@ -132,6 +167,7 @@ pub fn derive_fluid_steady_resource_projection(
             result.materialization_resident_bytes_estimate,
         ),
         phase_resident_bytes_upper_bound: ByteCount(phase_resident),
+        verification_phase_resident_bytes_upper_bound: ByteCount(verification_phase_resident),
     })
 }
 

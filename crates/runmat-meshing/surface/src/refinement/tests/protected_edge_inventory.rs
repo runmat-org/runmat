@@ -30,6 +30,12 @@ impl GeometryEvaluationControl for InventoryControl {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A 16384-entry reversed protected-segment inventory preserves minimum-edge protection
+//   and charges its temporary index before use; denied allocation rejects. This component
+//   lookup/admission case does not prove arbitrary constrained triangulation, native throughput, or
+//   whole-study memory.
 #[test]
 fn selection_preserves_protection_with_a_large_reversed_segment_inventory() {
     let geometry = geometry([0.005, 0.5, 0.5], 0.001, 1_000.0, 0.0, 0.0);

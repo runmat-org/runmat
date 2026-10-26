@@ -1,4 +1,8 @@
 use super::*;
+// witness: FEA-CONTACT-OPERATOR-001/friction_tangent_history @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: The local consistent tangent matches two finite-difference step sizes in all smooth
+//   regimes of the point law.
 #[test]
 fn local_consistent_tangent_matches_two_step_sizes_in_all_smooth_regimes() {
     let law = law(0.3);

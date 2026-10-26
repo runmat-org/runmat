@@ -333,6 +333,7 @@ fn bad_map_protocol_and_declared_lengths_are_rejected() {
 #[test]
 fn all_counter_arithmetic_is_checked() {
     let mut counter = Counter {
+        child_peak: 0,
         integer_value_bounds: false,
         live_map_metadata: 0,
         peak_map_metadata: 0,
@@ -348,12 +349,14 @@ fn all_counter_arithmetic_is_checked() {
         value_nodes: 0,
         map_entries: u64::MAX,
         string_bytes: 0,
+        ..Default::default()
     };
     assert!(counter.string(1, true, 0).is_err());
     counter.profile = MaterializationProfile {
         value_nodes: 0,
         map_entries: 0,
         string_bytes: u64::MAX,
+        ..Default::default()
     };
     assert!(counter.string(1, false, 0).is_err());
     assert!(
@@ -440,3 +443,43 @@ fn cooperative_encoding_profile_preserves_counts_and_interrupts_nested_inventory
     assert!(cancel.calls.load(Ordering::Relaxed) < 100);
 }
 mod shape;
+
+#[test]
+fn direct_materialization_stays_within_a_small_factor_of_measured_storage() {
+    #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+    struct Payload {
+        result_bytes: Vec<u8>,
+        values: Vec<f64>,
+        name: String,
+    }
+    let limits = CanonicalLimits::new(64 << 20, 100_000_000, 65_536, 64);
+    let payload = Payload {
+        result_bytes: (0..200_000u32).map(|i| (i % 251) as u8).collect(),
+        values: (0..20_000).map(|i| i as f64 * 0.5).collect(),
+        name: "fluid-state".into(),
+    };
+    let encoded = crate::encode_contract(b"p\0", "direct-materialization", &payload, limits).unwrap();
+    let decoded: Payload =
+        crate::decode_contract(b"p\0", "direct-materialization", &encoded, limits).unwrap();
+    assert_eq!(decoded, payload);
+    let profile = profile_direct_materialization(&payload, limits).unwrap();
+    assert!(profile.encoded_bytes_upper_bound >= encoded.len() as u64);
+    // Covers the import-side typed check over the actual wire.
+    let import = crate::canonical_payload_typed_resident_bytes_estimate(&encoded).unwrap();
+    assert!(profile.materialization_resident_bytes_estimate >= import);
+    // Measured: owned typed storage plus the canonical buffer and the decoded copy.
+    let typed = payload.result_bytes.capacity() + 8 * payload.values.capacity() + payload.name.len();
+    let measured = (typed + encoded.len()) as u64;
+    assert!(profile.materialization_resident_bytes_estimate >= measured);
+    assert!(
+        profile.materialization_resident_bytes_estimate <= 6 * measured,
+        "direct estimate {} vs measured {measured}",
+        profile.materialization_resident_bytes_estimate
+    );
+    // The value-tree projection charges tens of bytes per embedded byte.
+    let tree = profile_serialized(&payload, limits).unwrap();
+    assert!(
+        tree.materialization_resident_bytes_estimate
+            > 3 * profile.materialization_resident_bytes_estimate
+    );
+}

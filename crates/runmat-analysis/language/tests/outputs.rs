@@ -123,6 +123,10 @@ fn complex_outputs_require_explicit_representations_before_physical_reductions()
     ));
 }
 
+// witness: FEA-AUTHORING-OUTPUT-002/typed_output_queries @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Integration-point fields are typed output locations; node, element and constraint
+//   locations are covered by sibling tests.
 #[test]
 fn integration_point_fields_are_typed_output_locations() {
     let source = HARMONIC_STUDY.replacen(
@@ -158,6 +162,14 @@ fn complex_stress_cannot_claim_a_real_von_mises_invariant() {
     assert!(program.studies.is_empty());
 }
 
+// witness: FEA-AUTHORING-OUTPUT-002/closed_query_surface @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Projections and spatial reductions lower with exact dimensions and locations; the
+//   whole closed list is not enumerated.
+// witness: FEA-AUTHORING-OUTPUT-002/physical_query_dimensions @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Reductions carry exact output dimensions; principal-stress admission rules are not
+//   asserted.
 #[test]
 fn projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations() {
     let source = r#"
@@ -292,6 +304,9 @@ study response {
     );
 }
 
+// witness: FEA-AUTHORING-OUTPUT-002/typed_output_queries @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Recovery is an explicit typed element-to-node operation.
 #[test]
 fn recovery_is_an_explicit_typed_element_to_node_operation() {
     let source = r#"

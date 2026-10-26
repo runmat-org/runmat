@@ -150,16 +150,27 @@ fn validate_maxwell_constraints(
                     .into(),
             });
         }
+        // Harmonic fields admit grounded faces (tangential E = 0) and terminal potentials or
+        // currents of driven conductors; a Coulomb gauge or prescribed vector potential has
+        // no meaning for the electric-field formulation.
+        let admitted_in_harmonic = pec
+            || matches!(constraint, crate::AnalysisConstraint::Magnetic(value)
+                if matches!(value.kind, crate::MagneticConstraintKind::VectorPotentialGround { .. }))
+            || matches!(constraint, crate::AnalysisConstraint::Electrical(value)
+                if matches!(value.kind,
+                    crate::ElectricalConstraintKind::PrescribedPotential { .. }
+                    | crate::ElectricalConstraintKind::PotentialReference { .. }
+                    | crate::ElectricalConstraintKind::IntegralCurrent { .. }));
         if harmonic
             && matches!(
                 constraint,
                 crate::AnalysisConstraint::Magnetic(_) | crate::AnalysisConstraint::Electrical(_)
             )
-            && !pec
+            && !admitted_in_harmonic
         {
             return Err(AnalysisValidationError::InvalidConstraint {
                 constraint_id: constraint.constraint_id().into(),
-                detail: "harmonic electric-field Maxwell cannot reinterpret scalar-potential or magnetic constraints".into(),
+                detail: "harmonic Maxwell admits grounded faces (magnetic.vector_potential_ground, electrical.perfect_conductor) and terminal potentials or currents; a Coulomb gauge, prescribed or periodic vector potential is not admitted".into(),
             });
         }
     }
@@ -210,6 +221,8 @@ mod tests {
             density: MassDensity::new(1.225),
             dynamic_viscosity: DynamicViscosity::new(1.81e-5),
             turbulence_intensity: TurbulenceIntensity::new(0.05),
+            rheology: None,
+            porous_zones: Vec::new(),
         };
         validate_fluid_domain(&domain).unwrap();
 

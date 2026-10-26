@@ -2,7 +2,7 @@
 use super::*;
 use runmat_analysis_core::{
     AccuracyCriterion, AccuracyTarget, AccuracyTolerance, ErrorContributionKind,
-    FormulationRequirement, RequiredAccuracyEvidence,
+    RequiredAccuracyEvidence,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -18,15 +18,13 @@ use runmat_analysis_fea::{
 fn artifact(prepared: &PreparedAccuracy, evidence: Vec<AccuracyEvidence>) -> AccuracyArtifact {
     let request = &prepared.request;
     let evaluation = evaluate_accuracy(&request.plan, &evidence).unwrap();
-    let gate =
-        publication_gate(&request.plan, request.formulation_requirement, &evaluation).unwrap();
+    let gate = publication_gate(&request.plan, &evaluation).unwrap();
     AccuracyArtifact::new(AccuracyArtifactInput {
         evaluation_request: request.identity(),
         producer: request.producer,
         source_kind: request.source_kind,
         source_result: request.source_result,
         source_observations: request.source_observations,
-        formulation_requirement: request.formulation_requirement,
         evidence,
         evaluation,
         gate,
@@ -59,12 +57,17 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
             prepared.host.output_policy.chunk_bytes(),
             limits,
         )
-        .unwrap();
+        .ok()?;
+        // A counterfeit report larger than the admitted output envelope is rejected by the
+        // executing host before import; one that fits is rejected by import.
         AnalysisHostResponse::completed(&prepared.host, &completed)
-            .unwrap()
-            .program_response()
+            .ok()
+            .map(|response| response.program_response())
     };
-    let response = run(original.clone(), &mut store);
+    let rejected = |response: Option<_>, store: &MemoryObjects| {
+        response.is_none_or(|response| import_accuracy(store, response, prepared, limits).is_err())
+    };
+    let response = run(original.clone(), &mut store).expect("original evidence fits its plan");
     import_accuracy(&store, response.clone(), prepared, limits).unwrap();
     for mutation in 0..3 {
         let mut evidence = original.clone();
@@ -100,7 +103,7 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
         .unwrap();
         // Report identity, report status, gate and transport hashes are all recomputed correctly.
         let forged = run(evidence, &mut store);
-        assert!(import_accuracy(&store, forged, prepared, limits).is_err());
+        assert!(rejected(forged, &store));
     }
     for criterion in prepared.request.plan.criteria.iter().filter(|criterion| {
         !original.iter().any(|e| {
@@ -140,28 +143,20 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
                 runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
             );
             assert_eq!(
-                publication_gate(
-                    &prepared.request.plan,
-                    FormulationRequirement::Production,
-                    honest.evaluation()
-                )
-                .unwrap()
-                .decision,
+                publication_gate(&prepared.request.plan, honest.evaluation())
+                    .unwrap()
+                    .decision,
                 runmat_analysis_fea::results::accuracy::PublicationDecision::Block
             );
             assert_eq!(
-                publication_gate(
-                    &prepared.request.plan,
-                    FormulationRequirement::Production,
-                    counterfeit.evaluation()
-                )
-                .unwrap()
-                .decision,
+                publication_gate(&prepared.request.plan, counterfeit.evaluation())
+                    .unwrap()
+                    .decision,
                 runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
             );
         }
         let forged = run(evidence, &mut store);
-        assert!(import_accuracy(&store, forged, prepared, limits).is_err());
+        assert!(rejected(forged, &store));
     }
     let mut bad = PreparedAccuracy {
         request: prepared.request.clone(),
@@ -204,7 +199,7 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
             .boundaries
             .push(runmat_analysis_core::AnalysisBoundary {
                 boundary_id: "insulated".into(),
-                target: runmat_analysis_core::RegionTarget::boundary("face:0"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::HeatFlux::new(0.0),
@@ -229,7 +224,6 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
             step_id: step.step_id.clone(),
             initial_fields: Vec::new(),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             residual_target: 1e-8,
         };
@@ -274,7 +268,6 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
                 .collect(),
             sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
             step,
-            formulation_requirement: workload.formulation_requirement,
             program_revision: revision(),
             chunk_bytes: 1024,
             inventory_limits: ObjectInventoryLimits::default(),

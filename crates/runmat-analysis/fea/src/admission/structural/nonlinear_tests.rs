@@ -1,17 +1,17 @@
 use super::*;
 use crate::admission::{admit_formulation, FormulationAdmissionRequest};
-use runmat_analysis_core::{
-    FormulationMaturity, FormulationRequirement, PhysicsFamily, SolutionSpace,
-};
+use runmat_analysis_core::{PhysicsFamily, SolutionSpace};
 
 fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInput {
     let recovery = match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
-        | StructuralOperatorImplementation::Tet4SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet4SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum => {
             Some(StructuralRecoveryImplementation::Tet4ConstantStrain)
         }
         StructuralOperatorImplementation::Tet10LinearElasticity
-        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => {
             Some(StructuralRecoveryImplementation::Tet10IntegrationPointProjection)
         }
         StructuralOperatorImplementation::EulerBernoulliBeam3d => {
@@ -25,6 +25,7 @@ fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInp
     StructuralRealizationInput {
         assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
         procedure: AnalysisProcedure::Nonlinear,
+        kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
         coupling: CouplingImplementation::Uncoupled,
         sources: vec![SourceImplementation::CanonicalBoundaryPressureIntegration],
         boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
@@ -60,26 +61,13 @@ fn canonical_geometry_translates_to_exact_j2_equilibrium_axes() {
             realization,
             structural_exact_realization(input(solved)).unwrap()
         );
-        let request = FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Nonlinear,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
-        };
-        assert_eq!(
-            admit_formulation(request.clone()).unwrap().qualification(),
-            FormulationMaturity::Experimental
-        );
-        assert_eq!(
-            admit_formulation(FormulationAdmissionRequest {
-                requirement: FormulationRequirement::Production,
-                ..request
-            })
-            .unwrap_err()
-            .reason,
-            FormulationAdmissionRejectionReason::ProductionQualificationMissing
-        );
+        })
+        .expect("J2 nonlinear realization is admitted");
     }
 }
 
@@ -125,7 +113,6 @@ fn nonlinear_axes_cannot_be_relabelled_as_linear_or_reverse() {
         family: PhysicsFamily::Structural,
         procedure: AnalysisProcedure::Nonlinear,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization: forged,
     })
     .is_err());
@@ -160,11 +147,17 @@ fn coupled_profiles_cannot_borrow_the_uncoupled_j2_identity() {
             FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
         );
     }
-    assert!(crate::admission::registered_formulations(
+    for registered in crate::admission::registered_formulations(
         PhysicsFamily::Coupled(
-            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction
+            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
         ),
         AnalysisProcedure::TransientResponse,
-    )
-    .is_empty());
+    ) {
+        assert!(registered
+            .realization()
+            .components
+            .iter()
+            .all(|component| component.constitutive
+                != ConstitutiveImplementation::SmallStrainJ2IsotropicHardening));
+    }
 }

@@ -192,6 +192,7 @@ fn declaration_kind(kind: FeaDeclarationKind) -> FeaSymbolKind {
         FeaDeclarationKind::Study => FeaSymbolKind::Study,
         FeaDeclarationKind::Sweep => FeaSymbolKind::Sweep,
         FeaDeclarationKind::Execution => FeaSymbolKind::Execution,
+        FeaDeclarationKind::Table => FeaSymbolKind::Table,
     }
 }
 

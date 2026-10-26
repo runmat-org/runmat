@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, FormulationRequirement, PhysicsFamily,
-};
+use runmat_analysis_core::{AnalysisModel, AnalysisProcedure, PhysicsFamily};
 use runmat_analysis_fea::planning::resource::ResourcePlanningError;
 use runmat_analysis_fea::{AnalysisRunIdentity, FeaRunError};
 
@@ -162,13 +160,12 @@ pub(super) fn map_fea_run_error(
 pub(super) fn admit_runtime_proxy_for_operation(
     family: PhysicsFamily,
     procedure: AnalysisProcedure,
-    requirement: FormulationRequirement,
     branch: RuntimeProxyFormulation,
     operation: AnalysisOperation,
     model: &AnalysisModel,
     context: &OperationContext,
 ) -> Result<AnalysisRunIdentity, OperationErrorEnvelope> {
-    admit_runtime_proxy(family, procedure, requirement, branch).map_err(|error| {
+    admit_runtime_proxy(family, procedure, branch).map_err(|error| {
         operation_error(
             operation.name(),
             operation.version(),

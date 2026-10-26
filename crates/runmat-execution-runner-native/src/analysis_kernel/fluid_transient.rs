@@ -21,7 +21,8 @@ pub(super) fn execute(
         invocation.output_policy,
     )?;
     let prepared = original.prepare(invocation.output_policy)?;
-    let result = prepared.execute()?;
+    let result =
+        super::with_admitted_cpu_pool(&original.resource_plan, || Ok(prepared.execute()?))?;
     let result_bytes = result.canonical_bytes()?;
     let facts = original
         .resource_plan

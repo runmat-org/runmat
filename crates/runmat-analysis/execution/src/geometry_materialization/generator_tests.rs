@@ -146,12 +146,12 @@ fn executable(admitted: &AdmittedGeometryGenerator) -> ExecutableUnitEnvelope {
         ExecutableUnitManifest {
             schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: ExecutableIdentity {
+                declaration_class: None,
                 program: admitted.invocation.program_revision.clone(),
                 root_package: admitted.invocation.callable.owner_identity.clone(),
                 entrypoint: admitted.invocation.callable.qualified_name.clone(),
                 entrypoint_function: Some(admitted.invocation.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
-                declaration_class: None,
                 source_digest: admitted.invocation.executable_source_digest,
             },
             revisions: ExecutableComponentRevisions {

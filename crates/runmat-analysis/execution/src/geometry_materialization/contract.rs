@@ -269,9 +269,9 @@ impl GeometryMaterializationOutput {
                 || identity.kind != PersistentEntityKind::Face
                 || !face_identities.insert(identity)
             {
-                return Err(AnalysisBridgeError::Invalid(
-                    "geometry materialization face identity map is malformed".into(),
-                ));
+                return Err(AnalysisBridgeError::Invalid(format!(
+                    "geometry materialization face identity map is malformed at ordinal {ordinal} (expected {expected_ordinal}): {identity:?}"
+                )));
             }
             identity
                 .validate()
@@ -342,7 +342,11 @@ fn validate_source(request: &GeometryMaterializationRequest) -> AnalysisBridgeRe
                 && source_digest.bytes() == imported.content_digest.bytes()
                 && *encoded_length > 0
                 && valid_chunks(chunks, *encoded_length, *source_digest)
-                && request.import_options.source_units == imported.unit_fallback
+                && request.import_options.source_units == imported.authored_units
+                && request.import_options.source_units_authority
+                    == runmat_geometry_io::SourceUnitsAuthority::Authored
+                && request.import_options.analysis.healing.shared_interfaces
+                    == imported.shared_interfaces
         }
         (
             Definition::Derived(derived),
@@ -417,8 +421,9 @@ fn valid_chunks(chunks: &[GeometrySourceChunk], encoded_length: u64, digest: Dig
 }
 
 fn validate_output_sets(output: &GeometryMaterializationOutput) -> AnalysisBridgeResult<()> {
+    // Solids carry tetrahedral analyses; sheet faces carry shell and beam analyses.
     let topology_ids = match &output.document.model {
-        GeometryModel::ExactBRep { model } => model.solid_count,
+        GeometryModel::ExactBRep { model } => model.solid_count.max(model.face_count),
         GeometryModel::FacetedSolid { .. } => 0,
     };
     if topology_ids == 0

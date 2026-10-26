@@ -31,7 +31,7 @@ fn workload() -> MagnetostaticWorkload {
         completeness: StateCompleteness::Complete,
         persistence: StatePersistence::Canonical,
     }];
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
@@ -46,7 +46,7 @@ fn workload() -> MagnetostaticWorkload {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground:{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }
@@ -55,13 +55,12 @@ fn workload() -> MagnetostaticWorkload {
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "gauge".into(),
             kind: MagneticConstraintKind::CoulombGauge {
-                target: RegionTarget::volume("solid"),
+                target: RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("solid")),
             },
         }));
     MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }
@@ -91,7 +90,13 @@ fn magnetic_plan_cold_transport_and_exact_preflight_bind_both_orders_and_chunks(
         for chunk in [1024, 8192] {
             let policy =
                 AnalysisOutputPolicy::new(chunk, ObjectInventoryLimits::default()).unwrap();
-            let mut prepared = prepare_magnetostatic_inputs(&source, &mesh, policy).unwrap();
+            let mut prepared = prepare_magnetostatic_inputs(
+                &source,
+                &mesh,
+                policy,
+                runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            )
+            .unwrap();
             prepared.inputs.push(
                 prepare_analysis_objects(
                     AnalysisNumericalObjectKind::ResourcePlan,
@@ -157,6 +162,7 @@ fn magnetic_publication_driver_requires_distinct_work_kind_mesh_and_sampled_layo
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
     let task = crate::prepare_magnetostatic_task(crate::MagnetostaticTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: Digest::sha256("authored"),
         frozen_project_digest: None,
         program_revision: revision(),
@@ -236,4 +242,34 @@ fn magnetic_publication_driver_requires_distinct_work_kind_mesh_and_sampled_layo
         .unwrap()
         .logical_identity = Digest::sha256("foreign workload");
     assert!(crate::prepare_semantic_state_publication(foreign_workload).is_err());
+}
+
+#[test]
+fn magnetic_plan_carries_admitted_threads_and_worker_rederivation_converges() {
+    let source = workload();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
+    let threads =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(3_000)
+            .unwrap();
+    let mut prepared = prepare_magnetostatic_inputs(&source, &mesh, policy, threads).unwrap();
+    assert_eq!(prepared.resource_plan.request.cpu_millicores, 3_000);
+    prepared.inputs.push(
+        prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            prepared.resource_plan.identity.digest(),
+            &prepared.resource_plan.canonical_bytes().unwrap(),
+            1024,
+            ObjectNamespace::InputValue,
+            policy.inventory_limits(),
+        )
+        .unwrap(),
+    );
+    let plan =
+        rederive_magnetostatic_resource_plan(&source, &mesh, &prepared.inputs, policy).unwrap();
+    assert_eq!(plan, prepared.resource_plan);
+    assert_eq!(
+        source.execute_with_resource_plan(&mesh, &plan).unwrap(),
+        source.execute(&mesh).unwrap()
+    );
 }

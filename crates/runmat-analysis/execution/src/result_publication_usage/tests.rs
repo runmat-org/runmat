@@ -1,12 +1,15 @@
 use super::*;
-use runmat_analysis_core::{AccuracyPlan, FormulationRequirement, ProcedureStep};
+use runmat_analysis_core::{
+    AccuracyPlan, AccuracyTarget, ErrorContributionKind, ProcedureStep, RequiredAccuracyEvidence,
+};
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AccuracySourceKind, ResultPublicationRequest, SequenceIdentity,
     SolverResultIdentity, StepIdentity,
 };
 use runmat_analysis_fea::planning::resource::*;
 use runmat_analysis_fea::results::accuracy::{
-    accuracy_evaluation_resource_profile, evaluate_accuracy_artifact,
+    accuracy_evaluation_resource_profile, evaluate_accuracy_artifact, AccuracyEvidence,
+    AccuracyEvidenceScope, AccuracyMeasure,
 };
 use runmat_analysis_fea::results::publication::published_result_encoding_profile;
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
@@ -47,18 +50,27 @@ fn fixture() -> (
         AccuracySourceKind::StructuralLinear,
         result,
         None,
-        FormulationRequirement::Experimental,
-        AccuracyPlan::experimental_baseline("accuracy"),
+        AccuracyPlan::baseline("accuracy"),
     )
     .unwrap();
-    let profile = accuracy_evaluation_resource_profile(&request, &[]).unwrap();
+    // The baseline plan's mandatory residual bound is satisfied, so the gate allows publication.
+    let evidence = vec![AccuracyEvidence::new(
+        AccuracyTarget::GlobalEquilibrium,
+        ErrorContributionKind::Algebraic,
+        RequiredAccuracyEvidence::ResidualBound,
+        AccuracyMeasure::Relative(1.0e-9),
+        vec!["reference residual".into()],
+        AccuracyEvidenceScope::Step(producer),
+    )
+    .unwrap()];
+    let profile = accuracy_evaluation_resource_profile(&request, &evidence).unwrap();
     let primary = build_accuracy_resource_plan(
         &request,
-        &[],
+        &evidence,
         facts(profile.output_encoded_bytes_upper_bound),
     )
     .unwrap();
-    let accuracy = evaluate_accuracy_artifact(&request, vec![]).unwrap();
+    let accuracy = evaluate_accuracy_artifact(&request, evidence).unwrap();
     let source = ResourceUsageAttempt {
         attempt_id: AttemptId::derive(&[b"source"]),
         worker_id: WorkerId::derive(&[b"worker"]),

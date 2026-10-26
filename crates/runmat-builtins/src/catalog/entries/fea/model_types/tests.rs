@@ -4,10 +4,28 @@ use crate::*;
 #[test]
 fn documented_remaining_constructors_have_valid_unique_canonical_metadata() {
     let mut entries = Vec::new();
-    extend_entries(&mut entries);
+    entries.extend(
+        quantities::ENTRIES
+            .iter()
+            .chain(domains::ENTRIES)
+            .chain(interfaces::ENTRIES)
+            .copied(),
+    );
     assert_eq!(entries.len(), 14);
     assert_eq!(validate_builtin_catalog(&entries), Vec::new());
     for entry in entries {
+        let mut published = builtin_catalog_entries()
+            .iter()
+            .copied()
+            .filter(|candidate| candidate.identity == entry.identity);
+        let actual = published
+            .next()
+            .expect("canonical constructor is registered");
+        assert!(
+            published.next().is_none(),
+            "constructor has one static owner"
+        );
+        assert_eq!(actual.provenance, entry.provenance);
         assert_eq!(
             entry.documentation.authority,
             BuiltinDocumentationAuthority::Catalog

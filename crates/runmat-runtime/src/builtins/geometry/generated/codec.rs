@@ -9,35 +9,50 @@ use super::{
 };
 use crate::BuiltinResult;
 
-pub(super) fn feature_value(graph: GeometryFeatureGraph) -> BuiltinResult<Value> {
+pub(super) fn feature_value(
+    graph: GeometryFeatureGraph,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     let product = GeneratedGeometryProduct {
         graph,
         region_outputs: Default::default(),
     };
     product
         .validate()
-        .map_err(|error| invalid("geometry.feature", error.to_string()))?;
+        .map_err(|error| invalid(builtin, error.to_string()))?;
     object_value(
         GEOMETRY_FEATURE_CLASS,
-        product.canonical_bytes().map_err(map)?,
+        product
+            .canonical_bytes()
+            .map_err(|error| invalid(builtin, error.to_string()))?,
+        builtin,
     )
 }
 
-pub(super) fn generated_value(product: GeneratedGeometryProduct) -> BuiltinResult<Value> {
+pub(super) fn generated_value(
+    product: GeneratedGeometryProduct,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     product
         .validate()
-        .map_err(|error| invalid("geometry.finish", error.to_string()))?;
+        .map_err(|error| invalid(builtin, error.to_string()))?;
     object_value(
         GENERATED_GEOMETRY_CLASS,
-        product.canonical_bytes().map_err(map)?,
+        product
+            .canonical_bytes()
+            .map_err(|error| invalid(builtin, error.to_string()))?,
+        builtin,
     )
 }
 
-pub(super) fn region_output_value(output: &GeneratedGeometryRegionOutput) -> BuiltinResult<Value> {
+pub(super) fn region_output_value(
+    output: &GeneratedGeometryRegionOutput,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     let bytes = output
         .canonical_bytes()
-        .map_err(|error| invalid("geometry.regionOutput", error.to_string()))?;
-    object_value(GEOMETRY_REGION_OUTPUT_CLASS, bytes)
+        .map_err(|error| invalid(builtin, error.to_string()))?;
+    object_value(GEOMETRY_REGION_OUTPUT_CLASS, bytes, builtin)
 }
 
 pub(super) fn feature_from_value(
@@ -91,14 +106,14 @@ fn validate_product_object(
     GeneratedGeometryProduct::from_canonical_bytes(&bytes).map_err(|error| error.to_string())
 }
 
-fn object_value(class_name: &str, bytes: Vec<u8>) -> BuiltinResult<Value> {
+fn object_value(class_name: &str, bytes: Vec<u8>, builtin: &'static str) -> BuiltinResult<Value> {
     ensure_classes_registered();
     let length = bytes.len();
     let fields = [(
         CONTRACT_PROPERTY,
         Value::Tensor(
             Tensor::new_integer(IntegerStorage::U8(bytes), vec![length, 1])
-                .map_err(|error| invalid("geometry.value", error))?,
+                .map_err(|error| invalid(builtin, error))?,
         ),
     )];
     // These legacy entrypoints have no selected contextual factory authority.
@@ -133,8 +148,4 @@ fn object_contract_bytes(object: &ObjectInstance, class_name: &str) -> Result<Ve
         return Err(format!("{class_name} contract has an invalid shape"));
     }
     Ok(bytes.clone())
-}
-
-fn map(error: runmat_geometry_core::GeometryContractError) -> crate::RuntimeError {
-    invalid("geometry.value", error.to_string())
 }

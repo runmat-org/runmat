@@ -5,12 +5,16 @@ use serde::Serialize;
 use crate::presentation;
 
 mod local;
-pub(super) use local::{completed_summary, print_completed_fea_result};
+pub(super) use local::print_completed_fea_result;
+use local::completed_summary;
 
 #[derive(Serialize)]
 pub(super) struct LocalRunSummary {
     #[serde(flatten)]
     assessment_summary: AssessmentSummary,
+    /// Signed global heat balance of the final thermal solve, in watts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thermal_energy_balance: Option<ThermalEnergyBalanceSummary>,
     root_id: String,
     procedure: &'static str,
     study_definition_digest: String,
@@ -19,7 +23,22 @@ pub(super) struct LocalRunSummary {
     elements: usize,
     boundary_faces: usize,
     step_run_ids: Vec<String>,
+    /// Definition run ids of the steps; each resolves to its latest committed attempt, while
+    /// `step_run_ids` name this execution's attempts.
+    definition_run_ids: Vec<String>,
+    /// Every committed attempt of each definition run id, oldest first (this execution last).
+    attempt_run_ids: Vec<Vec<String>>,
     result_manifest_artifact_path: String,
+}
+
+pub(super) fn definition_run_ids(step_run_ids: &[String]) -> Vec<String> {
+    step_run_ids
+        .iter()
+        .map(|id| {
+            runmat_runtime::analysis::split_attempt_run_id(id)
+                .map_or_else(|| id.clone(), |(definition, _)| definition.to_owned())
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -27,6 +46,29 @@ struct AssessmentSummary {
     run_status: runmat_runtime::analysis::RunStatus,
     numerically_acceptable: bool,
     assessments: Vec<runmat_runtime::analysis::assessment::PublishedStudyAssessment>,
+}
+
+#[derive(Serialize)]
+pub(super) struct ThermalEnergyBalanceSummary {
+    applied_power_w: f64,
+    boundary_loss_w: f64,
+    storage_rate_w: f64,
+    prescribed_boundary_power_w: f64,
+    residual_w: f64,
+    relative_residual: f64,
+}
+
+impl From<&runmat_analysis_fea::contracts::ThermalEnergyBalance> for ThermalEnergyBalanceSummary {
+    fn from(balance: &runmat_analysis_fea::contracts::ThermalEnergyBalance) -> Self {
+        Self {
+            applied_power_w: balance.applied_power_w.canonical_value(),
+            boundary_loss_w: balance.boundary_loss_w.canonical_value(),
+            storage_rate_w: balance.storage_rate_w.canonical_value(),
+            prescribed_boundary_power_w: balance.prescribed_boundary_power_w.canonical_value(),
+            residual_w: balance.residual_w.canonical_value(),
+            relative_residual: balance.relative_residual,
+        }
+    }
 }
 
 impl From<&AnalysisStudyRunData> for AssessmentSummary {
@@ -46,6 +88,7 @@ pub(super) fn local_summary(
 ) -> Result<LocalRunSummary> {
     Ok(LocalRunSummary {
         assessment_summary: publication.into(),
+        thermal_energy_balance: None,
         root_id: root_id.into(),
         procedure: numerical_kind(completed.numerical()),
         study_definition_digest: completed
@@ -61,6 +104,8 @@ pub(super) fn local_summary(
             .iter()
             .map(|step| step.run_id.clone())
             .collect(),
+        definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
         result_manifest_artifact_path: publication
             .result_manifest_artifact_path
             .clone()
@@ -72,15 +117,21 @@ pub(super) fn local_summary(
 
 pub(crate) fn print_fea_result(
     study_id: &str,
-    completed: &runmat_runtime::analysis::StructuralStudyResult,
+    completed: &runmat_execution_runner_native::CompletedFeaStudyResult,
     publication: &runmat_runtime::analysis::AnalysisStudyRunData,
     json: bool,
 ) -> Result<()> {
-    let summary = local_summary(study_id, completed, publication)?;
-    print_summary(study_id, summary, json)
+    print_completed_fea_result(study_id, completed, publication, json)
 }
 
-fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result<()> {
+fn print_summary(study_id: &str, mut summary: LocalRunSummary, json: bool) -> Result<()> {
+    summary.definition_run_ids = definition_run_ids(&summary.step_run_ids);
+    summary.attempt_run_ids = summary
+        .definition_run_ids
+        .iter()
+        .map(|definition| runmat_runtime::analysis::storage::run_attempts(definition))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(anyhow::Error::msg)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
         return Ok(());
@@ -115,6 +166,18 @@ fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result
         summary.elements,
         summary.boundary_faces
     );
+    if let Some(balance) = &summary.thermal_energy_balance {
+        println!(
+            "  {} applied {:.6} W, boundary loss {:.6} W, storage {:.6} W, prescribed-temperature reaction {:.6} W, residual {:.3e} W (relative {:.3e})",
+            styles.label("energy balance:"),
+            balance.applied_power_w,
+            balance.boundary_loss_w,
+            balance.storage_rate_w,
+            balance.prescribed_boundary_power_w,
+            balance.residual_w,
+            balance.relative_residual
+        );
+    }
     for assessment in &summary.assessment_summary.assessments {
         println!(
             "  {}: {:?}",
@@ -152,7 +215,7 @@ pub(crate) fn print_fea_sweep_result(
                     serde_json::json!({
                         "case_id": case_id,
                         "status": "succeeded",
-                        "result": local_summary(case_id, &study.result, &study.publication)?,
+                        "result": completed_summary(case_id, &study.result, &study.publication)?,
                     })
                 }
                 super::remote::MaterializedFeaSweepTerminal::Failed(message) => serde_json::json!({
@@ -201,38 +264,10 @@ pub(crate) fn print_fea_sweep_result(
                 summary["elements"],
                 summary["procedure"].as_str().unwrap_or("unknown")
             ),
-            None => println!("  {id}: {status}"),
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn print_sweep_result(
-    id: &str,
-    summaries: &[LocalRunSummary],
-    json: bool,
-) -> Result<()> {
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "sweep_id": id,
-                "cases": summaries,
-            }))?
-        );
-    } else {
-        let styles = presentation::stdout();
-        println!(
-            "{} {} ({} cases)",
-            styles.success("FEA sweep complete"),
-            styles.identifier(id),
-            summaries.len()
-        );
-        for summary in summaries {
-            println!(
-                "  {}: {} tetrahedra, {}",
-                summary.root_id, summary.elements, summary.procedure
-            );
+            None => match case["message"].as_str() {
+                Some(message) => println!("  {id}: {status}: {message}"),
+                None => println!("  {id}: {status}"),
+            },
         }
     }
     Ok(())

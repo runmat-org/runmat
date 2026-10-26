@@ -41,7 +41,7 @@ fn result(task: &PreparedMagnetostaticTask) -> MagnetostaticSolverResult {
 
 #[test]
 fn native_magnetic_nonzero_reference_converges_without_reference_solver_outputs() {
-    let mu = runmat_analysis_fea::physics::magnetic::VACUUM_PERMEABILITY_H_PER_M;
+    let mu = runmat_analysis_fea::physics::magnetic::VACUUM_PERMEABILITY_H_PER_M.canonical_value();
     let exact_energy = reference::energy(mu, 255);
     let mut errors = Vec::new();
     for cells in [1, 2, 4] {
@@ -55,14 +55,14 @@ fn native_magnetic_nonzero_reference_converges_without_reference_solver_outputs(
             let (a, b) = reference::fields(x, y, mu, 1023);
             for axis in 0..3 {
                 potential += sample.volume_weight_m3
-                    * (sample.vector_potential_wb_per_m[axis] - a[axis]).powi(2);
-                flux += sample.volume_weight_m3 * (sample.flux_density_t[axis] - b[axis]).powi(2);
+                    * (sample.vector_potential_wb_per_m.canonical_value()[axis] - a[axis]).powi(2);
+                flux += sample.volume_weight_m3 * (sample.flux_density_t.canonical_value()[axis] - b[axis]).powi(2);
             }
         }
         let error = (
             potential.sqrt() / mu,
             flux.sqrt() / mu,
-            (response.magnetic_energy_j - exact_energy).abs() / exact_energy,
+            (response.magnetic_energy_j.canonical_value() - exact_energy).abs() / exact_energy,
         );
         eprintln!("native magnetic cells={cells} normalized A/B/energy errors={error:?}");
         errors.push(error);
@@ -95,15 +95,17 @@ fn native_magnetic_signed_material_scaling_and_affine_orders_are_transport_neutr
                 for (a, b) in cold
                     .response()
                     .edge_circulations_wb
-                    .iter()
-                    .zip(&base.response().edge_circulations_wb)
+                    .canonical_values().iter()
+                    .zip(base.response().edge_circulations_wb.canonical_values())
                 {
                     assert!((a - scale * b).abs() <= 1e-13 * scale.abs().max(1.0));
                 }
                 let expected = base.response().magnetic_energy_j * current * current * permeability;
                 assert!(
-                    (cold.response().magnetic_energy_j - expected).abs()
-                        <= 1e-8 * expected.abs().max(f64::MIN_POSITIVE)
+                    (cold.response().magnetic_energy_j - expected)
+                        .abs()
+                        .canonical_value()
+                        <= 1e-8 * expected.abs().canonical_value().max(f64::MIN_POSITIVE)
                 );
                 let outputs = solve(&task);
                 let receipt = outputs.into_iter().nth(1).unwrap();

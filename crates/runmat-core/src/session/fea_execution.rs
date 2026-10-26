@@ -225,7 +225,6 @@ impl CheckedFeaSessionSource {
             &compiled,
             StructuralStudyPlanningPolicy {
                 backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                formulation_requirement: resolved.study.formulation_requirement,
                 numerics: StructuralNumericalPlanningPolicy::production(),
             },
         )
@@ -289,6 +288,9 @@ fn sequence_preparation(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution,
+        solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
 }
 impl PreparedSerialFeaStudy {
@@ -355,6 +357,7 @@ impl PreparedSerialFeaStudy {
         let numerical = StructuralStudyNumericalResult::LinearSequence(
             StructuralStudySequenceNumericalResult {
                 frozen_project_digest: self.frozen_project_digest,
+                effective_memory_ceiling_bytes: None,
                 steps: completed
                     .steps
                     .into_iter()

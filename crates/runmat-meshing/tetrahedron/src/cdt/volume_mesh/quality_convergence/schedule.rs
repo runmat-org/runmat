@@ -47,9 +47,14 @@ impl<F> CoupledSchedule<F> {
         }
     }
 
-    /// An unchanged state already rejected by repair is never re-searched.
+    /// An unchanged state already rejected by repair is never re-searched. While refinement
+    /// admits batches, shape repair waits: new points keep replacing cells, so repairing the
+    /// shape defects of every intermediate state re-searches slivers refinement is about to
+    /// remove. Repair runs once refinement yields to a shape defect, is blocked, or is done.
     pub(super) fn should_repair(&self, step: RefinementStep, shape_violation: bool) -> bool {
-        self.blocked.is_none() && (step == RefinementStep::Blocked || shape_violation)
+        self.blocked.is_none()
+            && step != RefinementStep::Accepted
+            && (step == RefinementStep::Blocked || shape_violation)
     }
 
     pub(super) fn repaired(&mut self, step: RepairStep, rejection: Option<F>) {
@@ -88,6 +93,10 @@ impl<F> CoupledSchedule<F> {
 mod tests {
     use super::{RefinementStep::*, RepairStep::*, *};
 
+    // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: A failed source window yields to repair and a rejected repair resumes refinement;
+    //   fairness on real parts is not asserted.
     #[test]
     fn failed_source_window_yields_and_rejected_repair_resumes_refinement() {
         let mut schedule = CoupledSchedule::default();
@@ -100,12 +109,16 @@ mod tests {
             Next::Continue
         );
         // The unchanged rejected state is not searched again.
-        assert!(!schedule.should_repair(Accepted, true));
+        assert!(!schedule.should_repair(Yielded, true));
         schedule.refined(Accepted);
-        // Accepted refinement makes the rejection stale; repair is retried.
-        assert!(schedule.should_repair(Accepted, true));
+        // Repair waits while refinement admits batches.
+        assert!(!schedule.should_repair(Accepted, true));
+        assert_eq!(schedule.next(Accepted, None, false), Next::Continue);
+        // Accepted refinement made the rejection stale; once refinement is done, repair runs.
+        schedule.refined(Idle);
+        assert!(schedule.should_repair(Idle, true));
         schedule.repaired(Changed, None);
-        assert_eq!(schedule.next(Accepted, Some(Changed), true), Next::Finish);
+        assert_eq!(schedule.next(Idle, Some(Changed), true), Next::Finish);
     }
 
     #[test]

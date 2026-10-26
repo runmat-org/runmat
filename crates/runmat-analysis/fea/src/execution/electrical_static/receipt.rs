@@ -97,7 +97,9 @@ impl ElectricalNumericalReceiptArtifact {
             relative_flux_imbalance: r.relative_flux_imbalance,
             relative_energy_identity_error: r.relative_energy_identity_error,
             solver_relative_tolerance: workload.relative_residual_target,
-            closure_relative_tolerance: workload.relative_residual_target.max(1e-10) * 10.0,
+            closure_relative_tolerance: crate::physics::electrical::closure_target(
+                workload.relative_residual_target,
+            ),
             total_constitutive_integral: runmat_types::physical::Quantity::try_from_dimension(
                 r.equation.work_kind().dimension(),
                 Some(r.equation.work_kind()),
@@ -150,7 +152,8 @@ impl ElectricalNumericalReceiptArtifact {
             || !r.solver_relative_tolerance.is_finite()
             || r.solver_relative_tolerance <= 0.0
             || r.solver_relative_tolerance >= 1.0
-            || r.closure_relative_tolerance != r.solver_relative_tolerance.max(1e-10) * 10.0
+            || r.closure_relative_tolerance
+                != crate::physics::electrical::closure_target(r.solver_relative_tolerance)
             || !within(r.linear_relative_residual, r.solver_relative_tolerance)
             || !within(r.linear_absolute_residual, f64::MAX)
             || !within(r.relative_flux_imbalance, r.closure_relative_tolerance)

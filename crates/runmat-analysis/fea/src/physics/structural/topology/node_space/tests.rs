@@ -26,11 +26,11 @@ fn explicit_node_space_uses_the_authored_topology_without_a_mesh() {
 #[test]
 fn attached_explicit_node_upgrades_one_solid_node_without_duplicate_translation() {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-    let vertex = PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam-root".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let vertex = PersistentEntityId::new(
+        PersistentEntityKind::Vertex,
+        "beam-root".into(),
+        vec!["root".into()],
+    );
     mesh.topology.nodes[0].provenance.push(vertex.clone());
     reseal(&mut mesh);
     let mut structural = crate::fixtures::fixture_model(
@@ -60,22 +60,22 @@ fn attachments_fail_closed_on_missing_ambiguous_and_displaced_vertices() {
     .structural
     .expect("beam topology");
     structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment::GeometryVertex {
-        entity: runmat_geometry_core::PersistentEntityId {
-            kind: runmat_geometry_core::PersistentEntityKind::Vertex,
-            source_topology_id: "beam-root".into(),
-            assembly_path: Vec::new(),
-        },
+        entity: runmat_geometry_core::PersistentEntityId::new(
+            runmat_geometry_core::PersistentEntityKind::Vertex,
+            "beam-root".into(),
+            Vec::new(),
+        ),
     });
     assert!(matches!(
         CanonicalStructuralNodeSpace::derive(&mesh, &structural),
         Err(StructuralNodeSpaceError::MissingAttachment { .. })
     ));
 
-    let vertex = PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam-root".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let vertex = PersistentEntityId::new(
+        PersistentEntityKind::Vertex,
+        "beam-root".into(),
+        vec!["root".into()],
+    );
     mesh.topology.nodes[0].provenance.push(vertex.clone());
     mesh.topology.nodes[1].provenance.push(vertex.clone());
     structural.nodes[0].solid_attachment =
@@ -110,11 +110,11 @@ fn attachments_fail_closed_on_missing_ambiguous_and_displaced_vertices() {
 #[test]
 fn topology_identity_changes_with_attachment_ownership() {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-    let vertex = PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam-root".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let vertex = PersistentEntityId::new(
+        PersistentEntityKind::Vertex,
+        "beam-root".into(),
+        vec!["root".into()],
+    );
     mesh.topology.nodes[0].provenance.push(vertex.clone());
     reseal(&mut mesh);
     let mut structural = crate::fixtures::fixture_model(
@@ -263,14 +263,14 @@ fn cancelled_topology_construction_and_surface_selection_stop_at_entry() {
         ))
     ));
     assert_eq!(
-        super::super::explicit_target_node_indices(&structural, "shell_panel").unwrap_err(),
+        super::super::explicit_target_node_indices(&structural, &runmat_meshing_core::fixtures::fixture_face("shell_panel")).unwrap_err(),
         TopologyStorageError::Cancelled
     );
     assert!(matches!(
         super::super::explicit_surface::explicit_shell_surface_geometry(
             &structural,
             &topology,
-            "shell_panel"
+            &runmat_meshing_core::fixtures::fixture_face("shell_panel"),
         ),
         Err(
             super::super::explicit_surface::ExplicitShellSurfaceError::Storage(

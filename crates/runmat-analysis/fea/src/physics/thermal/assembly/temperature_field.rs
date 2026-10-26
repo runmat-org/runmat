@@ -139,7 +139,7 @@ mod tests {
             temperature("whole", RealizedExcitationTarget::WholeModel, 300.0),
             temperature(
                 "face",
-                RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
                 350.0,
             ),
         ]);
@@ -170,12 +170,12 @@ mod tests {
         let excitations = RealizedExcitations::new(vec![
             temperature(
                 "first",
-                RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
                 300.0,
             ),
             temperature(
                 "second",
-                RealizedExcitationTarget::Region(RegionTarget::boundary("face:1")),
+                RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1"))),
                 350.0,
             ),
         ]);
@@ -199,17 +199,18 @@ mod tests {
                 temperature("whole", RealizedExcitationTarget::WholeModel, 300.0),
                 temperature(
                     &id,
-                    RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                    RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
                     350.0,
                 ),
                 temperature(
                     "same",
-                    RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                    RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
                     350.0,
                 ),
             ]);
             let prescribed = prescribed_temperatures(&projection, &excitations).unwrap();
-            let face = projection.boundary_faces_matching("face:0").next().unwrap();
+            let face_selector = runmat_meshing_core::fixtures::fixture_face("face:0");
+            let face = projection.boundary_faces_matching(&face_selector).next().unwrap();
             for (index, value) in prescribed.iter().enumerate() {
                 assert_eq!(
                     *value,

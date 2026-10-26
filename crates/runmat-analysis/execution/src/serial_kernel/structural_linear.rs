@@ -7,6 +7,7 @@ use runmat_analysis_fea::results::observation::ObservationLimits;
 pub(crate) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.decode_inputs");
     let solve_invocation =
         unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
     let mesh_input = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
@@ -81,6 +82,8 @@ pub(crate) fn execute(
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     // Validate from the unchanged authored constraints; solver_model only rewrites sequence
     // execution controls. Release the fresh validation result before copying that model.
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.constraint_compilation");
     let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         &solve.model,
         mesh.as_ref(),
@@ -92,6 +95,8 @@ pub(crate) fn execute(
             "constraint plan differs from original bounded compilation",
         ));
     }
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.resource_plan_rederivation");
     let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observations =
@@ -120,6 +125,14 @@ pub(crate) fn execute(
             &accelerator_requests,
             local_execution,
             Some(&prepared_inputs),
+            // The submitted plan's recorded solve path is re-derived, never re-selected: the
+            // machine memory that chose it is provenance, not an input.
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::Recorded(
+                runmat_analysis_fea::planning::resource::recorded_static_solve_path(&resource_plan)
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "structural resource plan records no solve path",
+                    ))?,
+            ),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if expected_resource_plan != resource_plan {
@@ -212,8 +225,9 @@ pub(crate) fn execute(
             })
         })
         .transpose()?;
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.run");
     let solve_options = LinearStaticSolveOptions {
-        formulation_requirement: solve.formulation_requirement,
         preconditioner_kind: solve.preconditioner,
         algebra_backend_kind: solve.algebra_backend,
         solver_mesh_artifact_path: None,
@@ -312,6 +326,8 @@ pub(crate) fn execute(
         )?,
         None => StructuralLinearWorkloadResult::new(run, constraint_result)?,
     };
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.result_encoding");
     let payload = result.canonical_bytes()?;
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::new(invocation.host.workload.identity, &result)?;
@@ -323,6 +339,7 @@ pub(crate) fn execute(
         runmat_execution::Digest::sha256(&payload),
         crate::StructuralStateProfileResult::Linear(&result),
     )?;
+    drop(phase);
     Ok(vec![
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,

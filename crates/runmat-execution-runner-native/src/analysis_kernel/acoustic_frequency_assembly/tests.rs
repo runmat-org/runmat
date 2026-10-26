@@ -49,7 +49,7 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(frequencies);
     model.sequence.steps = vec![step];
@@ -58,13 +58,13 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "matched".into(),
-        target: RegionTarget::boundary("face:3"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -73,17 +73,14 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
-        solver: runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy {
-            uniqueness: Some(
-                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            ),
-            ..Default::default()
-        },
+        solver: runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }
 }
 
+// witness: FEA-ACOUSTIC-EXECUTION-001/inventory @ acoustic_harmonic/tet4|tet10/native_process;
+//   boundary: Tet4/Tet10, two/three serial-native frequencies, reversed completion and cold
+//   filesystem fields; no actual parallel/distributed/GPU or producer-termination claim.
 #[test]
 fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metadata() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -111,6 +108,8 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
             let mut objects = Vec::new();
             for entry in workload.plan().entries().unwrap().into_iter().rev() {
                 let solve = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                     authored_study_digest: digest,
                     frozen_project_digest: None,
                     program_revision: revision.clone(),
@@ -138,10 +137,17 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
                 originals.push(imported.result);
                 objects.push(imported.objects);
             }
+            let request =
+                runmat_analysis_fea::execution::AcousticFrequencyAssemblyRequest::new(vec![
+                    None;
+                    count
+                ])
+                .unwrap();
             let preparation = |entries| AcousticFrequencyAssemblyPreparation {
                 workload: workload.clone(),
                 mesh: mesh.clone(),
                 entries,
+                request: request.clone(),
                 artifact_access: access.clone(),
                 program_revision: revision.clone(),
                 output_policy: policy,
@@ -189,7 +195,7 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
             for missing in [true, false] {
                 let damaged = DamagedObject {
                     source: &store,
-                    target: imported.fields[0].objects[1].descriptor.digest,
+                    target: imported.result_objects.objects[0].descriptor.digest,
                     missing,
                 };
                 assert!(import_acoustic_frequency_assembly(
@@ -209,32 +215,23 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
                     .collect::<Vec<_>>(),
                 frequencies
             );
-            assert_eq!(imported.fields.len(), count);
             imported
                 .publication
                 .validate_for(&imported.result.publication_authority().unwrap())
                 .unwrap();
-            for ((result, sample), field) in imported
+            // Fields are recovered and published by each frequency entry's own task; the fan-in
+            // retains only the assembled result and its publication manifest.
+            for (result, sample) in imported
                 .result
                 .results()
                 .iter()
                 .zip(imported.publication.samples())
-                .zip(&imported.fields)
             {
                 assert!(originals.contains(result));
                 assert_eq!(
                     sample.recovery_request.source.solver_result(),
                     Some(result.source_result_identity().unwrap())
                 );
-                assert_eq!(
-                    field.manifest.logical_identity,
-                    sample.fields.identity.digest()
-                );
-                assert_eq!(
-                    field.manifest.partitions[0].logical_identity,
-                    sample.fields.identity.digest()
-                );
-                assert!(field.manifest.partitions.len() >= 3);
             }
             let mut ordered = objects;
             ordered.reverse();

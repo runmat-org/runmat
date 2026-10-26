@@ -36,15 +36,20 @@ pub(super) fn project_boundary_face(
     if !area.is_finite()
         || area <= 0.0
         || norm(area_vector) <= f64::EPSILON
-        || adjacent_element_indices.is_empty()
+        // Only a sheet mesh (no volume elements) has faces without an adjacent element.
+        || (adjacent_element_indices.is_empty() != elements.is_empty())
     {
         return Err(AnalysisProjectionError::InvalidBoundaryGeometry {
             face_id: face.face_id,
         });
     }
-    let interior = elements[adjacent_element_indices[0]].centroid_m;
-    if dot(area_vector, subtract(interior, centroid)) > 0.0 {
-        area_vector = area_vector.map(|value| -value);
+    // A volume face points away from its first adjacent element; a sheet face keeps the
+    // orientation of its corner order, which the mesher derives from the exact surface.
+    if let Some(&adjacent) = adjacent_element_indices.first() {
+        let interior = elements[adjacent].centroid_m;
+        if dot(area_vector, subtract(interior, centroid)) > 0.0 {
+            area_vector = area_vector.map(|value| -value);
+        }
     }
     Ok(ProjectedBoundaryFace {
         face_id: face.face_id,

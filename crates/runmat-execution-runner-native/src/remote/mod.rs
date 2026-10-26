@@ -10,6 +10,7 @@ mod driver;
 pub(crate) mod exact_meshing;
 pub(crate) mod exact_structural_study;
 pub(crate) mod exact_structural_sweep;
+mod family_study;
 mod gang;
 pub(crate) mod input_materialization;
 mod object_transfer;

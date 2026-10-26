@@ -16,6 +16,9 @@ use runmat_meshing_core::SolverMeshArtifact;
 use std::collections::BTreeSet;
 
 pub struct ElectricalStaticTaskPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    /// Memory this machine admits for work, from the shared machine-capacity authority.
+    pub machine_memory_bytes: u64,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -41,6 +44,8 @@ pub fn prepare_electrical_static_task(
         &preparation.workload,
         &preparation.mesh,
         preparation.output_policy,
+        preparation.local_execution,
+        preparation.machine_memory_bytes,
     )?;
     let resource_plan = prepared.resource_plan;
     let mut inputs = prepared.inputs;

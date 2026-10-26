@@ -5,7 +5,7 @@ use runmat_meshing_core::fixtures::{
 };
 
 use super::{
-    assert_vectors_within_tolerance, experimental_linear_static_options, host_field,
+    assert_vectors_within_tolerance, baseline_linear_static_options, host_field,
     replace_fixture_excitations, solid_static_patch::traction_patch_model, ComputeBackend,
     FixtureExcitation, FixtureExcitationKind, LinearStaticSolveOptions, ParityTolerance,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -128,7 +128,7 @@ fn connected_tet4_and_tet10_pressure_patch_recovers_hydrostatic_affine_solution(
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
                 solver_mesh: Some(mesh),
-                ..experimental_linear_static_options()
+                ..baseline_linear_static_options()
             },
         )
         .expect("connected pressure patch must solve");

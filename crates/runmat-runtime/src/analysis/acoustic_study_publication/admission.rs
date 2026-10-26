@@ -33,10 +33,8 @@ pub(super) fn validate(
     };
     if step.family != PhysicsFamily::Acoustic
         || step.procedure != AnalysisProcedure::HarmonicResponse
-        || !step.observations.is_empty()
-        || !completed.compiled.outputs.is_empty()
     {
-        return Err("acoustic publication requires an exact independent authored workload without unsupported observations".into());
+        return Err("acoustic publication requires an exact independent authored workload".into());
     }
     completed
         .result
@@ -74,15 +72,8 @@ pub(super) fn validate(
     let plan = runmat_analysis_fea::study::plan_acoustic_study(
         &completed.compiled,
         runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
-            formulation_requirement: first.workload.formulation_requirement,
-            krylov_restart: first.workload.solver.restart,
-            maximum_iterations: first.workload.solver.maximum_iterations,
             power_balance_relative_tolerance: first.workload.power_balance_relative_tolerance,
-            uniqueness: first
-                .workload
-                .solver
-                .uniqueness
-                .ok_or("authored acoustic publication lacks uniqueness controls")?,
+            contraction_limit: first.workload.solver.contraction_limit,
         },
     )
     .map_err(|e| e.to_string())?;
@@ -133,8 +124,7 @@ fn validate_entry(
             .result
             .source_result_identity()
             .map_err(|e| e.to_string())?,
-        None,
-        completed.workload.formulation_requirement,
+        completed.observation_catalog.as_ref(),
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;
@@ -150,6 +140,43 @@ fn validate_entry(
         return Err(
             "acoustic accuracy differs from exact authored plan and accepted receipt".into(),
         );
+    }
+    let sampled = runmat_analysis_fea::results::observation::authored_observations_sample(
+        step,
+        runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+            completed.workload.frequency.canonical_value(),
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    match &completed.observation_catalog {
+        // No authored observation samples this frequency of the sweep.
+        None if !sampled && completed.observation_results.is_empty() => {}
+        Some(catalog) if sampled => {
+            catalog
+                .validate_authored_step(step)
+                .map_err(|e| e.to_string())?;
+            let sample = runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+                completed.workload.frequency.canonical_value(),
+            );
+            if completed.observation_results.len() != step.observations.len()
+                || completed
+                    .observation_results
+                    .iter()
+                    .zip(&step.observations)
+                    .any(|(result, request)| {
+                        request
+                            .spec()
+                            .is_none_or(|spec| spec.observation_id != result.observation_id)
+                            || result.sample != sample
+                    })
+            {
+                return Err(
+                    "acoustic outputs differ from the authored observations at this frequency"
+                        .into(),
+                );
+            }
+        }
+        _ => return Err("acoustic output catalog differs from the authored step".into()),
     }
     let requests = completed
         .result

@@ -29,10 +29,10 @@ ordered predecessor might not publish a compatible basis.
 Check and run the complete example:
 
 ```sh
-runmat fea check docs/simulation/examples/modal-response-spectrum-experimental.fea
-runmat fea run docs/simulation/examples/modal-response-spectrum-experimental.fea
+runmat fea check docs/simulation/examples/modal-response-spectrum.fea
+runmat fea run docs/simulation/examples/modal-response-spectrum.fea
 ```
 
 Before using the envelope, inspect modal residuals, mass orthogonality, cumulative effective mass,
 truncation and missing-mass treatment, directional combination, recovered-field provenance, and
-formulation maturity. A requested mode count by itself is not a completeness criterion.
+formulation identity. A requested mode count by itself is not a completeness criterion.

@@ -39,6 +39,7 @@ pub fn prepare_thermal_solver_result_objects(
         &result.temperature_gradient_snapshots,
         &result.heat_flux_snapshots,
         &result.energy_storage_rate_snapshots,
+        &result.interface_temperature_snapshots,
     ];
     for (ordinal, entries) in manifest.fields.iter().enumerate() {
         for (entry, history) in entries.iter().zip(histories) {
@@ -70,9 +71,9 @@ pub fn decode_prepared_thermal_state(
     let manifest = decode_prepared_thermal_manifest(prepared)?;
     manifest.validate_publication_request(publication)?;
     let partitions = manifest
-        .terminal_temperature()?
-        .partitions
-        .iter()
+        .terminal_state_fields()?
+        .into_iter()
+        .flat_map(|entry| entry.partitions.iter())
         .map(|descriptor| {
             decode_partition(
                 descriptor.partition.digest(),
@@ -142,9 +143,9 @@ pub fn import_thermal_state(
     // Bound the union of selected semantic payloads before fetching temperature blocks.
     let selected = std::iter::once(manifest.identity().digest()).chain(
         manifest
-            .terminal_temperature()?
-            .partitions
-            .iter()
+            .terminal_state_fields()?
+            .into_iter()
+            .flat_map(|entry| entry.partitions.iter())
             .map(|part| part.partition.digest()),
     );
     let mut bytes = request.root.encoded_length;
@@ -173,9 +174,9 @@ pub fn import_thermal_state(
         ));
     }
     let partitions = manifest
-        .terminal_temperature()?
-        .partitions
-        .iter()
+        .terminal_state_fields()?
+        .into_iter()
+        .flat_map(|entry| entry.partitions.iter())
         .map(|descriptor| {
             let imported = load(descriptor.partition.digest())?;
             decode_partition(descriptor.partition.digest(), &imported.payload())

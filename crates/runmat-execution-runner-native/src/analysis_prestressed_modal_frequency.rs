@@ -70,6 +70,7 @@ pub(crate) async fn execute_with_thermal_source(
             "prestressed modal-frequency preparation and policy name different accelerator requests",
         ));
     }
+    let local_execution = preparation.local_execution;
     let mesh = preparation.mesh.clone();
     let program_revision = preparation.program_revision.clone();
     let artifact_access = preparation.artifact_access.clone();
@@ -123,6 +124,7 @@ pub(crate) async fn execute_with_thermal_source(
     let frequency = Box::pin(crate::analysis_frequency::execute_with_pool(
         pool,
         StructuralFrequencyExecutionPreparation {
+            local_execution,
             workload: bound.workload,
             mesh,
             prestress_state: Some(bound.prestress_state),

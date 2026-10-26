@@ -13,7 +13,6 @@ pub enum ResultsOption {
     IncludeTransientResults,
     TransientSnapshotIndices,
     IncludeNonlinearResults,
-    IncludeElectromagneticResults,
 }
 
 impl ResultsOption {
@@ -37,7 +36,6 @@ impl ResultsOption {
             "includetransientresults" => Self::IncludeTransientResults,
             "transientsnapshotindices" => Self::TransientSnapshotIndices,
             "includenonlinearresults" => Self::IncludeNonlinearResults,
-            "includeelectromagneticresults" => Self::IncludeElectromagneticResults,
             _ => return None,
         })
     }
@@ -53,7 +51,6 @@ impl ResultsOption {
             Self::IncludeTransientResults => "includetransientresults",
             Self::TransientSnapshotIndices => "transientsnapshotindices",
             Self::IncludeNonlinearResults => "includenonlinearresults",
-            Self::IncludeElectromagneticResults => "includeelectromagneticresults",
         }
     }
 }

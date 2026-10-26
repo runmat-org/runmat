@@ -14,7 +14,7 @@ fn fixed_constraint(
             constraint_id: id.into(),
             frame: runmat_analysis_core::CoordinateFrame::Global,
             kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                target: runmat_analysis_core::RegionTarget::authored(region),
+                target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
             },
         },
     )
@@ -30,7 +30,7 @@ fn zero_translation_constraint(
             frame: runmat_analysis_core::CoordinateFrame::Global,
             kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
                 runmat_analysis_core::PrescribedStructuralDofs {
-                    target: runmat_analysis_core::RegionTarget::authored(region),
+                    target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
                     translations: [
                         runmat_analysis_core::StructuralTranslationDof::Ux,
                         runmat_analysis_core::StructuralTranslationDof::Uy,
@@ -58,7 +58,7 @@ fn magnetic_ground(
     runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
         constraint_id: id.into(),
         kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
-            target: runmat_analysis_core::RegionTarget::authored(region),
+            target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
         },
     })
 }
@@ -69,7 +69,7 @@ fn magnetic_insulation(
 ) -> runmat_analysis_core::AnalysisBoundary {
     runmat_analysis_core::AnalysisBoundary {
         boundary_id: id.into(),
-        target: runmat_analysis_core::RegionTarget::authored(region),
+        target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
         operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
     }
 }
@@ -81,7 +81,7 @@ fn acoustic_boundary(
 ) -> runmat_analysis_core::AnalysisBoundary {
     runmat_analysis_core::AnalysisBoundary {
         boundary_id: id.into(),
-        target: runmat_analysis_core::RegionTarget::authored(region),
+        target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
         operator,
     }
 }
@@ -94,7 +94,7 @@ fn thermal_temperature(
     runmat_analysis_core::AnalysisConstraint::Thermal(runmat_analysis_core::ThermalConstraint {
         constraint_id: id.into(),
         kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-            target: runmat_analysis_core::RegionTarget::authored(region),
+            target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
             value: runmat_analysis_core::PrescribedValue::Constant(
                 runmat_analysis_core::Temperature::new(kelvin),
             ),
@@ -109,7 +109,7 @@ fn thermal_boundary(
 ) -> runmat_analysis_core::AnalysisBoundary {
     runmat_analysis_core::AnalysisBoundary {
         boundary_id: id.into(),
-        target: runmat_analysis_core::RegionTarget::authored(region),
+        target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region))),
         operator,
     }
 }
@@ -125,7 +125,7 @@ fn fluid_constraint(
     region: impl Into<String>,
     condition: FluidFixtureConstraint,
 ) -> runmat_analysis_core::AnalysisConstraint {
-    let target = runmat_analysis_core::RegionTarget::authored(region);
+    let target = runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region)));
     let kind = match condition {
         FluidFixtureConstraint::Velocity(components) => {
             runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
@@ -374,7 +374,7 @@ fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcit
         let target = if volume_target {
             runmat_analysis_core::RegionTarget::volume(spec.region_id)
         } else {
-            runmat_analysis_core::RegionTarget::boundary(spec.region_id)
+            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&spec.region_id))
         };
         model.signals.push(signal);
         model.excitations.push(action(AnalysisExcitation {
@@ -507,7 +507,7 @@ fn set_electric_potential_history(
         })
         .unwrap_or_else(|| {
             runmat_analysis_core::ExcitationTarget::Region(
-                runmat_analysis_core::RegionTarget::boundary("terminal"),
+                runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("terminal")),
             )
         });
     append_signal_excitation(
@@ -548,7 +548,7 @@ fn set_velocity_history(
             },
             _ => None,
         })
-        .unwrap_or_else(|| runmat_analysis_core::RegionTarget::boundary("inlet"));
+        .unwrap_or_else(|| runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("inlet")));
     append_signal_excitation(
         model,
         signal_id,
@@ -575,6 +575,8 @@ fn fixture_cfd_domain(
         density: runmat_analysis_core::MassDensity::new(1.225),
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(dynamic_viscosity_pa_s),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(turbulence_intensity),
+        rheology: None,
+        porous_zones: Vec::new(),
     }
 }
 
@@ -674,6 +676,9 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         AnalysisSolverOptions::ThermalDiffusion(_) => fea_thermal_temperature_field_id(0),
         AnalysisSolverOptions::AcousticHelmholtz(_) => {
             FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string()
+        }
+        AnalysisSolverOptions::AcousticResponse(_) => {
+            panic!("acoustic modal/transient fixtures execute through the study runner")
         }
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
@@ -1460,8 +1465,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ));
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_channel_slab_interface_{spec_id}"),
-                primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
-                secondary: runmat_analysis_core::RegionTarget::boundary("solid_slab"),
+                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_channel")),
+                secondary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("solid_slab")),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
                     runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
                         transfer: runmat_analysis_core::ThermalInterfaceTransfer::Conductance(
@@ -1489,8 +1494,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if spec_id == "cht_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_invalid_contact_{spec_id}"),
-                primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
-                secondary: runmat_analysis_core::RegionTarget::boundary("solid_wall"),
+                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_channel")),
+                secondary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("solid_wall")),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                     runmat_analysis_core::ContactInterfaceModel {
                         friction: runmat_analysis_core::ContactFriction::Frictionless,
@@ -1538,8 +1543,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             );
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_pipe_plate_interface_{spec_id}"),
-                primary: runmat_analysis_core::RegionTarget::boundary("fluid_pipe"),
-                secondary: runmat_analysis_core::RegionTarget::boundary("plate_wall"),
+                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_pipe")),
+                secondary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("plate_wall")),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
                     runmat_analysis_core::FluidStructureInterfaceModel {
                         kinematics: runmat_analysis_core::FluidStructureKinematics::NoSlip,
@@ -1555,8 +1560,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if spec_id == "fsi_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_invalid_contact_{spec_id}"),
-                primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
-                secondary: runmat_analysis_core::RegionTarget::boundary("structure_wall"),
+                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_channel")),
+                secondary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("structure_wall")),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                     runmat_analysis_core::ContactInterfaceModel {
                         friction: runmat_analysis_core::ContactFriction::Frictionless,
@@ -2654,8 +2659,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             .unwrap_or_else(|| "tip".to_string());
         model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
             interface_id: format!("contact_{spec_id}"),
-            primary: runmat_analysis_core::RegionTarget::boundary(primary),
-            secondary: runmat_analysis_core::RegionTarget::boundary(secondary),
+            primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&primary)),
+            secondary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&secondary)),
             kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                 runmat_analysis_core::ContactInterfaceModel {
                     friction: if contact.friction_coefficient == 0.0 {
@@ -2737,7 +2742,6 @@ fn run_fixture_cpu(
             return boxed_fixture_run_result(analysis_run_transient_with_options_op(
                 model,
                 ComputeBackend::Cpu,
-                FormulationRequirement::Experimental,
                 transient_options_for_spec(spec, solver_mesh_artifact_path),
                 OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
             ));
@@ -2750,14 +2754,12 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
@@ -2783,10 +2785,12 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
         ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisAcousticRunOptions {
                 mode_count: spec
                     .modal_mode_count
@@ -2798,28 +2802,24 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisChtRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2837,7 +2837,6 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisFsiRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2855,7 +2854,6 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2879,14 +2877,12 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
@@ -2912,10 +2908,12 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
         ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisAcousticRunOptions {
                 mode_count: spec
                     .modal_mode_count
@@ -2927,28 +2925,24 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisChtRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2966,7 +2960,6 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisFsiRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2984,7 +2977,6 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -4176,11 +4168,15 @@ fn write_fixture_solver_mesh_artifact(
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned();
-        let region_identity = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: assigned_region.clone(),
-            assembly_path: vec!["root".to_owned()],
-        };
+        let region_identity =
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(&assigned_region)
+                .unwrap_or_else(|| {
+                    PersistentEntityId::new(
+                        PersistentEntityKind::Region,
+                        assigned_region.clone(),
+                        vec!["root".to_owned()],
+                    )
+                });
         for element in &mut mesh.topology.volume_elements {
             element.region_id = region_identity.clone();
         }
@@ -4212,8 +4208,14 @@ fn write_fixture_solver_mesh_artifact(
     }
     let boundary_face_count = mesh.topology.boundary_faces.len();
     for (index, region_id) in boundary_regions.into_iter().enumerate() {
+        // Canonical fixture selectors name a fixture entity: place that exact entity, matched by
+        // its source name. Other targets (point ids, importer aliases) keep a region identity.
+        let fixture_entity = runmat_meshing_core::fixtures::fixture_entity_for_selection(&region_id);
+        let source_name = fixture_entity
+            .as_ref()
+            .map_or(region_id.as_str(), |entity| entity.source_topology_id.as_str());
         let face_index = if is_physical_transient_reference {
-            match region_id.as_str() {
+            match source_name {
                 "root" => 0,
                 "free_vertex_y_support" => 1,
                 "free_vertex_z_support" => 2,
@@ -4224,11 +4226,13 @@ fn write_fixture_solver_mesh_artifact(
             index % boundary_face_count
         };
         let face = &mut mesh.topology.boundary_faces[face_index];
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: region_id,
-            assembly_path: vec!["root".to_owned()],
-        });
+        face.provenance.push(fixture_entity.unwrap_or_else(|| {
+            PersistentEntityId::new(
+                PersistentEntityKind::Region,
+                region_id.clone(),
+                vec!["root".to_owned()],
+            )
+        }));
         face.provenance.sort();
         face.provenance.dedup();
     }
@@ -4427,7 +4431,6 @@ pub(super) fn run_fixture(
     let mut electromagnetic_resonance_quality_factor = None;
     let mut electromagnetic_resonance_flux_gain = None;
     let mut numerically_acceptable = None;
-    let mut production_publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
 
@@ -4530,7 +4533,6 @@ pub(super) fn run_fixture(
                     electromagnetic_resonance_quality_factor,
                     electromagnetic_resonance_flux_gain,
                     numerically_acceptable,
-                    production_publishable,
                     parity,
                     threshold_assertions,
                     failures,
@@ -4539,7 +4541,6 @@ pub(super) fn run_fixture(
         };
         run_ok = true;
         numerically_acceptable = Some(cpu_envelope.data.numerically_acceptable);
-        production_publishable = Some(cpu_envelope.data.production_publishable);
         if let Some(expected_numerically_acceptable) = spec.expected_numerically_acceptable {
             if cpu_envelope.data.numerically_acceptable != expected_numerically_acceptable {
                 failures.push(format!(
@@ -4547,12 +4548,6 @@ pub(super) fn run_fixture(
                     cpu_envelope.data.numerically_acceptable
                 ));
             }
-        }
-        if cpu_envelope.data.production_publishable {
-            failures.push(
-                "cpu result from an explicitly experimental formulation must not be production publishable"
-                    .to_string(),
-            );
         }
 
         if matches!(
@@ -6145,7 +6140,6 @@ pub(super) fn run_fixture(
                 Ok(gpu_envelope) => {
                     run_ok = true;
                     numerically_acceptable = Some(gpu_envelope.data.numerically_acceptable);
-                    production_publishable = Some(gpu_envelope.data.production_publishable);
                     gpu_fallback_events = gpu_envelope.data.provenance.fallback_events.clone();
                     gpu_solver_host_sync_count =
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
@@ -6266,12 +6260,6 @@ pub(super) fn run_fixture(
                                 gpu_envelope.data.numerically_acceptable
                             ));
                         }
-                    }
-                    if gpu_envelope.data.production_publishable {
-                        failures.push(
-                            "gpu result from an explicitly experimental formulation must not be production publishable"
-                                .to_string(),
-                        );
                     }
                     if spec.id.starts_with("transient_") {
                         push_fixed_step_transient_assertions(
@@ -8068,7 +8056,6 @@ pub(super) fn run_fixture(
                                 electromagnetic_resonance_quality_factor,
                                 electromagnetic_resonance_flux_gain,
                                 numerically_acceptable,
-                                production_publishable,
                                 parity,
                                 threshold_assertions,
                                 failures,
@@ -8485,7 +8472,6 @@ pub(super) fn run_fixture(
                                     electromagnetic_resonance_quality_factor,
                                     electromagnetic_resonance_flux_gain,
                                     numerically_acceptable,
-                                    production_publishable,
                                     parity,
                                     threshold_assertions,
                                     failures,
@@ -8623,7 +8609,6 @@ pub(super) fn run_fixture(
         electromagnetic_resonance_quality_factor,
         electromagnetic_resonance_flux_gain,
         numerically_acceptable,
-        production_publishable,
         parity,
         threshold_assertions,
         failures,

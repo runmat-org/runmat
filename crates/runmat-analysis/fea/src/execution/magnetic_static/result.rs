@@ -207,7 +207,6 @@ impl MagnetostaticSolverResult {
             &workload.model,
             mesh,
             workload.step_id.as_str(),
-            workload.formulation_requirement,
             workload.relative_residual_target,
         )
         .map_err(invalid)?;
@@ -233,7 +232,9 @@ impl MagnetostaticSolverResult {
                 "magnetic result belongs to a different workload or topology",
             ));
         }
-        let edges = crate::physics::magnetic::validate_projection_envelope(p).map_err(invalid)?;
+        let edges =
+            crate::physics::magnetic::validate_projection_envelope(p, &compiled.grounded_faces)
+                .map_err(invalid)?;
         if !d
             .response
             .edge_node_identities

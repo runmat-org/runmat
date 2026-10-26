@@ -36,11 +36,38 @@ pub(super) fn from_typed_value<T: DeserializeOwned>(
     Ok(wrapped.value)
 }
 
-pub(super) fn register_immutable_class(
+/// One immutable study-value class: its portable codec schema and its static
+/// constructor methods.
+pub(super) struct ImmutableStudyClass {
+    pub(super) class_name: &'static str,
+    pub(super) type_identity: &'static str,
+    pub(super) fields: &'static [&'static str],
+    pub(super) methods: &'static [(&'static str, &'static str)],
+}
+
+/// Register the process-global portable codec schemas once per process.
+pub(super) fn register_immutable_schemas(classes: &[ImmutableStudyClass]) {
+    for class in classes {
+        register_immutable_schema(class.class_name, class.type_identity, class.fields);
+    }
+}
+
+/// Register the runtime classes in the current class registry. Callers guard
+/// this with a `ClassRegistration` so every fresh registry receives them.
+pub(super) fn register_immutable_runtime_classes(classes: &[ImmutableStudyClass]) {
+    for class in classes {
+        register_value_class(
+            class.class_name,
+            immutable_properties(class.fields),
+            static_methods(class.methods.iter().copied()),
+        );
+    }
+}
+
+fn register_immutable_schema(
     class_name: &'static str,
     type_identity: &'static str,
     fields: &'static [&'static str],
-    methods: &[(&'static str, &'static str)],
 ) {
     crate::execution::value_codec::register_immutable_value_class(
         crate::execution::value_codec::ImmutableValueClassSchema {
@@ -53,12 +80,6 @@ pub(super) fn register_immutable_class(
         },
     )
     .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
-
-    register_value_class(
-        class_name,
-        immutable_properties(fields),
-        static_methods(methods.iter().copied()),
-    );
 }
 
 fn validate_immutable_value(object: &ObjectInstance) -> Result<(), String> {
@@ -108,5 +129,107 @@ pub(super) fn nonempty_id(
         ))
     } else {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// One static constructor per FEA value-class family. Each family registers
+    /// its runtime classes per class registry, so they must resolve on a thread
+    /// whose registry is fresh even after another thread consumed the
+    /// process-once codec schemas.
+    const FAMILY_PROBES: &[(&str, &str)] = &[
+        ("fea.StepObjectRef", "fea.StepObjectRef.constraint"),
+        (
+            "fea.ActivationLifecycle",
+            "fea.ActivationLifecycle.activate",
+        ),
+        ("fea.StepObjectActivation", "fea.StepObjectActivation.new"),
+        ("fea.ComputeBackend", "fea.ComputeBackend.cpu"),
+        ("fea.SolverOptions", "fea.SolverOptions.defaults"),
+        ("fea.ExecutionStep", "fea.ExecutionStep.new"),
+        ("fea.ExecutionPlan", "fea.ExecutionPlan.defaults"),
+        ("fea.AccuracyTarget", "fea.AccuracyTarget.numericalResult"),
+        ("fea.AccuracyTolerance", "fea.AccuracyTolerance.relative"),
+        (
+            "fea.NumericalEquivalencePolicy",
+            "fea.NumericalEquivalencePolicy.deterministic",
+        ),
+        (
+            "fea.AccuracyResourceCeiling",
+            "fea.AccuracyResourceCeiling.new",
+        ),
+        ("fea.AccuracyCriterion", "fea.AccuracyCriterion.new"),
+        ("fea.AccuracyPlan", "fea.AccuracyPlan.baseline"),
+        ("fea.ErrorContribution", "fea.ErrorContribution.algebraic"),
+        (
+            "fea.RequiredAccuracyEvidence",
+            "fea.RequiredAccuracyEvidence.convergenceStudy",
+        ),
+        (
+            "fea.UnavailableEvidencePolicy",
+            "fea.UnavailableEvidencePolicy.fail",
+        ),
+        ("fea.AccuracyLimitAction", "fea.AccuracyLimitAction.refine"),
+        (
+            "fea.ObservationQuantity",
+            "fea.ObservationQuantity.displacement",
+        ),
+        ("fea.FieldLocation", "fea.FieldLocation.node"),
+        ("fea.SpatialReduction", "fea.SpatialReduction.moment"),
+        ("fea.SeriesReduction", "fea.SeriesReduction.mean"),
+        ("fea.DiagnosticKind", "fea.DiagnosticKind.convergence"),
+        ("fea.StateKind", "fea.StateKind.thermal"),
+        (
+            "fea.TopologyTransitionPolicy",
+            "fea.TopologyTransitionPolicy.requireIdentical",
+        ),
+        (
+            "fea.IndependentDomain",
+            "fea.IndependentDomain.staticDomain",
+        ),
+        ("fea.ObservationTarget", "fea.ObservationTarget.wholeModel"),
+        ("fea.SignalDomain", "fea.SignalDomain.time"),
+        ("fea.SignalSampling", "fea.SignalSampling.uniform"),
+        ("fea.SignalInterpolation", "fea.SignalInterpolation.linear"),
+        ("fea.SignalKnot", "fea.SignalKnot.jump"),
+        (
+            "fea.InitialConditionTarget",
+            "fea.InitialConditionTarget.wholeModel",
+        ),
+        ("fea.ReferencePoint", "fea.ReferencePoint.fromCoordinates"),
+        ("fea.PeriodicTransform", "fea.PeriodicTransform.identity"),
+        ("fea.Direction", "fea.Direction.vector"),
+        ("fea.PeriodicPairing", "fea.PeriodicPairing.matching"),
+        ("fea.CoordinateFrame", "fea.CoordinateFrame.globalFrame"),
+        ("fea.SpectrumAxis", "fea.SpectrumAxis.frequencyHertz"),
+        ("fea.ResponseSpectrum", "fea.ResponseSpectrum.new"),
+    ];
+
+    fn assert_families_resolve() {
+        super::super::ensure_value_classes_registered();
+        for (class_name, builtin) in FAMILY_PROBES {
+            let class = crate::class_registry::get_class(
+                &runmat_types::ClassIdentity::new(*class_name).expect("class identity"),
+            )
+            .unwrap_or_else(|| panic!("{class_name} is registered in this class registry"));
+            assert!(
+                class
+                    .methods
+                    .values()
+                    .any(|method| method.is_static && method.function_name == *builtin),
+                "{builtin} is a static method of {class_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_fea_value_family_registers_in_each_fresh_class_registry() {
+        assert_families_resolve();
+        for _ in 0..2 {
+            std::thread::spawn(assert_families_resolve)
+                .join()
+                .expect("a fresh registry resolves every FEA value family");
+        }
     }
 }

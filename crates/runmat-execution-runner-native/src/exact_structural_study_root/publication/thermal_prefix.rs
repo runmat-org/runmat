@@ -150,6 +150,9 @@ pub(super) fn import<S: CacheImport>(
         required_capabilities: preparation.required_capabilities.clone(),
         accelerator_requests: expected.analysis_accelerator_requests.clone(),
         local_execution: expected.local_execution,
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .map_err(protocol)?;
     let (result_root, receipt_root, state_root, objects) = match analysis {

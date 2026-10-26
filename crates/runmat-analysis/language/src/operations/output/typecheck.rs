@@ -19,10 +19,36 @@ impl OutputOperation {
                 | Self::Real
                 | Self::Imaginary
                 | Self::Phase
+                | Self::Level
                 | Self::VonMises
                 | Self::Principal),
                 Some(value),
             ) => project_type(operation, value),
+            (Self::SoundPower, _) => {
+                let measure = region_measure(argument_type(arguments, 1, "through"))
+                    .ok_or("sound_power requires a face region")?;
+                if measure != crate::PhysicalDimension::AREA {
+                    return Err("sound_power requires a face region");
+                }
+                Ok(FeaType::Quantity(crate::PhysicalDimension::POWER.into()))
+            }
+            (Self::NormalFlux, Some(FeaType::Field(field))) => {
+                let measure = region_measure(argument_type(arguments, 1, "through"))
+                    .ok_or("flux requires a face region")?;
+                if measure != crate::PhysicalDimension::AREA {
+                    return Err("flux requires a face region");
+                }
+let FeaType::Vector { element, length: Some(3) } = field.value.as_ref() else {
+                    return Err("flux requires a three-component vector field");
+                };
+                let FeaType::Quantity(dimension) = element.as_ref() else {
+                    return Err("flux requires a physical vector field");
+                };
+                dimension
+                    .multiply(measure.into())
+                    .map(FeaType::Quantity)
+                    .ok_or("flux dimension overflows")
+            }
             (Self::Integral, Some(FeaType::Field(field))) => {
                 let measure = region_measure(argument_type(arguments, 1, "over"))
                     .ok_or("integral requires an edge, face, solid, or cell region")?;
@@ -140,7 +166,10 @@ fn project_type(operation: OutputOperation, value: &FeaType) -> Result<FeaType, 
             } if element.is_numeric() => {
                 Ok(projected_field(field, element.clone(), field.quantity))
             }
-            _ => Err("magnitude requires a three-component numeric field"),
+            // The modulus of a scalar phasor. The study's procedure decides whether the
+            // field is complex; authored-output validation rejects a real scalar source.
+            scalar if scalar.is_numeric() => Ok(FeaType::Field(field.clone())),
+            _ => Err("magnitude requires a three-component or complex scalar numeric field"),
         },
         OutputOperation::Component => match field.value.as_ref() {
             FeaType::Vector {
@@ -152,6 +181,15 @@ fn project_type(operation: OutputOperation, value: &FeaType) -> Result<FeaType, 
             _ => Err("component requires a three-component numeric field"),
         },
         OutputOperation::Real | OutputOperation::Imaginary => Ok(FeaType::Field(field.clone())),
+        // Sound pressure level of a complex scalar pressure, dB re 20 uPa (RMS).
+        OutputOperation::Level => match field.value.as_ref() {
+            value if value.is_numeric() => Ok(projected_field(
+                field,
+                Box::new(FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS.into())),
+                Some(runmat_analysis_core::ObservationQuantity::SoundPressureLevel),
+            )),
+            _ => Err("level requires a complex scalar acoustic pressure field"),
+        },
         OutputOperation::Phase => Ok(projected_field(
             field,
             Box::new(phase_shape(&field.value)),

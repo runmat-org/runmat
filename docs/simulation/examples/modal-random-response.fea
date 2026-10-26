@@ -1,0 +1,62 @@
+// Engineering physics belongs in the importing study.
+
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+
+    region body : solid { select id "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"; expect exactly_one }
+    region support : face { select id "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"; expect exactly_one }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 2 m
+        maximum_deviation = 0.1 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model random_environment {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    random_excitation base_motion {
+        frequencies = [0.1, 100, 1000, 2000] Hz
+        channels = [
+            { id = "x", quantity = base_acceleration, direction = [1, 0, 0] },
+        ]
+        spectral_density_real = [[[0.01]], [[0.01]], [[0.04]], [[0.02]]] m^2/s^3
+        convention = one_sided_per_hertz
+        interpolation = linear_frequency
+        extrapolation = reject
+        equivalent_degrees_of_freedom = 32
+    }
+}
+
+study modal_random_response {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.random_environment
+    analysis modes {
+        structural modal { modes = 10 }
+        retain basis
+    }
+    analysis random_response after analysis.modes {
+        structural random_response {
+            basis = analysis.modes.state.basis
+            excitation = model.random_excitation.base_motion
+            modal_damping_ratio = 0.03
+            minimum_cumulative_mass_ratio = 0.5
+        }
+    }
+    output displacement = analysis.random_response.field.node.displacement
+}

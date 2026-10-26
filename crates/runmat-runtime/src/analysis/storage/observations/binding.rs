@@ -39,8 +39,10 @@ pub(super) fn validate_run(
         &thermal.temperature_gradient_snapshots,
         &thermal.heat_flux_snapshots,
         &thermal.energy_storage_rate_snapshots,
+        &thermal.interface_temperature_snapshots,
     ];
-    for history in histories {
+    let field_count = manifest.fields.first().map_or(4, Vec::len);
+    for history in &histories[..field_count] {
         if history.len() != manifest.fields.len() {
             return Err("thermal source snapshot inventory differs".into());
         }
@@ -64,10 +66,10 @@ pub(super) fn validate_run(
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                if kind == 0 {
-                    manifest.ordered_node_ids.len()
-                } else {
-                    manifest.ordered_element_ids.len()
+                match kind {
+                    0 => manifest.ordered_node_ids.len(),
+                    4 => manifest.interface_node_ids.len(),
+                    _ => manifest.ordered_element_ids.len(),
                 },
             )
             .map_err(|error| error.to_string())?

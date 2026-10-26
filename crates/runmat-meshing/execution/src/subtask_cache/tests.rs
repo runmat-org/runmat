@@ -69,8 +69,21 @@ impl MeshingSubtaskCacheStore for Store {
         Ok(true)
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Fresh partition layouts reuse the same complete original faces and match uncached
+//   canonical results. Original boundary coordinate and UV changes invalidate identity; unrelated
+//   coordinates preserve it. This component witness does not establish native cache throughput or
+//   whole-study acceptance.
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Fresh and cold restored faces preserve the original accepted values while streamed
+//   rich-face storage releases after successful or rejected consumption. Producer dictionary and
+//   decoder workspace remain charged through their actual use. This component witness does not
+//   close native publication, whole-join memory, or complete-study scalability.
 #[test]
 fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity() {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     let (document, topology, registry) = runmat_geometry_fixtures::exact_tetrahedron();
     let geometry = crate::prepare_exact_geometry_objects(
         document,
@@ -89,7 +102,7 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
         Arc::new(crate::checkpoint_clock::CheckpointClock::new(now)),
         Arc::new(AtomicU64::new(0)),
         Arc::new(AtomicU64::new(0)),
-        &settings.resources,
+        &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
         &settings.cancellation,
     );
     let evaluator = PortableMeshingEvaluatorProvider

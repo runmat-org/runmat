@@ -11,11 +11,13 @@ fn workload(current: f64) -> MagnetostaticWorkload {
     MagnetostaticWorkload {
         model: authored_model(current),
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ magnetostatic/tet4|tet10/public_study;
+//   boundary: In-process affine both-order magnetic source-bound cold bytes and sign/zero-current
+//   inventory/work; no native process, restart, partition or measured RSS evidence.
 #[test]
 fn magnetic_portable_source_bound_cold_result_preserves_both_orders_and_signs() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -127,9 +129,6 @@ fn magnetic_cold_import_rejects_lineage_inventory_fields_and_integral_substituti
 #[test]
 fn magnetic_workload_rejects_unsupported_policy_and_resource_ceiling_before_projection() {
     let base = workload(2.0);
-    let mut production = base.clone();
-    production.formulation_requirement = FormulationRequirement::Production;
-    assert!(production.canonical_bytes().is_err());
     let mut electrical = base.clone();
     electrical.model.electromagnetic = Some(ElectromagneticDomain::Static {
         equation: StaticElectricalEquation::Electrostatics,

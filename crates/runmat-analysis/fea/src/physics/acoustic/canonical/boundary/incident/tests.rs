@@ -8,7 +8,7 @@ fn assembly() -> AcousticAssembly {
     let mesh = slab_mesh(2);
     let mut model = super::super::super::tests::model();
     model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid("slab");
+        runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let properties = compile_solid_property_map(&model, &mesh).unwrap();
     AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
@@ -21,7 +21,7 @@ fn assembly() -> AcousticAssembly {
 #[test]
 fn incident_plane_rejects_equal_impedance_but_different_material_and_nonparallel_union() {
     let mut a = assembly();
-    let left = a.faces(&RegionTarget::boundary("slab_left")).unwrap();
+    let left = a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))).unwrap();
     assert!(left.len() > 1);
     a.validate_incident_plane(&left).unwrap();
     let owner = left.last().unwrap().adjacent_element_indices[0];
@@ -41,8 +41,8 @@ fn incident_plane_rejects_equal_impedance_but_different_material_and_nonparallel
         Err(AcousticHarmonicError::Unsupported(_))
     ));
     let a = assembly();
-    let mut union = a.faces(&RegionTarget::boundary("slab_left")).unwrap();
-    union.extend(a.faces(&RegionTarget::boundary("slab_right")).unwrap());
+    let mut union = a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))).unwrap();
+    union.extend(a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))).unwrap());
     assert!(matches!(
         a.validate_incident_plane(&union),
         Err(AcousticHarmonicError::Unsupported(_))
@@ -53,7 +53,7 @@ fn incident_plane_rejects_equal_impedance_but_different_material_and_nonparallel
 fn incident_admittance_rejects_missing_multiple_and_foreign_owners() {
     let a = assembly();
     let face = a
-        .faces(&RegionTarget::boundary("slab_left"))
+        .faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")))
         .unwrap()
         .remove(0);
     for owners in [vec![], vec![0, 0], vec![usize::MAX]] {

@@ -4,6 +4,10 @@ use super::*;
 use crate::excitation::ProjectionSample;
 use runmat_analysis_core::*;
 
+// witness: FEA-FLUID-INPUTS-001/signals @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Signed rates across rotated exact faces; three modulo-index pieces demonstrate
+//   additive realization only, not distributed cell assembly.
 #[test]
 fn signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields() {
     for (speed, density, rotated) in [(0.001, 1.0, false), (-0.002, 3.0, true), (0.0, 2.0, false)] {
@@ -74,6 +78,9 @@ fn signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields(
     }
 }
 
+// witness: FEA-FLUID-INPUTS-001/rejection @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Selected duplicate/wrong-quantity/source authority and budget rejection only.
 #[test]
 fn source_authority_conflicts_quantity_and_budget_reject_before_solve() {
     for mutation in 0..11 {

@@ -817,7 +817,6 @@ fn materialize_constant_vector_signal(
 
 #[test]
 fn generated_force_and_moment_match_explicit_static_beam_and_analytic_balance() {
-    use runmat_analysis_core::FormulationRequirement;
     use runmat_analysis_fea::{
         excitation::SpatialProjectionBalance,
         fixtures::{fixture_model, FixtureId},
@@ -869,7 +868,6 @@ fn generated_force_and_moment_match_explicit_static_beam_and_analytic_balance() 
     generated_model.signals = generated_signals;
 
     let options = LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         ..LinearStaticSolveOptions::default()
     };
     let baseline =

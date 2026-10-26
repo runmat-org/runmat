@@ -91,6 +91,7 @@ impl WorkingRefinement {
         let mut excluded = BTreeSet::new();
         let mut attempts = 0_u64;
         let mut rejected = 0_u64;
+        let mut rejection_reasons = std::collections::BTreeMap::<&'static str, u64>::new();
         let mut pass_constructed = false;
         let mut complete_pass = self.after.is_none();
         loop {
@@ -170,6 +171,7 @@ impl WorkingRefinement {
                             crate::cdt::DelaunayInsertionErrorKind::InvalidTopology |
                             crate::cdt::DelaunayInsertionErrorKind::PointOutsideTopology) => {
                                 excluded.insert(candidate.node.identity); rejected += 1;
+                                *rejection_reasons.entry("insertion rejected").or_default() += 1;
                                 report_rejection(attempts, rejected, "insertion", &failure.reason, &source);
                                 continue;
                             },
@@ -190,21 +192,17 @@ impl WorkingRefinement {
                         ) {
                             excluded.insert(candidate.node.identity);
                             rejected += 1;
+                            *rejection_reasons.entry("trial rejected").or_default() += 1;
                             report_rejection(attempts, rejected, "trial", &failure.reason, &source);
                             continue;
                         }
                         return Err(failure.into());
                     }
-                    if !self.progress_policy.accepts(trial.quality(), &parent) {
+                    if let Some(reason) = self.progress_policy.rejection(trial.quality(), &parent) {
                         excluded.insert(candidate.node.identity);
                         rejected += 1;
-                        report_rejection(
-                            attempts,
-                            rejected,
-                            "quality_spectrum",
-                            "complete trial quality did not improve under its declared progress policy",
-                            &source,
-                        );
+                        *rejection_reasons.entry(reason).or_default() += 1;
+                        report_rejection(attempts, rejected, "quality_spectrum", reason, &source);
                         continue;
                     }
                     trial.commit();
@@ -249,7 +247,7 @@ impl WorkingRefinement {
             drop(batch);
             if !work.can_construct() {
                 return Err(super::insertion::error(DelaunayVolumeRefinementStepErrorKind::ResourceLimit,
-                    format!("working refinement exhausted candidate work after {attempts} attempts and {rejected} rejections")));
+                    format!("working refinement exhausted candidate work after {attempts} attempts and {rejected} rejections; rejection reasons {rejection_reasons:?}")));
             }
         }
     }

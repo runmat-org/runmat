@@ -16,7 +16,6 @@ fn fixture() -> AnalysisRunResult {
         family: PhysicsFamily::Thermal,
         procedure: AnalysisProcedure::Static,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization: registered.realization().clone(),
     })
     .unwrap()
@@ -62,14 +61,7 @@ fn fixture() -> AnalysisRunResult {
         result_quality: QualityGate::Pass,
         run_status: RunStatus::Completed,
         numerically_acceptable: true,
-        production_publishable: false,
         quality_reasons: vec![],
-        production_publication_reasons: vec![ProductionPublicationReason {
-            code: ProductionPublicationReasonCode::FormulationNotProductionQualified,
-            detail:
-                "the admitted Thermal/Static formulation is Experimental, not production-qualified"
-                    .into(),
-        }],
         provenance: RunProvenance {
             requested_backend: ComputeBackend::Cpu,
             execution_backend: ExecutionBackend::Cpu,
@@ -82,6 +74,7 @@ fn fixture() -> AnalysisRunResult {
             preconditioner: SolverPreconditioner::None,
             quality_policy: "exploratory".into(),
             fallback_events: vec![],
+            effective_memory_ceiling_bytes: None,
         },
     }
 }

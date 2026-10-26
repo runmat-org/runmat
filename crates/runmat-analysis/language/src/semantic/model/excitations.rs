@@ -73,11 +73,43 @@ pub(super) fn lower(
             _ => {}
         }
     }
+    if cases.is_empty() && !excitations.is_empty() && !declares_load_case(declaration) {
+        cases.push(default_case(&excitations));
+    }
     LoweredExcitations {
         signals,
         parameterized_signals,
         excitations,
         cases,
+    }
+}
+
+/// Case id of the implicit case that holds every load of a model that declares no `load_case`.
+pub const DEFAULT_LOAD_CASE_ID: &str = "load_case.default";
+
+fn declares_load_case(declaration: &CheckedFeaDeclaration) -> bool {
+    declaration.statements.iter().any(|statement| {
+        matches!(
+            &statement.kind,
+            CheckedFeaStatementKind::ModelDefinition {
+                kind: FeaModelDefinitionKind::LoadCase,
+                ..
+            }
+        )
+    })
+}
+
+/// A model without any `load_case` applies all of its loads together in one default case, so a
+/// minimal model needs no case declaration. Once a model declares a case, every load must be
+/// placed in a declared case explicitly.
+fn default_case(excitations: &[AuthoredExcitation]) -> AuthoredExcitationCase {
+    AuthoredExcitationCase {
+        case_id: DEFAULT_LOAD_CASE_ID.to_string(),
+        excitation_ids: excitations
+            .iter()
+            .map(|excitation| excitation.excitation_id.clone())
+            .collect(),
+        activation: ExcitationCaseActivation::Always,
     }
 }
 
@@ -115,6 +147,8 @@ fn explicit_excitation(
     let target = if matches!(&target_expression.kind, CheckedExpressionKind::Enum(name) if name == "whole_model")
     {
         AuthoredExcitationTarget::WholeModel
+    } else if let Some(constraint_id) = coupling_reference_point(target_expression) {
+        AuthoredExcitationTarget::ReferencePoint { constraint_id }
     } else {
         AuthoredExcitationTarget::Region(region_source(
             bound,
@@ -346,8 +380,12 @@ fn load(
             diagnostics,
         )?))
     };
-    let target =
-        AuthoredExcitationTarget::Region(region_source(bound, declaration, target, diagnostics)?);
+    let target = match coupling_reference_point(target) {
+        Some(constraint_id) => AuthoredExcitationTarget::ReferencePoint { constraint_id },
+        None => {
+            AuthoredExcitationTarget::Region(region_source(bound, declaration, target, diagnostics)?)
+        }
+    };
     let frame = match &signal {
         LoweredLoadSignal::Concrete(signal) => signal.frame().cloned(),
         LoweredLoadSignal::Parameterized(signal) => signal.frame.clone(),
@@ -373,6 +411,22 @@ fn load(
             },
         },
     ))
+}
+
+/// `constraint.<coupling>.reference_point`: the reference point a rigid or distributing coupling
+/// defines. Model realization binds it to that coupling's identity and position.
+fn coupling_reference_point(expression: &CheckedExpression) -> Option<String> {
+    let CheckedExpressionKind::Reference(path) = &expression.kind else {
+        return None;
+    };
+    match path.as_slice() {
+        [namespace, constraint, member]
+            if namespace == "constraint" && member == "reference_point" =>
+        {
+            Some(constraint.clone())
+        }
+        _ => None,
+    }
 }
 
 enum LoweredLoadSignal {

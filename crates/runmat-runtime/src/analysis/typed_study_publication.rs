@@ -14,7 +14,7 @@ mod preparation_storage;
 #[path = "typed_study_publication/publication_options.rs"]
 mod publication_options;
 
-use super::study_result_manifest::StudyResultManifest;
+use super::study_result_manifest::{PersistedStateEvidence, StudyResultManifest};
 use publication_options::publication_steps;
 
 use super::structural_study::{
@@ -215,7 +215,7 @@ enum StructuralStudyNumericalEvidence {
     LinearSequence {
         frozen_project_digest: Option<Digest>,
         steps: Vec<StructuralLinearStepEvidence>,
-        states: Vec<runmat_analysis_fea::execution::CanonicalSemanticState>,
+        states: Vec<PersistedStateEvidence>,
     },
     StructuralModal {
         frozen_project_digest: Option<Digest>,
@@ -229,7 +229,7 @@ enum StructuralStudyNumericalEvidence {
         modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
         transient_numerical_receipt:
             runmat_analysis_fea::execution::StructuralTransientNumericalReceipt,
-        basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+        basis_state: PersistedStateEvidence,
     },
     StructuralModalResponseSpectrum {
         frozen_project_digest: Option<Digest>,
@@ -243,8 +243,8 @@ enum StructuralStudyNumericalEvidence {
         response_publication_baseline_usage:
             runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
         response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
-        basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
-        envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+        basis_state: PersistedStateEvidence,
+        envelope_state: PersistedStateEvidence,
     },
     StructuralRandomResponse {
         frozen_project_digest: Option<Digest>,
@@ -258,8 +258,8 @@ enum StructuralStudyNumericalEvidence {
         response_publication_baseline_usage:
             runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
         response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
-        basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
-        statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+        basis_state: PersistedStateEvidence,
+        statistics_state: PersistedStateEvidence,
     },
     StructuralBuckling {
         frozen_project_digest: Option<Digest>,
@@ -270,7 +270,7 @@ enum StructuralStudyNumericalEvidence {
             runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
         buckling_numerical_receipt:
             runmat_analysis_fea::execution::StructuralBucklingNumericalReceipt,
-        prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+        prestress_state: PersistedStateEvidence,
     },
     StructuralPrestressedModal {
         frozen_project_digest: Option<Digest>,
@@ -280,7 +280,7 @@ enum StructuralStudyNumericalEvidence {
         preload_numerical_receipt:
             runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
         modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
-        prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+        prestress_state: PersistedStateEvidence,
     },
     StructuralPrestressedFrequency {
         frozen_project_digest: Option<Digest>,
@@ -289,10 +289,10 @@ enum StructuralStudyNumericalEvidence {
         preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
         preload_numerical_receipt:
             runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
-        prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+        prestress_state: PersistedStateEvidence,
         modal_reduction: Option<StructuralModalReductionEvidence>,
-        frequency_publication:
-            Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
+        /// The publication itself is persisted once with the frequency run record.
+        frequency_publication_digest: Digest,
     },
     StructuralTransient {
         frozen_project_digest: Option<Digest>,
@@ -302,7 +302,8 @@ enum StructuralStudyNumericalEvidence {
     StructuralFrequency {
         frozen_project_digest: Option<Digest>,
         step_id: ProcedureStepId,
-        publication: runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
+        /// The publication itself is persisted once with the frequency run record.
+        publication_digest: Digest,
     },
 }
 
@@ -319,7 +320,7 @@ struct StructuralLinearStepEvidence {
 struct StructuralModalReductionEvidence {
     modal_step_id: ProcedureStepId,
     modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
-    basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    basis_state: PersistedStateEvidence,
 }
 
 impl StructuralStudyNumericalEvidence {
@@ -350,7 +351,11 @@ impl StructuralStudyNumericalEvidence {
                         numerical_receipt: step.numerical_receipt.clone(),
                     })
                     .collect(),
-                states: result.states.clone(),
+                states: result
+                    .states
+                    .iter()
+                    .map(|state| PersistedStateEvidence::persist(state, study_digest, staging))
+                    .collect::<Result<_, _>>()?,
             },
             super::StructuralStudyNumericalResult::StructuralModal(result) => {
                 Self::StructuralModal {
@@ -366,7 +371,11 @@ impl StructuralStudyNumericalEvidence {
                     transient_step_id: result.transient_step_id.clone(),
                     modal_numerical_receipt: result.modal_numerical_receipt.clone(),
                     transient_numerical_receipt: result.transient_numerical_receipt.clone(),
-                    basis_state: result.basis_state.clone(),
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result) => {
@@ -382,8 +391,16 @@ impl StructuralStudyNumericalEvidence {
                         .response_publication_baseline_usage
                         .clone(),
                     response_publication: result.response_publication.clone(),
-                    basis_state: result.basis_state.clone(),
-                    envelope_state: result.envelope_state.clone(),
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
+                    envelope_state: PersistedStateEvidence::persist(
+                        &result.envelope_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralRandomResponse(result) => {
@@ -399,8 +416,16 @@ impl StructuralStudyNumericalEvidence {
                         .response_publication_baseline_usage
                         .clone(),
                     response_publication: result.response_publication.clone(),
-                    basis_state: result.basis_state.clone(),
-                    statistics_state: result.statistics_state.clone(),
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
+                    statistics_state: PersistedStateEvidence::persist(
+                        &result.statistics_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralBuckling(result) => {
@@ -411,7 +436,11 @@ impl StructuralStudyNumericalEvidence {
                     preload_solver_result_identity: result.preload_solver_result_identity,
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
                     buckling_numerical_receipt: result.buckling_numerical_receipt.clone(),
-                    prestress_state: result.prestress_state.clone(),
+                    prestress_state: PersistedStateEvidence::persist(
+                        &result.prestress_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralPrestressedModal(result) => {
@@ -422,7 +451,11 @@ impl StructuralStudyNumericalEvidence {
                     preload_solver_result_identity: result.preload_solver_result_identity,
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
                     modal_numerical_receipt: result.modal_numerical_receipt.clone(),
-                    prestress_state: result.prestress_state.clone(),
+                    prestress_state: PersistedStateEvidence::persist(
+                        &result.prestress_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralPrestressedFrequency(result) => {
@@ -433,7 +466,11 @@ impl StructuralStudyNumericalEvidence {
                     ) => Some(StructuralModalReductionEvidence {
                         modal_step_id: reduction.modal_step_id.clone(),
                         modal_numerical_receipt: reduction.modal_numerical_receipt.clone(),
-                        basis_state: reduction.basis_state.clone(),
+                        basis_state: PersistedStateEvidence::persist(
+                            &reduction.basis_state,
+                            study_digest,
+                            staging,
+                        )?,
                     }),
                 };
                 Self::StructuralPrestressedFrequency {
@@ -442,9 +479,15 @@ impl StructuralStudyNumericalEvidence {
                     frequency_step_id: result.frequency_step_id.clone(),
                     preload_solver_result_identity: result.preload_solver_result_identity,
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
-                    prestress_state: result.prestress_state.clone(),
+                    prestress_state: PersistedStateEvidence::persist(
+                        &result.prestress_state,
+                        study_digest,
+                        staging,
+                    )?,
                     modal_reduction,
-                    frequency_publication: Box::new(result.frequency.publication.clone()),
+                    frequency_publication_digest: frequency_publication_digest(
+                        &result.frequency.publication,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralTransient(result) => {
@@ -458,11 +501,20 @@ impl StructuralStudyNumericalEvidence {
                 Self::StructuralFrequency {
                     frozen_project_digest: result.frozen_project_digest,
                     step_id: result.step_id.clone(),
-                    publication: result.publication.clone(),
+                    publication_digest: frequency_publication_digest(&result.publication)?,
                 }
             }
         })
     }
+}
+
+fn frequency_publication_digest(
+    publication: &runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
+) -> Result<Digest, crate::analysis::storage::AnalysisPublicationError> {
+    let bytes = publication
+        .canonical_bytes()
+        .map_err(|error| error.to_string())?;
+    Ok(Digest::sha256(bytes))
 }
 
 fn typed_publication_error(

@@ -51,6 +51,8 @@ impl<'a> SolidNewtonProblem<'a> {
                 "contact linear target differs from Newton policy".into(),
             ));
         }
+        let mut reduction = reduction;
+        let prescribed = std::mem::replace(&mut reduction.offset, vec![0.0; summary.dof_count]);
         let contact = coupling
             .map(|input| contact::PreparedSolidContact::prepare(basis, &reduction, input, policy))
             .transpose()?;
@@ -68,12 +70,43 @@ impl<'a> SolidNewtonProblem<'a> {
         Ok(Self {
             basis,
             reduction,
+            prescribed,
             physical_force: &summary.physical_load,
+            scale_force: summary.physical_load.clone(),
+            follower: None,
             scope_identity,
             contact,
             policy,
             solver_admission: None,
         })
+    }
+
+    /// Adds configuration-dependent follower loads. Their reference-configuration force joins
+    /// the residual scale and their identity joins the equilibrium scope.
+    pub(crate) fn with_follower_loads(
+        mut self,
+        follower: Option<&'a crate::assembly::nonlinear_solid::FollowerLoadOperator>,
+    ) -> Result<Self, SolidNewtonError> {
+        let Some(follower) = follower else {
+            return Ok(self);
+        };
+        let reference = self
+            .basis
+            .evaluate_follower_loads(follower, &vec![0.0; self.basis.dof_count()])
+            .map_err(|e| SolidNewtonError::Invalid(e.to_string()))?;
+        for (scale, force) in self.scale_force.iter_mut().zip(&reference.force) {
+            *scale += force;
+        }
+        let bytes = encode_contract(
+            b"runmat-fea-follower-solid-equilibrium/v1\0",
+            "follower-solid-scope",
+            &(self.scope_identity, follower.identity()),
+            CanonicalLimits::new(4096, 256, 256, 8),
+        )
+        .map_err(constraint_error)?;
+        self.scope_identity = Digest::sha256(bytes);
+        self.follower = Some(follower);
+        Ok(self)
     }
 
     pub(crate) fn with_solver_admission(

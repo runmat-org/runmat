@@ -19,7 +19,7 @@ fn fixture(
         slab_mesh(cells)
     };
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.signals.push(PhysicalSignal::Pressure(complex_signal(
         Pressure::new(amplitude[0]),
@@ -30,7 +30,7 @@ fn fixture(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "anchor".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
@@ -41,8 +41,8 @@ fn fixture(
             kind: AcousticConstraintKind::PhaseShiftedPeriodic(PhaseShiftedPeriodicConstraint {
                 periodic: PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary("slab_left"),
-                        secondary: RegionTarget::boundary("slab_right"),
+                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),
@@ -63,16 +63,16 @@ fn solve(
         "acoustic",
         Frequency::new(0.2),
         AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
-            restart: 128,
-            maximum_iterations: 8192,
+            ..Default::default()
         },
         1e-8,
     )
 }
 
+// witness: FEA-ACOUSTIC-BOUNDARY-001/phase @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Anchored slab plane wave and declared paired planes; no unanchored pole/global
+//   conditioning credit.
 #[test]
 fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine() {
     // Anchoring all primary-plane DOFs propagates their phase; interior DOFs still solve.
@@ -119,6 +119,8 @@ fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine(
     assert_eq!(executed, 12);
 }
 
+// witness: FEA-ACOUSTIC-BOUNDARY-001/reject @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Periodic pairing, overlap and conflicting pressure rejection only.
 #[test]
 fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
     for quadratic in [false, true] {
@@ -136,7 +138,7 @@ fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
         let mut overlap = model.clone();
         overlap.boundaries.push(AnalysisBoundary {
             boundary_id: "overlap".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticRadiation,
         });
         assert!(solve(&overlap, &mesh).is_err());
@@ -146,7 +148,7 @@ fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: "wrong_secondary_pressure".into(),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary("slab_right"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                     value: PrescribedValue::Signal(SignalId("drive".into())),
                 },
             }));

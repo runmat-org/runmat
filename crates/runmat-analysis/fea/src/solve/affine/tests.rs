@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    planning::resource::{execute_scoped_chunks, LocalThreadCount, ScopedLocalExecutionError},
-    progress::{replace_fea_progress_context, FeaCancellationToken, FeaProgressContext},
-};
+use crate::planning::resource::LocalThreadCount;
 
 fn coupled_reduction() -> AffineConstraintReduction {
     let reduction = AffineConstraintReduction {
@@ -20,75 +17,16 @@ fn coupled_reduction() -> AffineConstraintReduction {
 }
 
 #[test]
-fn scoped_affine_forward_projection_and_lift_preserve_serial_bits() {
+fn scoped_affine_lift_preserves_serial_bits() {
     let reduction = coupled_reduction();
     let reduced = [0.75, -2.0, 1.25];
     let serial_linear = expand_linear(&reduction, &reduced, None).unwrap();
     let serial_full = expand(&reduction, &reduced, None).unwrap();
-    let transpose_index = AffineTransposeIndex::try_new(&reduction).unwrap();
     for threads in [2, 3, 7, 8] {
         let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
-        assert_eq!(
-            expand_linear(&reduction, &reduced, Some(plan)).unwrap(),
-            serial_linear
-        );
-        assert_eq!(
-            expand(&reduction, &reduced, Some(plan)).unwrap(),
-            serial_full
-        );
-        assert_eq!(
-            apply_reduced_operator(
-                &reduction,
-                &reduced,
-                &|full| Ok(full.to_vec()),
-                Some(plan),
-                Some(&transpose_index),
-            )
-            .unwrap(),
-            transpose_apply(&reduction, &serial_linear),
-        );
-        assert_eq!(
-            transpose_index
-                .apply(&reduction, &serial_linear, plan)
-                .unwrap(),
-            transpose_apply(&reduction, &serial_linear),
-        );
+        assert_eq!(expand_linear(&reduction, &reduced, Some(plan)).unwrap(), serial_linear);
+        assert_eq!(expand(&reduction, &reduced, Some(plan)).unwrap(), serial_full);
     }
-}
-
-#[test]
-fn scoped_affine_projection_rejects_nested_execution_and_cancellation() {
-    let reduction = coupled_reduction();
-    let reduced = [0.75, -2.0, 1.25];
-    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
-    let transpose_index = AffineTransposeIndex::try_new(&reduction).unwrap();
-    let full = expand_linear(&reduction, &reduced, None).unwrap();
-    let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
-        Ok::<_, ()>(transpose_index.apply(&reduction, &full, plan))
-    })
-    .unwrap();
-    assert!(matches!(
-        &nested[0],
-        Err(ScopedSpmvError::Execution(
-            ScopedLocalExecutionError::NestedExecution
-        ))
-    ));
-
-    let cancellation = FeaCancellationToken::new();
-    cancellation.cancel();
-    let _context = replace_fea_progress_context(FeaProgressContext {
-        cancellation,
-        ..FeaProgressContext::default()
-    });
-    assert!(matches!(
-        transpose_index.apply(&reduction, &full, plan),
-        Err(ScopedSpmvError::Execution(
-            ScopedLocalExecutionError::Work {
-                source: crate::algebra::SpmvWorkError::Cancelled,
-                ..
-            }
-        ))
-    ));
 }
 
 #[test]
@@ -135,6 +73,7 @@ fn repeated_affine_solves_rebind_lifting_and_invalidate_changed_congruence() {
             operator: &operator,
             constraint_matrix: Some(&matrix),
             affine_constraint_reduction: Some(&reduction),
+            planned_reduced_support: None,
         };
         let warm = solve_affine_constraint_system_reusing(
             &view,

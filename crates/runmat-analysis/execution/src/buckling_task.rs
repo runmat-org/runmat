@@ -43,6 +43,7 @@ const BUCKLING_TASK_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 pub struct StructuralBucklingTaskPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -168,6 +169,7 @@ pub fn prepare_structural_buckling_task(
         &preparation.prestress_state,
         &preparation.accelerator_requests,
         PreparedStructuralBucklingResourceFacts {
+            local_execution: preparation.local_execution,
             inputs: prepared_input_resource_facts(&numerical_inputs)?,
             result_output: projected_output_resource_facts(result_bound)?,
             receipt_output: projected_output_resource_facts(
@@ -200,10 +202,7 @@ pub fn prepare_structural_buckling_task(
     let discretization = DiscretizationIdentity::new(
         problem,
         topology_digest,
-        contract_digest(
-            "buckling-formulation",
-            &preparation.workload.formulation_requirement(),
-        )?,
+        contract_digest("buckling-formulation", &topology_digest)?,
     )?;
     let operator = OperatorIdentity::new(
         discretization,

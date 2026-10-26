@@ -315,7 +315,7 @@ struct Composition<'a, 'recovery> {
     recovery: StructuralTransientRecoveryAdmission<'recovery>,
 }
 
-fn admit_analysis_task_resources(
+pub(super) fn admit_analysis_task_resources(
     resources: &AllocationResources,
     expected_accelerators: &[runmat_execution::resource::AcceleratorRequest],
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
@@ -403,7 +403,7 @@ mod allocation_tests {
     }
 }
 
-fn sequence_error_composition(
+pub(super) fn sequence_error_composition(
     pool: &RemotePoolDriver,
     message: String,
 ) -> RemoteExactStructuralStudyComposition {
@@ -425,7 +425,7 @@ fn sequence_error_composition(
     }
 }
 
-fn signal_composition(
+pub(super) fn signal_composition(
     outcome: super::input_materialization::RemoteInputMaterializationOutcome,
 ) -> RemoteExactStructuralStudyComposition {
     match outcome {
@@ -499,8 +499,7 @@ mod tests {
             model,
             step_id,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             observation_execution:
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
@@ -516,11 +515,11 @@ mod tests {
             solver_mesh_digest: Digest::sha256(b"mesh"),
             aliases: BTreeMap::from([(
                 "face_000001".into(),
-                PersistentEntityId {
-                    kind: PersistentEntityKind::Face,
-                    source_topology_id: "face-a".into(),
-                    assembly_path: vec!["root".into()],
-                },
+                PersistentEntityId::new(
+                    PersistentEntityKind::Face,
+                    "face-a".into(),
+                    vec!["root".into()],
+                ),
             )]),
         };
 

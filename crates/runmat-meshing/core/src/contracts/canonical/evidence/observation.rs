@@ -113,4 +113,22 @@ mod tests {
             assert_eq!(original_digest(&reused, &control).unwrap(), expected);
         }
     }
+
+    #[test]
+    fn reused_stage_timings_may_exceed_the_restoring_run_wall_time() {
+        let artifact = super::super::super::artifact_tests::artifact();
+        let mut evidence = super::super::super::artifact_tests::evidence(&artifact);
+        evidence.stages[0].elapsed_time_ms = 1_000;
+        evidence.resources.wall_time_ms = 10;
+        let fresh = evidence.validate(&artifact).unwrap_err();
+        assert!(fresh
+            .to_string()
+            .contains("stage resource measurements exceed the aggregate resource evidence"));
+        let original = evidence.stages[0].canonical_digest().unwrap();
+        evidence.stages[0].reused_from = Some(ReusedMeshingStageObservation {
+            original_observation_digest: original,
+            implementation_digest: StableDigest::from_bytes([9; 32]),
+        });
+        evidence.validate(&artifact).unwrap();
+    }
 }

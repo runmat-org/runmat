@@ -142,8 +142,7 @@ fn resource_limits(
                 );
             }
             Some(range.minimum)
-        })
-        .unwrap_or(1);
+        });
     let maximum_memory_bytes_per_worker =
         assignment(statements, "memory_per_worker").and_then(|(relation, value)| {
             if relation != FeaAssignmentRelation::LessEqual

@@ -214,12 +214,12 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         .topology
         .vertices
         .iter()
-        .any(|vertex| vertex.point_m == [0.0, 0.0, 0.0]));
+        .any(|vertex| vertex.point_m.canonical_value() == [0.0, 0.0, 0.0]));
     assert!(millimeter_shape
         .topology
         .vertices
         .iter()
-        .flat_map(|vertex| vertex.point_m)
+        .flat_map(|vertex| vertex.point_m.canonical_value())
         .all(|coordinate| coordinate <= 0.003));
     let ExactMassPropertiesImplementation::KernelValidated {
         properties: millimeter_mass,

@@ -45,6 +45,7 @@ const TASK_PREFIX: &[u8] = b"runmat-analysis-structural-modal-response-spectrum-
 const TASK_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 pub struct StructuralModalResponseSpectrumFanoutPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -173,6 +174,7 @@ pub fn prepare_structural_modal_response_spectrum_fanout(
                         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
                     )?,
                     projected_output_set_resource_facts(),
+                    preparation.local_execution,
                 )
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             let resource_objects = resource_plan_objects(
@@ -253,6 +255,7 @@ pub fn import_structural_modal_response_spectrum_direction(
 }
 
 pub struct StructuralModalResponseSpectrumAssemblyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -399,6 +402,7 @@ pub fn prepare_structural_modal_response_spectrum_assembly(
             )?,
             },
             projected_output_set_resource_facts(),
+            preparation.local_execution,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan_objects = resource_plan_objects(
@@ -473,10 +477,7 @@ fn execution_plan(
     let discretization = DiscretizationIdentity::new(
         problem,
         topology_digest,
-        contract_digest(
-            "response-spectrum-formulation",
-            &workload.formulation_requirement(),
-        )?,
+        contract_digest("response-spectrum-formulation", &topology_digest)?,
     )?;
     let operator = OperatorIdentity::new(discretization, scope.operator_digest())?;
     let numerical = NumericalPlanIdentity::new(

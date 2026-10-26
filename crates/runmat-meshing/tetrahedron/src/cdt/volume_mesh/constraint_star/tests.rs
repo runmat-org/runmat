@@ -5,6 +5,11 @@ use crate::cdt::{
 };
 use runmat_meshing_core::{NeverCancelled, StableDigest};
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A visible conforming star is accepted only when independent physical Delaunay
+//   admission succeeds; visible but illegal stars decline the optimization. This kernel family does
+//   not independently prove every fallback recovery or governed native study.
 #[test]
 fn visible_nondelaunay_stars_decline_without_weakening_physical_admission() {
     let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();

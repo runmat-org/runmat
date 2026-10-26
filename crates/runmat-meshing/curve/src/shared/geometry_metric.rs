@@ -18,7 +18,10 @@ mod relations;
 mod surface_sampling;
 use relations::TopologyRelations;
 
-use proximity::{derive_proximity_contributions, ordered_pair, ContactProximityPairs, EdgeWitness};
+use proximity::{
+    derive_face_proximity_contributions, derive_proximity_contributions, ordered_pair,
+    ContactProximityPairs, EdgeWitness, FaceWitness,
+};
 
 const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 
@@ -47,7 +50,35 @@ pub fn derive_curve_geometry_metric(
         request.global_metric,
         surface_quality,
     )?;
+    let shell_solids = topology
+        .solids
+        .iter()
+        .flat_map(|solid| {
+            std::iter::once(&solid.outer_shell_id)
+                .chain(&solid.void_shell_ids)
+                .map(move |shell| (shell.clone(), solid.id.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut face_solids = BTreeMap::<
+        runmat_geometry_core::PersistentEntityId,
+        BTreeSet<runmat_geometry_core::PersistentEntityId>,
+    >::new();
+    for shell in &topology.shells {
+        if let Some(solid) = shell_solids.get(&shell.id) {
+            for face_use in &shell.face_uses {
+                face_solids
+                    .entry(face_use.entity_id.clone())
+                    .or_default()
+                    .insert(solid.clone());
+            }
+        }
+    }
     let mut edge_witnesses = Vec::new();
+    // Gaps between facing surfaces are measured only when the request authors
+    // `cells_across_gap`, so default requests keep their meshes.
+    let measure_face_gaps = request.cells_across_gap.is_some();
+    let mut face_witnesses =
+        BTreeMap::<runmat_geometry_core::PersistentEntityId, FaceWitness>::new();
     for edge in &topology.edges {
         if edge.is_degenerate {
             continue;
@@ -128,10 +159,19 @@ pub fn derive_curve_geometry_metric(
             let normals = face_metrics.sample(&relations, edge, evaluator, control, parameter)?;
             is_feature |= normals.iter().enumerate().any(|(index, left)| {
                 normals[index + 1..].iter().any(|right| {
-                    normal_angle_degrees(*left, *right)
+                    normal_angle_degrees(left.normal, right.normal)
                         > surface_quality.maximum_normal_deviation_degrees
                 })
             });
+            if measure_face_gaps {
+                for sample in normals {
+                    face_witnesses
+                        .entry(sample.face_id.clone())
+                        .or_insert_with(|| FaceWitness::new(sample.face_id))
+                        .samples
+                        .push((sample.point_m, sample.normal));
+                }
+            }
         }
         if has_curvature {
             contributions.push(MetricContribution {
@@ -170,6 +210,7 @@ pub fn derive_curve_geometry_metric(
         }
         edge_witnesses.push(EdgeWitness {
             edge_id: edge.id.clone(),
+            tolerance_m: edge.tolerance_m.canonical_value(),
             endpoint_ids: edge
                 .start_vertex_id
                 .iter()
@@ -179,6 +220,12 @@ pub fn derive_curve_geometry_metric(
             face_ids: relations
                 .edge_coedges(&edge.id)
                 .map(|coedge| coedge.face_id.clone())
+                .collect(),
+            solid_ids: relations
+                .edge_coedges(&edge.id)
+                .filter_map(|coedge| face_solids.get(&coedge.face_id))
+                .flatten()
+                .cloned()
                 .collect(),
             points_m: witness_points,
         });
@@ -191,19 +238,62 @@ pub fn derive_curve_geometry_metric(
         .map_err(|error| {
             SharedCurveError::invalid_request("curve proximity radius", error.to_string())
         })?
-        * 2.0;
+        * f64::from(request.resolved_cells_across_gap());
+    // Exact edge samples locate edge-local sizing; consumers grade it by distance from the
+    // edge instead of applying it across each face the edge bounds.
+    let supports = edge_witnesses
+        .iter()
+        .map(|witness| runmat_meshing_size::metric::MetricEntitySupport {
+            entity_id: witness.edge_id.clone(),
+            points_m: witness.points_m.clone(),
+        })
+        .collect::<Vec<_>>();
+    if measure_face_gaps {
+        for edge in &topology.edges {
+            for coedge in relations.edge_coedges(&edge.id) {
+                if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
+                    witness.tolerance_m = witness.tolerance_m.max(edge.tolerance_m.canonical_value());
+                    witness.vertex_ids.extend(
+                        edge.start_vertex_id
+                            .iter()
+                            .chain(&edge.end_vertex_id)
+                            .cloned(),
+                    );
+                }
+            }
+        }
+        contributions.extend(derive_face_proximity_contributions(
+            face_witnesses.into_values().collect(),
+            &contact_pairs,
+            search_radius_m,
+            request.resolved_cells_across_gap(),
+            control,
+        )?);
+    }
     contributions.extend(derive_proximity_contributions(
         edge_witnesses,
         &contact_pairs,
         request.global_metric,
         search_radius_m,
+        request.resolved_cells_across_gap(),
         control,
     )?);
-    request
+    let mut resolved = request
         .intersect_contributions(contributions)
         .map_err(|error| {
             SharedCurveError::invalid_request("curve geometry metric", error.to_string())
-        })
+        })?;
+    // Every regular edge carries a support: edge-scoped sizing and the uniform sizing of a
+    // finer adjacent face both grade from it.
+    let mut entity_supports = std::mem::take(&mut resolved.entity_supports);
+    entity_supports.extend(supports);
+    entity_supports.sort_by(|left, right| left.entity_id.cmp(&right.entity_id));
+    entity_supports.dedup_by(|left, right| left.entity_id == right.entity_id);
+    resolved.entity_supports = entity_supports;
+    resolved.validate().map_err(|error| {
+        SharedCurveError::invalid_request("curve geometry metric supports", error.to_string())
+    })?;
+    Ok(resolved)
 }
 
 fn contact_proximity_pairs(

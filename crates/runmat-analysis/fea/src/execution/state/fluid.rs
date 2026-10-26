@@ -7,9 +7,7 @@ use crate::{
     execution::{FluidSteadySolverResult, FluidSteadyWorkload},
     results::field::FiniteVolumeFieldTopology,
 };
-use runmat_canonical_codec::{
-    canonical_payload_materialization_resident_bytes_estimate, profile_serialized,
-};
+use runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate;
 use runmat_meshing_core::SolverMeshArtifact;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -38,36 +36,24 @@ fn add(a: u64, b: u64) -> AnalysisExecutionResult<u64> {
         .ok_or_else(|| invalid("fluid state requested heap overflow"))
 }
 
-/// Original source/projection and complete byte-vector materialization coexisting
-/// with a decoded immutable result. This is requested heap, not scheduler/RSS evidence.
+/// Source-bound validation of the retained original result: the verification phase of the
+/// original source (re-preparation and residual re-evaluation, no linear solve) plus the
+/// directly decoded original result beside its canonical bytes. The owned state payload is
+/// not charged here: the shared publication phase charges it once, as the state entry's
+/// direct materialization inside output construction. This is requested heap, not
+/// scheduler/RSS evidence.
 pub fn fluid_state_publication_workspace_bytes(
     workload: &FluidSteadyWorkload,
     mesh: &SolverMeshArtifact,
     result_bytes: &[u8],
-    topology: &FiniteVolumeFieldTopology,
 ) -> AnalysisExecutionResult<u64> {
     let projection =
         crate::planning::resource::derive_fluid_steady_resource_projection(workload, mesh)
             .map_err(invalid)?;
-    let payload = profile_serialized(
-        &FluidStatePayloadProjection {
-            workload,
-            mesh,
-            result_bytes,
-            topology,
-        },
-        STATE_LIMITS,
-    )?;
-    let decoded_original = canonical_payload_materialization_resident_bytes_estimate(result_bytes)?;
+    let decoded_original = canonical_payload_typed_resident_bytes_estimate(result_bytes)?;
     let required = add(
-        projection.phase_resident_bytes_upper_bound.0,
-        add(
-            decoded_original,
-            add(
-                payload.materialization_resident_bytes_estimate,
-                payload.encoded_bytes_upper_bound,
-            )?,
-        )?,
+        projection.verification_phase_resident_bytes_upper_bound.0,
+        decoded_original,
     )?;
     if required > workload.resident_ceiling()? || required > isize::MAX as u64 {
         return Err(invalid(
@@ -80,12 +66,7 @@ pub fn fluid_state_publication_workspace_bytes(
 impl CanonicalFluidStatePayload {
     /// Source-bound cold decode and original-equation validation; never invokes solve.
     pub fn original_result(&self) -> AnalysisExecutionResult<FluidSteadySolverResult> {
-        fluid_state_publication_workspace_bytes(
-            &self.workload,
-            &self.mesh,
-            &self.result_bytes,
-            &self.topology,
-        )?;
+        fluid_state_publication_workspace_bytes(&self.workload, &self.mesh, &self.result_bytes)?;
         FluidSteadySolverResult::from_canonical_bytes_for(
             &self.result_bytes,
             Digest::sha256(&self.result_bytes),
@@ -198,7 +179,7 @@ impl CanonicalSemanticState {
         validate_request(request, workload, mesh, result)?;
         let result_bytes = result.canonical_bytes()?;
         let topology = result.native_field_topology(workload, mesh)?;
-        fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes, &topology)?;
+        fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes)?;
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,
             declaration: request.declaration.clone(),

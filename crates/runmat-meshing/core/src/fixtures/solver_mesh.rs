@@ -5,7 +5,7 @@ use crate::{
     CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets, ElementOrder,
     FieldTopologyLocation, FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy,
     InvariantEvidence, MeshNeighbor, MeshRegion, MeshingEvidence, MeshingPartitionDescriptor,
-    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits, MeshingExecutionCeilings,
     MeshingResourceUsage, MeshingStageEvidence, MeshingStageKind, MetricCombinationRule,
     MetricFieldRequest, MetricTensor3, PersistentEntityId, PersistentEntityKind,
     PlatformBuildIdentity, SolverBoundaryEdge, SolverBoundaryFace, SolverMeshArtifact,
@@ -388,6 +388,7 @@ pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> 
         cancellation_checkpoints: 1,
     };
     let evidence = MeshingEvidence {
+        ceilings: FIXTURE_CEILINGS,
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact
@@ -407,7 +408,7 @@ pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> 
         sizing: Vec::new(),
         resources: MeshingResourceUsage {
             generated_nodes: artifact.topology.nodes.len() as u64,
-            generated_elements: artifact.topology.volume_elements.len() as u64,
+            generated_elements: artifact.generated_element_count(),
             peak_memory_bytes: 1_024,
             peak_scratch_bytes: 256,
             wall_time_ms: 1,
@@ -431,6 +432,7 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 1,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/1".into(),
@@ -449,10 +451,12 @@ fn request() -> MeshingRequest {
             maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -474,21 +478,16 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
+        size_controls: Vec::new(),
     }
 }
 
@@ -505,11 +504,7 @@ fn field(
 }
 
 fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source.into(),
-        assembly_path: vec!["root".into()],
-    }
+    super::fixture_entity(kind, source)
 }
 
 fn digest(byte: u8) -> StableDigest {
@@ -534,3 +529,13 @@ mod tests {
             .all(|element| element.node_ids.len() == 10));
     }
 }
+
+/// Execution ceilings the fixture evidence was produced under.
+pub const FIXTURE_CEILINGS: MeshingExecutionCeilings = MeshingExecutionCeilings {
+    maximum_memory_bytes: 1_000_000,
+    maximum_scratch_bytes: 1_000_000,
+    maximum_wall_time_ms: 10_000,
+    maximum_artifact_bytes: 1_000_000,
+    maximum_search_work: 10_000,
+    maximum_iterations: 10_000,
+};

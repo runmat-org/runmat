@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisSequence, CoordinateFrame, CrossPowerSpectralDensity, FormulationRequirement,
-    IndependentDomain, ProcedureStep, RandomExcitationChannel, RandomExcitationChannelId,
-    RandomExcitationId, RandomExcitationQuantity, RandomExcitationSpectrum, RandomSpectrumEvidence,
+    AnalysisSequence, CoordinateFrame, CrossPowerSpectralDensity, IndependentDomain, ProcedureStep,
+    RandomExcitationChannel, RandomExcitationChannelId, RandomExcitationId,
+    RandomExcitationQuantity, RandomExcitationSpectrum, RandomSpectrumEvidence,
     RandomSpectrumExtrapolation, RandomSpectrumInterpolation, ReferenceStatePolicy,
     SequenceDependencyReason, SpectralDensityConvention, SpectrumDirection, StateTransition,
     StateTransitionMethod, StateUse, TopologyTransitionPolicy, TransitionId,
@@ -31,7 +31,7 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::resource::ResourceAccounting;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
@@ -50,6 +50,7 @@ fn native_random_response_is_portable_order_independent_and_publishes_typed_stat
     .unwrap();
     let mut intervals =
         prepare_structural_random_response_fanout(StructuralRandomResponseFanoutPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("random-response-study"),
             frozen_project_digest: None,
             program_revision: revision(),
@@ -85,6 +86,7 @@ fn native_random_response_is_portable_order_independent_and_publishes_typed_stat
     completed_intervals.reverse();
     let assembly =
         prepare_structural_random_response_assembly(StructuralRandomResponseAssemblyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("random-response-study"),
             frozen_project_digest: None,
             program_revision: revision(),
@@ -173,7 +175,6 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -186,7 +187,6 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
         model,
         step_id: response_step.step_id.clone(),
         backend: bound.backend(),
-        formulation_requirement: bound.formulation_requirement(),
         observation_execution: bound.observation_execution(),
         integration_policy: bound.integration_policy(),
         maximum_intervals_per_task: bound.maximum_intervals_per_task(),
@@ -409,24 +409,20 @@ fn fixture() -> (
     model.random_excitations = vec![excitation];
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let volume_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: model.material_assignments[0]
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     for (face_index, region) in [(0, "root"), (1, "tip"), (3, "dynamic_force")] {
         mesh.topology.boundary_faces[face_index]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: region.into(),
-                assembly_path: vec!["root".into()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                region.into(),
+                vec!["root".into()],
+            ));
         mesh.topology.boundary_faces[face_index].provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -435,7 +431,6 @@ fn fixture() -> (
         model: model.clone(),
         step_id: modal.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -473,7 +468,6 @@ fn fixture() -> (
         model,
         step_id: response.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         modal_basis_transition: transition,
         integration_policy: RandomResponseIntegrationPolicy {
@@ -537,14 +531,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("random-response-graph"),
         digest("random-response-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("random-response-runtime"),
-            digest("random-response-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

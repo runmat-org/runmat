@@ -23,7 +23,7 @@ pub use contracts::canonical::{
     ClosedMeshingStage, ConformalInterface, ContactPair, CurveQualityTargets, ElementOrder,
     EncodedMeshingChunk, EncodedMeshingChunkRef, ErrorDistribution, FieldTopologyLocation,
     FieldTopologyMap, GeometricWitness, GeometryRevisionRef, GeometryTolerancePolicy,
-    InvariantEvidence, MeshDefinition, MeshNeighbor, MeshRegion, MeshingCancellationSignal,
+    InvariantEvidence, MeshDefinition, MeshDimension, MeshNeighbor, MeshRegion, MeshingCancellationSignal,
     MeshingCanonicalCodecControl, MeshingCanonicalLimits, MeshingCapabilityRequirement,
     MeshingChunkDescriptor, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStorageProfile,
     MeshingChunkStream, MeshingChunkedPayload, MeshingContractError, MeshingDiagnosticEntry,
@@ -31,7 +31,10 @@ pub use contracts::canonical::{
     MeshingInputKind, MeshingInputRef, MeshingJoinIdentity, MeshingManifestDisposition,
     MeshingManifestMetadata, MeshingOperation, MeshingPartitionDescriptor,
     MeshingPartitionIdentity, MeshingPartitionKind, MeshingPartitionResultRef, MeshingProgress,
-    MeshingQualityTargets, MeshingRequest, MeshingRequestSettings, MeshingResourceBudget,
+    MeshingExecutionCeilings, MeshingQualityTargets, MeshingRequest, MeshingRequestSettings,
+    size_control_evidence, validate_size_controls, AchievedEdgeLengths, AppliedSizeControl,
+    MeshSizeControl, MeshSizeControlTarget, NamedRegionEntities,
+    MeshingResourceBudget, MeshingSizeLimits,
     MeshingResourceUsage, MeshingStageEvidence, MeshingStageIdentity, MeshingStageKind,
     MeshingStageManifest, MeshingStageResultIdentity, MeshingStageResultKind,
     MeshingStreamStorageProfile, MeshingValidationIdentity, MeshingWorkloadRequest,
@@ -44,7 +47,8 @@ pub use contracts::canonical::{
     SolverMeshProjection, SolverMeshTopology, SolverMeshTransferMap, SolverMeshValidation,
     SolverNodeExactParameter, SolverTransferMethod, SolverTransferSource, SolverVolumeElement,
     StableDigest, SurfaceQualityTargets, ValidatedSolverMeshProjection,
-    ValidatedSolverMeshTopology, VolumeQualityTargets, MESHING_EVIDENCE_SCHEMA_VERSION,
+    SolverElevationReport, ValidatedSolverMeshTopology, VolumeQualityTargets,
+    MESHING_EVIDENCE_SCHEMA_VERSION,
     MESHING_FAILURE_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
     MESHING_PROGRESS_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
     MESHING_STAGE_MANIFEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
@@ -75,6 +79,18 @@ pub use quality::boundary::{
     evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,
     BoundaryQualityCandidateError, BoundaryQualityCandidateEvaluation,
     BoundaryQualityCandidateOptions, BoundaryQualityCandidateRejectionReason,
+};
+pub use quality::boundary_face::{
+    boundary_face_rule, boundary_face_validity, is_valid_boundary_face, BoundaryFaceRule,
+    BoundaryFaceValidity, BOUNDARY_FACE_MINIMUM_NORMAL_JACOBIAN_RATIO,
+    GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT,
+};
+pub use quality::tet10_element::{
+    is_valid_tetrahedron10_element, tensor_tetrahedron_rule, tetrahedron10_is_affine,
+    tetrahedron10_jacobian_margin, tetrahedron10_reference_gradients,
+    tetrahedron10_stiffness_moments, Tet10ElementInvalidity, Tet10JacobianMargin,
+    Tet10StiffnessMoments, Tet10StiffnessRule, STIFFNESS_MOMENT_RELATIVE_TOLERANCE,
+    TET10_GRADIENT_MOMENT_COUNT, TET10_MINIMUM_JACOBIAN_RATIO, TETRAHEDRON_FOUR_POINT_RULE,
 };
 pub use quality::ElementQuality;
 pub use quality::{predicate, spatial_index, tolerance};

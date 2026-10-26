@@ -46,10 +46,10 @@ async fn run_intervals(intervals: &[usize]) {
             );
         }
         let balance = done.result.manifest.energy_balances[0];
-        assert!((balance.boundary_loss_w / power - 1.0).abs() < 1e-8);
-        assert!((balance.prescribed_boundary_power_w / power + 1.0).abs() < 1e-8);
-        assert_eq!(balance.applied_power_w, 0.0);
-        assert_eq!(balance.storage_rate_w, 0.0);
+        assert!((balance.boundary_loss_w.canonical_value() / power - 1.0).abs() < 1e-8);
+        assert!((balance.prescribed_boundary_power_w.canonical_value() / power + 1.0).abs() < 1e-8);
+        assert_eq!(balance.applied_power_w, runmat_types::physical::Quantity::new(0.0));
+        assert_eq!(balance.storage_rate_w, runmat_types::physical::Quantity::new(0.0));
         for (index, expected) in [(1, [surface - 400.0, 0.0, 0.0]), (2, [power, 0.0, 0.0])] {
             let field = fields::original(&done, &mesh, 0, index);
             for values in field.storage().as_host_f64().unwrap().chunks_exact(3) {

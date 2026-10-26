@@ -33,11 +33,13 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     model.sequence = AnalysisSequence::from_steps(
         "retained-fluid",
@@ -48,7 +50,7 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "stationary".into(),
             kind: FluidConstraintKind::NoSlipWall {
-                target: RegionTarget::boundary("slab_insulated"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
             },
         }));
     model
@@ -56,13 +58,13 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant([Velocity::new(0.0); 3]),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(0.0)),
         },
@@ -101,8 +103,8 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,
@@ -117,11 +119,11 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
             maximum_authority_items: 100,
         },
         geometry_policy: FiniteVolumeProjectionPolicy {
-            max_cells: 100,
-            max_face_incidences: 400,
-            max_boundary_faces: 400,
-            max_scratch_bytes: 10_000_000,
-            max_traversal_operations: 1_000_000,
+            max_cells: Some(100),
+            max_face_incidences: Some(400),
+            max_boundary_faces: Some(400),
+            max_scratch_bytes: Some(10_000_000),
+            max_traversal_operations: Some(1_000_000),
         },
     };
     (workload, mesh)
@@ -133,7 +135,7 @@ fn original_zero_flow_cold_fields_and_traction_evidence_roundtrip_without_resolv
     let result = workload.execute(&mesh).unwrap();
     assert_eq!(
         workload.result_encoding_profile(&mesh).unwrap(),
-        runmat_canonical_codec::profile_serialized(&result, LIMITS).unwrap()
+        runmat_canonical_codec::profile_serialized_shape(&result, LIMITS).unwrap()
     );
     assert!(result
         .original()
@@ -266,21 +268,21 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     let native = result
         .recover_native_fields(&workload, &mesh, &request)
         .unwrap();
+    // Cells are stored in mesh element order; the whole mesh is fluid, so faces keep their
+    // order and orientation.
+    let mut cells = (0..source.topology.cells.len()).collect::<Vec<_>>();
+    cells.sort_by_key(|&cell| source.topology.cells[cell].source_element_index);
     for (field, expected) in native.fields().iter().zip([
-        result
-            .original()
-            .velocity_m_per_s
-            .canonical_values()
+        cells
+            
             .iter()
-            .flatten()
-            .copied()
+            .flat_map(|&cell| result.original().velocity_m_per_s.canonical_values()[cell])
             .collect::<Vec<_>>(),
-        result.original().pressure_pa.canonical_values().clone(),
-        result
-            .original()
-            .face_volume_flux_m3_per_s
-            .canonical_values()
-            .clone(),
+        cells
+            .iter()
+            .map(|&cell| result.original().pressure_pa.canonical_values()[cell])
+            .collect(),
+        result.original().face_volume_flux_m3_per_s.canonical_values().clone(),
     ]) {
         assert_eq!(
             field.storage().values,
@@ -316,8 +318,7 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
     use crate::results::{
         field::{FiniteVolumeFieldTopology, RecoveredFieldCatalog, RecoveredFieldEntityDomain},
         observation::{
-            evaluate_finite_volume_observations, resolve_finite_volume_observation_plan,
-            ObservationEntity, ObservationLimits,
+            evaluate_observations, resolve_observation_plan, ObservationEntity, ObservationLimits,
         },
     };
     let (mut workload, mesh) = authored();
@@ -391,31 +392,34 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
         artifact.fields()[2].storage().shape,
         vec![source.topology.faces.len()]
     );
+    // The whole mesh is fluid: complete support, mesh faces in fluid face order.
+    assert!(artifact
+        .fields()
+        .iter()
+        .all(|field| field.definition().support().is_complete()));
+    assert_eq!(
+        artifact.fields()[2].storage().as_host_f64().unwrap(),
+        &result.original().face_volume_flux_m3_per_s.canonical_values()[..]
+    );
+    let definitions = artifact
+        .fields()
+        .iter()
+        .map(|field| field.definition().clone())
+        .collect::<Vec<_>>();
     let catalog = RecoveredFieldCatalog::new_for_topology(
-        layout.identity().discretization_digest(),
-        layout.entity_counts(),
+        source.source.projection_digest,
+        artifact.entity_counts(),
         artifact.into_fields(),
     )
     .unwrap();
-    let definitions = fluid_native_field_definition_inventory().unwrap();
-    let plan = resolve_finite_volume_observation_plan(
+    let plan = resolve_observation_plan(
         &workload.model.sequence.steps[0],
-        &layout,
         &source.source,
-        &source.topology,
         &definitions,
         ObservationLimits::default(),
     )
     .unwrap();
-    let observed = evaluate_finite_volume_observations(
-        &plan,
-        &layout,
-        &source.source,
-        &source.topology,
-        &catalog,
-        ObservationLimits::default(),
-    )
-    .unwrap();
+    let observed = evaluate_observations(&plan, &source.source, &catalog).unwrap();
     assert_eq!(observed[0].location, FieldLocation::Cell);
     assert_eq!(observed[2].entities.len(), source.topology.faces.len());
     assert!(observed[2]
@@ -432,6 +436,10 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
         .is_err());
 }
 
+// witness: FEA-FLUID-EXECUTION-001/resources @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Original payload and authored requested ceilings before expansion; no measured
+//   RSS/GPU/distributed bound.
 #[test]
 fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expansion() {
     let (mut workload, mesh) = authored();
@@ -441,7 +449,7 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
     let result = workload.execute(&mesh).unwrap();
     assert_eq!(
         workload.result_encoding_profile(&mesh).unwrap(),
-        runmat_canonical_codec::profile_serialized(&result, LIMITS).unwrap()
+        runmat_canonical_codec::profile_serialized_shape(&result, LIMITS).unwrap()
     );
     assert!(
         projection.phase_resident_bytes_upper_bound.0
@@ -466,25 +474,31 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
     );
 }
 
+// witness: FEA-FLUID-RECOVERY-001/fields @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Portable original field/traction/resource substitution rejection; no process
+//   termination.
 #[test]
 fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
     let (workload, mesh) = authored();
     let result = workload.execute(&mesh).unwrap();
     for path in [
-        vec!["original", "velocity_m_per_s", "0", "0"],
-        vec!["original", "pressure_pa", "0"],
-        vec!["original", "pressure_fluctuation_pa", "0"],
+        vec!["original", "steady", "velocity_m_per_s", "0", "0"],
+        vec!["original", "steady", "pressure_pa", "0"],
+        vec!["original", "steady", "pressure_fluctuation_pa", "0"],
         vec![
             "original",
+            "steady",
             "residual",
             "boundary_balances",
             "0",
             "volume_flow_rate_m3_per_s",
         ],
-        vec!["original", "face_volume_flux_m3_per_s", "0"],
-        vec!["original", "pressure_reference_pa", "0"],
+        vec!["original", "steady", "face_volume_flux_m3_per_s", "0"],
+        vec!["original", "steady", "pressure_reference_pa", "0"],
         vec![
             "original",
+            "steady",
             "residual",
             "face_forces",
             "viscous_traction_n",
@@ -520,9 +534,9 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
         let mut wire = serde_json::to_value(&result).unwrap();
         if legacy_schema >= 2 {
             wire["data"]["schema_version"] =
-                serde_json::json!(if legacy_schema == 2 { 1 } else { 3 });
+                serde_json::json!(if legacy_schema == 2 { 1 } else { 4 });
         } else {
-            wire["data"]["original"]
+            wire["data"]["original"]["steady"]
                 .as_object_mut()
                 .unwrap()
                 .remove(if legacy_schema == 0 {
@@ -551,7 +565,7 @@ fn missing_original_cell_material_boundary_or_source_and_stale_cfd_reject() {
     wrong.model.material_assignments.clear();
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
-    wrong.model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    wrong.model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
     wrong.model.constraints.pop();
@@ -604,9 +618,6 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
     wrong.model.sequence.steps[0].procedure = AnalysisProcedure::TransientResponse;
-    assert!(wrong.validate().is_err());
-    let mut wrong = workload.clone();
-    wrong.formulation_requirement = FormulationRequirement::Production;
     assert!(wrong.validate().is_err());
     let mut wrong = workload.clone();
     wrong.model.sequence.steps[0].state_outputs.clear();

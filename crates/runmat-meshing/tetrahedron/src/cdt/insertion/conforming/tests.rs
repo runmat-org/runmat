@@ -31,6 +31,12 @@ fn fixture() -> (TopologyMutation, BTreeSet<[StableDigest; 3]>) {
         .collect();
     (TopologyMutation::from_canonical(topology), barriers)
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Explicit conforming insertion splits the complete containing cell, internal face or
+//   edge support, preserves the exact outer boundary, retains every point and passes independent
+//   canonical admission. A protected boundary split rejects without changing the original state.
+//   This contract does not assert Delaunay empty-sphere quality or original CAD convergence.
 #[test]
 fn conforming_cell_face_and_edge_insertions_preserve_the_exact_outer_boundary() {
     let (mut topology, barriers) = fixture();
@@ -89,6 +95,13 @@ fn conforming_cell_face_and_edge_insertions_preserve_the_exact_outer_boundary() 
         serde_json::to_value(after).unwrap()
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Exact predicates establish a point outside a chosen tetrahedron but inside its
+//   Euclidean circumsphere. Explicit conforming insertion retains that unaffected tetrahedron and
+//   passes independent physical topology admission. Quality refill therefore does not silently
+//   impose Euclidean conflict growth; callers requesting Delaunay insertion retain their separate
+//   operator. This is not a whole-study accuracy or throughput claim.
 #[test]
 fn conforming_refill_keeps_an_unaffected_tetrahedron_inside_the_euclidean_conflict_sphere() {
     let (mut topology, barriers) = fixture();

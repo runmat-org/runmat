@@ -17,35 +17,19 @@ use crate::cdt::{
 };
 
 pub(super) fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, "solid".to_owned(), Vec::new())
 }
 
 fn named_region(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, value.to_owned(), Vec::new())
 }
 
 fn face(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Face, value.to_owned(), Vec::new())
 }
 
 fn edge(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Edge, value.to_owned(), Vec::new())
 }
 
 fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {
@@ -85,15 +69,18 @@ pub(super) fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProve
 
 pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
 fn anisotropic_metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3 {
             xx: 1.0,
@@ -105,6 +92,7 @@ fn anisotropic_metric() -> MetricFieldRequest {
         },
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
@@ -451,6 +439,57 @@ fn refinement_uses_an_interior_centroid_when_circumcenter_is_exterior() {
         selected.node.coordinates_m.canonical_value(),
         [0.5, 0.25, 0.25]
     );
+}
+
+// witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: The size-defect edge candidate splits only an edge with an interior endpoint and
+//   lies strictly inside its source; whole-part runtime is measured on the cantilever study.
+#[test]
+fn size_refinement_splits_the_longest_edge_with_an_interior_endpoint() {
+    let corner = [2.0, 0.0, 0.0];
+    let interior = [0.3, 0.2, 0.2];
+    let topology = insert_delaunay_volume_node(
+        topology([[0.0, 0.0, 0.0], corner, [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        DelaunayVolumeNode::explicit(StableDigest::from_bytes([9; 32]), interior),
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let contexts = context(&topology);
+    let (evaluated, options) = quality(&topology, &contexts, 1.2);
+    let points = |index: usize| {
+        topology.tetrahedra[index]
+            .vertex_indices
+            .map(|vertex| topology.nodes[vertex as usize].coordinates_m.canonical_value())
+    };
+    // The hull edges (corner to corner, up to 2.24) are longer than the interior
+    // edge to the far corner (1.73), but they cannot be split from inside.
+    let source = (0..topology.tetrahedra.len())
+        .find(|&index| points(index).contains(&corner) && points(index).contains(&[0.0, 1.0, 0.0]))
+        .unwrap();
+    let cell = evaluated
+        .tetrahedra
+        .iter()
+        .find(|cell| {
+            let mut identities = cell.node_identities;
+            identities.sort_unstable();
+            let mut expected = topology.tetrahedra[source]
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize].identity);
+            expected.sort_unstable();
+            identities == expected
+        })
+        .unwrap();
+    let point = candidate::metric_edge_midpoint(&topology, source, cell, options).unwrap();
+    let midpoint: [f64; 3] = std::array::from_fn(|axis| 0.5 * (interior[axis] + corner[axis]));
+    let offset = (0..3).map(|axis| (point[axis] - midpoint[axis]).powi(2)).sum::<f64>().sqrt();
+    assert!(offset < 0.1, "{point:?} is not near the interior edge midpoint {midpoint:?}");
+    assert!(candidate::strictly_inside(points(source), point).unwrap());
+    // No edge over the bound with an interior endpoint: no candidate.
+    let (relaxed, relaxed_options) = quality(&topology, &contexts, 2.0);
+    let relaxed_cell = relaxed.tetrahedra.iter().find(|candidate| candidate.node_identities == cell.node_identities).unwrap();
+    assert!(candidate::metric_edge_midpoint(&topology, source, relaxed_cell, relaxed_options).is_none());
 }
 
 struct Cancelled;

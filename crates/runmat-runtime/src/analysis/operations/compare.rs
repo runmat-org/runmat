@@ -114,8 +114,6 @@ pub fn analysis_results_compare_op(
         candidate_run_id: candidate.run_id,
         numerically_acceptable_changed: baseline.numerically_acceptable
             != candidate.numerically_acceptable,
-        production_publishable_changed: baseline.production_publishable
-            != candidate.production_publishable,
         run_status_changed: baseline.run_status != candidate.run_status,
         quality_reason_count_delta: candidate.quality_reasons.len() as i64
             - baseline.quality_reasons.len() as i64,

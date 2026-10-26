@@ -110,14 +110,18 @@ pub(crate) async fn execute_local_study_geometry(
     meshing_request.tolerance = output.document.tolerance;
 
     let analysis_config = config.clone();
+    let meshing_ceilings = match config.local_memory_capacity_bytes {
+        Some(capacity) => crate::machine_capacity::meshing_execution_ceilings_for(capacity, &meshing_request.limits),
+        None => crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
+    };
     // Worker slots advertise the whole machine, while the pool has one aggregate
     // capacity. A wide volume task and narrow entity tasks draw from the same budget.
     config.worker_memory_bytes = config
         .worker_memory_bytes
-        .max(meshing_request.resources.maximum_memory_bytes);
+        .max(meshing_ceilings.maximum_memory_bytes);
     config.worker_scratch_bytes = config
         .worker_scratch_bytes
-        .max(meshing_request.resources.maximum_scratch_bytes);
+        .max(meshing_ceilings.maximum_scratch_bytes);
     let meshing_cpu_millicores = config.worker_cpu_millicores;
     config.enable_exact_meshing(
         &output.document,
@@ -147,6 +151,7 @@ pub(crate) async fn execute_local_study_geometry(
         ExactMeshingDagRun {
             geometry: &geometry,
             request: meshing_request,
+            ceilings: meshing_ceilings,
             artifact_access: artifact_access.clone(),
             capability_cohort: Some(output.platform.capability_cohort.clone()),
             program_revision: geometry_meshing_program.recipe.program_revision.clone(),
@@ -158,6 +163,9 @@ pub(crate) async fn execute_local_study_geometry(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: runmat_meshing_core::NamedRegionEntities::from_resolved_regions(
+                &output.regions,
+            ),
         },
         &mut executor,
     )

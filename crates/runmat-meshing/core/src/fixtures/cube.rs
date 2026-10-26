@@ -167,8 +167,8 @@ pub fn slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         field("faces", FieldTopologyLocation::BoundaryFace, face_ids),
         field("edges", FieldTopologyLocation::BoundaryEdge, Vec::new()),
     ];
-    artifact.resolved_request.resources.maximum_nodes = artifact.topology.nodes.len() as u64;
-    artifact.resolved_request.resources.maximum_elements =
+    artifact.resolved_request.limits.maximum_nodes = artifact.topology.nodes.len() as u64;
+    artifact.resolved_request.limits.maximum_elements =
         artifact.topology.volume_elements.len() as u64;
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -266,12 +266,12 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         }
     }
     mesh.resolved_request.element_order = ElementOrder::Tet10;
-    mesh.resolved_request.resources.maximum_nodes = mesh.topology.nodes.len() as u64;
+    mesh.resolved_request.limits.maximum_nodes = mesh.topology.nodes.len() as u64;
     mesh.seal_canonical_digest().unwrap();
     mesh
 }
 
-fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
+pub(super) fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
     let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m.canonical_value());
     let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -280,21 +280,17 @@ fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
         + ab[2] * (ac[0] * ad[1] - ac[1] * ad[0])
 }
 
-fn node_digest(index: usize) -> StableDigest {
+pub(super) fn node_digest(index: usize) -> StableDigest {
     let mut bytes = [0_u8; 32];
     bytes[..8].copy_from_slice(&(index as u64 + 1).to_le_bytes());
     StableDigest::from_bytes(bytes)
 }
 
-fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source.into(),
-        assembly_path: vec!["root".into()],
-    }
+pub(super) fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
+    super::fixture_entity(kind, source)
 }
 
-fn field(
+pub(super) fn field(
     topology_id: &str,
     location: FieldTopologyLocation,
     ordered_entity_ids: Vec<u64>,

@@ -8,9 +8,9 @@ use std::sync::Mutex;
 
 use peak_allocator::{begin_measurement, end_measurement, process_peak_rss_bytes};
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, CoordinateFrame, Displacement, FormulationRequirement,
-    RegionTarget, StructuralConstraint, StructuralConstraintEquation,
-    StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralTranslationDof,
+    AnalysisConstraint, AnalysisModel, CoordinateFrame, Displacement, RegionTarget,
+    StructuralConstraint, StructuralConstraintEquation, StructuralConstraintEquationTerm,
+    StructuralConstraintKind, StructuralTranslationDof,
 };
 use runmat_analysis_fea::{
     constraints::{CanonicalStructuralConstraintPlan, ConstraintEnforcement},
@@ -115,7 +115,6 @@ fn measure_static_case(
     )
     .unwrap();
     let options = LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         local_execution,
         ..LinearStaticSolveOptions::default()
     };
@@ -124,7 +123,6 @@ fn measure_static_case(
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: options.formulation_requirement,
         preconditioner: options.preconditioner_kind,
         algebra_backend: options.algebra_backend_kind,
         observation_execution: ObservationExecutionPolicy::serial(),

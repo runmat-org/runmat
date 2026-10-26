@@ -5,7 +5,7 @@ use runmat_meshing_core::{
     solver_volume_element_identity, AlgorithmVersionSet, CancellationPolicy,
     CanonicalMeshingContract, CurveQualityTargets, ElementOrder, FieldTopologyLocation,
     FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy, MeshNeighbor, MeshRegion,
-    MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     NeverCancelled, SolverMeshAdaptationKind, SolverMeshAdaptationLineage, SolverMeshArtifact,
     SolverMeshNode, SolverMeshTopology, SolverTransferMethod, SolverVolumeElement, StableDigest,
     SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
@@ -22,11 +22,7 @@ use crate::cdt::{
 };
 
 fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".into(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, "solid".into(), Vec::new())
 }
 
 fn topology() -> DelaunayVolumeTopology {
@@ -65,6 +61,7 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/current".into(),
@@ -103,30 +100,27 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 10.0,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
+        size_controls: Vec::new(),
     }
 }
 
 fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 

@@ -233,7 +233,8 @@ pub fn prepared_input_resource_facts_from_refs<'a>(
                 .iter()
                 .try_fold(total, |partition_total, partition| {
                     let chunks = input.partition_chunks(partition.logical_identity)?;
-                    let estimate = runmat_canonical_codec::canonical_chunked_payload_materialization_resident_bytes_estimate(
+                    // Inputs decode directly into typed values; no value tree is built.
+                    let estimate = runmat_canonical_codec::canonical_chunked_payload_typed_resident_bytes_estimate(
                         chunks.iter().map(|object| object.bytes.as_slice()), &ResourceProfileControl,
                     )
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -290,9 +291,12 @@ pub(crate) fn validate_prepared_output_resource_facts(
     if output.manifest.encoded_length > admitted.encoded_payload_bytes_upper_bound.0
         || actual_closure > admitted.transport_closure_bytes_upper_bound.0
     {
-        return Err(AnalysisBridgeError::Invalid(
-            "prepared output exceeds its admitted semantic or transport envelope".into(),
-        ));
+        return Err(AnalysisBridgeError::Invalid(format!(
+            "prepared output exceeds its admitted semantic or transport envelope: encoded {} of {}, closure {actual_closure} of {}",
+            output.manifest.encoded_length,
+            admitted.encoded_payload_bytes_upper_bound.0,
+            admitted.transport_closure_bytes_upper_bound.0,
+        )));
     }
     Ok(())
 }

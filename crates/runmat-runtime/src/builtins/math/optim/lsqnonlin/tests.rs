@@ -191,8 +191,8 @@ fn lsqnonlin_vector_residual_recovers_parameters() {
                 panic!("original sparse J");
             };
             assert!(j.as_f32_slice().is_some());
-            assert_eq!(j.col_ptrs.as_slice(), &[0, 2, 4]);
-            assert_eq!(j.row_indices.as_slice(), &[0, 2, 1, 2]);
+            assert_eq!(&*j.col_ptrs, &[0, 2, 4]);
+            assert_eq!(&*j.row_indices, &[0, 2, 1, 2]);
         } else {
             let Value::Tensor(j) = &outputs[6] else {
                 panic!("dense J");

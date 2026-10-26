@@ -169,11 +169,7 @@ mod tests {
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
     fn face(id: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: id.into(),
-            assembly_path: vec!["root".into()],
-        }
+        PersistentEntityId::new(PersistentEntityKind::Face, id.into(), vec!["root".into()])
     }
 
     fn selection(id: &str) -> String {
@@ -181,11 +177,7 @@ mod tests {
     }
 
     fn identity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: id.into(),
-            assembly_path: vec!["root".into()],
-        }
+        PersistentEntityId::new(kind, id.into(), vec!["root".into()])
     }
 
     fn model_with_all_boundary_targets() -> AnalysisModel {
@@ -473,11 +465,8 @@ mod tests {
 
     #[test]
     fn alias_inventory_rejects_non_face_and_invalid_identities() {
-        let non_face = PersistentEntityId {
-            kind: PersistentEntityKind::Solid,
-            source_topology_id: "solid".into(),
-            assembly_path: Vec::new(),
-        };
+        let non_face =
+            PersistentEntityId::new(PersistentEntityKind::Solid, "solid".into(), Vec::new());
         assert!(matches!(
             GeometryRegionAliases::new(BTreeMap::from([("face_000001".into(), non_face)])),
             Err(GeometryRegionResolutionError::WrongIdentityKind { .. })
@@ -488,6 +477,9 @@ mod tests {
         ));
     }
 
+    // witness: FEA-SHARED-PROPERTIES-001/exact_assignment_targets @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Material targets resolve only against compatible topology aliases.
     #[test]
     fn material_targets_resolve_only_against_their_compatible_topology_aliases() {
         let mut model = model_with_all_boundary_targets();

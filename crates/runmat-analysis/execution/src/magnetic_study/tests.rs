@@ -15,7 +15,7 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
     compiled.model.electromagnetic = Some(ElectromagneticDomain::Magnetostatic {
         formulation: MagnetostaticFormulation::MagneticVectorPotential,
     });
-    compiled.model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    compiled.model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     compiled.model.constraints.clear();
     for face in 0..4 {
         compiled
@@ -24,7 +24,7 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground:{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }
@@ -34,18 +34,17 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "gauge".into(),
             kind: MagneticConstraintKind::CoulombGauge {
-                target: RegionTarget::volume("solid"),
+                target: RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("solid")),
             },
         }));
     compiled.properties =
         runmat_analysis_fea::properties::compile_property_map(&compiled.model, Some(&mesh))
             .unwrap();
     compiled.solver_mesh_digest = mesh.canonical_digest;
-    let policy = MagneticStudyPlanningPolicy {
-        formulation_requirement: input.policy.formulation_requirement,
-    };
+    let policy = MagneticStudyPlanningPolicy {};
     let workload = plan_magnetic_study(&compiled, policy).unwrap();
     MagneticStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product: MagneticStudyProduct { compiled, workload },
         mesh,

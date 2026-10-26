@@ -7,11 +7,11 @@ fn actual_wire_decode_budget_is_checked_without_demanding_maximum_width_profile(
     let w = workload();
     let m = fixtures::slab_mesh(2);
     let mut f = facts(&w, &m);
-    let exact = runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+    let exact = runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
         &w.canonical_bytes().unwrap(),
     )
     .unwrap()
-        + runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        + runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &m.canonical_encode().unwrap(),
         )
         .unwrap();
@@ -55,7 +55,7 @@ fn workload() -> MaxwellHarmonicWorkload {
             AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: id.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(id),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(id))),
                 },
             })
         })
@@ -63,8 +63,8 @@ fn workload() -> MaxwellHarmonicWorkload {
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 fn facts(
@@ -73,6 +73,7 @@ fn facts(
 ) -> PreparedMaxwellHarmonicResourceFacts {
     let input = (w.canonical_bytes().unwrap().len() + m.canonical_encode().unwrap().len()) as u64;
     PreparedMaxwellHarmonicResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
             transport_closure_bytes: ByteCount(input + 2048),
@@ -116,14 +117,15 @@ fn exact_complex_support_codec_and_retained_cold_outputs_fit_both_orders() {
         let FeaResourceDemand::MaxwellHarmonic(d) = &plan.input.demand else {
             panic!("Maxwell demand");
         };
-        let system = MaxwellSystemPlan::derive(&m).unwrap();
+        let grounded = crate::physics::maxwell::grounded_face_identities(&w.model, &m).unwrap();
+        let system = MaxwellSystemPlan::derive(&m, &grounded).unwrap();
         assert_eq!(d.system_plan_identity, system.identity().unwrap());
-        assert_eq!(d.real_block_dimension.0, 2 * d.free_edge_count.0);
+        assert_eq!(d.complex_dimension.0, d.free_edge_count.0);
         assert_eq!(
-            d.block_nonzeros.0,
-            system.block_pattern().column_indices().len() as u64
+            d.nonzeros.0,
+            system.pattern().column_indices().len() as u64
         );
-        assert!(d.krylov.dimension.0 > 0);
+        assert!(d.factorization.dimension.0 > 0);
         assert_eq!(
             d.quadrature_sample_count.0,
             (m.topology.volume_elements.len() * 15) as u64
@@ -177,7 +179,7 @@ fn prepared_understatement_and_count_only_tiny_policy_fail_closed() {
     assert!(maxwell_harmonic_result_payload_bytes_upper_bound(&tiny, &malformed).is_err());
 }
 #[test]
-fn shared_gmres_envelope_and_forged_exact_facts_are_rejected() {
+fn direct_factor_envelope_and_forged_exact_facts_are_rejected() {
     let w = workload();
     let m = fixtures::slab_mesh(2);
     let plan = build_maxwell_harmonic_resource_plan(&w, &m, facts(&w, &m)).unwrap();
@@ -187,16 +189,16 @@ fn shared_gmres_envelope_and_forged_exact_facts_are_rejected() {
             panic!();
         };
         match which {
-            0 => d.real_block_dimension.0 += 1,
-            1 => d.krylov.resident_bytes.0 -= 1,
-            2 => d.block_nonzeros.0 = d.element_count.0 * 144 + 1,
+            0 => d.complex_dimension.0 += 1,
+            1 => d.factorization.resident_bytes.0 -= 1,
+            2 => d.nonzeros.0 = d.element_count.0 * 36 + 1,
             _ => d.edge_count_upper_bound.0 -= 1,
         }
         assert!(build_resource_plan(input).is_err());
     }
     assert_eq!(
-        estimate::maxwell_harmonic::krylov_envelope(0).unwrap(),
-        MaxwellGmresResourceEnvelope::default()
+        estimate::maxwell_harmonic::factor_envelope(0, 0).unwrap(),
+        MaxwellDirectFactorEnvelope::default()
     );
-    assert!(estimate::maxwell_harmonic::krylov_envelope(usize::MAX).is_err());
+    assert!(estimate::maxwell_harmonic::factor_envelope(u64::MAX, 0).is_err());
 }

@@ -16,6 +16,11 @@ fn check(source: &str) -> CheckedFeaProgram {
     })
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/spectral_inputs @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A response spectrum is a typed model-owned input retaining the complete solver policy
+//   (combination rules, mass truncation, rigid response); procedure references through the bound
+//   model are covered by sibling tests only.
 #[test]
 fn response_spectrum_is_typed_and_retains_complete_solver_policy() {
     let program = check(
@@ -101,8 +106,8 @@ model launch_environment {
     assert_eq!(excitation.channels.len(), 2);
     let samples = excitation.resolved_spectral_density().unwrap();
     assert_eq!(samples.len(), 2);
-    assert_eq!(samples[0].value(2, 0, 1).imaginary, 2.0);
-    assert_eq!(samples[0].value(2, 1, 0).imaginary, -2.0);
+    assert_eq!(samples[0].canonical_coefficient(2, 0, 1).imaginary, 2.0);
+    assert_eq!(samples[0].canonical_coefficient(2, 1, 0).imaginary, -2.0);
 }
 
 #[test]

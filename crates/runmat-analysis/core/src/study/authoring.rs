@@ -78,8 +78,6 @@ pub struct AuthoredStudy {
     pub geometry: AuthoredGeometryInstance,
     pub mesh: AuthoredMeshRef,
     pub model: AuthoredModelInstance,
-    /// Minimum formulation maturity admitted by this analysis study.
-    pub formulation_requirement: crate::FormulationRequirement,
     pub inputs: Vec<AuthoredInputDefinition>,
     pub outputs: Vec<AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

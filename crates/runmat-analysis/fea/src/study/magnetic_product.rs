@@ -59,11 +59,10 @@ pub fn plan_magnetic_study_product(
         &workload.model,
         mesh,
         workload.step_id.as_str(),
-        workload.formulation_requirement,
         workload.relative_residual_target,
     )
     .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
-    crate::physics::magnetic::validate_projection_envelope(&input.projection)
+    crate::physics::magnetic::validate_projection_envelope(&input.projection, &input.grounded_faces)
         .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
     Ok(MagneticStudyProduct { compiled, workload })
 }

@@ -11,7 +11,7 @@ These are separate contracts in RunMat:
 | `fea.AnalysisSequence` | Procedure order, dependencies, transitions, and branches | Worker placement or solver task scheduling |
 | `fea.ProcedureStep` | Physics procedure, independent domain, activations, state, observations, accuracy, and restart | Materials, loads, or geometry definitions |
 | `fea.Observation` | Physical quantity, target, recovery, sampling, reduction, and retention | Plot styling or figure creation |
-| `fea.AccuracyPlan` | Required numerical evidence, tolerances, resource ceilings, and limit action | Formulation maturity or publication status |
+| `fea.AccuracyPlan` | Required numerical evidence, tolerances, resource ceilings, and limit action | Solver selection or execution placement |
 
 The objects are immutable and portable. A sequence authored in RunMat code serializes into the
 same solver-neutral analysis contract used by a `.fea` document, a local process, or a cluster
@@ -32,7 +32,6 @@ study bracket_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
 
     analysis static {
         structural static {}
@@ -221,13 +220,20 @@ transition = fea.StateTransition.new( ...
     "prestress_transfer", "preload", "modes", "converged_stress", ...
     fea.StateTransitionMethod.linearize(), ...
     fea.TopologyTransitionPolicy.requireIdentical(), ...
-    fea.ReferenceStatePolicy.preserve());
+    fea.ReferenceStatePolicy.explicitLinearizationPoint());
 ```
 
 Other transition methods are reuse, interpolation, conservative projection, deriving an operator
 contribution, and initial-guess-only transfer. Topology may require identity, an evidenced
 projection, or an adapted-mesh lineage. Reference state may be preserved, reset to the receiving
 step origin, or supplied as an explicit linearization point.
+
+Validation keeps these choices consistent: `reuse` requires identical topology, an adapted-mesh
+lineage requires conservative projection or interpolation, `initialGuessOnly` pairs with an
+`initialGuess` state input, and `linearize` or `deriveOperatorContribution` require an explicit
+linearization point. Execution currently performs byte-preserving `reuse` and `initialGuessOnly`
+transfers on identical topology with the reference state preserved; a study that declares another
+transition validates but is rejected when it runs.
 
 `fea.SequenceBranch.new(id, producerStep, stateIds, consumerSteps)` publishes named states once and
 permits independent consumers to proceed. Branches describe physical dependencies; the execution
@@ -410,7 +416,7 @@ time_mean = fea.SeriesReduction.mean( ...
 tip_history = fea.Observation.history( ...
     "tip_displacement_mean", ...
     fea.ObservationQuantity.displacement(), ...
-    fea.ObservationTarget.point([0.10, 0.00, 0.00]), ...
+    fea.ObservationTarget.point(fea.Position.meters([0.10, 0.00, 0.00])), ...
     fea.FieldLocation.node(), fea.FieldLocation.point(), ...
     fea.RecoveryPolicy.shapeFunctionInterpolation(), ...
     fea.ObservationComponent.y(), fea.CoordinateFrame.globalFrame(), ...
@@ -503,13 +509,20 @@ precision, and execution-equivalence error are not added into a decorative total
 
 Required evidence may be an a-posteriori estimator, convergence study, conservation balance,
 residual bound, reference comparison, statistical confidence, or transfer bound. When required
-evidence is unavailable, the plan either fails or marks the result indeterminate and experimental.
-When a resource ceiling is reached, the typed action may fail, refine, tighten the solver, extend
-sampling, or warn only for explicitly experimental work.
+evidence is unavailable, the plan's `fea.UnavailableEvidencePolicy` decides the outcome:
+`fail()` blocks publication, and `markIndeterminate()` publishes the result with an indeterminate
+accuracy status that every reader sees. When a resource ceiling is reached, the typed action may
+fail, refine, tighten the solver, or extend sampling.
 
-`fea.AccuracyPlan.experimentalBaseline(id)` is intentionally non-production. It is useful while
-building or diagnosing a formulation, but cannot make an experimental formulation publishable.
-Numerical acceptance, formulation maturity, and publication status remain independent decisions.
+Publication follows the accuracy status. A satisfied plan publishes. An indeterminate plan publishes,
+marked indeterminate, only when its unavailable-evidence policy is `markIndeterminate()`. A plan
+whose criteria are not satisfied always blocks publication. Residual and convergence gates apply
+independently of the accuracy plan.
+
+`fea.AccuracyPlan.baseline(id)` builds a plan with one mandatory relative algebraic residual bound
+of 1e-8 on global equilibrium, reports evidence the solver cannot produce as indeterminate, and
+fails when a resource ceiling is reached. A residual bound is not a field-error bound; add spatial,
+temporal or reference criteria when a result needs that evidence.
 Response-spectrum and random-response steps evaluate their typed whole-result evidence at the
 portable execution boundary. A blocked accuracy gate prevents terminal semantic-state
 publication. Their publication request also names the exact resource plan and canonical aggregated
@@ -517,8 +530,8 @@ usage evidence for the response subgraph. Publication independently verifies tha
 the terminal result, uses the assembly plan as its primary plan, and contains no admitted-resource
 overrun. The published receipt retains those identities, so exact local and remote import cannot
 substitute an otherwise valid accuracy artifact or result onto different resource evidence.
-Experimental indeterminate evidence appears as degraded only when the authored
-unavailable-evidence policy explicitly permits publication.
+Indeterminate evidence is published, and reported as degraded, only when the authored
+unavailable-evidence policy is `markIndeterminate()`.
 
 ## Selection Is Not Rendering
 
@@ -579,8 +592,7 @@ The RunMat authoring boundary keeps those responsibilities explicit and typed:
 
 ```matlab
 backend = fea.ComputeBackend.cpu();
-requirement = fea.FormulationRequirement.experimental();
-execution = fea.ExecutionPlan.defaults(sequence, backend, requirement);
+execution = fea.ExecutionPlan.defaults(sequence, backend);
 study = fea.study("bracket", geometry, model, ...
     "Execution", execution);
 ```
@@ -588,11 +600,11 @@ study = fea.study("bracket", geometry, model, ...
 For a heterogeneous sequence, construct one `fea.SolverOptions` and `fea.ExecutionStep` per
 procedure step, then pass the ordered entries to `fea.ExecutionPlan.new(sequence, steps)`. The
 sequence remains the authority for physical order and state flow; the execution plan only binds
-those steps to solver options, requested backend, and required formulation maturity. Cluster
+those steps to solver options and the requested backend. Cluster
 selection belongs to the shared CLI/execution placement layer rather than either object.
 
 Changing placement cannot weaken an accuracy criterion, alter activation, invent a state
-transition, or turn an experimental formulation into a production one. Checkpoint and result
+transition, or change the selected formulation. Checkpoint and result
 artifacts retain sequence, topology, partition, formulation, observation, and accuracy identity so
 retries and remote execution remain attributable.
 

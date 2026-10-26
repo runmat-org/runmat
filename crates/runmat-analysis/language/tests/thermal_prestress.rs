@@ -32,7 +32,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.part
     model = model.solid
-    formulation = experimental
     analysis heat {
         thermal steady {}
         retain heated

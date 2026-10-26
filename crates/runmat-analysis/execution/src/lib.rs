@@ -11,6 +11,7 @@ mod callable;
 mod error;
 mod field_recovery;
 mod fluid_field_recovery;
+mod fluid_phase_plan_memo;
 mod fluid_state_publication;
 pub use fluid_state_publication::{
     build_prepared_fluid_state_publication_resource_plan, prepare_fluid_state_publication,
@@ -150,11 +151,16 @@ mod acoustic_frequency_assembly;
 mod acoustic_harmonic_plan;
 pub use acoustic_frequency_assembly::{
     decode_acoustic_frequency_assembly_entries, import_acoustic_frequency_assembly,
-    prepare_acoustic_frequency_assembly_task, prepare_acoustic_frequency_field_objects,
+    prepare_acoustic_frequency_assembly_task,
     rederive_acoustic_frequency_assembly_resource_plan,
     validate_acoustic_frequency_assembly_entries, AcousticFrequencyAssemblyPreparation,
     ImportedAcousticFrequencyAssembly, PreparedAcousticFrequencyAssemblyTask,
 };
+mod acoustic_response_plan;
+mod acoustic_response_result;
+mod acoustic_response_state_profiles;
+mod acoustic_response_study;
+mod acoustic_response_task;
 mod electrical_state_profiles;
 mod electrical_static_plan;
 mod electrical_static_result;
@@ -168,7 +174,13 @@ pub use fluid_study::{
     CompletedFluidStudy, FluidStudyCoordinator, FluidStudyPhase, FluidStudyPreparation,
     FluidStudyResultClosure, FluidStudyResultPhase, PreparedFluidStudyRoot,
 };
+mod sampled_history_observations;
+pub use sampled_history_observations::{CompletedSampledObservations, SampledObservationTask};
 mod sampled_study_observations;
+mod statistical_study_observations;
+pub use statistical_study_observations::{
+    StatisticalObservationSource, StatisticalStudyObservations,
+};
 mod steady_study;
 pub use magnetic_study::{
     import_magnetic_study_completion, import_magnetic_study_root, prepare_magnetic_study_root,
@@ -180,8 +192,28 @@ pub use maxwell_study::{
     CompletedMaxwellStudy, MaxwellStudyCoordinator, MaxwellStudyPhase, MaxwellStudyPreparation,
     MaxwellStudyResultClosure, MaxwellStudyResultPhase, PreparedMaxwellStudyRoot,
 };
+mod electrical_field_recovery;
+pub use electrical_field_recovery::{
+    build_prepared_electrical_field_recovery_resource_plan, decode_electrical_recovery_source,
+    import_electrical_recovered_fields, prepare_electrical_field_recovery,
+    ElectricalFieldRecoveryPreparation, PreparedElectricalFieldRecovery,
+};
 mod magnetic_field_recovery;
+mod statistical_field_recovery;
+pub use statistical_field_recovery::{
+    build_prepared_statistical_field_recovery_resource_plan, decode_statistical_recovery_source,
+    import_statistical_recovered_fields, prepare_statistical_field_recovery,
+    statistical_procedure, statistical_recovery_execution_plan, statistical_recovery_request,
+    DecodedStatisticalSource, PreparedStatisticalFieldRecovery,
+    StatisticalFieldRecoveryPreparation,
+};
 mod magnetic_state_profiles;
+mod acoustic_field_recovery;
+pub use acoustic_field_recovery::{
+    build_prepared_acoustic_field_recovery_resource_plan, decode_acoustic_recovery_source,
+    import_acoustic_recovered_fields, prepare_acoustic_field_recovery,
+    AcousticFieldRecoveryPreparation, PreparedAcousticFieldRecovery,
+};
 mod maxwell_field_recovery;
 mod maxwell_harmonic_plan;
 mod maxwell_harmonic_result;
@@ -223,6 +255,23 @@ pub use electrical_study::{
     prepare_electrical_study_root, CompletedElectricalStudy, ElectricalStudyCoordinator,
     ElectricalStudyPhase, ElectricalStudyPreparation, ElectricalStudyResultClosure,
     ElectricalStudyResultPhase, PreparedElectricalStudyRoot,
+};
+pub use acoustic_response_state_profiles::acoustic_response_state_publication_profiles;
+pub use acoustic_response_plan::{
+    prepare_acoustic_response_inputs, rederive_acoustic_response_resource_plan,
+    PreparedAcousticResponseInputs,
+};
+pub use acoustic_response_result::{
+    import_acoustic_response_result, ImportedAcousticResponseResult,
+};
+pub use acoustic_response_task::{
+    prepare_acoustic_response_task, AcousticResponseTaskPreparation, PreparedAcousticResponseTask,
+};
+pub use acoustic_response_study::{
+    import_acoustic_response_study_completion, import_acoustic_response_study_root,
+    prepare_acoustic_response_study_root, CompletedAcousticResponseStudy, AcousticResponseStudyCoordinator,
+    AcousticResponseStudyPhase, AcousticResponseStudyPreparation, AcousticResponseStudyResultClosure,
+    AcousticResponseStudyResultPhase, PreparedAcousticResponseStudyRoot,
 };
 pub use magnetic_field_recovery::{
     build_magnetic_recovery_metadata_resource_plan,
@@ -284,8 +333,8 @@ pub use structural_state_profiles::{
 };
 pub use thermal_study::{
     import_thermal_study_completion, import_thermal_study_root, prepare_thermal_study_root,
-    CompletedThermalObservations, CompletedThermalStudy, PreparedThermalStudyRoot,
-    ThermalObservationTask, ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
+    CompletedThermalStudy, PreparedThermalStudyRoot, ThermalStudyCoordinator, ThermalStudyPhase,
+    ThermalStudyPreparation,
     ThermalStudyResultClosure, ThermalStudyResultPhase, ThermalStudyScope,
 };
 mod thermal_task;
@@ -569,7 +618,7 @@ pub use structural_sequence::{
     CompletedStructuralSequence, CompletedStructuralSequenceState, CompletedStructuralSequenceStep,
     PreparedStructuralSolveTask, PreparedStructuralSolveWave, PreparedStructuralStateTask,
     PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
-    StructuralSequencePreparation, StructuralSequenceResultClosure,
+    StructuralSequencePreparation, StructuralSequenceResultClosure, StructuralSequenceSolveSelection,
     StructuralSequenceStateResourceAttempt,
 };
 pub use structural_transient_recovery::{
@@ -632,6 +681,8 @@ pub use workload::{
     AnalysisWorkloadRequest,
 };
 
+#[cfg(test)]
+mod test_fixtures;
 #[cfg(test)]
 mod tests;
 

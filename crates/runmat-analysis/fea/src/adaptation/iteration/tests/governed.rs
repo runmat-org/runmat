@@ -28,7 +28,7 @@ fn solver(
     }
 }
 pub(in crate::adaptation) fn plan() -> AccuracyPlan {
-    let mut plan = AccuracyPlan::experimental_baseline("adaptive");
+    let mut plan = AccuracyPlan::baseline("adaptive");
     plan.exceeded_limit = AccuracyLimitAction::Refine;
     plan.resources.maximum_refinement_cycles = 4;
     plan.criteria = [
@@ -86,6 +86,11 @@ fn quantity(value: f64) -> StructuralTargetQuantity {
     }
 }
 
+// witness: FEA-ADAPTATION-GOVERNANCE-001/durable_accuracy_lineage @
+//   adaptive_analysis/tet4/numerical_kernel;
+//   boundary: Canonical adaptation records use constructed converged solver facts and quantities,
+//   real mesh refinement/transfer fixtures; rejects missing/indeterminate evidence and capped
+//   refinement. No independently solved adaptive target convergence or remote lifecycle claim.
 #[test]
 fn iteration_binds_canonical_solver_mesh_lineage_transfer_and_evidence() {
     let (source, target, transfer, lineage) = adaptation_fixture();

@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     AnalysisProcedure, AnalysisSequence, AuthoredMeshRef, AuthoredModel, CoupledPhysicsFamily,
-    FormulationRequirement, ProcedureStep, RealizedGeometryInstance, RealizedStudy,
+    ProcedureStep, RealizedGeometryInstance, RealizedStudy,
 };
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
@@ -13,6 +13,10 @@ use super::{
     AnalysisStudyCompilationError, AnalysisStudyCompilationInput, CompiledAnalysisStudy,
 };
 
+// witness: FEA-SHARED-PROPERTIES-001/optional_law_capabilities @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Structural study compilation requires a capable solid material before planning;
+//   acoustic, electrical and fluid capability checks are sibling cases.
 #[test]
 fn structural_study_compilation_requires_capable_solid_material_before_planning() {
     let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
@@ -37,7 +41,6 @@ fn structural_study_compilation_requires_capable_solid_material_before_planning(
     let substituted = CompiledAnalysisStudy {
         module_path: "tests/structural.fea".into(),
         study_id: "structural".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -106,7 +109,6 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
     let substituted = CompiledAnalysisStudy {
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -136,6 +138,9 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/optional_law_capabilities @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A thermomechanical study requires the union of solid capabilities.
 #[test]
 fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
     let mut model =
@@ -166,7 +171,6 @@ fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
     let substituted = CompiledAnalysisStudy {
         module_path: "tests/thermomechanical.fea".into(),
         study_id: "thermomechanical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -215,7 +219,7 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
                 unit_evidence: document.source.unit_evidence.clone(),
                 logical_path: "project/part.brep".into(),
                 format: document.source.format,
-                unit_fallback: document.source.unit_evidence.uniform_unit(),
+                authored_units: document.source.unit_evidence.uniform_unit(),
                 content_digest: document.source.content_digest,
                 topology_digest: GeometryDigest::from_bytes([1; 32]),
                 capabilities: GeometryAuthoringCapabilities {
@@ -224,7 +228,7 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
                     ..Default::default()
                 },
                 exchange: None,
-            })),
+                shared_interfaces: false,            })),
             bindings: Default::default(),
         },
         mesh: AuthoredMeshRef {
@@ -256,7 +260,6 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
             random_excitations: Vec::new(),
             initial_conditions: Vec::new(),
         },
-        formulation_requirement: FormulationRequirement::Experimental,
         included_models: Vec::new(),
         study_inputs: Vec::new(),
         outputs: Vec::new(),
@@ -301,7 +304,7 @@ fn imported_source_digest_format_and_units_must_match_the_document() {
     let GeometryDefinitionSource::Imported(imported) = &mut wrong_units.geometry.source else {
         unreachable!()
     };
-    imported.unit_fallback = Some(
+    imported.authored_units = Some(
         if document.source.unit_evidence.uniform_unit() == Some(LengthUnit::Meter) {
             LengthUnit::Millimeter
         } else {

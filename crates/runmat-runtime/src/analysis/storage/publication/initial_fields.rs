@@ -81,9 +81,7 @@ impl AnalysisPublicationBuilder {
                     != entry
                         .definition
                         .storage_shape(
-                            catalog
-                                .entity_counts
-                                .entity_count(entry.definition.entity_domain()),
+                            entry.definition.stored_entities(catalog.entity_counts),
                         )
                         .map_err(|e| e.to_string())?
                 {
@@ -93,14 +91,9 @@ impl AnalysisPublicationBuilder {
             })
             .collect::<Result<Vec<_>, String>>()?;
         // Read exactly retained original chunks to verify typed identities; no source solve.
-        let chunks = self
-            .store
-            .chunks
-            .read()
-            .map_err(|_| "publication chunks poisoned")?;
         for (entry, field) in candidate {
-            let payload = super::super::field_reader::read_field_payload(field, &mut |digest| {
-                Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+            let payload = self.read_staged_chunks(|mut read| {
+                super::super::field_reader::read_field_payload(field, &mut read)
             })?;
             let values = decode_field_values(&payload)?;
             let recovered = RecoveredField::new(
@@ -115,13 +108,16 @@ impl AnalysisPublicationBuilder {
                 );
             }
         }
+        let run_value = run.run_projection()?.into_owned();
         let digest = persisted_run_digest(
-            &run.run,
+            &run_value,
             &run.field_inventory,
             &run.materialized_field_ids,
             run.render_tiles.as_ref(),
             &run.observation_histories,
             Some(catalog),
+            run.dynamic_balance.as_ref(),
+            run.observation_payload.as_ref(),
         )?;
         run.original_fields = Some(catalog.clone());
         run.run_digest = digest;

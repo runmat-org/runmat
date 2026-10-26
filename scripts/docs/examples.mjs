@@ -36,14 +36,6 @@ export function collectExamples(source, output, validate, requirements, snapshot
                 const target = base + match[1].replace(/^\.\//, "");
                 if (!files.some(file => file.path === target))
                     throw new Error(`Undeclared example dependency: ${target}`);
-                if (/file\s*=/.test(match[0]) && /select\s+name\s+"/.test(file.content)) {
-                    const slash = target.lastIndexOf("/");
-                    const metadata = `${slash < 0 ? "" : target.slice(0, slash + 1)}.runmat/geometry/${target.slice(slash + 1)}.json`;
-                    const saved = files.find(file => file.path === metadata);
-                    if (!saved) throw new Error(`Undeclared CAD selection metadata: ${metadata}`);
-                    if (JSON.stringify(JSON.parse(saved.content).source_digest) !== JSON.stringify([...Buffer.from(hash(files.find(file => file.path === target).content), "hex")]))
-                        throw new Error(`Stale CAD selection metadata: ${metadata}`);
-                }
             }
         }
         const snapshot_digest = example.snapshot ? snapshotIdentity(snapshotsRoot, example.id) : undefined;

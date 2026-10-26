@@ -1,5 +1,11 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Point-index trials share original immutable pages. Appending inside prepared bounds
+//   at 1024 and 65536 points preserves the original complete inventory and has bounded checkpoint
+//   growth without copying every point. This component size series does not qualify arbitrary
+//   spatial distributions, full topology trial ownership or native whole-task memory.
 #[test]
 fn shared_point_append_copies_bounded_pages_and_preserves_original_inventory() {
     let mut costs = Vec::new();

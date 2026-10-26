@@ -137,6 +137,7 @@ pub fn build_structural_transient_recovery_resource_plan(
         &prepared,
         None,
         None,
+        super::LocalExecutionPlan::serial(),
     )?;
     let FeaResourceDemand::StructuralTransientScopePreparation(scope_demand) =
         scope_plan.input.demand
@@ -217,7 +218,7 @@ pub fn build_structural_transient_recovery_resource_plan(
         "transient recovery control inputs",
     )?;
     let decoded_inputs =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
             encoded_inputs,
             3,
         )

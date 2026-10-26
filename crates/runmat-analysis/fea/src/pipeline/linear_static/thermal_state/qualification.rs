@@ -1,4 +1,4 @@
-//! Experimental, physical solid qualification of the solved-temperature transfer path.
+//! Physical solid qualification of the solved-temperature transfer path.
 //!
 //! The retained tetrahedron cases are continuum patches, not beam benchmarks. The
 //! `continuum` child separately verifies affine Tet4/Tet10 mesh refinement against an
@@ -147,7 +147,6 @@ fn solve_temperature_profile(
         model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::Steady,
             solver_mesh: Some(mesh.clone()),
             ..ThermalSolveOptions::default()
@@ -264,7 +263,6 @@ fn solved_linear_temperature_drives_compatible_quadratic_tet10_deformation() {
 
 fn options(mesh: &SolverMeshArtifact) -> LinearStaticSolveOptions {
     LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         ..LinearStaticSolveOptions::default()
     }

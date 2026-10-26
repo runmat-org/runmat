@@ -191,7 +191,7 @@ pub async fn execute_structural_workloads_locally(
                 "prepared structural study has no workloads".into(),
             )
         })?;
-    let maximum_resident_bytes = authored_model
+    let authored_resident_bytes = authored_model
         .sequence
         .steps
         .iter()
@@ -202,6 +202,14 @@ pub async fn execute_structural_workloads_locally(
                 "prepared structural study has no workloads".into(),
             )
         })?;
+    // The effective ceiling is min(authored, machine): an unbounded authored ceiling runs within
+    // the memory this host admits (the same snapshot as the pool's capacity).
+    let machine_resident_bytes = match execution_config.local_memory_capacity_bytes {
+        Some(capacity) => capacity,
+        None => crate::machine_capacity::memory_bytes()
+            .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?,
+    };
+    let maximum_resident_bytes = authored_resident_bytes.min(machine_resident_bytes);
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
     execution_config.max_workers = workers.max(1);
@@ -550,6 +558,7 @@ pub async fn execute_structural_workloads_locally(
                             response_publication: completed.publication.result,
                             field_recovery: completed.response.field_recovery,
                             envelope_state: completed.envelope_state.state,
+                            response_observations: completed.observations,
                         },
                     )),
                 );
@@ -591,6 +600,7 @@ pub async fn execute_structural_workloads_locally(
                         response_resource_usage: completed.resource_usage.evidence,
                         response_publication: completed.publication.result,
                         statistics_state: completed.statistics_state.state,
+                        response_observations: completed.observations,
                     }),
                 ));
             }
@@ -643,6 +653,10 @@ pub async fn execute_structural_workloads_locally(
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
                     local_execution,
+                    solve_selection:
+                        runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+                            machine_memory_bytes: Some(maximum_resident_bytes),
+                        },
                 },
                 policy,
             )
@@ -650,6 +664,7 @@ pub async fn execute_structural_workloads_locally(
             Ok(StructuralStudyNumericalResult::LinearSequence(
                 StructuralStudySequenceNumericalResult {
                     frozen_project_digest,
+                    effective_memory_ceiling_bytes: Some(maximum_resident_bytes),
                     steps: completed
                         .steps
                         .into_iter()
@@ -673,6 +688,7 @@ pub async fn execute_structural_workloads_locally(
             let (completion, source) = execute_structural_frequency_locally_with_source(
                 execution_config,
                 StructuralFrequencyExecutionPreparation {
+                    local_execution,
                     workload: resolved_workload.clone(),
                     mesh: (*mesh).clone(),
                     prestress_state: None,
@@ -740,6 +756,7 @@ pub async fn execute_structural_workloads_locally(
             let step_id = workload.step_id.clone();
             let preparation = runmat_analysis_execution::prepare_structural_transient_sequence(
                 runmat_analysis_execution::StructuralTransientSequencePreparationInput {
+                    local_execution,
                     workload: &workload,
                     mesh,
                     modal_state: None,

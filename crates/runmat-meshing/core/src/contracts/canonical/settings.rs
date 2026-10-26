@@ -4,49 +4,55 @@ use runmat_geometry_core::GeometryTolerancePolicy;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
-    MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder, MeshDimension,
+    MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
+    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION, MeshSizeControl,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingRequestSettings {
     pub element_order: ElementOrder,
+    #[serde(default, skip_serializing_if = "MeshDimension::is_solid")]
+    pub dimension: MeshDimension,
     pub deterministic_seed: u64,
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub target_edge_length_m: runmat_types::physical::Length,
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_grading_ratio: f64,
-    pub resources: MeshingResourceBudget,
+    pub limits: MeshingSizeLimits,
     pub cancellation: CancellationPolicy,
+    /// Requested element layers across thin gaps (proximity sizing). `None` keeps the canonical
+    /// two layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells_across_gap: Option<u32>,
+    /// Local sizing controls on named geometry regions, ordered by control name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub size_controls: Vec<MeshSizeControl>,
 }
 
 impl Default for MeshingRequestSettings {
     fn default() -> Self {
         Self {
             element_order: ElementOrder::Tet4,
+            dimension: MeshDimension::Solid,
             deterministic_seed: 0,
             target_edge_length_m: runmat_types::physical::Length::new(0.01),
             maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0001),
             maximum_grading_ratio: 1.3,
-            resources: MeshingResourceBudget {
+            limits: MeshingSizeLimits {
                 maximum_nodes: 10_000_000,
                 maximum_elements: 10_000_000,
-                maximum_memory_bytes: 512 << 20,
-                maximum_scratch_bytes: 512 << 20,
-                maximum_wall_time_ms: 3_600_000,
-                maximum_artifact_bytes: 512 << 20,
-                maximum_search_work: 1_000_000_000,
                 maximum_recursion_depth: 256,
-                maximum_iterations: 1_000_000_000,
             },
             cancellation: CancellationPolicy {
                 maximum_checkpoint_latency_ms: 1_000,
                 maximum_work_units_between_checks: 100_000,
             },
+            cells_across_gap: None,
+            size_controls: Vec::new(),
         }
     }
 }
@@ -82,7 +88,14 @@ impl MeshingRequestSettings {
                 "must be at least one",
             ));
         }
-        self.resources.validate()?;
+        if self.cells_across_gap.is_some_and(|cells| !(1..=64).contains(&cells)) {
+            return Err(MeshingContractError::invalid(
+                "cells across gap",
+                "must be between 1 and 64",
+            ));
+        }
+        super::validate_size_controls(&self.size_controls)?;
+        self.limits.validate()?;
         self.cancellation.validate()
     }
 }
@@ -117,14 +130,17 @@ pub fn resolve_meshing_request(
     let request = MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: settings.element_order,
+        dimension: settings.dimension,
         deterministic_seed: settings.deterministic_seed,
         algorithms: production_algorithm_versions(),
         tolerance,
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: metric,
             maximum_grading_ratio: settings.maximum_grading_ratio,
             contributions: Vec::new(),
+            cells_across_gap: settings.cells_across_gap,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -150,8 +166,9 @@ pub fn resolve_meshing_request(
                 maximum_metric_edge_length: 1.0,
             },
         },
-        resources: settings.resources,
+        limits: settings.limits,
         cancellation: settings.cancellation,
+        size_controls: settings.size_controls,
     };
     request.validate()?;
     Ok(request)

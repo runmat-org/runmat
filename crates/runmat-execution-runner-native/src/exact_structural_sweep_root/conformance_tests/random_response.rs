@@ -97,9 +97,7 @@ async fn random_response_reaches_an_admitted_result_over_encrypted_quic() {
             .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {

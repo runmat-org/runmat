@@ -44,6 +44,7 @@ macro_rules! visit_analysis_result_fields {
                 $($borrow)* thermal.temperature_gradient_snapshots,
                 $($borrow)* thermal.heat_flux_snapshots,
                 $($borrow)* thermal.energy_storage_rate_snapshots,
+                $($borrow)* thermal.interface_temperature_snapshots,
             ] {
                 for field in fields {
                     $visit(field);
@@ -1283,9 +1284,7 @@ fn analysis_results_op_with_field_inventory(
         },
         run_status: run_result.run_status,
         numerically_acceptable: run_result.numerically_acceptable,
-        production_publishable: run_result.production_publishable,
         quality_reasons: run_result.quality_reasons.clone(),
-        production_publication_reasons: run_result.production_publication_reasons.clone(),
         provenance: run_result.provenance.clone(),
         summary,
     };
@@ -1298,11 +1297,53 @@ fn analysis_results_op_with_field_inventory(
     ))
 }
 
+/// Field payload a results object holds inline; larger runs page values through `fea.field`.
+const RESULTS_INLINE_FIELD_BYTES: u64 = 16 * 1024 * 1024;
+
 pub fn analysis_results_by_run_id_op(
     run_id: &str,
     query: AnalysisResultsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    // A definition run id names every attempt of a study step; results are those of the latest
+    // committed attempt, and the returned run id says which attempt that is.
+    let resolved_run_id = storage::resolve_run_attempt(run_id).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to resolve the latest FEA run attempt: {err}"),
+            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+        )
+    })?;
+    let run_id = resolved_run_id.as_str();
+    // A results object opens bounded: when a run's field payload exceeds the inline budget, it
+    // carries field descriptors and shells, and `fea.field` pages values from the artifact.
+    let mut query = query;
+    if query.include_field_values {
+        let inventory = storage::load_field_inventory(run_id).ok().flatten();
+        let payload = inventory.as_ref().map_or(0u64, |fields| {
+            fields
+                .iter()
+                .map(|field| {
+                    field
+                        .shape
+                        .iter()
+                        .try_fold(8u64, |bytes, extent| bytes.checked_mul(*extent as u64))
+                        .unwrap_or(u64::MAX)
+                })
+                .fold(0u64, u64::saturating_add)
+        });
+        if payload > RESULTS_INLINE_FIELD_BYTES {
+            query.include_field_values = false;
+        }
+    }
     let field_inventory = if query.include_field_values {
         None
     } else {

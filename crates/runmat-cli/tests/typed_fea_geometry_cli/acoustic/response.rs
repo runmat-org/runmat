@@ -1,0 +1,149 @@
+//! Cavity modes and pressure transients run through the authored CLI and publish fields.
+use super::super::*;
+
+fn project(study: &str) -> TempDir {
+    let project = TempDir::new().unwrap();
+    fs::create_dir(project.path().join("src")).unwrap();
+    fs::write(project.path().join("runmat.toml"),
+        "[package]\nname = \"typed-acoustic-response\"\n[sources]\nroots = [\"src\"]\n[runtime.fea]\nartifact_root = \"artifacts\"\nstudy_artifact_root = \"study-artifacts\"\n").unwrap();
+    fs::write(
+        project.path().join("src/makePart.m"),
+        "function part = makePart()\npart = geometry.finish(geometry.box(1, 1, 1));\nend\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("src/main.fea"), study).unwrap();
+    project
+}
+
+fn run(project: &TempDir, study: &str) -> (Value, AnalysisRunResultView) {
+    let output = runmat(
+        project,
+        &["fea", "run", "src/main.fea", "--study", study, "--json"],
+    );
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let run_id = summary["step_run_ids"][0].as_str().unwrap().to_string();
+    let store = FilesystemAnalysisArtifactStore::new(project.path().join("artifacts"));
+    let run = store.load_run(&run_id).unwrap().expect("standard run record");
+    (summary, AnalysisRunResultView(run))
+}
+
+struct AnalysisRunResultView(runmat_runtime::analysis::AnalysisRunResult);
+impl AnalysisRunResultView {
+    fn field(&self, id: &str) -> Vec<&runmat_analysis_core::AnalysisField> {
+        self.0.run.fields.iter().filter(|f| f.field_id == id).collect()
+    }
+}
+
+// witness: FEA-ACOUSTIC-MODAL-001/rigid_box_modes @ acoustic_modal/tet10/public_study; coverage:
+//   partial;
+//   boundary: A rigid unit cube on a quadratic mesh run through the CLI returns a zero-frequency
+//   uniform mode and three axial modes within 2 percent of c/2L = 171.5 Hz; the first ten modes
+//   within 0.5 percent are not asserted.
+// witness: FEA-ACOUSTIC-MODAL-001/modal_publication @ acoustic_modal/tet10/public_study; coverage:
+//   partial;
+//   boundary: The modal run publishes modal.frequency_hz and five acoustic.pressure mode fields and
+//   is numerically acceptable; residuals and normalization are not asserted; a cabin-sized model is
+//   not run.
+#[test]
+fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
+    let project = project(&STUDY.replace(
+        "analysis sound { acoustic transient { start_time = 0 s; end_time = 2 ms; time_step = 0.1 ms } }",
+        "analysis sound { acoustic modal { modes = 5 } }",
+    ).replace(
+        "    constraint drive {\n        acoustic.pressure { target = geometry.part.region.surface; value = signal.pulse }\n    }\n",
+        "    load walls {\n        acoustic.rigid_wall { target = geometry.part.region.surface }\n    }\n",
+    ));
+    let (summary, run) = run(&project, "response");
+    assert_eq!(summary["procedure"], "acoustic_modal");
+    let frequencies = run.field("modal.frequency_hz");
+    let values = frequencies[0].as_host_f64().unwrap();
+    // c / 2L = 171.5 Hz for the three axial modes of the unit cube; 0 Hz uniform mode.
+    assert!(values[0].abs() < 1e-3, "{values:?}");
+    for value in &values[1..4] {
+        assert!((value - 171.5).abs() / 171.5 < 0.02, "{values:?}");
+    }
+    assert_eq!(run.field("acoustic.pressure").len(), 5);
+    assert!(run.0.numerically_acceptable);
+}
+
+// witness: FEA-ACOUSTIC-TRANSIENT-001/pressure_time_history_publication @
+//   acoustic_transient/tet10/public_study; coverage: partial;
+//   boundary: A quadratic-mesh pulse study run through the CLI publishes 21 pressure snapshots on a
+//   21-point time axis ending at 2 ms, all finite, with the prescribed surface carrying the pulse
+//   peak at 0.5 ms; cold reopening is covered by other tests.
+#[test]
+fn pressure_transient_publishes_its_complete_time_history() {
+    let project = project(STUDY);
+    let (summary, run) = run(&project, "response");
+    assert_eq!(summary["procedure"], "acoustic_transient");
+    let snapshots = run.field("acoustic.pressure");
+    assert_eq!(snapshots.len(), 21);
+    let times = run.field("acoustic.time_s")[0].as_host_f64().unwrap();
+    assert_eq!(times.len(), 21);
+    assert!((times[20] - 2e-3).abs() < 1e-12);
+    // The prescribed surface carries the exact pulse peak at 0.5 ms; the interior responds.
+    let at_peak = snapshots[5].as_host_f64().unwrap();
+    let peak = at_peak.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert!((peak - 1.0).abs() < 1e-9 || peak > 1.0, "{peak}");
+    assert!(snapshots
+        .iter()
+        .all(|field| field.as_host_f64().unwrap().iter().all(|v| v.is_finite())));
+    assert!(at_peak.iter().any(|v| (v - 1.0).abs() < 1e-9));
+}
+
+const STUDY: &str = r#"
+import function makePart from "./makePart.m"
+geometry part {
+    generated by function.makePart { arguments {} }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+    region surface : face {
+        select result
+        expect one_or_more
+    }
+}
+mesh volume on geometry.part {
+    tetrahedra {
+        order = quadratic
+        target_size = 0.25 m
+        maximum_deviation = 0.02 m
+    }
+}
+material fluid {
+    mass_density = 1.2 kg/m^3
+    acoustic {
+        speed_of_sound = 343 m/s
+        damping_ratio = 0.0
+    }
+}
+model cavity {
+    assign material.fluid to geometry.part.region.body
+    signal pulse : pressure over time {
+        samples = [
+            { at = 0 s, value = 0 Pa },
+            { at = 0.5 ms, value = 1 Pa },
+            { at = 1 ms, value = 0 Pa },
+            { at = 10 ms, value = 0 Pa },
+        ]
+        interpolation = linear
+        extrapolation = reject
+    }
+    constraint drive {
+        acoustic.pressure { target = geometry.part.region.surface; value = signal.pulse }
+    }
+}
+study response {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.cavity
+    analysis sound { acoustic transient { start_time = 0 s; end_time = 2 ms; time_step = 0.1 ms } }
+}
+"#;

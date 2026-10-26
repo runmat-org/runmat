@@ -157,7 +157,7 @@ fn magnetic_authored_native_observations_are_admitted_before_solve() {
         wrong_location.output_location = FieldLocation::Edge;
         let mut unknown_selector = native.clone();
         unknown_selector.target = ObservationTarget::Spatial(ExcitationTarget::Region(
-            RegionTarget::volume("missing-magnetic-volume"),
+            RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("missing-magnetic-volume")),
         ));
         let mut understated_cost = native;
         understated_cost.cost = ObservationCostPolicy::UpperBound(ObservationCostEstimate {
@@ -222,6 +222,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             ),
         ];
         let task = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: Digest::sha256(b"native magnetic authored observations"),
             frozen_project_digest: None,
             program_revision: original.program.request.recipe.program_revision.clone(),
@@ -413,31 +414,21 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             .map(|chunk| chunk.digest)
             .collect::<BTreeSet<_>>();
         assert!(cold.reads.borrow().is_disjoint(&data_chunks));
+        // Expected values are the retained native fields themselves, by field identity: the
+        // integration-point samples and their element averages alike.
+        let native = retained
+            .recover_native_fields_from_result(&retained.native_field_request_from_result().unwrap())
+            .unwrap();
         for entry in &fields.manifest.fields {
-            let expected = match entry.definition.quantity() {
-                ObservationQuantity::MagneticEdgeCirculation => {
-                    retained.response().edge_circulations_wb.clone()
-                }
-                ObservationQuantity::MagneticVectorPotential => retained
-                    .response()
-                    .samples
-                    .iter()
-                    .flat_map(|s| s.vector_potential_wb_per_m)
-                    .collect(),
-                ObservationQuantity::MagneticFluxDensity => retained
-                    .response()
-                    .samples
-                    .iter()
-                    .flat_map(|s| s.flux_density_t)
-                    .collect(),
-                ObservationQuantity::MagneticFieldIntensity => retained
-                    .response()
-                    .samples
-                    .iter()
-                    .flat_map(|s| s.magnetic_field_a_per_m)
-                    .collect(),
-                _ => panic!("unexpected native magnetic quantity"),
-            };
+            let expected = native
+                .fields()
+                .iter()
+                .find(|field| field.storage().field_id == entry.definition.field_id())
+                .expect("published field is a native field")
+                .storage()
+                .as_host_f64()
+                .unwrap()
+                .to_vec();
             let width =
                 if entry.definition.quantity() == ObservationQuantity::MagneticEdgeCirculation {
                     1
@@ -642,7 +633,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         .response()
                         .samples
                         .iter()
-                        .flat_map(|s| s.flux_density_t)
+                        .flat_map(|s| s.flux_density_t.canonical_value())
                         .collect::<Vec<_>>();
                     assert_eq!(values, expected);
                     assert_eq!(
@@ -660,7 +651,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         .response()
                         .samples
                         .iter()
-                        .map(|s| s.flux_density_t[1])
+                        .map(|s| s.flux_density_t.canonical_value()[1])
                         .collect::<Vec<_>>()
                 ),
                 "Hnorm" => assert_eq!(
@@ -671,7 +662,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         .iter()
                         .map(|s| s
                             .magnetic_field_a_per_m
-                            .iter()
+                            .canonical_values().iter()
                             .map(|v| v * v)
                             .sum::<f64>()
                             .sqrt())
@@ -682,7 +673,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         retained
                             .response()
                             .edge_circulations_wb
-                            .iter()
+                            .canonical_values().iter()
                             .copied()
                             .reduce(f64::min)
                             .unwrap()
@@ -690,7 +681,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         retained
                             .response()
                             .edge_circulations_wb
-                            .iter()
+                            .canonical_values().iter()
                             .copied()
                             .reduce(f64::max)
                             .unwrap()

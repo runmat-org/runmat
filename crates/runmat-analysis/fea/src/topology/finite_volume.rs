@@ -14,22 +14,39 @@ use super::AnalysisProjection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+/// Each limit is `None` when unbounded: a cap is a count, never a sentinel value.
 pub struct FiniteVolumeProjectionPolicy {
-    pub max_cells: usize,
-    pub max_face_incidences: usize,
-    pub max_boundary_faces: usize,
-    pub max_scratch_bytes: usize,
-    pub max_traversal_operations: usize,
+    pub max_cells: Option<usize>,
+    pub max_face_incidences: Option<usize>,
+    pub max_boundary_faces: Option<usize>,
+    pub max_scratch_bytes: Option<usize>,
+    pub max_traversal_operations: Option<usize>,
 }
 
+/// No fixed size caps by default: derivation memory is charged to the calling phase's
+/// resident admission, which the authored resource budget bounds.
 impl Default for FiniteVolumeProjectionPolicy {
     fn default() -> Self {
         Self {
-            max_cells: 1_000_000,
-            max_face_incidences: 4_000_000,
-            max_boundary_faces: 4_000_000,
-            max_scratch_bytes: 1024 * 1024 * 1024,
-            max_traversal_operations: 1_000_000_000,
+            max_cells: None,
+            max_face_incidences: None,
+            max_boundary_faces: None,
+            max_scratch_bytes: None,
+            max_traversal_operations: None,
+        }
+    }
+}
+
+impl FiniteVolumeProjectionPolicy {
+    /// Limits that admit exactly this projection's complete cell complex. Work and scratch
+    /// are governed by the calling phase's resident admission, not by a fixed cell cap.
+    pub fn covering(source: &AnalysisProjection) -> Self {
+        Self {
+            max_cells: Some(source.elements.len()),
+            max_face_incidences: Some(source.elements.len().saturating_mul(4)),
+            max_boundary_faces: Some(source.boundary_faces.len()),
+            max_scratch_bytes: None,
+            max_traversal_operations: None,
         }
     }
 }
@@ -45,12 +62,45 @@ pub struct FiniteVolumeReservation {
     pub traversal_operations: usize,
 }
 
+/// The source volume elements that become cells. A region subset makes every face it shares
+/// with an excluded region an exterior face of the cell complex; that face must be an original
+/// conformal-interface face, so its exact CAD provenance remains the boundary authority.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FiniteVolumeCellSelection {
+    AllElements,
+    /// Sorted, unique mesh region identities.
+    Regions(Vec<PersistentEntityId>),
+}
+
+impl FiniteVolumeCellSelection {
+    pub fn regions(
+        mut regions: Vec<PersistentEntityId>,
+    ) -> Result<Self, FiniteVolumeProjectionError> {
+        regions.sort();
+        regions.dedup();
+        if regions.is_empty() {
+            return Err(FiniteVolumeProjectionError::Invalid(
+                "empty region selection",
+            ));
+        }
+        Ok(Self::Regions(regions))
+    }
+    pub fn includes(&self, region: &PersistentEntityId) -> bool {
+        match self {
+            Self::AllElements => true,
+            Self::Regions(regions) => regions.binary_search(region).is_ok(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FiniteVolumeTopology {
     pub mesh_digest: StableDigest,
     pub projection_digest: Digest,
     pub geometry_digest: Digest,
     pub policy: FiniteVolumeProjectionPolicy,
+    pub selection: FiniteVolumeCellSelection,
     pub reservation: FiniteVolumeReservation,
     pub cells: Vec<FiniteVolumeCell>,
     pub faces: Vec<FiniteVolumeFace>,
@@ -123,7 +173,16 @@ impl FiniteVolumeTopology {
         source: &AnalysisProjection,
         policy: FiniteVolumeProjectionPolicy,
     ) -> Result<Self, FiniteVolumeProjectionError> {
-        derive::derive(source, policy)
+        derive::derive(source, policy, FiniteVolumeCellSelection::AllElements)
+    }
+
+    /// Cells of the selected mesh regions only, such as the fluid of a conjugate model.
+    pub fn derive_selected(
+        source: &AnalysisProjection,
+        policy: FiniteVolumeProjectionPolicy,
+        selection: FiniteVolumeCellSelection,
+    ) -> Result<Self, FiniteVolumeProjectionError> {
+        derive::derive(source, policy, selection)
     }
 
     /// Revalidate externally constructible/mutable records before using geometry in a kernel.
@@ -132,16 +191,19 @@ impl FiniteVolumeTopology {
         &self,
         source: &AnalysisProjection,
     ) -> Result<(), FiniteVolumeProjectionError> {
-        if self != &Self::derive(source, self.policy)? {
+        if self != &Self::derive_selected(source, self.policy, self.selection.clone())? {
             return Err(FiniteVolumeProjectionError::SourceMismatch);
         }
         Ok(())
     }
 
+    /// Count-only reservation for the cells `selection` admits; the boundary-face count is
+    /// the whole projection's, an upper bound for any region subset.
     pub fn reserve(
         source: &AnalysisProjection,
         policy: FiniteVolumeProjectionPolicy,
+        selection: &FiniteVolumeCellSelection,
     ) -> Result<FiniteVolumeReservation, FiniteVolumeProjectionError> {
-        derive::reserve(source, policy)
+        derive::reserve(source, policy, selection)
     }
 }

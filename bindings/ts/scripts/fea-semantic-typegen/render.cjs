@@ -155,9 +155,9 @@ function renderType(raw, registry, generics) {
   }
   const tuple = source.startsWith("(") && source.endsWith(")") ? splitTopLevel(source.slice(1, -1)) : null;
   if (tuple) return `[${tuple.map((value) => renderType(value, registry, generics)).join(", ")}]`;
-  for (const wrapper of ["Vec", "BTreeSet", "HashSet", "Box", "Arc"]) {
+  for (const wrapper of ["Vec", "BTreeSet", "HashSet", "Box", "Arc", "std::sync::Arc", "Rc"]) {
     const inner = unwrap(source, wrapper);
-    if (inner) return ["Box", "Arc"].includes(wrapper) ? renderType(inner, registry, generics) : `${renderType(inner, registry, generics)}[]`;
+    if (inner) return ["Vec", "BTreeSet", "HashSet"].includes(wrapper) ? `${renderType(inner, registry, generics)}[]` : renderType(inner, registry, generics);
   }
   const option = unwrap(source, "Option");
   if (option) return `${renderType(option, registry, generics)} | null`;

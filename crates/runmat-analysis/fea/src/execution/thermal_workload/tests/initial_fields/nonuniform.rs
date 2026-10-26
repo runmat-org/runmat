@@ -6,7 +6,7 @@ fn prescribed(id: &str, face: &str, value: PrescribedValue<Temperature>) -> Anal
     AnalysisConstraint::Thermal(ThermalConstraint {
         constraint_id: id.into(),
         kind: ThermalConstraintKind::Prescribed {
-            target: RegionTarget::boundary(face),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
             value,
         },
     })

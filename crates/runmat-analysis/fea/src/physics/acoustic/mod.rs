@@ -1,4 +1,4 @@
-//! Experimental canonical and reduced acoustic formulations.
+//! Canonical and reduced acoustic formulations.
 //!
 //! The canonical library entry uses physical Tet4/Tet10 operators and exact boundaries.
 //! The graph-domain proxy remains separately named for its existing callers. Neither has
@@ -10,12 +10,14 @@ mod linear;
 mod medium;
 mod recovery;
 mod reduced;
-pub(crate) use canonical::uniqueness_admission as canonical_uniqueness_admission;
 pub(crate) use canonical::validate_input as validate_canonical_input;
 
 pub use canonical::{
-    solve_canonical_harmonic, AcousticHarmonicError, AcousticHarmonicPolicy,
-    CanonicalAcousticResponse,
+    solve_canonical_harmonic, solve_canonical_modal, solve_canonical_transient,
+    AcousticHarmonicError, AcousticHarmonicPolicy, AcousticModalPolicy, AcousticSolveCertificate,
+    AcousticTransientPolicy,
+    CanonicalAcousticModes, CanonicalAcousticResponse, CanonicalAcousticTransient,
+    TransientRetention,
 };
 
 pub use reduced::solve_reduced_harmonic;

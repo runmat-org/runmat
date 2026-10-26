@@ -24,7 +24,7 @@ fn workload(
         "electrical",
         vec![ProcedureStep::electromagnetic_static("potential")],
     );
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -49,8 +49,9 @@ fn workload(
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 
@@ -79,8 +80,14 @@ fn electrical_planning_and_admitted_solve_preserve_physics_and_cold_transport() 
             for chunk in [1024, 8192] {
                 let policy =
                     AnalysisOutputPolicy::new(chunk, ObjectInventoryLimits::default()).unwrap();
-                let mut prepared =
-                    prepare_electrical_static_inputs(&source, &mesh, policy).unwrap();
+                let mut prepared = prepare_electrical_static_inputs(
+                    &source,
+                    &mesh,
+                    policy,
+                    LocalExecutionPlan::serial(),
+                    16 << 30,
+                )
+                .unwrap();
                 prepared
                     .inputs
                     .push(resource_input(&prepared.resource_plan, policy));
@@ -181,5 +188,29 @@ fn electrical_ceiling_rejection_precedes_numerical_matrix() {
         .resources
         .maximum_resident_bytes = 1;
     let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
-    assert!(prepare_electrical_static_inputs(&source, &mesh, policy).is_err());
+    assert!(
+        prepare_electrical_static_inputs(&source, &mesh, policy, LocalExecutionPlan::serial(), 16 << 30)
+            .is_err()
+    );
+}
+
+#[test]
+fn electrical_plan_carries_admitted_threads_and_worker_rederivation_converges() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let source = workload(&mesh, StaticElectricalEquation::Electrostatics);
+    let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
+    let threads = LocalExecutionPlan::from_cpu_millicores(3_000).unwrap();
+    let mut prepared = prepare_electrical_static_inputs(&source, &mesh, policy, threads, 16 << 30).unwrap();
+    assert_eq!(prepared.resource_plan.request.cpu_millicores, 3_000);
+    assert_eq!(prepared.resource_plan.input.worker.cpu_millicores, 3_000);
+    prepared
+        .inputs
+        .push(resource_input(&prepared.resource_plan, policy));
+    let plan =
+        rederive_electrical_static_resource_plan(&source, &mesh, &prepared.inputs, policy).unwrap();
+    assert_eq!(plan, prepared.resource_plan);
+    assert_eq!(
+        source.execute_with_resource_plan(&mesh, &plan).unwrap(),
+        source.execute(&mesh).unwrap()
+    );
 }

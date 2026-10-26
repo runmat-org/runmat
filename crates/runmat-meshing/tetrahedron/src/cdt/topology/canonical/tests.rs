@@ -26,6 +26,13 @@ fn constructed() -> CanonicalVolumeTopology {
     .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Construction-only immutable topology authority matches independent complete
+//   admission. Consuming the carrier discards authority; a raw handoff with broken neighbors
+//   rejects when authority is restored. This bounded component is not proof of local-only
+//   construction, arbitrary connected-mesh scaling, native peak memory or complete study
+//   acceptance.
 #[test]
 fn construction_authority_preserves_independent_admission_and_rejects_edited_handoff() {
     let built = constructed();
@@ -41,6 +48,12 @@ fn construction_authority_preserves_independent_admission_and_rejects_edited_han
     .is_err());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An immutable construction carrier still checks the current protected-face inventory,
+//   lower topology caps and immediate cancellation. Present faces pass; absent faces, tighter caps
+//   and an already cancelled small candidate reject. This component does not establish arbitrary
+//   feature recovery, native deadline latency or full physics qualification.
 #[test]
 fn construction_authority_does_not_waive_protected_faces_or_current_limits() {
     let built = constructed();
@@ -90,6 +103,12 @@ fn construction_authority_does_not_waive_protected_faces_or_current_limits() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Contiguous sorted face incidence preserves complete canonical node, cell, neighbor
+//   and boundary/region/star inventory across sixteen input permutations. Separated duplicate and
+//   same-side overlap inputs reject. This component establishes deterministic topology equivalence,
+//   not measured production-scale performance or accepted realistic native studies.
 #[test]
 fn compact_face_inventory_preserves_canonical_topology_under_input_permutations() {
     let baseline = constructed().into_inner();

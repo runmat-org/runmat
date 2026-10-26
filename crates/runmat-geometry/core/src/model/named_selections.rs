@@ -135,11 +135,11 @@ mod tests {
     use super::*;
     use crate::{GeometryRegionCardinality, PersistentEntityId, PersistentEntityKind};
     fn metadata() -> GeometryNamedSelections {
-        let entity = PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "exact-face".into(),
-            assembly_path: vec!["root".into()],
-        };
+        let entity = PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "exact-face".into(),
+            vec!["root".into()],
+        );
         GeometryNamedSelections {
             schema_version: 1,
             source_digest: GeometryDigest::from_bytes([1; 32]),

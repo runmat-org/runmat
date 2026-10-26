@@ -36,32 +36,6 @@ pub(super) struct ValidationWork<'storage, 'work> {
     pub storage: Storage<'storage>,
 }
 
-pub(super) fn validate(
-    topology: &SolverMeshTopology,
-    maximum_search_work: u64,
-    maximum_recursion_depth: u32,
-    cancellation_check_interval: u64,
-    cancellation: &dyn MeshingCancellationSignal,
-    work: ValidationWork<'_, '_>,
-) -> Result<(), DelaunaySolverTopologyError> {
-    if cancellation_check_interval == 0 {
-        return Err(error::failure(
-            DelaunaySolverTopologyErrorKind::InvalidOptions,
-            "Tet10 Jacobian cancellation-check interval must be greater than zero",
-        ));
-    }
-    let element_indices = 0..topology.volume_elements.len();
-    validate_elements(
-        topology,
-        element_indices,
-        maximum_search_work,
-        maximum_recursion_depth,
-        cancellation_check_interval,
-        cancellation,
-        work,
-    )
-}
-
 pub(super) fn validate_elements(
     topology: &SolverMeshTopology,
     element_indices: impl IntoIterator<Item = usize>,
@@ -264,6 +238,12 @@ fn margin_checkpoint(
     Ok(())
 }
 
+/// Subdivision work one element may spend to certify its Jacobian. Certification is charged per
+/// element, so total work scales with the mesh and one hard element cannot exhaust the others'.
+/// It is a property of the algorithm, not of the machine: an element that cannot be certified
+/// within it is not admitted (and goes to repair) on every host alike.
+pub(super) const ELEMENT_SEARCH_WORK: u64 = 1 << 16;
+
 fn certify_element(
     coordinates: [[f64; 3]; 10],
     maximum_search_work: u64,
@@ -281,7 +261,50 @@ fn certify_element(
             .as_ref()
             .map(|scope| scope as &dyn runmat_geometry_core::GeometryEvaluationControl),
     );
-    let work = work.counter;
+    let total_work = work.counter;
+    let mut element_work = 0_u64;
+    let result = certify_element_within(
+        coordinates,
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation,
+        &storage,
+        &mut element_work,
+        cancellation_check_interval,
+    );
+    *total_work = total_work.saturating_add(element_work);
+    match result {
+        Err(failure)
+            if failure.kind == DelaunaySolverTopologyErrorKind::ResourceLimit
+                && element_work > maximum_search_work =>
+        {
+            Err(invalid(format!(
+                "Tet10 isoparametric Jacobian could not be certified positive within the element's search work of {maximum_search_work}"
+            )))
+        }
+        // A positive Jacobian is necessary but not sufficient: the element must also pass the
+        // shared Tet10 rule (Jacobian margin and stiffness-quadrature convergence) that analysis
+        // applies before integrating it, so the mesher never publishes an element it rejects.
+        Ok(()) => runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates)
+            .map(|_| ())
+            .map_err(|invalidity| {
+                invalid(format!(
+                    "Tet10 element fails the shared element-validity rule: {invalidity:?}"
+                ))
+            }),
+        result => result,
+    }
+}
+
+fn certify_element_within(
+    coordinates: [[f64; 3]; 10],
+    maximum_search_work: u64,
+    maximum_recursion_depth: u32,
+    cancellation: &dyn MeshingCancellationSignal,
+    storage: &Storage<'_>,
+    work: &mut u64,
+    cancellation_check_interval: u64,
+) -> Result<(), DelaunaySolverTopologyError> {
     if cancellation_check_interval == 0 {
         return Err(error::failure(
             DelaunaySolverTopologyErrorKind::InvalidOptions,

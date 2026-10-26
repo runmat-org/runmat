@@ -1,19 +1,11 @@
 use super::*;
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 fn part_id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into(), "instance".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into(), "instance".into()])
 }
 
 fn curve_evaluator(name: &str) -> CurveEvaluatorId {
@@ -331,11 +323,11 @@ fn large_assembly_validates_canonical_occurrence_ownership() {
     let mut instances = vec![topology.instances[0].clone()];
     for index in 1..INSTANCE_COUNT {
         let path = vec!["root".into(), format!("instance:{index:04}")];
-        let assembly_id = PersistentEntityId {
-            kind: PersistentEntityKind::Assembly,
-            source_topology_id: format!("assembly:{index:04}"),
-            assembly_path: path.clone(),
-        };
+        let assembly_id = PersistentEntityId::new(
+            PersistentEntityKind::Assembly,
+            format!("assembly:{index:04}"),
+            path.clone(),
+        );
         children.push(ExactAssembly {
             id: assembly_id.clone(),
             definition_digest: [(index % 251 + 1) as u8; 32],
@@ -347,11 +339,11 @@ fn large_assembly_validates_canonical_occurrence_ownership() {
         ]);
         transform.0[3] = index as f64 * 2.0;
         instances.push(ExactInstance {
-            id: PersistentEntityId {
-                kind: PersistentEntityKind::Instance,
-                source_topology_id: format!("instance:{index:04}"),
-                assembly_path: path,
-            },
+            id: PersistentEntityId::new(
+                PersistentEntityKind::Instance,
+                format!("instance:{index:04}"),
+                path,
+            ),
             parent_assembly_id: root_id.clone(),
             instantiated_assembly_id: assembly_id,
             transform,
@@ -651,11 +643,11 @@ fn occurrence_transform_resolves_world_points_and_vectors() {
         [-4.0, 2.0, 6.0]
     );
 
-    let unknown = PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: "unknown".into(),
-        assembly_path: vec!["absent".into()],
-    };
+    let unknown = PersistentEntityId::new(
+        PersistentEntityKind::Edge,
+        "unknown".into(),
+        vec!["absent".into()],
+    );
     assert!(topology.world_transform_for(&unknown).is_err());
 }
 

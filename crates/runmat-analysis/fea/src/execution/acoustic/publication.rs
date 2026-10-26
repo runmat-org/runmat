@@ -9,7 +9,7 @@ use runmat_analysis_core::{IndependentDomain, StateOutput, StatePersistence};
 use runmat_canonical_codec::SerializedCanonicalProfile;
 
 impl AcousticHarmonicWorkload {
-    pub(super) fn producer_identity(&self) -> AnalysisExecutionResult<StepIdentity> {
+    pub fn producer_identity(&self) -> AnalysisExecutionResult<StepIdentity> {
         StepIdentity::from_solver_contract(
             SequenceIdentity::from_solver_contract(&self.model.sequence)?,
             self.step()?,

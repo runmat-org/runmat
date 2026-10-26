@@ -132,7 +132,7 @@ pub fn import_nonlinear_solid_study_root(
     };
     let manifest_bytes = read(source, root, read_limits)?;
     let manifest_resident =
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &manifest_bytes,
         )?;
     if manifest_resident > maximum_resident_bytes {
@@ -159,7 +159,7 @@ pub fn import_nonlinear_solid_study_root(
         return Err(invalid("nonlinear completion payload identity differs"));
     }
     let decode_bytes =
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &payload,
         )?
         .checked_add(objects.retained_storage_bytes()?)

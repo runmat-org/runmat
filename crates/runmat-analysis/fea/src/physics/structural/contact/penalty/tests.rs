@@ -20,6 +20,10 @@ fn near(a: f64, b: f64) {
         "{a} != {b}"
     );
 }
+// witness: FEA-CONTACT-OPERATOR-001/references @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Analytic sliding, unloading, reversal and separation keep the original history at the
+//   point law.
 #[test]
 fn analytic_sliding_unloading_reversal_and_separation_keep_original_history() {
     let law = law(0.3);
@@ -68,6 +72,10 @@ fn analytic_sliding_unloading_reversal_and_separation_keep_original_history() {
         .unwrap();
     near(reclosed.internal_traction_local_pa[0], 1.0);
 }
+// witness: FEA-CONTACT-OPERATOR-001/normal_friction_equilibrium @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: At the point law, pressure unloading changes the friction radius and retains energy
+//   accounting; no assembled body.
 #[test]
 fn pressure_unloading_changes_the_friction_radius_and_retains_energy_accounting() {
     let law = law(0.3);
@@ -85,6 +93,10 @@ fn pressure_unloading_changes_the_friction_radius_and_retains_energy_accounting(
     );
     near(response.tangential_elastic_energy_j_per_m2, 0.1125);
 }
+// witness: FEA-CONTACT-OPERATOR-001/normal_friction_equilibrium @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Frictionless and zero-coefficient pairs have no tangential resistance at the point
+//   law.
 #[test]
 fn frictionless_and_zero_coefficient_have_no_tangential_resistance() {
     let frictionless = PenaltyContactLaw::derive(

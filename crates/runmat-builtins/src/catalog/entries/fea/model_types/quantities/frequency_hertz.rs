@@ -9,7 +9,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     description: "`frequency = fea.Frequency.hertz(value)` creates an `fea.Frequency` for frequency-domain procedures and signals.",
     keywords: &["fea", "quantity", "frequency", "hertz"],
     related: &[],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["The input must be a finite positive real scalar.", "Host integer inputs cross one checked binary64 storage boundary; resident values are rejected."] }],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["The input must be a finite positive real scalar.", "Host integer inputs cross one checked binary64 storage boundary; resident values are rejected."] },
+        BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &["Pass a frequency to fea.ElectromagneticDomain.atFrequency, or as the sample argument in fea.field(results, selector, frequency) for a frequency-domain result."] },
+    ],
     examples: &[BuiltinExample {
         id: "author-frequency-hertz",
         title: "Create 60 Hz",

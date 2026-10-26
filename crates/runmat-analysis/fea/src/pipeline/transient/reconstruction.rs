@@ -125,11 +125,8 @@ pub fn recover_completed_transient_run(
         TransientSolveError::Assembly(never) => match never {},
         other => FeaRunError::Solve(other.to_string()),
     })?;
-    let identity = super::super::admission::admit_structural(
-        &basis.initial_assembly,
-        &basis.execution_step,
-        input.workload.formulation_requirement,
-    )?;
+    let identity =
+        super::super::admission::admit_structural(&basis.initial_assembly, &basis.execution_step)?;
     // Reporting assemblies are derived one accepted sample at a time, then consumed by field
     // recovery. The completed numerical result never retains a second history of full operators.
     let mut reassemble = |time_s| {
@@ -147,7 +144,7 @@ pub fn recover_completed_transient_run(
             &basis.active_model,
             &excitations,
             Some(input.solver_mesh),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let summary = if basis.motions.is_empty() {

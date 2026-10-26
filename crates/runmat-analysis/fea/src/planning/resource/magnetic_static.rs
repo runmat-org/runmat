@@ -2,10 +2,7 @@
 //! exact sparse edge/gauge support, and codec wire-shape projections. Requested
 //! heap is conservative additive lifetime accounting, never a measured RSS claim.
 use super::*;
-use crate::{
-    execution::MagnetostaticWorkload, physics::magnetic::MagneticSystemPlan,
-    topology::AnalysisProjection,
-};
+use crate::{execution::MagnetostaticWorkload, physics::magnetic::MagneticSystemPlan};
 use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
@@ -15,6 +12,7 @@ mod tests;
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedMagnetostaticResourceFacts {
+    pub local_execution: super::LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -93,9 +91,20 @@ pub fn build_magnetostatic_resource_plan(
     }
     // Count-only ceiling is checked before either shared geometric projection or
     // sparse plan discovery can allocate. No physical matrices/fields are built.
-    let projection = AnalysisProjection::derive(m).map_err(invalid)?;
-    let system = MagneticSystemPlan::derive(&projection).map_err(invalid)?;
-    let krylov = estimate::magnetic_static::krylov_envelope(system.saddle_pattern().rows())?;
+    let input = crate::physics::magnetic::compile_canonical_input(
+        &w.model,
+        m,
+        w.step_id.as_str(),
+        w.relative_residual_target,
+    )
+    .map_err(invalid)?;
+    let system = MagneticSystemPlan::derive(&input.projection, &input.grounded_faces)
+        .map_err(invalid)?;
+    drop(input);
+    let krylov = estimate::magnetic_static::krylov_envelope(
+        system.saddle_pattern().rows(),
+        system.saddle_pattern().column_indices().len() as u64,
+    )?;
     // The numeric preflight already sums support/properties/planned assembly,
     // matrices, shared GMRES and retained sampling/result-clone lifetimes. Add
     // encoded result scratch and exact result wire materialization explicitly.
@@ -135,7 +144,10 @@ pub fn build_magnetostatic_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(invalid)?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(16 * 1024 * 1024),
             fixed_scratch_bytes: ByteCount(8 * 1024 * 1024),

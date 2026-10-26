@@ -20,7 +20,10 @@ use super::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedCurveMetricField {
     by_edge: BTreeMap<PersistentEntityId, EdgeMetricRecord>,
+    /// Uniform face sizing; each face's entity-local sources are graded at the query point.
     face_metrics: Vec<ResolvedMetricEvaluation>,
+    face_local: Vec<Vec<runmat_meshing_size::metric::LocalMetricSource>>,
+    resolver: ResolvedMetricField,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,9 +167,30 @@ impl ResolvedCurveMetricField {
                 .consume_allocation_bytes(slots)
                 .map_err(control_error)?;
         }
+        let mut face_local = Vec::with_capacity(face_metrics.len());
+        let mut face_uniform = Vec::with_capacity(face_metrics.len());
+        for sizing in face_metrics.into_values() {
+            if let Some(control) = control {
+                let bytes = (sizing.local.capacity() as u64)
+                    .checked_mul(
+                        std::mem::size_of::<runmat_meshing_size::metric::LocalMetricSource>()
+                            as u64,
+                    )
+                    .ok_or_else(|| {
+                        SharedCurveError::invalid_request("face local metric", "storage overflow")
+                    })?;
+                control
+                    .consume_allocation_bytes(bytes)
+                    .map_err(control_error)?;
+            }
+            face_uniform.push(sizing.uniform);
+            face_local.push(sizing.local);
+        }
         Ok(Self {
             by_edge: records,
-            face_metrics: face_metrics.into_values().collect(),
+            face_metrics: face_uniform,
+            face_local,
+            resolver,
         })
     }
 }
@@ -195,30 +219,48 @@ impl CurveMetricField for ResolvedCurveMetricField {
             .for_edge(query.edge_id)
         })?;
         let resolved = &record.resolved;
-        let failure = |error: runmat_meshing_size::metric::MetricContractError| {
-            SharedCurveError::new(
-                SharedCurveErrorKind::MetricEvaluation,
-                "curve boundary trace",
-                error.to_string(),
-            )
-            .for_edge(query.edge_id)
+        let failure = |step: &'static str, detail: String| {
+            move |error: runmat_meshing_size::metric::MetricContractError| {
+                SharedCurveError::new(
+                    SharedCurveErrorKind::MetricEvaluation,
+                    "curve boundary trace",
+                    format!("{step}: {error} ({detail})"),
+                )
+                .for_edge(query.edge_id)
+            }
         };
         let mut density = resolved
             .metric
             .directional_density(query.unit_tangent)
-            .map_err(failure)?;
+            .map_err(failure("edge metric", format!("{:?}", resolved.metric)))?;
         for face in &record.faces {
+            let face_metric = self
+                .resolver
+                .evaluate_graded(
+                    self.face_metrics[*face].metric,
+                    &self.face_local[*face],
+                    query.point_m,
+                )
+                .map_err(failure(
+                    "graded face metric",
+                    format!("uniform {:?} at {:?}", self.face_metrics[*face].metric, query.point_m),
+                ))?;
             density = density.max(
-                self.face_metrics[*face]
-                    .metric
+                face_metric
                     .directional_density(query.unit_tangent)
-                    .map_err(failure)?,
+                    .map_err(failure("face directional density", format!("{face_metric:?}")))?,
             );
         }
         let metric = resolved
             .metric
             .with_directional_density(query.unit_tangent, density)
-            .map_err(failure)?;
+            .map_err(failure(
+                "tightened edge metric",
+                format!(
+                    "base {:?}, tangent {:?}, density {density:e}",
+                    resolved.metric, query.unit_tangent
+                ),
+            ))?;
         Ok(CurveMetricEvaluation {
             metric,
             active_sources: resolved.active_sources.clone(),

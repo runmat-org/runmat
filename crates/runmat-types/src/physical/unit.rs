@@ -284,8 +284,29 @@ impl LengthUnit {
             kind: PhantomData,
         }
     }
+    /// The length unit of size `meters_per_unit`; `None` unless finite and positive. Every SI
+    /// prefix on the metre and every conversion-based unit (inch, foot, mil, ...) is a length
+    /// unit of its exact size.
+    pub fn from_meters_per_unit(meters_per_unit: f64) -> Option<Self> {
+        let definition =
+            UnitDefinition::try_new(PhysicalDimension::LENGTH, meters_per_unit, 0.0).ok()?;
+        Self::try_from_definition(definition).ok()
+    }
     pub fn meters_per_unit(self) -> f64 {
         self.definition.scale()
+    }
+    /// The length unit a conversion-based unit's standard name defines (inch, foot, mil,
+    /// microinch), case-insensitive. A declared conversion factor always governs; this is
+    /// the definition for a named unit whose factor is absent.
+    pub fn from_conversion_name(name: &str) -> Option<Self> {
+        let meters_per_unit = match name.trim().to_ascii_lowercase().as_str() {
+            "inch" | "in" => 0.0254,
+            "foot" | "ft" => 0.3048,
+            "mil" | "thou" => 2.54e-5,
+            "microinch" => 2.54e-8,
+            _ => return None,
+        };
+        Self::from_meters_per_unit(meters_per_unit)
     }
     pub fn symbol(self) -> &'static str {
         match self.definition.scale_bits {
@@ -296,6 +317,13 @@ impl LengthUnit {
             bits if bits == 1000.0f64.to_bits() => "km",
             bits if bits == 0.0254f64.to_bits() => "in",
             bits if bits == 0.3048f64.to_bits() => "ft",
+            bits if bits == 1e-9f64.to_bits() => "nm",
+            bits if bits == 1e-10f64.to_bits() => "Angstrom",
+            bits if bits == 1e-12f64.to_bits() => "pm",
+            bits if bits == 0.1f64.to_bits() => "dm",
+            bits if bits == 2.54e-5f64.to_bits() => "mil",
+            bits if bits == 2.54e-8f64.to_bits() => "uin",
+            bits if bits == 1609.344f64.to_bits() => "mi",
             _ => "custom length unit",
         }
     }

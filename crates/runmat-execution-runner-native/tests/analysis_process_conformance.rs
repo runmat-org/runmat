@@ -1,3 +1,5 @@
+#[path = "support/fixtures.rs"]
+mod test_fixtures;
 #[path = "analysis_process_conformance/fluid_fourier.rs"]
 mod fluid_fourier;
 #[path = "analysis_process_conformance/fluid_mass_flow.rs"]
@@ -69,6 +71,9 @@ use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind
 
 #[path = "analysis_process_conformance/assessment.rs"]
 mod assessment;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/remote_families.rs"]
+mod remote_families;
 #[cfg(feature = "occt-native")]
 #[path = "analysis_process_conformance/assessment_publication.rs"]
 mod assessment_publication;
@@ -156,7 +161,9 @@ fn main() {
         return;
     }
     let mut runtime = if std::env::args_os().any(|argument| {
-        argument == "--fluid-authored-only" || argument == "--nonlinear-authored-only"
+        argument == "--fluid-authored-only"
+            || argument == "--nonlinear-authored-only"
+            || argument == "--remote-families-only"
     }) {
         tokio::runtime::Builder::new_multi_thread()
     } else {
@@ -166,6 +173,14 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--remote-families-only") {
+        #[cfg(feature = "occt-native")]
+        remote_families::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("remote family conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--fluid-massflow-only") {
         fluid_mass_flow::run().await;
         return;
@@ -636,10 +651,6 @@ fn assert_publication_semantics(
     assert_eq!(actual.source_observations, expected.source_observations);
     assert_eq!(actual.source_accuracy, expected.source_accuracy);
     assert_eq!(actual.source_resource_plan, expected.source_resource_plan);
-    assert_eq!(
-        actual.formulation_requirement,
-        expected.formulation_requirement
-    );
     assert_eq!(actual.accuracy_status, expected.accuracy_status);
     assert_eq!(actual.gate, expected.gate);
 }
@@ -1503,7 +1514,6 @@ fn fixture_for_study(
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1531,6 +1541,9 @@ fn fixture_for_study(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     (
@@ -1557,7 +1570,6 @@ fn explicit_fixture(
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1583,6 +1595,9 @@ fn explicit_fixture(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     assert!(prepared
@@ -1609,27 +1624,29 @@ fn mixed_fixture(
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.topology.boundary_faces[1]
         .provenance
-        .push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "solid_load".into(),
-            assembly_path: vec!["root".into()],
-        });
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "solid_load".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.boundary_faces[1].provenance.sort();
 
     let mut model = mixed_solid_beam_shell_model(attached_coordinates);
@@ -1703,14 +1720,10 @@ fn mixed_fixture(
             },
         ));
     let assignment = model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -1752,7 +1765,6 @@ fn mixed_fixture(
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1778,6 +1790,9 @@ fn mixed_fixture(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     let constraint_plan =
@@ -1900,7 +1915,6 @@ fn sequence_preparation(
         model,
         step_id: root.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1937,6 +1951,9 @@ fn sequence_preparation(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     }
 }
 
@@ -1986,7 +2003,6 @@ fn frequency_preparation(
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
                 std::num::NonZeroU32::new(2).unwrap(),
@@ -1999,6 +2015,7 @@ fn frequency_preparation(
     })
     .unwrap();
     StructuralFrequencyExecutionPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload,
         mesh,
         prestress_state: None,
@@ -2131,22 +2148,18 @@ fn solver_mesh(
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;

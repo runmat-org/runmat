@@ -72,7 +72,8 @@ fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
             .result
             .recover_native_fields(&workload, &mesh, &recovery.request)
             .unwrap();
-        assert_eq!(cold.manifest.fields.len(), 3);
+        // Velocity, pressure, face flux, vorticity and wall shear stress.
+        assert_eq!(cold.manifest.fields.len(), 5);
         for (entry, original) in cold.manifest.fields.iter().zip(expected.fields()) {
             let partitions = entry
                 .partitions
@@ -99,21 +100,18 @@ fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                cold.manifest
-                    .entity_counts
-                    .entity_count(entry.definition.entity_domain()),
+                entry.definition.stored_entities(cold.manifest.entity_counts),
             )
             .unwrap();
             assert_eq!(&field, original);
         }
-        let mut missing_layout = recovery.inputs.clone();
-        missing_layout
-            .retain(|input| input.manifest.kind != AnalysisNumericalObjectKind::FieldSourceBinding);
+        let mut missing_mesh = recovery.inputs.clone();
+        missing_mesh.retain(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh);
         assert!(NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
                 kind: AnalysisWorkKind::RecoverField,
                 host: &recovery.host,
-                inputs: &missing_layout,
+                inputs: &missing_mesh,
                 output_policy: policy,
             })
             .is_err());

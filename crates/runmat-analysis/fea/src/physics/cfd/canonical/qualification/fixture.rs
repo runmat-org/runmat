@@ -41,10 +41,13 @@ pub fn material() -> CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
+        porous_zones: Vec::new(),
     }
 }
 pub fn policy() -> CanonicalFluidPolicy {
     CanonicalFluidPolicy {
+        pressure_velocity_coupling: PressureVelocityCoupling::Coupled,
         fixed_point_acceleration: None,
         maximum_outer_iterations: 2000,
         maximum_nonorthogonal_iterations: 8,
@@ -62,16 +65,30 @@ pub fn policy() -> CanonicalFluidPolicy {
 
 pub fn geometry_policy() -> FiniteVolumeProjectionPolicy {
     FiniteVolumeProjectionPolicy {
-        max_cells: 10000,
-        max_face_incidences: 40000,
-        max_boundary_faces: 40000,
-        max_scratch_bytes: 100_000_000,
-        max_traversal_operations: 100_000_000,
+        max_cells: None,
+        max_face_incidences: None,
+        max_boundary_faces: None,
+        max_scratch_bytes: None,
+        max_traversal_operations: None,
     }
 }
 
 pub fn case(n: usize, reference: ReferenceCase, rotated: bool) -> Fixture {
+    case_mapped(n, reference, rotated, |x| x)
+}
+
+/// The reference case on a slab whose nodes are moved by `map` (for example graded toward a
+/// plane), keeping its topology and boundary faces.
+pub fn case_mapped(
+    n: usize,
+    reference: ReferenceCase,
+    rotated: bool,
+    map: fn([f64; 3]) -> [f64; 3],
+) -> Fixture {
     let mut mesh = fixtures::slab_mesh(n);
+    for node in &mut mesh.topology.nodes {
+        node.coordinates_m = runmat_types::physical::Quantity::new(map(node.coordinates_m.canonical_value()));
+    }
     if rotated {
         for node in &mut mesh.topology.nodes {
             node.coordinates_m =
@@ -81,11 +98,11 @@ pub fn case(n: usize, reference: ReferenceCase, rotated: bool) -> Fixture {
         }
     }
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: format!("original-reference-face-{}", face.face_id),
-            assembly_path: vec!["root".into()],
-        }];
+        face.provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            format!("original-reference-face-{}", face.face_id),
+            vec!["root".into()],
+        )];
     }
     mesh.seal_canonical_digest().unwrap();
     let source = AnalysisProjection::derive(&mesh).unwrap();

@@ -14,9 +14,22 @@ after materialization, a revision-bound canonical geometry artifact.
 
 Parent: module. Labels: one mesh name and one geometry reference. A source or meshing request is
 required. The current volume request is `tetrahedra` with `order`, `target_size`, and
-`maximum_deviation`; bounded grading, element count, and deterministic seed use canonical defaults
+`maximum_deviation`; `maximum_grading_ratio` and `deterministic_seed` use canonical defaults
 when omitted. It produces a mesh definition bound to the geometry definition. A study may not pair
 it with another geometry.
+
+Local sizing controls are optional inside `tetrahedra`:
+
+| Setting | Form | Meaning |
+| --- | --- | --- |
+| `cells_across_gap` | integer 1 to 64 | elements through thin gaps and walls narrower than the count times `target_size`, measured between boundary edges and between facing faces |
+| `refine <name> { ... }` | block, any number | a local size on one named region of the meshed geometry |
+| `on` (in `refine`) | `geometry.<g>.region.<r>` | a `solid`, `face` or `edge` region of the mesh's geometry |
+| `target_size` (in `refine`) | length | the local target edge length; must be smaller than the global `target_size` |
+
+Where controls overlap, the smallest size wins, whatever order they are written in. Away from a
+refined region the size grows back at `maximum_grading_ratio` per element layer. See
+[Local sizing controls](../../meshing.md#local-sizing-controls) for diagnostics and evidence.
 
 ## `material <name> { ... }`
 
@@ -37,9 +50,8 @@ has no template or defaults field. Its required content is determined by consumi
 ## `study <name> { ... }`
 
 Parent: module. Label: one study name. Required members are `geometry`, `mesh`, `model`, and at
-least one `analysis`. Optional members are typed inputs, `formulation`, `execution`, and outputs.
-Omitted `formulation` means production is required. Omitted `execution` uses ordinary local/project
-policy. A study produces one typed procedure graph and a runnable root.
+least one `analysis`. Optional members are typed inputs, `execution`, and outputs.
+Omitted `execution` uses ordinary local/project policy. A study produces one typed procedure graph and a runnable root.
 
 ## `sweep <name> over study.<name> { ... }`
 

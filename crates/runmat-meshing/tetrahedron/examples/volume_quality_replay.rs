@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "QUALITY_PROBE {}",
             serde_json::json!({"status":"diagnostic-converged-not-whole-mesh-acceptance",
             "nodes":result.topology.nodes.len(),"cells":result.topology.tetrahedra.len(),
-            "insertions":result.refinement_insertions.len(),"mutations":result.sliver_mutations.len(),
+            "insertions":result.quality_mutations.iter().filter(|step| matches!(step, runmat_meshing_tetrahedron::cdt::DelaunayVolumeQualityMutation::Refined(_))).count(),"mutations":result.quality_mutations.iter().filter(|step| matches!(step, runmat_meshing_tetrahedron::cdt::DelaunayVolumeQualityMutation::Optimized(_))).count(),
             "elapsed_seconds":deadline.started.elapsed().as_secs_f64(),"checkpoints":deadline.checkpoints.load(Ordering::Relaxed)})
         ),
         Err(error) => println!(

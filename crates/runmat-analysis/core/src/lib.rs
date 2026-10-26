@@ -9,6 +9,8 @@ pub mod problem {
     pub mod authored_model_physics;
     pub mod authored_parameterized_signals;
     pub mod authored_properties;
+    pub mod acoustic_impedance;
+    pub mod rheology;
     pub mod boundary;
     pub mod connector;
     pub mod constraint;
@@ -53,7 +55,7 @@ pub use execution_policy::{
     MAX_CPU_THREADS_PER_WORKER,
 };
 pub use study::{
-    attach_authored_outputs, authored_output_types, geometry_parameter_input_type,
+    attach_authored_outputs, authored_output_root, authored_output_types, retain_authored_outputs, geometry_parameter_input_type,
     lower_authored_observations, validate_authored_outputs, AuthoredCaseOutputRef,
     AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
     AuthoredGeometryArgument, AuthoredGeometryArgumentValue, AuthoredGeometryInstance,
@@ -104,7 +106,7 @@ pub use problem::authored_inputs::{
     AuthoredInputDefinition, AuthoredInputError, AuthoredInputType, AuthoredInputValue,
 };
 pub use problem::authored_model_physics::{
-    AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
+    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
     AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
 };
 pub use problem::authored_parameterized_signals::{
@@ -117,6 +119,8 @@ pub use problem::authored_properties::{
     AuthoredSectionSource, AxisOrientation, CartesianOrientation, CircularBeamSection,
     GeneralBeamSection, HomogeneousShellSection, RectangularBeamSection, TubularBeamSection,
 };
+pub use problem::acoustic_impedance::AcousticImpedanceLaw;
+pub use problem::rheology::GeneralizedNewtonianLaw;
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
 pub use problem::connector::{AnalysisConnector, ConnectorKind};
 pub use problem::constraint::{
@@ -132,7 +136,7 @@ pub use problem::constraint::{
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, MagnetostaticFormulation,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, MagnetostaticFormulation, PorousZone,
     StaticElectricalEquation, ThermalDomain, ThermoMechanicalDomain,
 };
 pub use problem::excitation::{
@@ -160,7 +164,8 @@ pub use problem::materials::{
     IncompressibleNewtonianMaterial, MaterialAcousticModel, MaterialCapability,
     MaterialElasticityModel, MaterialElectricalModel, MaterialFluidModel, MaterialMechanicalModel,
     MaterialModel, MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialProvenance,
-    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, SolverMaterialModel,
+    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, PorousMediumLaw,
+    SolverMaterialModel,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
@@ -238,6 +243,7 @@ pub use study::output::{
     ObservationThreshold, ObservationValueShape, PartialAccessPolicy, RecoveryPolicy,
     ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent, SeriesReduction,
     SeriesWeighting, SignConvention, SolverObservationEvent, SpatialReduction,
+    SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
@@ -245,17 +251,18 @@ pub use study::sequence::{
     ReferenceStatePolicy, RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
     SequenceDependencyReason, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
     StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
-    StepObjectActivation, StepObjectRef, StructuralRandomResponseSettings,
+    StepObjectActivation, StepObjectRef, StructuralKinematics, StructuralNonlinearSettings,
+    StructuralRandomResponseSettings,
     TopologyTransitionPolicy, TransitionId, ValidatedAnalysisSequence,
 };
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
     CoupledPhysicsFamily, CouplingImplementation, ExactFormulationComponent,
-    ExactFormulationRealization, ExecutionFallbackPolicy, FormulationAdmissionRejectionReason,
-    FormulationAxis, FormulationMaturity, FormulationRequirement, PhysicsFamily,
-    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
-    StructuralFormulationRealization, StructuralOperatorImplementation,
-    StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
+    ExactFormulationRealization, FormulationAdmissionRejectionReason, FormulationAxis,
+    PhysicsFamily, RecoveryImplementation, SolutionSpace, SourceImplementation,
+    SpatialOperatorImplementation, StructuralFormulationRealization,
+    StructuralOperatorImplementation, StructuralRecoveryImplementation, TemporalImplementation,
+    TopologyImplementation,
 };
 pub use validate::{
     dependency_graph_resident_bytes_upper_bound, validate_analysis_sequence,

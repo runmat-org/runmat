@@ -51,6 +51,7 @@ pub fn build_structural_transient_block_resource_plan(
     predecessor: Option<&StructuralTransientCheckpoint>,
     prepared_inputs: Option<PreparedInputResourceFacts>,
     output_set: Option<PreparedOutputSetResourceFacts>,
+    local_execution: super::LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     request
         .validate_against_predecessor(predecessor)
@@ -69,6 +70,7 @@ pub fn build_structural_transient_block_resource_plan(
         &prepared,
         None,
         None,
+        local_execution,
     )?;
     let FeaResourceDemand::StructuralTransientScopePreparation(scope_demand) =
         scope_plan.input.demand
@@ -163,7 +165,7 @@ pub fn build_structural_transient_block_resource_plan(
             encoded_payload_bytes: ByteCount(encoded_inputs),
             transport_closure_bytes: ByteCount(encoded_inputs),
             decoded_resident_bytes_admission_budget: ByteCount(
-                runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(encoded_inputs, 3)
+                runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(encoded_inputs, 3)
                     .ok_or(ResourcePlanningError::Overflow("transient decoded inputs"))?,
             ),
         },
@@ -178,33 +180,47 @@ pub fn build_structural_transient_block_resource_plan(
         crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
         "transient segment closure",
     )?;
-    let segment_construction = add(
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            segment_bytes,
-            2,
-        )
-        .ok_or(ResourcePlanningError::Overflow(
-            "transient segment construction",
-        ))?,
-        segment_closure,
-        "transient segment construction",
+    // The segment is encoded from typed solver vectors, never decoded from a generic value
+    // tree: its construction holds the nine f64 physical vectors per record, the encoded
+    // payload and closure, and fixed per-contract codec state.
+    let segment_records = add(time_point_count, 4, "transient segment records")?;
+    let segment_typed_values = multiply(
+        multiply(segment_records, 9, "transient segment vectors")?,
+        physical_dofs,
+        "transient segment values",
     )?;
+    let segment_construction = [
+        multiply(segment_typed_values, 8, "transient segment typed bytes")?,
+        segment_bytes,
+        segment_closure,
+        multiply(
+            runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+            2,
+            "transient segment contract state",
+        )?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |sum, bytes| {
+        add(sum, bytes, "transient segment construction")
+    })?;
     let segment_output = PreparedOutputResourceFacts {
         encoded_payload_bytes_upper_bound: ByteCount(segment_bytes),
         transport_closure_bytes_upper_bound: ByteCount(segment_closure),
         construction_resident_bytes_admission_budget: ByteCount(segment_construction),
     };
-    let output_set = match output_set {
-        Some(facts) if facts.encoded_bytes_upper_bound.0 >= segment_bytes => facts,
-        Some(_) => {
-            return Err(ResourcePlanningError::Invalid(
-                "transient block output set is smaller than its segment bound".into(),
-            ))
-        }
-        None => PreparedOutputSetResourceFacts {
-            encoded_bytes_upper_bound: ByteCount(segment_bytes),
-        },
-    };
+    // The output set is the one root manifest listing this phase's output roots. Its bound is
+    // the root schema bound, not the numerical payload bound carried by the prepared output.
+    let output_set = output_set.unwrap_or(PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: ByteCount(crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES),
+    });
+    if output_set.encoded_bytes_upper_bound.0 == 0
+        || output_set.encoded_bytes_upper_bound.0
+            > crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "transient block output set is outside the output-set root schema bound".into(),
+        ));
+    }
     let operator = scope_demand.operator;
     let operator_nonzeros = operator
         .sparse
@@ -299,12 +315,13 @@ pub fn build_structural_transient_block_resource_plan(
         )?),
         retained_bytes: ByteCount(segment_construction),
     };
+    // The segment payload and its manifest; the output-set root is charged separately.
     operator.publication = CheckpointArtifactPolicy {
-        result_artifact_bytes: ByteCount(crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES),
+        result_artifact_bytes: ByteCount(segment_closure),
         checkpoint_bytes: ByteCount(0),
         artifact_overhead_bytes: ByteCount(0),
         relay_bytes: ByteCount(0),
-        result_egress_bytes: ByteCount(crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES),
+        result_egress_bytes: ByteCount(segment_closure),
         checkpoint_egress_bytes: ByteCount(0),
     };
     operator.partitioning = PartitioningPolicy::Monolithic;

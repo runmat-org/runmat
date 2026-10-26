@@ -50,8 +50,18 @@ pub(super) fn reopen(
         panic!("exact acoustic frequency step missing");
     };
     assert_eq!(numerical.entries.len(), 1);
-    let state = numerical.entries[0].states[0].clone();
-    assert_eq!(state.kind, runmat_analysis_core::StateKind::AcousticComplex);
+    // The run record keeps a reference; the state is persisted once as canonical binary.
+    let reference = numerical.entries[0].states[0].clone();
+    assert_eq!(
+        reference.kind,
+        runmat_analysis_core::StateKind::AcousticComplex
+    );
+    reference.verify_identity().unwrap();
+    let state = runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
+        &fs::read(&reference.artifact_path).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state.identity, reference.identity);
     let acoustic = state.payload.acoustic().unwrap();
     assert_eq!(acoustic.frequency.canonical_value(), 0.2);
     assert_eq!(acoustic.fields.fields().len(), 2);

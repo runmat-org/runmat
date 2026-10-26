@@ -1,50 +1,28 @@
 use super::*;
 use runmat_analysis_core::ObservationCostPolicy;
+use runmat_builtins::fea_contract::study_types::descriptors::{
+    compression_policy::*, observation_cost::*, observation_storage::*, reduction_policy::*,
+    retention_policy::*, signal_precision::*,
+};
 
-const REDUCTION_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required("spatial", BuiltinParamType::Any, "Typed spatial reduction."),
-    required("series", BuiltinParamType::Any, "Typed series reduction."),
-    required(
-        "extremaTies",
-        BuiltinParamType::Any,
-        "Typed extrema tie policy.",
-    ),
-];
-descriptor!(
-    REDUCTION_DESCRIPTOR,
-    REDUCTION_SIGNATURES,
-    "policy = fea.ReductionPolicy.new(spatial, series, extremaTies)",
-    &REDUCTION_INPUTS
-);
-descriptor!(
-    REDUCTION_NONE_DESCRIPTOR,
-    REDUCTION_NONE_SIGNATURES,
-    "policy = fea.ReductionPolicy.none()",
-    &NO_INPUTS
-);
 #[runtime_builtin(
     name = "fea.ReductionPolicy.none",
-    category = "fea",
-    summary = "Preserve the requested observation without reducing it.",
-    keywords = "fea,observation,reduction,none,typed",
-    descriptor(REDUCTION_NONE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn reduction_none() -> BuiltinResult<Value> {
-    to_typed_value::<Option<ReductionPolicy>>("fea.ReductionPolicy.none", REDUCTION_CLASS, None)
+    const NAME: &str = "fea.ReductionPolicy.none";
+    study_outputs(&FEA_REDUCTION_POLICY_NONE_DESCRIPTOR, NAME)?;
+    absent_typed_value(NAME, REDUCTION_CLASS)
 }
 #[runtime_builtin(
     name = "fea.ReductionPolicy.new",
-    category = "fea",
-    summary = "Compose typed spatial and series reductions.",
-    keywords = "fea,observation,reduction,typed",
-    descriptor(REDUCTION_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn reduction(spatial: Value, series: Value, ties: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ReductionPolicy.new";
+    study_outputs(&FEA_REDUCTION_POLICY_NEW_DESCRIPTOR, NAME)?;
     to_typed_value(
         NAME,
         REDUCTION_CLASS,
@@ -57,83 +35,64 @@ pub async fn reduction(spatial: Value, series: Value, ties: Value) -> BuiltinRes
 }
 
 macro_rules! typed_no_arg {
-    ($function:ident, $name:literal, $descriptor:ident, $signatures:ident, $label:literal, $class:expr, $value:expr) => {
-        descriptor!($descriptor, $signatures, $label, &NO_INPUTS);
-        #[runtime_builtin(name = $name, category = "fea", summary = "Select a typed observation storage policy.", keywords = "fea,observation,storage,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::storage")]
-        pub async fn $function() -> BuiltinResult<Value> { to_typed_value($name, $class, $value) }
+    ($function:ident, $name:literal, $descriptor:ident, $class:expr, $value:expr) => {
+        #[runtime_builtin(name = $name, binding_variant = "default", builtin_path = "crate::builtins::fea::observations::storage")]
+        pub async fn $function() -> BuiltinResult<Value> {
+            study_outputs(&$descriptor, $name)?;
+            to_typed_value($name, $class, $value)
+        }
     };
 }
 typed_no_arg!(
     precision_real32,
     "fea.SignalPrecision.real32",
-    PRECISION_REAL32_DESCRIPTOR,
-    PRECISION_REAL32_SIGNATURES,
-    "value = fea.SignalPrecision.real32()",
+    FEA_SIGNAL_PRECISION_REAL32_DESCRIPTOR,
     PRECISION_CLASS,
     SignalPrecision::Real32
 );
 typed_no_arg!(
     precision_real64,
     "fea.SignalPrecision.real64",
-    PRECISION_REAL64_DESCRIPTOR,
-    PRECISION_REAL64_SIGNATURES,
-    "value = fea.SignalPrecision.real64()",
+    FEA_SIGNAL_PRECISION_REAL64_DESCRIPTOR,
     PRECISION_CLASS,
     SignalPrecision::Real64
 );
 typed_no_arg!(
     precision_complex64,
     "fea.SignalPrecision.complex64",
-    PRECISION_COMPLEX64_DESCRIPTOR,
-    PRECISION_COMPLEX64_SIGNATURES,
-    "value = fea.SignalPrecision.complex64()",
+    FEA_SIGNAL_PRECISION_COMPLEX64_DESCRIPTOR,
     PRECISION_CLASS,
     SignalPrecision::Complex64
 );
 typed_no_arg!(
     precision_complex128,
     "fea.SignalPrecision.complex128",
-    PRECISION_COMPLEX128_DESCRIPTOR,
-    PRECISION_COMPLEX128_SIGNATURES,
-    "value = fea.SignalPrecision.complex128()",
+    FEA_SIGNAL_PRECISION_COMPLEX128_DESCRIPTOR,
     PRECISION_CLASS,
     SignalPrecision::Complex128
 );
 typed_no_arg!(
     compression_lossless,
     "fea.CompressionPolicy.lossless",
-    COMPRESSION_LOSSLESS_DESCRIPTOR,
-    COMPRESSION_LOSSLESS_SIGNATURES,
-    "value = fea.CompressionPolicy.lossless()",
+    FEA_COMPRESSION_POLICY_LOSSLESS_DESCRIPTOR,
     COMPRESSION_CLASS,
     CompressionPolicy::Lossless
 );
 typed_no_arg!(
     compression_none,
     "fea.CompressionPolicy.none",
-    COMPRESSION_NONE_DESCRIPTOR,
-    COMPRESSION_NONE_SIGNATURES,
-    "value = fea.CompressionPolicy.none()",
+    FEA_COMPRESSION_POLICY_NONE_DESCRIPTOR,
     COMPRESSION_CLASS,
     CompressionPolicy::None
 );
-descriptor!(
-    COMPRESSION_ERROR_DESCRIPTOR,
-    COMPRESSION_ERROR_SIGNATURES,
-    "value = fea.CompressionPolicy.errorBounded(maximumRelativeError)",
-    &ONE_VALUE
-);
 #[runtime_builtin(
     name = "fea.CompressionPolicy.errorBounded",
-    category = "fea",
-    summary = "Use error-bounded observation compression.",
-    keywords = "fea,observation,compression,error,typed",
-    descriptor(COMPRESSION_ERROR_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn compression_error(value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.CompressionPolicy.errorBounded";
+    study_outputs(&FEA_COMPRESSION_POLICY_ERROR_BOUNDED_DESCRIPTOR, NAME)?;
     to_typed_value(
         NAME,
         COMPRESSION_CLASS,
@@ -149,43 +108,27 @@ pub async fn compression_error(value: Value) -> BuiltinResult<Value> {
 typed_no_arg!(
     retention_canonical,
     "fea.RetentionPolicy.canonical",
-    RETENTION_CANONICAL_DESCRIPTOR,
-    RETENTION_CANONICAL_SIGNATURES,
-    "value = fea.RetentionPolicy.canonical()",
+    FEA_RETENTION_POLICY_CANONICAL_DESCRIPTOR,
     RETENTION_CLASS,
     RetentionPolicy::Canonical
 );
 typed_no_arg!(
     retention_until,
     "fea.RetentionPolicy.untilDependentsComplete",
-    RETENTION_UNTIL_DESCRIPTOR,
-    RETENTION_UNTIL_SIGNATURES,
-    "value = fea.RetentionPolicy.untilDependentsComplete()",
+    FEA_RETENTION_POLICY_UNTIL_DEPENDENTS_COMPLETE_DESCRIPTOR,
     RETENTION_CLASS,
     RetentionPolicy::UntilDependentsComplete
 );
-descriptor!(
-    RETENTION_LATEST_DESCRIPTOR,
-    RETENTION_LATEST_SIGNATURES,
-    "value = fea.RetentionPolicy.latestSamples(count)",
-    &LATEST
-);
-descriptor!(
-    RETENTION_EXPLICIT_DESCRIPTOR,
-    RETENTION_EXPLICIT_SIGNATURES,
-    "value = fea.RetentionPolicy.explicitSamples(maximumCount)",
-    &LATEST
-);
 #[runtime_builtin(
     name = "fea.RetentionPolicy.latestSamples",
-    category = "fea",
-    summary = "Retain only the latest bounded observation samples.",
-    keywords = "fea,observation,retention,bounded,typed",
-    descriptor(RETENTION_LATEST_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn retention_latest(count: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_RETENTION_POLICY_LATEST_SAMPLES_DESCRIPTOR,
+        "fea.RetentionPolicy.latestSamples",
+    )?;
     to_typed_value(
         "fea.RetentionPolicy.latestSamples",
         RETENTION_CLASS,
@@ -196,14 +139,14 @@ pub async fn retention_latest(count: Value) -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.RetentionPolicy.explicitSamples",
-    category = "fea",
-    summary = "Bound explicitly requested retained samples.",
-    keywords = "fea,observation,retention,bounded,typed",
-    descriptor(RETENTION_EXPLICIT_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn retention_explicit(count: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_RETENTION_POLICY_EXPLICIT_SAMPLES_DESCRIPTOR,
+        "fea.RetentionPolicy.explicitSamples",
+    )?;
     to_typed_value(
         "fea.RetentionPolicy.explicitSamples",
         RETENTION_CLASS,
@@ -213,41 +156,9 @@ pub async fn retention_explicit(count: Value) -> BuiltinResult<Value> {
     )
 }
 
-const STORAGE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "precision",
-        BuiltinParamType::Any,
-        "Typed signal precision.",
-    ),
-    required(
-        "compression",
-        BuiltinParamType::Any,
-        "Typed compression policy.",
-    ),
-    required(
-        "retention",
-        BuiltinParamType::Any,
-        "Typed retention policy.",
-    ),
-    required(
-        "partialAccess",
-        BuiltinParamType::Any,
-        "Typed partial-access policy.",
-    ),
-];
-descriptor!(
-    STORAGE_DESCRIPTOR,
-    STORAGE_SIGNATURES,
-    "storage = fea.ObservationStorage.new(precision, compression, retention, partialAccess)",
-    &STORAGE_INPUTS
-);
 #[runtime_builtin(
     name = "fea.ObservationStorage.new",
-    category = "fea",
-    summary = "Compose typed observation storage and retention.",
-    keywords = "fea,observation,storage,retention,typed",
-    descriptor(STORAGE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn storage(
@@ -257,6 +168,7 @@ pub async fn storage(
     partial: Value,
 ) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ObservationStorage.new";
+    study_outputs(&FEA_OBSERVATION_STORAGE_NEW_DESCRIPTOR, NAME)?;
     let precision: TypedStudyValue<SignalPrecision> =
         object_payload(NAME, &precision, PRECISION_CLASS)?;
     let compression: TypedStudyValue<CompressionPolicy> =
@@ -276,45 +188,15 @@ pub async fn storage(
     )
 }
 
-const COST_INPUTS: [BuiltinParamDescriptor; 5] = [
-    required(
-        "operationCount",
-        BuiltinParamType::NumericScalar,
-        "Estimated operation count.",
-    ),
-    required(
-        "peakResidentBytes",
-        BuiltinParamType::NumericScalar,
-        "Estimated peak resident bytes.",
-    ),
-    required(
-        "storedBytes",
-        BuiltinParamType::NumericScalar,
-        "Estimated stored bytes.",
-    ),
-    required(
-        "transferBytes",
-        BuiltinParamType::NumericScalar,
-        "Estimated transfer bytes.",
-    ),
-    required(
-        "collectiveCount",
-        BuiltinParamType::NumericScalar,
-        "Estimated collective count.",
-    ),
-];
-descriptor!(COST_DESCRIPTOR, COST_SIGNATURES, "cost = fea.ObservationCost.new(operationCount, peakResidentBytes, storedBytes, transferBytes, collectiveCount)", &COST_INPUTS);
 #[runtime_builtin(
     name = "fea.ObservationCost.new",
-    category = "fea",
-    summary = "Declare an observation resource-cost estimate.",
-    keywords = "fea,observation,cost,resources,typed",
-    descriptor(COST_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
-pub async fn cost(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn cost(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.ObservationCost.new";
+    study_outputs(&FEA_OBSERVATION_COST_NEW_DESCRIPTOR, NAME)?;
     if args.len() != 5 {
         return Err(builtin_error(
             NAME,

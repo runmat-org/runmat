@@ -1,8 +1,8 @@
 use super::*;
 use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, AnalysisSequence,
-    FormulationRequirement, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure,
-    ProcedureStep, RegionTarget,
+    IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep,
+    RegionTarget,
 };
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
@@ -37,7 +37,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(face),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));
@@ -47,7 +47,6 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/acoustic.fea".into(),
         study_id: "acoustic".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -55,9 +54,10 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         model,
         solver_mesh_digest: mesh.canonical_digest,
     };
-    let policy = AcousticStudyPlanningPolicy::experimental();
+    let policy = AcousticStudyPlanningPolicy::standard();
     let plan = plan_acoustic_study(&compiled, policy).unwrap();
     AcousticStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         product: AcousticStudyProduct { compiled, plan },
         policy,
         mesh,
@@ -90,7 +90,7 @@ fn acoustic_standalone_coordinator_rejects_foreign_mesh_policy_and_definition() 
     input.product.compiled.solver_mesh_digest = StableDigest::ZERO;
     assert!(AcousticStudyCoordinator::new(input).is_err());
     let mut input = preparation();
-    input.policy.maximum_iterations -= 1;
+    input.policy.contraction_limit *= 0.5;
     assert!(AcousticStudyCoordinator::new(input).is_err());
     let mut input = preparation();
     input.product.compiled.model.geometry_revision += 1;

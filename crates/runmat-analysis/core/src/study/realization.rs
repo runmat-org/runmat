@@ -41,7 +41,6 @@ pub struct RealizedStudy {
     pub mesh: AuthoredMeshRef,
     /// The realized root model selected by the study.
     pub model: AuthoredModel,
-    pub formulation_requirement: crate::FormulationRequirement,
     /// Transitive included models in dependency-first order. The root model is not repeated here.
     pub included_models: Vec<AuthoredModel>,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
@@ -94,7 +93,6 @@ impl AuthoredStudy {
             geometry,
             mesh: self.mesh.clone(),
             model: realized_model,
-            formulation_requirement: self.formulation_requirement,
             included_models,
             study_inputs: self
                 .inputs
@@ -362,6 +360,13 @@ fn substitute_model_inputs(
     }
     for boundary in &mut model.boundaries {
         substitute_region(&mut boundary.target, inputs)?;
+        boundary
+            .kind
+            .realize_model_inputs(inputs)
+            .map_err(|error| AuthoredStudyRealizationError::ParameterizedBoundary {
+                boundary_id: boundary.boundary_id.clone(),
+                detail: error.to_string(),
+            })?;
     }
     for connector in &mut model.connectors {
         let mut error = None;
@@ -500,6 +505,8 @@ pub enum AuthoredStudyRealizationError {
     WrongBoundInputKind(String),
     #[error("parameterized signal `{signal_id}` could not be realized: {detail}")]
     ParameterizedSignal { signal_id: String, detail: String },
+    #[error("boundary `{boundary_id}` coefficient could not be realized: {detail}")]
+    ParameterizedBoundary { boundary_id: String, detail: String },
     #[error("realized authored model is invalid: {0}")]
     InvalidRealizedModel(AuthoredModelError),
 }

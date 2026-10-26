@@ -34,7 +34,7 @@ pub(crate) fn fixture(
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: face.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                     value: PrescribedValue::Constant(Temperature::new(300.0)),
                 },
             }));
@@ -43,7 +43,6 @@ pub(crate) fn fixture(
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::Steady,
         residual_target: 1e-11,
         initial_fields: vec![],

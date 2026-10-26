@@ -4,10 +4,7 @@
 //! host-backed numerical result into a public, persisted-runtime result shape. It owns no solver
 //! or artifact-store I/O.
 
-use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, AnalysisProcedure, FormulationMaturity, FormulationRequirement,
-    SolutionSpace,
-};
+use runmat_analysis_core::{AnalysisField, AnalysisModel, AnalysisProcedure, SolutionSpace};
 use runmat_analysis_fea::properties::compile_structural_property_map;
 use runmat_analysis_fea::{
     ComputeBackend, ExecutionBackend, FeaRunResult, SolverPreconditioner,
@@ -24,16 +21,17 @@ use super::contracts::{
     FallbackEvent, PreconditionerMode, QualityGate, QualityPolicy, QualityReason,
     QualityReasonCode, RunProvenance,
 };
-use super::result_policy::{classify_run_status, evaluate_production_publication};
+use super::result_policy::classify_run_status;
 use super::{render_topology_from_solver_mesh, storage};
 
 pub(super) struct LinearStaticResultInput<'a> {
     pub model: &'a AnalysisModel,
     pub solver_mesh: Option<&'a SolverMeshArtifact>,
     pub requested_backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub options: &'a AnalysisRunOptions,
     pub assigned_run_id: Option<&'a str>,
+    /// The effective memory ceiling the placement admitted (provenance only).
+    pub effective_memory_ceiling_bytes: Option<u64>,
 }
 
 pub(super) fn admit_linear_static_result(
@@ -51,7 +49,9 @@ pub(super) fn admit_linear_static_result(
             }
         }
         PreconditionerMode::Amg => {
-            fallback_events.push(FallbackEvent::preconditioner(SolverPreconditioner::Jacobi));
+            if run.preconditioner != SolverPreconditioner::Amg {
+                fallback_events.push(FallbackEvent::preconditioner(run.preconditioner));
+            }
         }
     }
     if input.requested_backend == ComputeBackend::Gpu
@@ -143,8 +143,6 @@ pub(super) fn admit_linear_static_result(
             solver_convergence == QualityGate::Pass && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     Ok(AnalysisRunResult {
@@ -164,9 +162,7 @@ pub(super) fn admit_linear_static_result(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: input.requested_backend,
             execution_backend: run.execution_backend,
@@ -179,6 +175,7 @@ pub(super) fn admit_linear_static_result(
             preconditioner: run.preconditioner,
             quality_policy: super::contracts::format_quality_policy(input.options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: input.effective_memory_ceiling_bytes,
         },
         run,
     })
@@ -201,13 +198,6 @@ fn validate_result(input: &LinearStaticResultInput<'_>, run: &FeaRunResult) -> R
         })
     {
         return Err("structural result identity differs from the requested model procedure".into());
-    }
-    if input.formulation_requirement == FormulationRequirement::Production
-        && run.identity.qualification() != FormulationMaturity::Production
-    {
-        return Err(
-            "structural result does not satisfy the production formulation requirement".into(),
-        );
     }
     if let Some(mesh) = input.solver_mesh {
         mesh.validate().map_err(|error| error.to_string())?;
@@ -259,7 +249,8 @@ fn solid_mesh_quality_reasons(
         return Vec::new();
     };
     let mut reasons = Vec::new();
-    if mesh.topology.volume_elements.is_empty() {
+    // Sheet and wire meshes carry shells and beams realized on faces and edges, not volumes.
+    if mesh.topology.volume_elements.is_empty() && mesh.resolved_request.dimension.is_solid() {
         reasons.push(QualityReason {
             code: QualityReasonCode::SolidMeshNoVolumeElements,
             detail: "solver mesh has no volume elements".to_string(),
@@ -363,11 +354,23 @@ fn mesh_has_boundary_target(
     mesh: &SolverMeshArtifact,
     target: &runmat_analysis_core::RegionTarget,
 ) -> bool {
-    mesh.topology.boundary_faces.iter().any(|face| {
-        face.provenance
+    // Face, edge and vertex targets resolve through the provenance of boundary faces, boundary
+    // edges and nodes respectively.
+    let matches = |provenance: &[runmat_geometry_core::PersistentEntityId]| {
+        provenance
             .iter()
             .any(|entity| target.matches_persistent_entity(entity))
-    })
+    };
+    mesh.topology
+        .boundary_faces
+        .iter()
+        .any(|face| matches(&face.provenance))
+        || mesh
+            .topology
+            .boundary_edges
+            .iter()
+            .any(|edge| matches(&edge.provenance))
+        || mesh.topology.nodes.iter().any(|node| matches(&node.provenance))
 }
 
 fn primary_solver_mesh_field_expected_count(
@@ -450,7 +453,7 @@ mod lineage_tests {
     fn boundary_quality_uses_resolved_occurrence_provenance() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         let source_face = mesh.topology.boundary_faces[0].provenance[0].clone();
-        let mut target = RegionTarget::boundary("authored_support");
+        let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("authored_support"));
         target
             .bind_resolved_entities(vec![source_face.clone()])
             .expect("resolve authored face");
@@ -504,7 +507,6 @@ mod convergence_tests {
             &model,
             ComputeBackend::Cpu,
             runmat_analysis_fea::LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..Default::default()
@@ -519,9 +521,9 @@ mod convergence_tests {
             model: &model,
             solver_mesh: Some(&mesh),
             requested_backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             options: &options,
             assigned_run_id: Some("typed-convergence"),
+            effective_memory_ceiling_bytes: None,
         };
         run.diagnostics.clear();
         assert_eq!(

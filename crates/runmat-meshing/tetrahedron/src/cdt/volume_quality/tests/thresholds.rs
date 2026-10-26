@@ -22,6 +22,12 @@ fn baseline() -> (
     (topology, request, provenance, quality)
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Above-bound ratios inside the same scheduling bucket, including the next
+//   representable value above one, remain physical violations. Nonfinite ratios fail closed. This
+//   checks the acceptance predicate; it does not establish meshing convergence or a physical error
+//   bound for arbitrary geometry.
 #[test]
 fn scheduling_ties_do_not_waive_full_value_physical_bounds() {
     let (_, _, _, baseline) = baseline();
@@ -42,6 +48,12 @@ fn scheduling_ties_do_not_waive_full_value_physical_bounds() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Size and shape violations inside a scheduling tie are established from primitive
+//   physical inequalities, independently admitted and retained by the mutable work queue. This
+//   finite mesh family does not qualify an original CAD model or substitute for final physical
+//   admission.
 #[test]
 fn independent_admission_and_working_queues_preserve_near_boundary_violations() {
     let (topology, request, provenance, baseline) = baseline();
@@ -108,6 +120,12 @@ fn independent_admission_and_working_queues_preserve_near_boundary_violations() 
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A substituted ratio and missing work source cannot hide a primitive size-bound
+//   violation, even when the substitution lies within numeric field-comparison allowance. This
+//   separates approximate evidence comparison from physical acceptance; other tampering and
+//   whole-study envelopes require their own witnesses.
 #[test]
 fn near_bound_report_substitution_cannot_hide_an_independent_physical_violation() {
     let (topology, request, provenance, baseline) = baseline();

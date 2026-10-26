@@ -25,7 +25,7 @@ pub(super) fn assert_carried_request_identity(
         workload,
         &[],
         LocalExecutionPlan::serial(),
-        None,
+        None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
     )
     .unwrap();
     assert_eq!(
@@ -48,7 +48,7 @@ pub(super) fn assert_carried_request_identity(
             &equivalent,
             &[],
             LocalExecutionPlan::serial(),
-            None,
+            None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
         )
         .is_err(),
         "foreign borrowed source cannot reuse construction evidence"
@@ -61,7 +61,7 @@ pub(super) fn assert_carried_request_identity(
         workload,
         &[],
         LocalExecutionPlan::serial(),
-        None,
+        None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
     )
     .is_err());
     let fresh = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
@@ -83,7 +83,7 @@ pub(super) fn assert_carried_request_identity(
             &equivalent,
             &[],
             LocalExecutionPlan::serial(),
-            None,
+            None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
         )
         .unwrap(),
         *plan,

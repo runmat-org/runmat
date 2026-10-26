@@ -7,11 +7,11 @@ use runmat_meshing_core::{
 #[test]
 fn counted_identity_shape_bounds_original_contract_without_changing_digest() {
     let target = RegionTarget::boundary("边界🌊".repeat(128));
-    let entities = [PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "surface/α".repeat(256),
-        assembly_path: vec!["long instance".repeat(64), "β".repeat(1024)],
-    }];
+    let entities = [PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "surface/α".repeat(256),
+        vec!["long instance".repeat(64), "β".repeat(1024)],
+    )];
     for count in [0, 1, 4, 1024] {
         let nodes = (0..count)
             .map(|ordinal| {
@@ -39,15 +39,15 @@ fn counted_identity_shape_bounds_original_contract_without_changing_digest() {
 fn candidate_provenance_bounds_original_deduplicated_selection_for_both_orders() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mut mesh = canonical_tetrahedron_solver_mesh(order);
-        let entity = PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "common".into(),
-            assembly_path: vec!["instance".repeat(1024)],
-        };
+        let entity = PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "common".into(),
+            vec!["instance".repeat(1024)],
+        );
         for face in &mut mesh.topology.boundary_faces {
             face.provenance.push(entity.clone());
         }
-        let target = RegionTarget::boundary("common");
+        let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("common"));
         let profile =
             super::super::profile::constraint_target_workspace_profile(&mesh, &target).unwrap();
         let resolved = super::super::resolve_nodal_target(&mesh, &target, "fixed").unwrap();
@@ -63,11 +63,11 @@ fn candidate_provenance_bounds_original_deduplicated_selection_for_both_orders()
                 >= profile.identity_materialization_bytes + profile.owned_metadata_bytes
         );
         assert_eq!(resolved.matched_entities, vec![entity]);
-        let vertex = PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "anchor".into(),
-            assembly_path: vec!["instance".repeat(32)],
-        };
+        let vertex = PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "anchor".into(),
+            vec!["instance".repeat(32)],
+        );
         mesh.topology.nodes[0].provenance.push(vertex.clone());
         let mut exact = RegionTarget::point("anchor");
         exact.bind_resolved_entities(vec![vertex]).unwrap();

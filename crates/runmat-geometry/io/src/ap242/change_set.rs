@@ -119,6 +119,9 @@ mod tests {
         Ap242Measure, Ap242Parameter, Ap242ParameterAccess, GeometryDigest, QuantityKind,
     };
 
+    // witness: FEA-AUTHORING-GEOMETRY-002/truthful_exchange_export @
+    //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+    //   boundary: Validated changes are reported as sidecar-only without claiming a CAD export.
     #[test]
     fn reports_validated_changes_as_sidecar_only_without_claiming_export() {
         let inventory = inventory();

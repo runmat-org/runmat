@@ -10,7 +10,7 @@ use runmat_execution_artifact::{
 use runmat_execution_runner_native::{
     execute_prepared_fea_study_locally, fluid_study_completion_from_source,
     prepare_checked_fea_study, CompletedFeaStudyResult, LocalFeaExecutionOptions,
-    PreparedFeaStudyRoot,
+    StudyRootPlanning,
 };
 use runmat_runtime::analysis::FeaRootSelector;
 
@@ -37,7 +37,7 @@ model flow {
  load outlet { fluid.outlet_pressure { target = geometry.part.region.outlet; value = 0 Pa } }
 }
 study steady {
- geometry = geometry.part; mesh = mesh.volume; model = model.flow; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.flow
  analysis solve { fluid static {}; accuracy { algebraic_relative_tolerance = 1e-8 } }
  output velocity = analysis.solve.field.cell.fluid_velocity
  output pressure = analysis.solve.field.cell.fluid_pressure
@@ -123,11 +123,11 @@ pub(super) async fn run() {
         )
         .await
         .unwrap();
-        let PreparedFeaStudyRoot::Fluid(root) = &mut prepared.root else {
+        let StudyRootPlanning::Fluid(planning) = &mut prepared.root.planning else {
             panic!("expected original authored fluid root")
         };
-        root.planning.numerical.maximum_outer_iterations = 400;
-        root.planning.numerical.linear_relative_tolerance = 1e-11;
+        planning.numerical.maximum_outer_iterations = 400;
+        planning.numerical.linear_relative_tolerance = 1e-11;
         let case = execute_prepared_fea_study_locally(prepared, &options)
             .await
             .unwrap();
@@ -168,18 +168,18 @@ pub(super) async fn run() {
         assert!(original.residual.global_momentum_relative <= 1e-8);
         assert!(worst_cell_momentum <= 1e-8);
         assert_eq!(
-            original.velocity_m_per_s.len(),
+            original.velocity_m_per_s.canonical_values().len(),
             result.mesh.topology.volume_elements.len()
         );
-        assert!(!original.face_volume_flux_m3_per_s.is_empty());
+        assert!(!original.face_volume_flux_m3_per_s.canonical_values().is_empty());
         assert_eq!(result.completion.fields.fields.len(), 3);
         assert_eq!(
             result.completion.fields.entity_counts.volume_elements,
-            original.velocity_m_per_s.len()
+            original.velocity_m_per_s.canonical_values().len()
         );
         assert_eq!(
             result.completion.fields.entity_counts.oriented_faces,
-            original.face_volume_flux_m3_per_s.len()
+            original.face_volume_flux_m3_per_s.canonical_values().len()
         );
         let domains = [
             runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::VolumeElements,
@@ -191,9 +191,9 @@ pub(super) async fn run() {
             let expected = if domain
                 == runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::OrientedFaces
             {
-                original.face_volume_flux_m3_per_s.len()
+                original.face_volume_flux_m3_per_s.canonical_values().len()
             } else {
-                original.velocity_m_per_s.len()
+                original.velocity_m_per_s.canonical_values().len()
             };
             assert_eq!(
                 entry
@@ -239,13 +239,9 @@ pub(super) async fn run() {
             runmat_analysis_fea::results::accuracy::AccuracyStatus::Indeterminate
         );
         assert_eq!(
-            runmat_analysis_fea::results::accuracy::publication_gate(
-                &spatial_plan,
-                runmat_analysis_core::FormulationRequirement::Production,
-                &spatial
-            )
-            .unwrap()
-            .decision,
+            runmat_analysis_fea::results::accuracy::publication_gate(&spatial_plan, &spatial)
+                .unwrap()
+                .decision,
             runmat_analysis_fea::results::accuracy::PublicationDecision::Block
         );
         assert!(!result.completion.states.is_empty());
@@ -253,17 +249,17 @@ pub(super) async fn run() {
         for observation in &result.completion.observation_results {
             let (count, width, location) = match observation.quantity {
                 runmat_analysis_core::ObservationQuantity::FluidVelocity => (
-                    original.velocity_m_per_s.len(),
+                    original.velocity_m_per_s.canonical_values().len(),
                     3,
                     runmat_analysis_core::FieldLocation::Cell,
                 ),
                 runmat_analysis_core::ObservationQuantity::FluidPressure => (
-                    original.pressure_pa.len(),
+                    original.pressure_pa.canonical_values().len(),
                     1,
                     runmat_analysis_core::FieldLocation::Cell,
                 ),
                 runmat_analysis_core::ObservationQuantity::VolumeFlowRate => (
-                    original.face_volume_flux_m3_per_s.len(),
+                    original.face_volume_flux_m3_per_s.canonical_values().len(),
                     1,
                     runmat_analysis_core::FieldLocation::Face,
                 ),
@@ -293,7 +289,7 @@ pub(super) async fn run() {
         }
         let max_velocity = original
             .velocity_m_per_s
-            .iter()
+            .canonical_values().iter()
             .flatten()
             .map(|x| x.abs())
             .fold(0.0, f64::max);
@@ -305,10 +301,10 @@ pub(super) async fn run() {
                 result.completion.workload.geometry_policy,
             )
             .unwrap();
-            assert_eq!(topology.cells.len(), original.velocity_m_per_s.len());
+            assert_eq!(topology.cells.len(), original.velocity_m_per_s.canonical_values().len());
             assert_eq!(
                 topology.faces.len(),
-                original.face_volume_flux_m3_per_s.len()
+                original.face_volume_flux_m3_per_s.canonical_values().len()
             );
             let tolerance = result
                 .completion
@@ -317,14 +313,14 @@ pub(super) async fn run() {
                 .physical_relative_tolerance;
             // Independent rigid-translation patch: U constant, p=0 and q=U dot S
             // at every original owner-oriented face, not only an exterior rendering.
-            for u in &original.velocity_m_per_s {
+            for u in original.velocity_m_per_s.canonical_values() {
                 for (actual, expected) in u.iter().zip([0.001_f64, 0.0, 0.0]) {
                     assert!((*actual - expected).abs() <= tolerance * 0.001);
                 }
             }
             assert!(original
                 .pressure_pa
-                .iter()
+                .canonical_values().iter()
                 .all(|p| p.abs() <= tolerance * 0.001));
             let flux_scale = topology
                 .faces
@@ -335,7 +331,7 @@ pub(super) async fn run() {
             for (face, q) in topology
                 .faces
                 .iter()
-                .zip(&original.face_volume_flux_m3_per_s)
+                .zip(original.face_volume_flux_m3_per_s.canonical_values())
             {
                 let expected = 0.001 * face.owner_area_vector_m2[0];
                 assert!((*q - expected).abs() <= tolerance * flux_scale);
@@ -349,7 +345,7 @@ pub(super) async fn run() {
             assert!(max_velocity > 0.0);
         } else {
             assert_eq!(max_velocity, 0.0);
-            assert!(original.pressure_pa.iter().all(|p| *p == 0.0));
+            assert!(original.pressure_pa.canonical_values().iter().all(|p| *p == 0.0));
         }
         let expected = result.completion.clone();
         let mesh = result.mesh.clone();
@@ -488,8 +484,8 @@ pub(super) async fn run() {
         }) {
             eprintln!(
                 "authored fluid lifecycle: cells={}, all_faces={}, admitted_state_heap={}B",
-                expected.result.original().velocity_m_per_s.len(),
-                expected.result.original().face_volume_flux_m3_per_s.len(),
+                expected.result.original().velocity_m_per_s.canonical_values().len(),
+                expected.result.original().face_volume_flux_m3_per_s.canonical_values().len(),
                 closure
                     .execution
                     .winning_accounting()

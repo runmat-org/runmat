@@ -28,7 +28,9 @@ const POST_PROCESS_CPU_MILLICORES: u32 = 1_000;
 const POST_PROCESS_WALL_MILLISECONDS: u64 = 3_600_000;
 const POST_PROCESS_FIXED_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const POST_PROCESS_FIXED_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-const POST_PROCESS_MAXIMUM_RESIDENT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+/// Post-processing phases carry no authored memory ceiling; placement admits them against the
+/// machine-capacity authority like every other phase.
+const POST_PROCESS_MAXIMUM_RESIDENT_BYTES: u64 = u64::MAX;
 const DERIVED_OUTPUT_RECORD_OVERHEAD_BYTES: u64 = 64 * 1024;
 const CANONICAL_NUMERIC_BYTES_UPPER_BOUND: u64 = 9;
 
@@ -683,15 +685,17 @@ mod tests {
     #[test]
     fn accelerator_preflight_requires_the_complete_device_buffer_peak() {
         let exact = AcceleratorRequest {
-            class: "test-gpu".into(),
+            class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
             count: 1,
-            memory_bytes_each: 24,
+            minimum_allocation_bytes: 24,
+            provider: None,
+            required_features: Default::default(),
         };
         let worker = post_process_worker_with_accelerator(Some(&exact), 24).unwrap();
         assert_eq!(worker.accelerators[0].memory_bytes_each, ByteCount(24));
 
         let mut short = exact;
-        short.memory_bytes_each -= 1;
+        short.minimum_allocation_bytes -= 1;
         assert!(post_process_worker_with_accelerator(Some(&short), 24).is_err());
     }
 }

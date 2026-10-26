@@ -545,7 +545,14 @@ fn catalog_entries_keep_domain_modules_out_of_the_root() {
         .expect("catalog entries directory")
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.is_file())
+        // Hidden files such as Finder's .DS_Store are not catalog sources.
+        .filter(|path| {
+            path.is_file()
+                && !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+        })
         .collect::<Vec<_>>();
     root_files.sort();
     assert_eq!(

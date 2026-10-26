@@ -40,11 +40,15 @@ fn reference(meshes: &[DelaunayVolumeMesh]) -> DelaunayVolumeMesh {
         provenance,
         quality,
         facet_recovery_insertions: super::reference::assemble_insertions(meshes),
-        refinement_insertions: super::reference::assemble_refinement_insertions(meshes),
-        sliver_mutations: super::reference::assemble_sliver_mutations(meshes),
+        quality_mutations: super::reference::assemble_quality_mutations(meshes),
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Single-region completion retains the original node, cell and quality allocations and
+//   matches the former rebuild's complete output and independently validated canonical encoding.
+//   This excludes whole-native-study memory peaks and multi-region aggregate allocation bounds.
 #[test]
 fn single_component_moves_storage_and_preserves_independent_encoding() {
     let mesh = component();
@@ -78,6 +82,11 @@ fn single_component_moves_storage_and_preserves_independent_encoding() {
     assert_eq!(encode(&actual), encode(&expected));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Consuming multi-region assembly matches the original independent rebuild including
+//   merged shared-node provenance and complete quality. This does not establish arbitrary partition
+//   scaling, native throughput or whole-task admission.
 #[test]
 fn multiple_components_match_original_assembly_and_merge_shared_provenance() {
     let first = component();
@@ -210,5 +219,21 @@ fn conflicting_identity_and_cancelled_handoff_reject() {
         .unwrap_err()
         .kind,
         DelaunayVolumeMeshErrorKind::Cancelled
+    );
+}
+
+// witness: FEA-MESH-DISCRETIZATION-001/volume_conformity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Conformal multi-region interfaces mesh in one component so both sides share every
+//   interface Steiner point (fsi-compliant-tube bore).
+#[test]
+fn regions_joined_by_an_interface_facet_form_one_component() {
+    let constraints = crate::cdt::test_fixtures::same_facet_multi_steiner_constraints();
+    let components = super::partition_constraints(&constraints).unwrap();
+    assert_eq!(components.len(), 1);
+    assert!(components[0].joined_regions);
+    assert_eq!(
+        components[0].constraints.facets.len(),
+        constraints.facets.len()
     );
 }

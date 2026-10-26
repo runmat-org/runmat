@@ -27,14 +27,14 @@ mod accuracy_import;
 mod host_transport;
 #[path = "tests/host_contract.rs"]
 mod host_contract;
-pub(crate) use host_contract::{
-    contract_default_host, contract_devices, contract_host, contract_worker,
-};
+pub(crate) use host_contract::{contract_default_host, contract_devices, contract_worker};
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
 
 #[path = "tests/accuracy_source_context.rs"]
 mod accuracy_source_context_tests;
+#[path = "tests/accuracy_plan_binding.rs"]
+mod accuracy_plan_binding_tests;
 #[path = "tests/acoustic_accuracy.rs"]
 mod acoustic_accuracy_tests;
 #[path = "tests/frequency_sample_publication.rs"]
@@ -197,7 +197,6 @@ fn portable_static_preparation_admits_connector_target_observation() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -218,6 +217,9 @@ fn portable_static_preparation_admits_connector_target_observation() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .expect("connector-target observation must be admitted in the portable resource plan");
     let demand = prepared.resource_plan.input.structural_operator().unwrap();
@@ -1582,7 +1584,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1598,22 +1599,18 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = solve.model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -1632,6 +1629,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 4);
@@ -1744,7 +1744,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         &solve.solver_model().unwrap(),
         solve.backend,
         LinearStaticSolveOptions {
-            formulation_requirement: solve.formulation_requirement,
             preconditioner_kind: solve.preconditioner,
             algebra_backend_kind: solve.algebra_backend,
             solver_mesh_artifact_path: None,
@@ -2434,7 +2433,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .collect(),
         sequence,
         step: producer_step.clone(),
-        formulation_requirement: solve.formulation_requirement,
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2493,7 +2491,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .collect(),
         sequence,
         step: producer_step.clone(),
-        formulation_requirement: solve.formulation_requirement,
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2529,7 +2526,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     let accuracy_gate = runmat_analysis_fea::results::accuracy::publication_gate(
         &accuracy_prepared.request.plan,
-        accuracy_prepared.request.formulation_requirement,
         &accuracy_evaluation,
     )
     .unwrap();
@@ -2540,7 +2536,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             source_kind: accuracy_prepared.request.source_kind,
             source_result: accuracy_prepared.request.source_result,
             source_observations: accuracy_prepared.request.source_observations,
-            formulation_requirement: accuracy_prepared.request.formulation_requirement,
             evidence: accuracy_evidence,
             evaluation: accuracy_evaluation,
             gate: accuracy_gate,
@@ -2910,6 +2905,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     assert_eq!(branch.inputs.len(), 5);
@@ -2961,6 +2959,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })
         .is_err()
     );
@@ -3000,6 +3001,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     assert_eq!(prepared.host.workload, access_variant.host.workload);
@@ -3034,6 +3038,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     assert_eq!(
@@ -3106,6 +3113,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             required_features: BTreeSet::new(),
         }],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .err()
     .expect("unsupported GPU static work must be rejected before scheduler preparation");
@@ -3228,7 +3238,6 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         step_id: root.step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -3239,22 +3248,18 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = workload.model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -3264,7 +3269,6 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         &workload.solver_model().unwrap(),
         workload.backend,
         LinearStaticSolveOptions {
-            formulation_requirement: workload.formulation_requirement,
             preconditioner_kind: workload.preconditioner,
             algebra_backend_kind: workload.algebra_backend,
             solver_mesh_artifact_path: None,
@@ -3319,6 +3323,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .err()
     .expect("a later GPU branch must fail before the sequence admits any solve wave");
@@ -3340,6 +3347,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })
         .is_err()
     );
@@ -3363,6 +3373,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
                 required_features: BTreeSet::new(),
             }],
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })
         .is_err()
     );
@@ -3385,6 +3398,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })
         .is_err()
     );
@@ -3400,6 +3416,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     assert_eq!(coordinator.sequence().parallel_levels().len(), 2);
@@ -3613,6 +3632,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         },
         closures.clone(),
     )
@@ -3635,6 +3657,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: crate::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         },
         incomplete,
     )

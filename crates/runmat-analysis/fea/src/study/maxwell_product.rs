@@ -55,14 +55,9 @@ pub fn plan_maxwell_study_product(
     workload
         .formulation(mesh)
         .map_err(|error| MaxwellStudyProductError::Admission(error.to_string()))?;
-    crate::physics::maxwell::compile_canonical_input(
-        &workload.model,
-        mesh,
-        workload.step_id.as_str(),
-        workload.formulation_requirement,
-        workload.relative_residual_target,
-    )
-    .map_err(|error| MaxwellStudyProductError::Admission(error.to_string()))?;
+    workload
+        .compile_input(mesh)
+        .map_err(|error| MaxwellStudyProductError::Admission(error.to_string()))?;
     Ok(MaxwellStudyProduct { compiled, workload })
 }
 

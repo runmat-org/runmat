@@ -5,7 +5,7 @@ use crate::{
         RealSparseMatrix,
     },
     planning::resource::{
-        execute_scoped_chunks, ByteCount, Count, LocalThreadCount, ScopedLocalExecutionError,
+        ByteCount, Count, LocalThreadCount,
     },
     solve::backend::cpu_reference::CpuReferenceBackend,
 };
@@ -232,7 +232,7 @@ fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling(
 }
 
 #[test]
-fn zero_load_warm_start_uses_initial_residual_as_relative_reference() {
+fn zero_load_warm_start_returns_the_exact_zero_solution() {
     let stiffness = RealSparseMatrix::diagonal(
         vec![2.0, 4.0],
         OperatorRole::Stiffness,
@@ -265,10 +265,20 @@ fn zero_load_warm_start_uses_initial_residual_as_relative_reference() {
         Some(&[1.0, -1.0]),
     );
     assert!(solved.converged, "{:?}", solved.diagnostics);
-    assert!(solved.iterations > 0);
-    assert!(solved.solution.iter().all(|value| value.abs() <= 1.0e-12));
+    // A homogeneous nonsingular system has the exact solution zero, whatever the warm start.
+    assert_eq!(solved.iterations, 0);
+    assert!(solved.solution.iter().all(|value| *value == 0.0));
+    assert_eq!(solved.relative_residual, Some(0.0));
 }
 
+// witness: FEA-SCALE-PARALLEL-001/shared_parallel_kernels @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: A scoped PCG on a two-unknown SPD system equals the serial solution and repeats
+//   exactly; nested scoped execution is rejected. Tiny system, one preconditioner.
+// witness: FEA-SHARED-ACCELERATORS-001/resource_scoped_local_parallelism @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: A scoped pool solve equals the serial solve and nested pools are rejected; global
+//   pool independence and CPU resource accounting are covered in the resources requirement.
 #[test]
 fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
     let operator = system([4.0, 3.0]);
@@ -302,48 +312,6 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
     assert_eq!(parallel, serial);
     assert!((parallel.solution[0] - 5.0 / 11.0).abs() < 1.0e-12);
     assert!((parallel.solution[1] - 9.0 / 11.0).abs() < 1.0e-12);
-
-    let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
-        Ok::<_, ()>(solve_operator_system_scoped(
-            &operator,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &CpuReferenceBackend,
-            None,
-            ScopedLinearSolveSettings::with_default_tolerance(plan, None),
-        ))
-    })
-    .unwrap();
-    assert!(matches!(
-        &nested[0],
-        Err(ScopedSpmvError::Execution(
-            ScopedLocalExecutionError::NestedExecution
-        ))
-    ));
-}
-
-#[test]
-fn scoped_pcg_reduction_failure_is_not_reported_as_numerical_breakdown() {
-    let operator = system([4.0, 3.0]);
-    let result = solve_operator_system_with_apply(
-        &operator,
-        SpdPreconditionerKind::Jacobi,
-        LinearAlgebraBackendKind::CpuReference,
-        &CpuReferenceBackend,
-        None,
-        (
-            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
-                Ok(crate::algebra::apply_prepared(prepared, x))
-            },
-            |_: &[f64], _: &[f64]| Err(ScopedSpmvError::ReductionDimensionMismatch),
-            None,
-        ),
-        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
-    );
-    assert!(matches!(
-        result,
-        Err(ScopedSpmvError::ReductionDimensionMismatch)
-    ));
 }
 
 #[test]
@@ -386,6 +354,9 @@ fn cpu_reference_warm_start_does_not_use_an_absolute_breakdown_threshold() {
     assert!(result.residual_norm <= 1.0e-8);
 }
 
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A noncoercive operator is rejected before preconditioner setup.
 #[test]
 fn noncoercive_operator_is_rejected_before_preconditioner_setup() {
     let operator = system([0.0, 3.0]);

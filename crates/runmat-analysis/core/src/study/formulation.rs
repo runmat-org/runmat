@@ -1,16 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Qualification requested by the caller at the pre-solve boundary.
-///
-/// There is intentionally no `Default`: every caller must choose whether experimental numerical
-/// work is admissible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FormulationRequirement {
-    Production,
-    Experimental,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuralOperatorImplementation {
@@ -18,6 +7,8 @@ pub enum StructuralOperatorImplementation {
     Tet10LinearElasticity,
     Tet4SmallStrainContinuum,
     Tet10SmallStrainContinuum,
+    Tet4TotalLagrangianContinuum,
+    Tet10TotalLagrangianContinuum,
     EulerBernoulliBeam3d,
     Mitc3TriangularShell,
     SyntheticDiagonalChain,
@@ -39,6 +30,9 @@ pub enum SpatialOperatorImplementation {
     MaxwellLowestOrderEdgeCurlCurlComplexMass,
     ReducedChannelFlow,
     FluidCellCenteredConservativeMomentumPressure,
+    /// Nodal Galerkin energy over fluid and solid, with conservative Raviart–Thomas advection
+    /// of the solved fluid face fluxes and streamline-upwind stabilization in the fluid.
+    ConjugateEnergyGalerkinConservativeAdvection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -64,8 +58,20 @@ pub enum TemporalImplementation {
     MaxwellComplexElectricFieldGeneralSolve,
     AcousticDomainGraphHarmonicSolve,
     AcousticCanonicalHarmonicSolve,
+    AcousticCanonicalModalSolve,
+    AcousticCanonicalTransientSolve,
     FluidSteadyNonorthogonalPressureCorrection,
     FluidBackwardEulerConservativeMomentumPressure,
+    /// Steady finite-volume flow, then one monolithic energy solve across fluid and solid.
+    ConjugateSteadyFlowMonolithicEnergy,
+    /// Steady finite-volume flow advecting a backward-Euler monolithic energy march.
+    ConjugateSteadyFlowBackwardEulerEnergy,
+    /// Steady flow on the deformed fluid domain and a small-strain structure, iterated with
+    /// Aitken-relaxed interface displacement until both sides agree.
+    FluidStructureSteadyAitkenPartitioned,
+    /// Moving-mesh backward-Euler flow and average-acceleration Newmark structure, iterated
+    /// within every interval with Aitken-relaxed interface displacement.
+    FluidStructureTransientAitkenPartitioned,
     CoupledSinglePassProfileTransfer,
     CoupledFixedPointRelaxation,
     CoupledScalarResidualIteration,
@@ -78,6 +84,7 @@ pub enum TemporalImplementation {
 pub enum ConstitutiveImplementation {
     IsotropicLinearElasticity,
     SmallStrainJ2IsotropicHardening,
+    GreenLagrangeJ2IsotropicHardening,
     ReducedThermalCoefficientProfile,
     ElementOwnedIsotropicThermalExpansion,
     IsotropicThermalConduction,
@@ -100,6 +107,8 @@ pub enum CouplingImplementation {
     StaggeredElectrothermalConductanceLine,
     PartitionedConjugateProjection,
     PartitionedFluidStructureRelaxation,
+    /// Flow advects heat; fluid and solid energy share one system through declared interfaces.
+    FlowAdvectedMonolithicConjugateEnergy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -122,12 +131,15 @@ pub enum RecoveryImplementation {
     ElementOwnedThermoelasticStressEnergy,
     AcousticDomainGraphComplexPressure,
     AcousticSolverMeshPressureVelocityEnergy,
+    AcousticSolverMeshNodalPressure,
     ElectricalSolverMeshFieldDisplacementEnergy,
     ElectricalSolverMeshFieldCurrentJoulePower,
     MagneticSolverMeshVectorPotentialFluxFieldEnergy,
     MaxwellSolverMeshElectricFluxFieldPower,
     CfdReducedChannelProfile,
     FluidOriginalCellVelocityPressureOwnerFaceFlux,
+    ConjugateNodalTemperatureInterfaceHeat,
+    FluidStructureNodalDisplacementInterfaceEvidence,
     CoupledResampledFields,
 }
 
@@ -153,6 +165,9 @@ pub enum SourceImplementation {
     CanonicalVolumeProjection,
     CanonicalBoundaryProjection,
     CanonicalBoundaryPressureIntegration,
+    /// Force, traction or pressure integrated over the deformed boundary at every Newton
+    /// iterate, with its load stiffness (total Lagrangian solids only).
+    CanonicalFollowerBoundaryIntegration,
     CanonicalPointProjection,
     AcousticHashedTargetGraphProjection,
     BoundaryResultantMomentProjection,
@@ -179,6 +194,8 @@ pub enum BoundaryTransferImplementation {
     FullExteriorTangentialPotentialGroundWithWeakCoulombGauge,
     FullExteriorElectricPerfectConductor,
     HeuristicInterfaceTransfer,
+    /// Declared conformal interface: shared nodes or an exact conductance jump.
+    DeclaredConformalInterfaceLaw,
     UnmappedFallback,
 }
 
@@ -244,7 +261,6 @@ pub enum FormulationAdmissionRejectionReason {
     UnsupportedSolutionSpace,
     UnregisteredRealization,
     IncompatibleAxis(FormulationAxis),
-    ProductionQualificationMissing,
     InvalidRealization,
 }
 
@@ -279,7 +295,7 @@ mod tests {
             "temporals": ["structural_static_linear_solve"],
             "coupling": "uncoupled",
             "boundary_transfers": ["canonical_boundary_projection"],
-            "forged_maturity": "production"
+            "forged_field": "value"
         });
         assert!(serde_json::from_value::<ExactFormulationRealization>(extra).is_err());
     }

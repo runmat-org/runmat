@@ -9,9 +9,14 @@ use crate::class_registry::declaration::{
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_analysis_core::Length;
 
-const PAIRING_CLASS: &str = "fea.PeriodicPairing";
-const MATCHING_PAIRING_CLASS: &str = "fea.MatchingPeriodicPairing";
-const GEOMETRIC_PAIRING_CLASS: &str = "fea.GeometricPeriodicPairing";
+const PAIRING_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_PERIODIC_PAIRING_CLASS.display_name();
+const MATCHING_PAIRING_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS
+        .display_name();
+const GEOMETRIC_PAIRING_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS
+        .display_name();
 const EMPTY_FIELDS: &[&str] = &[];
 const GEOMETRIC_FIELDS: &[&str] = &["tolerance"];
 #[runtime_builtin(
@@ -23,6 +28,10 @@ const GEOMETRIC_FIELDS: &[&str] = &["tolerance"];
 pub async fn periodic_pairing_matching_builtin(
     runtime: Option<crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_PERIODIC_PAIRING_MATCHING_DESCRIPTOR,
+        "fea.PeriodicPairing.matching",
+    )?;
     ensure_pairing_classes_registered();
     let object = crate::execution::object::construct_object_from_borrowed_fields(
         runtime.as_ref(),
@@ -42,6 +51,10 @@ pub async fn periodic_pairing_geometric_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     tolerance: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_PERIODIC_PAIRING_GEOMETRIC_DESCRIPTOR,
+        "fea.PeriodicPairing.geometric",
+    )?;
     let meters = quantity_scalar(
         "fea.PeriodicPairing.geometric",
         &tolerance,

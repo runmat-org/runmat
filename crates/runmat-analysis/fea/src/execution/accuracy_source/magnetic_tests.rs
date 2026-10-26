@@ -6,13 +6,12 @@ use crate::{
     topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
 };
 use runmat_analysis_core::{
-    AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance, FormulationRequirement,
-    ProcedureStepId,
+    AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance, ProcedureStepId,
 };
 use runmat_meshing_core::ElementOrder;
 
 fn plan() -> AccuracyPlan {
-    let mut plan = AccuracyPlan::experimental_baseline("magnetic_accuracy");
+    let mut plan = AccuracyPlan::baseline("magnetic_accuracy");
     plan.criteria = [
         (
             "residual",
@@ -48,6 +47,10 @@ fn plan() -> AccuracyPlan {
     plan
 }
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ magnetostatic/tet4|tet10/public_study;
+//   boundary: Both affine geometry orders/signs receipts preserve original algebraic
+//   residual/gauge/energy claims and block production when independent convergence evidence is
+//   missing; no process or distributed proof.
 #[test]
 fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -59,7 +62,6 @@ fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
             let workload = MagnetostaticWorkload {
                 model: authored_model(current),
                 step_id: ProcedureStepId("potential".into()),
-                formulation_requirement: FormulationRequirement::Experimental,
                 relative_residual_target: 1e-10,
             };
             let result = workload.execute(&mesh).unwrap();
@@ -86,7 +88,6 @@ fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
                 AccuracySourceKind::Magnetostatic,
                 receipt.source_result(),
                 None,
-                FormulationRequirement::Experimental,
                 plan(),
             )
             .unwrap();
@@ -130,13 +131,9 @@ fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
                 assert_eq!(contribution.status, expected);
             }
             assert_eq!(
-                publication_gate(
-                    &request.plan,
-                    FormulationRequirement::Production,
-                    &evaluated
-                )
-                .unwrap()
-                .decision,
+                publication_gate(&request.plan, &evaluated)
+                    .unwrap()
+                    .decision,
                 PublicationDecision::Block
             );
             // The two algebraic criteria can be satisfied; this never qualifies spatial accuracy.
@@ -153,7 +150,6 @@ fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 wrong_target,
             )
             .unwrap();
@@ -165,7 +161,6 @@ fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 request.plan.clone(),
             )
             .unwrap();

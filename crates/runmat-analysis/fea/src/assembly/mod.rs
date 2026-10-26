@@ -527,7 +527,7 @@ impl std::error::Error for StructuralAssemblyError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuralFormulationRequirement {
     PhysicalDiscretization,
-    ExperimentalSyntheticOperator,
+    SyntheticOperator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -661,30 +661,6 @@ pub(super) fn assemble_linear_system_impl(
         solved_nodal_temperature_k,
         solid_energy,
     } = execution;
-    if structural_requirement.is_none() {
-        return Err(LinearAssemblyError::CouplingRealization(
-            "assembly requires an explicit structural formulation; other physics must use their physical assembly operators, not a synthetic shared RHS".into(),
-        ));
-    }
-    let experimental = structural_requirement
-        == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator);
-    if !experimental && electro_thermal_context.is_some() {
-        return Err(LinearAssemblyError::CouplingRealization(
-            "electro-thermal structural coupling requires a solved physical electrical/thermal transfer; the legacy synthetic Joule-heating RHS is not a physical formulation".into(),
-        ));
-    }
-    if !experimental
-        && thermo_mechanical_context.is_some()
-        && (solver_mesh.is_none()
-            || model
-                .structural
-                .as_ref()
-                .is_some_and(|domain| !domain.elements.is_empty()))
-    {
-        return Err(LinearAssemblyError::CouplingRealization(
-            "prescribed thermomechanical coupling requires the physical solid temperature-load assembly; other formulations require a solved physical thermal transfer".into(),
-        ));
-    }
     if solved_nodal_temperature_k.is_some()
         && (solver_mesh.is_none()
             || structural_requirement
@@ -833,8 +809,7 @@ pub(super) fn assemble_linear_system_impl(
 
     let mut rhs = vec![0.0; dof_count];
     if solid_topology.is_none()
-        && structural_requirement
-            == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator)
+        && structural_requirement == Some(StructuralFormulationRequirement::SyntheticOperator)
     {
         apply_synthetic_structural_rhs(excitations, &mut rhs);
     }
@@ -912,7 +887,6 @@ pub(super) fn assemble_linear_system_impl(
     }
 
     if let Some(temperatures) = solved_nodal_temperature_k {
-        let temperatures = temperatures.canonical_value();
         let (mesh, properties) = solver_mesh.zip(solid_properties.as_ref()).ok_or_else(|| {
             LinearAssemblyError::CouplingRealization(
                 "solved thermal input lacks solid material coverage".into(),
@@ -1340,13 +1314,14 @@ pub(super) fn assemble_linear_system_impl(
                     StructuralFormulationRealization::new(operator, recovery)
                 })
                 .or_else(|| {
-                    (requirement == StructuralFormulationRequirement::ExperimentalSyntheticOperator)
-                        .then(|| {
+                    (requirement == StructuralFormulationRequirement::SyntheticOperator).then(
+                        || {
                             StructuralFormulationRealization::new(
                                 StructuralOperatorImplementation::SyntheticDiagonalChain,
                                 None,
                             )
-                        })
+                        },
+                    )
                 })
                 .into_iter()
                 .collect()
@@ -1728,7 +1703,7 @@ fn apply_thermo_spatial_field(
             / 240.0)
             .clamp(-0.45, 0.45);
         let start =
-            ((region_hash(&region_delta.region_id) as usize).wrapping_add(idx * 5)) % dof_count;
+            ((region_hash(region_delta.region_id()) as usize).wrapping_add(idx * 5)) % dof_count;
         let stride = context
             .region_temperature_deltas
             .len()
@@ -1907,7 +1882,7 @@ mod tests {
                 constraint_id: "fixed_root".to_string(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                    target: runmat_analysis_core::RegionTarget::authored(region_id),
+                    target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id))),
                 },
             },
         )
@@ -2100,7 +2075,7 @@ mod tests {
         model
             .material_assignments
             .push(runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("span"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span")),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2136,11 +2111,11 @@ mod tests {
     fn solver_mesh_and_beam_share_attached_translation_rows() {
         let mut mesh = tetrahedron4_mesh();
         let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "beam_root".into(),
-            assembly_path: vec!["root".into()],
-        }];
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        )];
         set_boundary_regions(&mut mesh, 0, &["root"]);
         set_boundary_regions(&mut mesh, 1, &["solid_load"]);
         reseal(&mut mesh);
@@ -2198,12 +2173,11 @@ mod tests {
                 SourceImplementation::ExplicitRegionNodalDistribution,
             ]
         );
+        // The fixed solid face holds the beam's attached root node, so its support is compiled in
+        // the mixed node space and also fixes that node's rotations.
         assert_eq!(
             summary.structural_boundary_transfers,
-            vec![
-                BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                BoundaryTransferImplementation::ExplicitRegionConnectivity,
-            ]
+            vec![BoundaryTransferImplementation::ExplicitRegionConnectivity]
         );
         assert!(summary
             .operator
@@ -2328,11 +2302,11 @@ mod tests {
     fn whole_model_body_force_spans_solid_and_explicit_formulations_once() {
         let mut mesh = tetrahedron4_mesh();
         let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "beam_root".into(),
-            assembly_path: vec!["root".into()],
-        }];
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        )];
         set_boundary_regions(&mut mesh, 0, &["root"]);
         reseal(&mut mesh);
         let mut model = mixed_solid_beam_model(attached_coordinates);
@@ -2377,11 +2351,11 @@ mod tests {
     fn mixed_affine_rows_anchor_rigid_modes_without_connector_support() {
         let mut mesh = tetrahedron4_mesh();
         let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "beam_root".into(),
-            assembly_path: vec!["root".into()],
-        }];
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        )];
         set_boundary_regions(&mut mesh, 0, &["root"]);
         set_boundary_regions(&mut mesh, 1, &["solid_load"]);
         reseal(&mut mesh);
@@ -2435,6 +2409,10 @@ mod tests {
         assert!(solve.converged, "{:?}", solve.diagnostics);
     }
 
+    // witness: FEA-SHARED-PROPERTIES-001/material_bearing_roles @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Solver-mesh material regions select the assigned solid materials; beam, shell and
+    //   cell roles are not covered by this test.
     #[test]
     fn solver_mesh_material_regions_select_assigned_solid_materials() {
         let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -2452,7 +2430,7 @@ mod tests {
             runmat_types::physical::YoungsModulus::new(20.0e9);
         soft_model.materials = vec![hard.clone(), soft.clone()];
         soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
+            target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("soft_region")),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_soft".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2462,7 +2440,7 @@ mod tests {
 
         let mut hard_model = soft_model.clone();
         hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
+            target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("soft_region")),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_hard".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2660,12 +2638,12 @@ mod tests {
             vec![
                 FixtureExcitation {
                     id: "tip_force".into(),
-                    region_id: "beam_span".into(),
+                    region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                     kind: FixtureExcitationKind::Force([3.0, -5.0, 7.0]),
                 },
                 FixtureExcitation {
                     id: "tip_moment".into(),
-                    region_id: "beam_span".into(),
+                    region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                     kind: FixtureExcitationKind::Moment([2.0, 4.0, -6.0]),
                 },
             ],
@@ -2698,6 +2676,10 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-CONSTRAINT-001/typed_connector_inventory @
+    //   linear_structural/beam/numerical_kernel; coverage: partial;
+    //   boundary: Explicit connectors assemble physical stiffness and damping operators on a beam
+    //   fixture; only the connector kinds in that fixture are exercised.
     #[test]
     fn explicit_connectors_assemble_physical_stiffness_and_damping_operators() {
         let base = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -2795,6 +2777,9 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-CONSTRAINT-001/typed_connector_inventory @
+    //   linear_structural/beam/numerical_kernel; coverage: partial;
+    //   boundary: Connector targets and foundation semantics fail closed.
     #[test]
     fn explicit_connector_targets_and_foundation_semantics_fail_closed() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -2866,6 +2851,9 @@ mod tests {
         assert_eq!(summary.structural_connector_damping_count, 0);
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/damping_body_loads @ linear_structural/shell/numerical_kernel;
+    //   coverage: partial;
+    //   boundary: A shell assembles authored Rayleigh damping; solid damping is not asserted here.
     #[test]
     fn shell_assembles_authored_rayleigh_damping() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
@@ -2921,13 +2909,13 @@ mod tests {
         model.materials.push(second_material);
         model.material_assignments = vec![
             runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("span_first"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span_first")),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
             },
             runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("span_second"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span_second")),
                 expected_material_id: "mat_second".into(),
                 assigned_material_id: "mat_second".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -3014,7 +3002,7 @@ mod tests {
             LinearAssemblyError::Structural(
                 StructuralAssemblyError::InvalidMaterialCoverage(message)
             ) if message.contains("beam_1")
-                && message.contains("beam_span")
+                && message.contains(&runmat_meshing_core::fixtures::fixture_edge("beam_span"))
                 && message.contains("found 0")
         ));
     }
@@ -3370,7 +3358,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_solid_uses_physical_traction_projection() {
+    fn physical_solid_uses_physical_traction_projection() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = Vec::new();
         replace_fixture_excitations(
@@ -3389,9 +3377,9 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(mesh),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
-        .expect("experimental admission with a solver mesh must use physical traction quadrature");
+        .expect("admission with a solver mesh must use physical traction quadrature");
 
         let evidence = summary
             .spatial_projection_evidence
@@ -3404,6 +3392,9 @@ mod tests {
         assert!(summary.structural_load_plan_identity.is_some());
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/damping_body_loads @ linear_structural/tet10/numerical_kernel;
+    //   coverage: partial;
+    //   boundary: Tet10 body-force quadrature preserves the integrated volume resultant.
     #[test]
     fn tet10_body_force_quadrature_preserves_integrated_volume_resultant() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -3471,7 +3462,7 @@ mod tests {
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::DistributingCoupling(
                     runmat_analysis_core::ReferencePointCoupling {
-                        target: runmat_analysis_core::RegionTarget::boundary("tip"),
+                        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
                         reference_point: runmat_analysis_core::ReferencePoint {
                             reference_point_id: "tip".into(),
                             position: runmat_analysis_core::Position::new([0.0, 0.0, 0.0]),
@@ -3675,13 +3666,16 @@ mod tests {
                 &model,
                 &static_excitations(&model),
                 None,
-                StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+                StructuralFormulationRequirement::SyntheticOperator,
             )
             .expect_err(name);
             assert_eq!(error, LinearAssemblyError::Structural(expected), "{name}");
         }
     }
 
+    // witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+    //   linear_structural/beam|shell/numerical_kernel; coverage: partial;
+    //   boundary: Mixed beam and shell connectivity assembles one shared DOF system.
     #[test]
     fn mixed_beam_shell_connectivity_assembles_one_shared_dof_system() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -3840,7 +3834,7 @@ mod tests {
                 &mut model,
                 vec![FixtureExcitation {
                     id: "shell_surface_load".into(),
-                    region_id: "shell_panel".into(),
+                    region_id: runmat_meshing_core::fixtures::fixture_face("shell_panel"),
                     kind,
                 }],
             );
@@ -3875,18 +3869,21 @@ mod tests {
         }
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/damping_body_loads @
+    //   linear_structural/beam|shell/numerical_kernel; coverage: partial;
+    //   boundary: An explicit body-force density integrates over beam and shell volumes.
     #[test]
     fn explicit_body_force_density_integrates_beam_and_shell_volume() {
         let cases = [
             (
                 FixtureId::StructuralBeamCantileverEndMomentReference,
-                "beam_span",
+                runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                 [100.0, 0.0, 0.0],
                 [0.02, 0.0, 0.0],
             ),
             (
                 FixtureId::StructuralShellPlateMomentReference,
-                "shell_panel",
+                runmat_meshing_core::fixtures::fixture_face("shell_panel"),
                 [0.0, 0.0, -1_000.0],
                 [0.0, 0.0, -1.0],
             ),
@@ -3937,7 +3934,7 @@ mod tests {
             &mut shell,
             vec![FixtureExcitation {
                 id: "normal_traction".into(),
-                region_id: "shell_panel".into(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("shell_panel"),
                 kind: FixtureExcitationKind::Traction([2.0, 0.0, 0.0]),
             }],
         );
@@ -4092,14 +4089,14 @@ mod tests {
             &model,
             &first_sample,
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .expect("first sampled load should assemble");
         let second = assemble_structural_system(
             &model,
             &second_sample,
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .expect("second sampled load should assemble");
 
@@ -4204,7 +4201,7 @@ mod tests {
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
                     runmat_analysis_core::PrescribedStructuralDofs {
-                        target: runmat_analysis_core::RegionTarget::authored("root"),
+                        target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
                         translations: vec![runmat_analysis_core::TranslationDofValue {
                             dof: runmat_analysis_core::StructuralTranslationDof::Ux,
                             value: runmat_analysis_core::PrescribedValue::Signal(
@@ -4312,9 +4309,9 @@ mod tests {
             &synthetic_model,
             &static_excitations(&synthetic_model),
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
-        .expect("typed experimental admission should permit synthetic assembly");
+        .expect("typed admission should permit synthetic assembly");
 
         let cases = [
             (
@@ -4371,7 +4368,7 @@ mod tests {
         model
             .material_assignments
             .push(runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span_2"),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span_2")),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -4469,6 +4466,9 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-SHELL-001/physical_shell_operator @
+    //   linear_structural/shell/numerical_kernel; coverage: partial;
+    //   boundary: An unconstrained shell retains its physical rigid-body null space.
     #[test]
     fn unconstrained_shell_retains_its_physical_rigid_body_nullspace() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
@@ -4504,10 +4504,12 @@ mod tests {
     fn set_boundary_regions(mesh: &mut SolverMeshArtifact, face_index: usize, regions: &[&str]) {
         mesh.topology.boundary_faces[face_index].provenance = regions
             .iter()
-            .map(|region| PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: (*region).to_owned(),
-                assembly_path: vec!["root".to_owned()],
+            .map(|region| {
+                PersistentEntityId::new(
+                    PersistentEntityKind::Face,
+                    (*region).to_owned(),
+                    vec!["root".to_owned()],
+                )
             })
             .collect();
         mesh.topology.boundary_faces[face_index].provenance.sort();
@@ -4515,20 +4517,20 @@ mod tests {
 
     fn clear_boundary_regions(mesh: &mut SolverMeshArtifact) {
         for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-            face.provenance = vec![PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: format!("unselected:{index}"),
-                assembly_path: vec!["root".to_owned()],
-            }];
+            face.provenance = vec![PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                format!("unselected:{index}"),
+                vec!["root".to_owned()],
+            )];
         }
     }
 
     fn set_solver_mesh_region(mesh: &mut SolverMeshArtifact, region_id: &str) {
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: region_id.to_owned(),
-            assembly_path: vec!["root".to_owned()],
-        };
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            region_id.to_owned(),
+            vec!["root".to_owned()],
+        );
         mesh.topology.volume_elements[0].region_id = region.clone();
         mesh.topology.regions[0].region_id = region;
         reseal(mesh);

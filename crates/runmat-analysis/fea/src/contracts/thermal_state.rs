@@ -1,6 +1,6 @@
 //! Thermal solve controls, solved output and initial/reference-state evidence.
 
-use runmat_analysis_core::{AnalysisField, AnalysisProcedure, FormulationRequirement};
+use runmat_analysis_core::{AnalysisField, AnalysisProcedure};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,6 @@ impl ThermalProcedureControl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThermalSolveOptions {
     pub initial_fields: Vec<crate::execution::InitialFieldBinding>,
-    pub formulation_requirement: FormulationRequirement,
     pub procedure: ThermalProcedureControl,
     pub residual_target: f64,
     pub solver_mesh: Option<SolverMeshArtifact>,
@@ -44,7 +43,6 @@ pub struct ThermalSolveOptions {
 impl Default for ThermalSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 10 },
             residual_target: 1.0e-4,
             solver_mesh: None,
@@ -68,6 +66,14 @@ pub struct FeaThermalRunResult {
     pub ordered_element_ids: Vec<u64>,
     pub time_points_s: Vec<f64>,
     pub temperature_snapshots: Vec<AnalysisField>,
+    /// Mesh nodes of finite-conductance thermal interfaces, in the interface field's order.
+    /// `temperature_snapshots` holds the first side's temperature there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_node_ids: Vec<u64>,
+    /// The second side's temperature at `interface_node_ids`, one field per time point (empty
+    /// when the study has no finite-conductance interface).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_temperature_snapshots: Vec<AnalysisField>,
     pub temperature_gradient_snapshots: Vec<AnalysisField>,
     pub heat_flux_snapshots: Vec<AnalysisField>,
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,

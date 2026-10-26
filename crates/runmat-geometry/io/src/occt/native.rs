@@ -65,6 +65,7 @@ pub(crate) fn import_exact_cad_shape(
     // fallback units; BREP has no declared units and uses that explicit fallback.
     let (evidence, kernel_units) = crate::exact::exact_import_units(path, bytes, format, options)?;
     let meters_per_source_unit = kernel_units.meters_per_unit();
+    let kernel_unit_m = crate::exact::exchange_reader_unit(format, kernel_units).meters_per_unit();
     let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_probe());
     let payload = ffi::bridge::import_exact_cad_bytes(
@@ -72,7 +73,12 @@ pub(crate) fn import_exact_cad_shape(
         bytes,
         materialized_path(&materialized)?,
         ffi_format(format),
-        ffi_exact_import_options(options, cancel_token.id(), meters_per_source_unit),
+        ffi_exact_import_options(
+            options,
+            cancel_token.id(),
+            kernel_unit_m,
+            meters_per_source_unit,
+        ),
     )
     .map_err(|err| exact_bridge_error(err, options))?;
     context.check_cancelled()?;
@@ -194,6 +200,8 @@ pub(crate) fn import_exact_cad_shape(
         model: projection.model,
         healing_report: None,
         source_face_ids: projection.source_face_ids,
+        entity_names: projection.entity_names,
+        entity_tags: projection.entity_tags,
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
         kernel_entity_ids: projection.kernel_entity_ids,
@@ -575,6 +583,7 @@ fn ffi_import_options(
         heal_duplicates: false,
         heal_gaps: false,
         heal_short_edges_and_sliver_faces: false,
+        share_interfaces: false,
         maximum_healing_displacement: 0.0,
         cancel_token_id,
     })
@@ -583,12 +592,13 @@ fn ffi_import_options(
 pub(super) fn ffi_exact_import_options(
     options: &ExactCadImportOptions,
     cancel_token_id: u64,
+    kernel_unit_m: f64,
     meters_per_source_unit: f64,
 ) -> ffi::bridge::OcctImportOptions {
     ffi::bridge::OcctImportOptions {
-        step_coordinate_unit_m: meters_per_source_unit,
+        step_coordinate_unit_m: kernel_unit_m,
         require_declared_step_units: true,
-        unitless_source_unit_m: meters_per_source_unit,
+        unitless_source_unit_m: kernel_unit_m,
         linear_deflection: DEFAULT_LINEAR_DEFLECTION,
         angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
         relative_deflection: false,
@@ -605,6 +615,7 @@ pub(super) fn ffi_exact_import_options(
             .analysis
             .healing
             .simplify_short_edges_and_sliver_faces,
+        share_interfaces: options.analysis.healing.shared_interfaces,
         maximum_healing_displacement: options
             .analysis
             .maximum_healing_displacement_m

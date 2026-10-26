@@ -1,12 +1,114 @@
 use super::*;
 
-pub(super) fn columns(gradient: &[f64; 3]) -> [[f64; 6]; 3] {
+/// Point kinematics of one integration point in the reference configuration.
+///
+/// Small strain: `F = I` in the strain-displacement operator and the engineering strain is the
+/// symmetric displacement gradient. Total Lagrangian: `F = I + H`, the strain is the
+/// Green-Lagrange strain `E = (H + Hᵀ + HᵀH)/2`, the work-conjugate stress is the second
+/// Piola-Kirchhoff stress, and the strain-displacement operator is `δE = sym(Fᵀ ∇δu)`.
+pub(super) struct PointKinematics {
+    pub deformation_gradient: [[f64; 3]; 3],
+    /// Engineering order xx, yy, zz, yz, xz, xy (shear components doubled).
+    pub strain: [f64; 6],
+}
+
+pub(super) fn point_kinematics(
+    kinematics: StructuralKinematics,
+    element: &PreparedElement,
+    point: &PreparedPoint,
+    displacement: &[f64],
+) -> PointKinematics {
+    // H_ij = ∂u_i/∂X_j
+    let mut h = [[0.0; 3]; 3];
+    for (rows, g) in element.dofs.iter().zip(&point.gradients) {
+        for i in 0..3 {
+            let u = displacement[rows[i]];
+            for j in 0..3 {
+                h[i][j] += u * g[j];
+            }
+        }
+    }
+    match kinematics {
+        StructuralKinematics::SmallStrain => PointKinematics {
+            deformation_gradient: IDENTITY,
+            strain: [
+                h[0][0],
+                h[1][1],
+                h[2][2],
+                h[1][2] + h[2][1],
+                h[0][2] + h[2][0],
+                h[0][1] + h[1][0],
+            ],
+        },
+        StructuralKinematics::LargeDeformation => {
+            let f = std::array::from_fn(|i| std::array::from_fn(|j| IDENTITY[i][j] + h[i][j]));
+            // C = FᵀF; E = (C - I)/2, written without cancellation as (H + Hᵀ + HᵀH)/2.
+            let e = |i: usize, j: usize| {
+                0.5 * (h[i][j] + h[j][i] + (0..3).map(|k| h[k][i] * h[k][j]).sum::<f64>())
+            };
+            PointKinematics {
+                deformation_gradient: f,
+                strain: [
+                    e(0, 0),
+                    e(1, 1),
+                    e(2, 2),
+                    2.0 * e(1, 2),
+                    2.0 * e(0, 2),
+                    2.0 * e(0, 1),
+                ],
+            }
+        }
+    }
+}
+
+const IDENTITY: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// Strain-displacement columns of one node: row `k` is `∂E/∂u_k` for that node.
+pub(super) fn columns(gradient: &[f64; 3], f: &[[f64; 3]; 3]) -> [[f64; 6]; 3] {
     let [x, y, z] = *gradient;
-    [
-        [x, 0.0, 0.0, 0.0, z, y],
-        [0.0, y, 0.0, z, 0.0, x],
-        [0.0, 0.0, z, y, x, 0.0],
-    ]
+    std::array::from_fn(|k| {
+        let r = f[k];
+        [
+            r[0] * x,
+            r[1] * y,
+            r[2] * z,
+            r[1] * z + r[2] * y,
+            r[0] * z + r[2] * x,
+            r[0] * y + r[1] * x,
+        ]
+    })
+}
+
+/// Cauchy stress `σ = F S Fᵀ / J` from second Piola-Kirchhoff stress, both in physical-shear order.
+pub(super) fn cauchy_stress(f: &[[f64; 3]; 3], s: &[f64; 6]) -> Option<[f64; 6]> {
+    let tensor = voigt_tensor(s);
+    let det = f[0][0] * (f[1][1] * f[2][2] - f[1][2] * f[2][1])
+        - f[0][1] * (f[1][0] * f[2][2] - f[1][2] * f[2][0])
+        + f[0][2] * (f[1][0] * f[2][1] - f[1][1] * f[2][0]);
+    if !det.is_finite() || det <= 0.0 {
+        return None;
+    }
+    let sigma = |i: usize, j: usize| {
+        let mut value = 0.0;
+        for (a, row) in tensor.iter().enumerate() {
+            for (b, s_ab) in row.iter().enumerate() {
+                value += f[i][a] * s_ab * f[j][b];
+            }
+        }
+        value / det
+    };
+    Some([
+        sigma(0, 0),
+        sigma(1, 1),
+        sigma(2, 2),
+        sigma(1, 2),
+        sigma(0, 2),
+        sigma(0, 1),
+    ])
+}
+
+fn voigt_tensor(s: &[f64; 6]) -> [[f64; 3]; 3] {
+    [[s[0], s[5], s[4]], [s[5], s[1], s[3]], [s[4], s[3], s[2]]]
 }
 
 impl CanonicalNonlinearSolidBasis {
@@ -24,6 +126,7 @@ impl CanonicalNonlinearSolidBasis {
                 "displacement is not a finite full physical-layout vector".into(),
             ));
         }
+        let large = self.kinematics == StructuralKinematics::LargeDeformation;
         let mut tangent = RealSparseAssembler::with_pattern(
             self.tangent_pattern
                 .try_clone()
@@ -34,7 +137,14 @@ impl CanonicalNonlinearSolidBasis {
         .map_err(|e| NonlinearSolidError::Tangent(e.to_string()))?;
         tangent.add_contribution(ContributionProvenance {
             domain: ContributionDomain::Structural,
-            contribution_id: ContributionId("physical_j2_solid_tangent".into()),
+            contribution_id: ContributionId(
+                if large {
+                    "physical_j2_total_lagrangian_solid_tangent"
+                } else {
+                    "physical_j2_solid_tangent"
+                }
+                .into(),
+            ),
         });
         let mut internal_force = vec![0.0; self.dof_count];
         let mut trial_state = self.zero_state();
@@ -71,22 +181,20 @@ impl CanonicalNonlinearSolidBasis {
                         "point gradient inventory differs".into(),
                     ));
                 }
+                let PointKinematics {
+                    deformation_gradient: f,
+                    strain,
+                } = point_kinematics(self.kinematics, element, point, displacement);
                 for (slot, value) in point_columns[..column_count].iter_mut().zip(
                     element
                         .dofs
                         .iter()
                         .zip(&point.gradients)
-                        .flat_map(|(rows, g)| rows.iter().copied().zip(columns(g))),
+                        .flat_map(|(rows, g)| rows.iter().copied().zip(columns(g, &f))),
                 ) {
                     *slot = value;
                 }
                 let basis = &point_columns[..column_count];
-                let strain: [f64; 6] = std::array::from_fn(|component| {
-                    basis
-                        .iter()
-                        .map(|(row, b)| b[component] * displacement[*row])
-                        .sum()
-                });
                 let response = element
                     .constitutive
                     .update(strain, &committed.points[ordinal])
@@ -133,10 +241,32 @@ impl CanonicalNonlinearSolidBasis {
                         );
                     }
                 }
+                let stress_pa = if large {
+                    // Initial-stress (geometric) stiffness: (∇N_aᵀ S ∇N_b) I for every node pair.
+                    let s = voigt_tensor(&response.stress_pa);
+                    for (rows_a, ga) in element.dofs.iter().zip(&point.gradients) {
+                        let sga: [f64; 3] =
+                            std::array::from_fn(|i| (0..3).map(|j| s[i][j] * ga[j]).sum::<f64>());
+                        for (rows_b, gb) in element.dofs.iter().zip(&point.gradients) {
+                            let value =
+                                point.weight_m3 * (0..3).map(|i| sga[i] * gb[i]).sum::<f64>();
+                            for k in 0..3 {
+                                tangent.add(rows_a[k], rows_b[k], value);
+                            }
+                        }
+                    }
+                    cauchy_stress(&f, &response.stress_pa).ok_or_else(|| {
+                        NonlinearSolidError::Constitutive(
+                            "deformation gradient is not orientation preserving".into(),
+                        )
+                    })?
+                } else {
+                    response.stress_pa
+                };
                 evidence.volume_m3 += point.weight_m3;
                 for (i, value) in strain.iter().enumerate() {
                     evidence.mean_total_engineering_strain[i] += point.weight_m3 * value;
-                    evidence.mean_stress_pa[i] += point.weight_m3 * response.stress_pa[i];
+                    evidence.mean_stress_pa[i] += point.weight_m3 * stress_pa[i];
                 }
                 evidence.elastic_energy_j += runmat_types::physical::Energy::new(
                     point.weight_m3 * response.elastic_energy_density_pa,
@@ -151,7 +281,7 @@ impl CanonicalNonlinearSolidBasis {
                     position_m: point.position_m,
                     volume_weight_m3: point.weight_m3,
                     total_engineering_strain: strain,
-                    stress_pa: response.stress_pa,
+                    stress_pa,
                     elastic_energy_density_pa: response.elastic_energy_density_pa,
                     hardening_energy_density_pa: response.hardening_energy_density_pa,
                     plastic_dissipation_increment_pa: response.plastic_dissipation_increment_pa,

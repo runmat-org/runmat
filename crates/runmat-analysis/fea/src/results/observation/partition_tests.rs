@@ -473,6 +473,9 @@ fn path_extrema_return_physical_sample_locations() {
     super::publish_observation(&plan, &result, 1024).unwrap();
 }
 
+// witness: FEA-SHARED-OBSERVATIONS-001/bounded_partitioned_evaluation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Partitioned boundary reduction matches single-partition evaluation.
 #[test]
 fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
@@ -488,7 +491,7 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     let mut observation = spec(
         "boundary_average",
         ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(face_selector),
+            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector))),
         )),
     );
     observation.reduction = Some(ReductionPolicy {
@@ -768,7 +771,7 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
     )
     .unwrap();
     let target = ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-        runmat_analysis_core::RegionTarget::boundary(selector),
+        runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
     ));
     let mut resultant = spec("pressure_resultant", target.clone());
     resultant.quantity = ObservationQuantity::ContactPressure;

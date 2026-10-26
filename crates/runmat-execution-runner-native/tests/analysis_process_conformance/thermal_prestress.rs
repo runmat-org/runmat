@@ -97,7 +97,6 @@ pub(super) fn preparation(
         &compiled,
         StructuralStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
     )
@@ -153,7 +152,6 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/thermal-prestress.fea".into(),
         study_id: "thermal-prestress".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -165,7 +163,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
         &compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         },
     )
     .unwrap();

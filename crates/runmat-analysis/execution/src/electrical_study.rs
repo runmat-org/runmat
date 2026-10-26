@@ -21,13 +21,15 @@ use runmat_meshing_core::SolverMeshArtifact;
 use crate::{
     import_electrical_static_result, prepare_electrical_static_task, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisOutputPolicy, ElectricalStaticTaskPreparation, ImportedAccuracy,
-    ImportedElectricalStaticResult, ImportedPublishedResult, ImportedSemanticState,
-    PreparedAccuracy, PreparedElectricalStaticTask, PreparedResourceUsage,
-    PreparedResultPublication, PreparedSemanticStatePublication,
+    AnalysisOutputPolicy, ImportedAccuracy, ImportedElectricalStaticResult, ImportedPublishedResult,
+    ImportedSemanticState, ElectricalStaticTaskPreparation, PreparedAccuracy,
+    PreparedElectricalStaticTask, PreparedResourceUsage, PreparedResultPublication,
+    PreparedSemanticStatePublication,
 };
 
 mod completion;
+mod observations;
+mod recovery;
 mod root;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -46,6 +48,10 @@ pub struct CompletedElectricalStudy {
     pub compiled: CompiledAnalysisStudy,
     pub workload: runmat_analysis_fea::execution::ElectricalStaticWorkload,
     pub result: ImportedElectricalStaticResult,
+    pub fields: crate::ImportedRecoveredFields,
+    pub observations: Option<crate::ImportedObservations>,
+    pub observation_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
     pub accuracy: ImportedAccuracy,
     pub states: Vec<ImportedSemanticState>,
     pub baseline_usage: PreparedResourceUsage,
@@ -54,6 +60,9 @@ pub struct CompletedElectricalStudy {
 }
 
 pub struct ElectricalStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    /// Memory this machine admits for work, from the shared machine-capacity authority.
+    pub machine_memory_bytes: u64,
     pub policy: ElectricalStudyPlanningPolicy,
     pub product: ElectricalStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -68,6 +77,14 @@ pub struct ElectricalStudyPreparation {
 pub enum ElectricalStudyPhase {
     ReadyForSolve,
     AwaitingSolve,
+    ReadyForFieldRecovery,
+    AwaitingFieldRecovery,
+    ReadyForObservationFanout,
+    AwaitingObservationPartitions,
+    ReadyForObservationReduction { ordinal: usize },
+    AwaitingObservationReduction { ordinal: usize },
+    ReadyForObservationAssembly,
+    AwaitingObservationAssembly,
     ReadyForAccuracy,
     AwaitingAccuracy,
     ReadyForState { ordinal: usize },
@@ -87,6 +104,10 @@ pub struct ElectricalStudyCoordinator {
     solve_task: Option<PreparedElectricalStaticTask>,
     result: Option<ImportedElectricalStaticResult>,
     tail: Option<SteadyStudyTail>,
+    recovery_task: Option<crate::PreparedElectricalFieldRecovery>,
+    fields: Option<crate::ImportedRecoveredFields>,
+    observation_state: observations::ElectricalObservations,
+    usage: Option<PreparedResourceUsage>,
 }
 
 impl ElectricalStudyCoordinator {
@@ -96,7 +117,7 @@ impl ElectricalStudyCoordinator {
             .compiled
             .validate_against(&preparation.mesh)
             .map_err(|error| invalid(error.to_string()))?;
-        let expected = plan_electrical_study(&preparation.product.compiled, preparation.policy)
+        let expected = plan_electrical_study(&preparation.product.compiled, preparation.policy.clone())
             .map_err(|error| invalid(error.to_string()))?;
         if expected != preparation.product.workload {
             return Err(AnalysisBridgeError::Identity(
@@ -116,12 +137,18 @@ impl ElectricalStudyCoordinator {
             solve_task: None,
             result: None,
             tail: None,
+            recovery_task: None,
+            fields: None,
+            observation_state: observations::ElectricalObservations::default(),
+            usage: None,
         })
     }
 
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedElectricalStaticTask> {
         self.require(ElectricalStudyPhase::ReadyForSolve)?;
         let task = prepare_electrical_static_task(ElectricalStaticTaskPreparation {
+            local_execution: self.preparation.local_execution,
+            machine_memory_bytes: self.preparation.machine_memory_bytes,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -168,31 +195,10 @@ impl ElectricalStudyCoordinator {
             self.preparation.output_policy.chunk_bytes(),
             self.preparation.output_policy.inventory_limits(),
         )?;
-        let workload = self.preparation.workload();
-        self.tail = Some(SteadyStudyTail::new(SteadyStudySource {
-            host: task.host.clone(),
-            result: result.objects.clone(),
-            state: crate::steady_study::TerminalStatePublicationSource::Profiles {
-                profiles: Box::new(result.source_profiles.clone()),
-                kind: SemanticStatePublicationSource::StaticElectricalNativeFields,
-                topology: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
-            },
-            receipt: result.numerical_receipt_objects.clone(),
-            context_inputs: task.inputs.iter().filter(|input| matches!(input.manifest.kind,
-                runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ElectricalStaticWorkload
-                | runmat_analysis_fea::execution::AnalysisNumericalObjectKind::Mesh))
-                .cloned().chain(std::iter::once(result.objects.clone())).collect(),
-            accuracy_kind: AccuracySourceKind::ElectricalStatic,
-            sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
-            step: self.preparation.selected_step().clone(),
-            formulation_requirement: workload.formulation_requirement,
-            observations: None,
-            program_revision: self.preparation.program_revision.clone(),
-            output_policy: self.preparation.output_policy,
-        }, usage));
+        self.usage = Some(usage);
         self.result = Some(result);
         self.closures.push(closure);
-        self.phase = ElectricalStudyPhase::ReadyForAccuracy;
+        self.phase = ElectricalStudyPhase::ReadyForFieldRecovery;
         Ok(())
     }
 
@@ -310,6 +316,8 @@ impl ElectricalStudyCoordinator {
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedElectricalStudy {
             replay: completion::ElectricalStudyReplayContext {
+                local_execution: self.preparation.local_execution,
+                machine_memory_bytes: self.preparation.machine_memory_bytes,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,
@@ -322,6 +330,9 @@ impl ElectricalStudyCoordinator {
             compiled: self.preparation.product.compiled,
             workload,
             result: self.result.expect("completed solve"),
+            fields: self.fields.expect("completed retained field publication"),
+            observations: self.observation_state.completed,
+            observation_catalog: self.observation_state.catalog,
             accuracy: tail.accuracy.expect("completed accuracy"),
             states: tail.states,
             baseline_usage: tail.baseline.expect("frozen baseline"),
@@ -333,7 +344,7 @@ impl ElectricalStudyCoordinator {
         self.phase() == ElectricalStudyPhase::Complete
     }
     pub fn policy(&self) -> ElectricalStudyPlanningPolicy {
-        self.preparation.policy
+        self.preparation.policy.clone()
     }
     pub fn selected_step(&self) -> &runmat_analysis_core::ProcedureStep {
         self.preparation.selected_step()
@@ -343,6 +354,17 @@ impl ElectricalStudyCoordinator {
     }
     pub fn result(&self) -> Option<&ImportedElectricalStaticResult> {
         self.result.as_ref()
+    }
+    pub fn fields(&self) -> Option<&crate::ImportedRecoveredFields> {
+        self.fields.as_ref()
+    }
+    pub fn observations(&self) -> Option<&crate::ImportedObservations> {
+        self.observation_state.completed.as_ref()
+    }
+    pub fn observation_catalog(
+        &self,
+    ) -> Option<&runmat_analysis_fea::results::observation::ObservationPublicationCatalog> {
+        self.observation_state.catalog.as_ref()
     }
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.tail.as_ref().and_then(|tail| tail.accuracy.as_ref())
@@ -376,7 +398,7 @@ impl ElectricalStudyCoordinator {
     }
 }
 
-fn invalid(message: impl Into<String>) -> AnalysisBridgeError {
+pub(super) fn invalid(message: impl Into<String>) -> AnalysisBridgeError {
     AnalysisBridgeError::Invalid(message.into())
 }
 

@@ -1,15 +1,10 @@
 use super::*;
 use crate::{
     algebra::{MatrixProperties, OperatorRole, RealSparseAssembler},
-    solve::{general::solve_general_system, uniqueness::SparseUniquenessPolicy},
+    solve::general::solve_general_system,
 };
 fn policy() -> GeneralSolvePolicy {
-    GeneralSolvePolicy {
-        relative_tolerance: 1e-11,
-        restart: 3,
-        maximum_iterations: 16,
-        uniqueness: SparseUniquenessPolicy::bounded(),
-    }
+    GeneralSolvePolicy::bounded(1e-11)
 }
 fn matrix() -> RealSparseMatrix {
     let mut a =
@@ -76,9 +71,9 @@ fn changed_controls_and_shape_reject_even_when_workspace_matches() {
     let foreign: GeneralSparseSolveResourceDemand = serde_json::from_value(encoded).unwrap();
     assert!(foreign.admit_operator(&matrix(), policy()).is_err());
     let mut encoded = serde_json::to_value(d).unwrap();
-    encoded["controls"]["uniqueness"]["restart"] = serde_json::json!(0);
+    encoded["controls"]["contraction_limit"] = serde_json::json!(1.0);
     assert!(serde_json::from_value::<GeneralSparseSolveResourceDemand>(encoded).is_err());
-    for field in ["relative_tolerance", "uniqueness"] {
+    for field in ["relative_tolerance", "contraction_limit"] {
         let mut encoded = serde_json::to_value(d).unwrap();
         encoded["controls"].as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<GeneralSparseSolveResourceDemand>(encoded).is_err());
@@ -113,7 +108,7 @@ fn underreservation_and_cumulative_work_overflow_reject_before_execution() {
     invalid.relative_tolerance = f64::NAN;
     assert!(GeneralSolveResourceControls::try_from(invalid).is_err());
     invalid = policy();
-    invalid.uniqueness.candidate_relative_tolerance = f64::INFINITY;
+    invalid.contraction_limit = f64::INFINITY;
     assert!(GeneralSolveResourceControls::try_from(invalid).is_err());
 }
 
@@ -166,6 +161,6 @@ fn actual_support_and_zero_rhs_singularity_are_not_authorized_by_portable_demand
     let admission = d.admit_operator(&singular, policy()).unwrap();
     assert!(matches!(
         solve_general_system(&singular, &[0.; 3], policy(), admission),
-        Err(GeneralSolveError::UniquenessNotEstablished(_))
+        Err(GeneralSolveError::NonsingularityNotEstablished(_))
     ));
 }

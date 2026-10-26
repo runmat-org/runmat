@@ -7,11 +7,7 @@ use crate::{
 };
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 fn tetrahedron() -> FacetedSolid {
@@ -87,6 +83,7 @@ fn document() -> GeometryDocument {
             consolidate_duplicates: false,
             repair_tolerance_scale_gaps: false,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::FacetedSolid {
             model: FacetedSolidModel {

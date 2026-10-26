@@ -1,8 +1,9 @@
-//! Solver-specific constraint transforms and restarted saddle GMRES workspace.
+//! Solver-specific constraint transforms and solve workspace.
 use super::*;
 
 pub(super) fn solve_policy(
     preconditioner: SpdPreconditionerKind,
+    path: StaticSolvePath,
     dofs: u64,
     constraint_rows: u64,
     enforcement: ConstraintEnforcement,
@@ -10,28 +11,25 @@ pub(super) fn solve_policy(
     admission: SolverAdmissionResourcePolicy,
     transpose_index_bytes: u64,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
-    if enforcement == ConstraintEnforcement::LagrangeMultiplier {
-        let saddle = dofs
-            .checked_add(constraint_rows)
-            .ok_or(ResourcePlanningError::Overflow("saddle dimension"))?;
-        let restart = saddle.min(32);
-        let maximum_iterations = saddle
-            .checked_mul(8)
-            .ok_or(ResourcePlanningError::Overflow(
-                "saddle GMRES iteration bound",
-            ))?
-            .max(256);
-        let workspace_bytes = saddle_gmres_workspace_bytes(dofs, constraint_rows)?;
-        return Ok(SolveResourcePolicy::SaddlePointGmres {
-            block_dimension: Count(saddle),
-            restart: Count(restart),
-            maximum_iterations: Count(maximum_iterations),
-            workspace_bytes_upper_bound: ByteCount(workspace_bytes),
-            admission,
-        });
-    }
+    // Multiplier enforcement is solved on the affine-reduced SPD system (one canonical path).
+    // The elastic rigidity path always solves with AMG-preconditioned CG.
+    let preconditioner = match path {
+        StaticSolvePath::ElasticRigidityMultigrid => SpdPreconditionerKind::Amg,
+        StaticSolvePath::ProvingFactorization => preconditioner,
+    };
     let storage = match preconditioner {
-        SpdPreconditionerKind::Jacobi => PreconditionerStorage::Diagonal,
+        // The direct factor is the coercivity proof; its bytes are the admission envelope's
+        // factorization charge.
+        SpdPreconditionerKind::Jacobi
+        | SpdPreconditionerKind::Auto
+        | SpdPreconditionerKind::Direct => PreconditionerStorage::Diagonal,
+        SpdPreconditionerKind::Amg => {
+            let bytes = runmat_sparse_solvers::estimate::amg_bytes(dofs as usize, stiffness_nonzeros as usize, 3);
+            PreconditionerStorage::SparseCsr {
+                nonzero_upper_bound: Count(stiffness_nonzeros.saturating_mul(3)),
+                resident_bytes_upper_bound: ByteCount(bytes),
+            }
+        }
         SpdPreconditionerKind::Ilu0 => {
             let row_offsets = checked_bytes(
                 dofs.checked_add(1)
@@ -60,6 +58,7 @@ pub(super) fn solve_policy(
         preconditioner: storage,
         admission,
         transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
+        path,
     })
 }
 
@@ -149,7 +148,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn multiplier_preflight_names_gmres_without_charging_an_unused_preconditioner() {
+    fn multiplier_preflight_plans_the_reduced_spd_solve() {
         let admission = SolverAdmissionResourcePolicy {
             dimension: Count(8),
             factor_nonzero_upper_bound: Count(36),
@@ -158,6 +157,7 @@ mod tests {
         };
         let policy = solve_policy(
             SpdPreconditionerKind::Ilu0,
+            StaticSolvePath::ProvingFactorization,
             12,
             7,
             ConstraintEnforcement::LagrangeMultiplier,
@@ -166,21 +166,21 @@ mod tests {
             0,
         )
         .unwrap();
-        let SolveResourcePolicy::SaddlePointGmres {
-            block_dimension,
-            restart,
-            maximum_iterations,
-            workspace_bytes_upper_bound,
+        let SolveResourcePolicy::Iterative {
+            vector_count,
+            preconditioner,
             admission: planned_admission,
+            ..
         } = policy
         else {
-            panic!("multiplier solve must have a saddle GMRES policy");
+            panic!("multiplier solve is planned as the affine-reduced SPD solve");
         };
-        assert_eq!(block_dimension, Count(19));
-        assert_eq!(restart, Count(19));
-        assert_eq!(maximum_iterations, Count(256));
         assert_eq!(planned_admission, admission);
-        assert!(workspace_bytes_upper_bound.0 >= 19 * 20 * 8);
+        assert_eq!(vector_count, Count(101));
+        assert!(matches!(
+            preconditioner,
+            PreconditionerStorage::SparseCsr { .. }
+        ));
     }
 
     #[test]

@@ -17,8 +17,8 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let request = materialized_request(
         &call,
         runmat_execution::OutputContract {
-            requested_outputs: 1,
             owned_work: None,
+            requested_outputs: 1,
         },
         runmat_execution_artifact::ProgramTarget::portable("original-parent-loss"),
     );

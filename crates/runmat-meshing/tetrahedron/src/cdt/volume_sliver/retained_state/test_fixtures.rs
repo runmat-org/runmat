@@ -55,19 +55,19 @@ pub(in crate::cdt::volume_sliver) fn assigned(
     let regions = topology
         .tetrahedra
         .iter()
-        .map(|cell| PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: if topology.nodes[cell.vertex_indices[0] as usize]
+        .map(|cell| {
+            PersistentEntityId::new(
+                PersistentEntityKind::Region,
+                if topology.nodes[cell.vertex_indices[0] as usize]
                 .coordinates_m
-                .canonical_value()[0]
-                >= 20.
-            {
-                "unrelated-part"
-            } else {
-                "local-part"
-            }
-            .into(),
-            assembly_path: Vec::new(),
+                .canonical_value()[0] >= 20. {
+                    "unrelated-part"
+                } else {
+                    "local-part"
+                }
+                .into(),
+                Vec::new(),
+            )
         })
         .collect();
     crate::cdt::assign_delaunay_volume_regions(
@@ -83,10 +83,12 @@ pub(in crate::cdt::volume_sliver) fn quality(
     topology: &DelaunayVolumeTopology,
 ) -> DelaunayVolumeQuality {
     let metric = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(10.).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     evaluate_delaunay_volume_quality(
         topology,

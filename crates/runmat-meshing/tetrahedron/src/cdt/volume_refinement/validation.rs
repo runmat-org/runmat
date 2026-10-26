@@ -3,7 +3,10 @@ use runmat_meshing_core::MeshingCancellationSignal;
 use super::metric_circumcenter::metric_circumcenter;
 
 use super::{
-    candidate::{canonical_interior_points, metric_offcenter_points, strictly_inside_region_from},
+    candidate::{
+        canonical_interior_points, metric_edge_midpoint, metric_offcenter_points,
+        strictly_inside_region_from,
+    },
     candidate_identity, error, quality_error, validate_options, CandidateWork,
     DelaunayRefinementCandidateKind, DelaunayVolumeRefinementCandidate,
     DelaunayVolumeRefinementCandidateError, DelaunayVolumeRefinementCandidateErrorKind,
@@ -137,6 +140,32 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
             .ok_or_else(|| {
                 invalid("metric off-center point index exceeds its construction family")
             })?
+        }
+        DelaunayRefinementCandidateKind::MetricEdgeMidpoint => {
+            if observed.construction_node_identities != source_identity
+                || observed.construction_point_index != 0
+            {
+                return Err(invalid(
+                    "metric edge midpoint must be constructed from the quality source",
+                ));
+            }
+            let point = metric_edge_midpoint(
+                input.topology,
+                topology_index,
+                source_quality,
+                input.quality_options,
+            )
+            .ok_or_else(|| invalid("source has no size-violating edge with an interior endpoint"))?;
+            if !strictly_inside_region_from(
+                input.topology,
+                topology_index,
+                &source_quality.region_id,
+                point,
+                cancellation,
+            )? {
+                return Err(invalid("metric edge midpoint is outside its admitted domain"));
+            }
+            point
         }
         DelaunayRefinementCandidateKind::InteriorPoint => {
             canonical_interior_points(construction_points)?

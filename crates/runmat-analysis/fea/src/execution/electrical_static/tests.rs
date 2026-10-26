@@ -11,23 +11,29 @@ fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         0.0,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         2.0,
     );
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ electrostatic/tet4|tet10/public_study,
+//   electrical_conduction/tet4|tet10/public_study;
+//   boundary: In-process both scalar equations and orders retain original slab fields and canonical
+//   source-bound cold identity; changed controls/equation/mesh reject. No producer death, remote or
+//   durable execution.
 #[test]
 fn equation_order_matrix_retains_exact_fields_and_cold_source_bound_identity() {
     let mut identities = Vec::new();
@@ -195,9 +201,6 @@ fn unsupported_lifecycle_and_production_never_become_portable_numerical_intent()
         assert!(value.canonical_bytes().is_err());
     }
     let mut value = baseline.clone();
-    value.formulation_requirement = FormulationRequirement::Production;
-    assert!(value.validate().is_err());
-    let mut value = baseline.clone();
     value.model.sequence.steps[0].restart = RestartPolicy::ResumeCheckpoint {
         checkpoint_id: "not-admitted".into(),
         required_state_digest: "not-admitted".into(),
@@ -231,13 +234,13 @@ fn residual_scale_and_large_zero_field_gauge_do_not_change_acceptance_authority(
                 prescribe(
                     &mut source.model,
                     "left".into(),
-                    RegionTarget::boundary("slab_left"),
+                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                     left,
                 );
                 prescribe(
                     &mut source.model,
                     "right".into(),
-                    RegionTarget::boundary("slab_right"),
+                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
                     right,
                 );
                 let result = source.execute(&mesh).unwrap();

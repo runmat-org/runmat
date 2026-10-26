@@ -177,6 +177,11 @@ fn overlapping_retained_neighbor_is_rejected_before_commit() {
 mod boundary;
 mod spatial;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A local cavity retains lowest-slot reuse and independently rebuilds valid topology
+//   with ten thousand inactive slots. This storage-ordering component check is not a
+//   heap-allocation measurement, scaling series or whole-task resource qualification.
 #[test]
 fn local_replacement_reuses_lowest_slots_with_large_inactive_inventory() {
     let mut topology = triangular_bipyramid();
@@ -201,6 +206,12 @@ fn local_replacement_reuses_lowest_slots_with_large_inactive_inventory() {
     assert_eq!(frozen.tetrahedra.len(), 3);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The consumed topology owner releases its shared spatial search index before the first
+//   canonical materialization checkpoint and produces the same topology as retained independent
+//   admission. This verifies ownership lifetime at the boundary, not allocator RSS, all resource
+//   estimates or a complete study's scaling envelope.
 #[test]
 fn consuming_freeze_releases_search_indexes_before_independent_admission() {
     use runmat_meshing_core::{MeshingCancellationSignal, PointSpatialIndex};
@@ -234,11 +245,11 @@ fn consuming_freeze_releases_search_indexes_before_independent_admission() {
 fn borrowed_snapshot_preserves_regions_disconnected_cells_and_rejected_transaction() {
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
     let region = |name: &str| {
-        Some(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: name.into(),
-            assembly_path: vec!["assembly".into()],
-        })
+        Some(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            name.into(),
+            vec!["assembly".into()],
+        ))
     };
     let nodes = vec![
         node(10, [0.0, 0.0, 0.0]),

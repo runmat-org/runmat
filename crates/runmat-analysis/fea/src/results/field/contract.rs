@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use thiserror::Error;
 
-use super::entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain};
+use super::entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain, RecoveredFieldSupport};
 use crate::execution::{FieldRecoveryRequestIdentity, FieldRecoverySource};
 
 use super::partition_set::{
@@ -16,8 +16,12 @@ use super::partition_set::{
     RecoveredFieldPartitionDescriptor,
 };
 
-const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
-const FIELD_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 4096, 32);
+pub(super) const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
+/// Recovered fields carry one value per entity and component of any admitted mesh (the same
+/// complete fields a semantic state carries), so collections are bounded by the encoded-byte
+/// ceiling rather than a fixed item count. Memory is admitted by the recovery resource plan.
+pub(super) const FIELD_LIMITS: CanonicalLimits =
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4096, 32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -116,6 +120,8 @@ pub struct RecoveredFieldDefinition {
     value_shape: ObservationValueShape,
     numeric_representation: RecoveredFieldNumericRepresentation,
     derivation: RecoveredFieldDerivation,
+    #[serde(default, skip_serializing_if = "RecoveredFieldSupport::is_complete")]
+    support: RecoveredFieldSupport,
 }
 
 #[derive(Deserialize)]
@@ -129,6 +135,8 @@ struct RecoveredFieldDefinitionData {
     value_shape: ObservationValueShape,
     numeric_representation: RecoveredFieldNumericRepresentation,
     derivation: RecoveredFieldDerivation,
+    #[serde(default)]
+    support: RecoveredFieldSupport,
 }
 
 impl TryFrom<RecoveredFieldDefinitionData> for RecoveredFieldDefinition {
@@ -144,6 +152,7 @@ impl TryFrom<RecoveredFieldDefinitionData> for RecoveredFieldDefinition {
             value_shape: data.value_shape,
             numeric_representation: data.numeric_representation,
             derivation: data.derivation,
+            support: data.support,
         };
         definition.validate()?;
         Ok(definition)
@@ -188,10 +197,28 @@ impl RecoveredFieldDefinition {
             value_shape,
             numeric_representation,
             derivation,
+            support: RecoveredFieldSupport::Complete,
         };
         definition.identity = definition.derive_identity()?;
         definition.validate()?;
         Ok(definition)
+    }
+
+    /// The same field restricted to `support` (a new definition identity).
+    pub fn with_support(mut self, support: RecoveredFieldSupport) -> Result<Self, RecoveredFieldError> {
+        self.support = support;
+        self.identity = self.derive_identity()?;
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn support(&self) -> &RecoveredFieldSupport {
+        &self.support
+    }
+
+    /// Stored entity count given the complete domain count.
+    pub fn stored_entities(&self, counts: RecoveredFieldEntityCounts) -> usize {
+        self.support.stored_entities(counts.entity_count(self.entity_domain))
     }
 
     pub const fn identity(&self) -> RecoveredFieldDefinitionIdentity {
@@ -278,19 +305,25 @@ impl RecoveredFieldDefinition {
     }
 
     fn derive_identity(&self) -> Result<RecoveredFieldDefinitionIdentity, RecoveredFieldError> {
-        encode_contract(
-            FIELD_PREFIX,
-            "recovered-field-definition",
-            &(
-                self.quantity,
-                self.location,
-                self.entity_domain,
-                &self.value_shape,
-                self.numeric_representation,
-                self.derivation,
-            ),
-            FIELD_LIMITS,
-        )
+        let shape = (
+            self.quantity,
+            self.location,
+            self.entity_domain,
+            &self.value_shape,
+            self.numeric_representation,
+            self.derivation,
+        );
+        // Complete fields keep their established identity; a support is part of the identity.
+        if self.support.is_complete() {
+            encode_contract(FIELD_PREFIX, "recovered-field-definition", &shape, FIELD_LIMITS)
+        } else {
+            encode_contract(
+                FIELD_PREFIX,
+                "recovered-field-definition-supported",
+                &(shape, &self.support),
+                FIELD_LIMITS,
+            )
+        }
         .map(Digest::sha256)
         .map(RecoveredFieldDefinitionIdentity)
         .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
@@ -325,6 +358,7 @@ impl RecoveredFieldDefinition {
                 return Err(RecoveredFieldError::CatalogUnsupportedLocation)
             }
         }
+        self.support.validate(self.entity_domain)?;
         if self.identity != self.derive_identity()? {
             return Err(RecoveredFieldError::IdentityMismatch);
         }
@@ -427,9 +461,7 @@ impl RecoveredFieldArtifactManifest {
         for entry in &self.fields {
             entry.definition.validate()?;
             entry.sample.validate()?;
-            let expected_entity_count = self
-                .entity_counts
-                .entity_count(entry.definition.entity_domain());
+            let expected_entity_count = entry.definition.stored_entities(self.entity_counts);
             let covered = validate_canonical_field_partition_descriptors(&entry.partitions)?;
             if covered != expected_entity_count
                 || entry
@@ -634,6 +666,10 @@ impl RecoveredFieldArtifact {
         &self.fields
     }
 
+    pub fn entity_counts(&self) -> RecoveredFieldEntityCounts {
+        self.entity_counts
+    }
+
     pub fn into_fields(self) -> Vec<RecoveredField> {
         self.fields
     }
@@ -710,9 +746,7 @@ impl RecoveredFieldArtifact {
         let mut sample_keys = std::collections::BTreeSet::new();
         for field in &self.fields {
             field.validate()?;
-            let expected_entities = self
-                .entity_counts
-                .entity_count(field.definition().entity_domain());
+            let expected_entities = field.definition().stored_entities(self.entity_counts);
             if expected_entities == 0 {
                 return Err(RecoveredFieldError::ArtifactTopologyMismatch);
             }

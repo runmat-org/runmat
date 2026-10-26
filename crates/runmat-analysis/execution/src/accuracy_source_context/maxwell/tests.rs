@@ -131,7 +131,6 @@ fn original_complex_catalog_and_missing_catalog_authenticate_both_orders() {
             AccuracySourceKind::MaxwellHarmonic,
             receipt.source_result(),
             Some(&publication),
-            w.formulation_requirement,
             w.model.sequence.steps[0].accuracy.clone(),
         )
         .unwrap();
@@ -142,7 +141,6 @@ fn original_complex_catalog_and_missing_catalog_authenticate_both_orders() {
             AccuracySourceKind::MaxwellHarmonic,
             receipt.source_result(),
             None,
-            w.formulation_requirement,
             w.model.sequence.steps[0].accuracy.clone(),
         )
         .unwrap();
@@ -170,7 +168,7 @@ fn workload() -> MaxwellHarmonicWorkload {
     let mut step = ProcedureStep::electromagnetic_harmonic("field");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![1e8]);
     model.sequence = AnalysisSequence::from_steps("maxwell-source", vec![step]);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -185,15 +183,15 @@ fn workload() -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: format!("pec:{face}"),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("field".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 
@@ -244,7 +242,6 @@ fn request(
         AccuracySourceKind::MaxwellHarmonic,
         r.source_result(),
         None,
-        w.formulation_requirement,
         w.model.sequence.steps[0].accuracy.clone(),
     )
     .unwrap()
@@ -268,16 +265,6 @@ fn cold_context_both_orders_authenticates_exact_original_receipt_and_authored_ac
             AccuracyPlanId("foreign-plan".into());
         let rehashed = request(&policy, &receipt);
         assert!(validate(&rehashed, &receipt, None, &refs).is_err());
-        let wrong_requirement = AccuracyEvaluationRequest::new(
-            original.producer,
-            original.source_kind,
-            original.source_result,
-            None,
-            FormulationRequirement::Production,
-            original.plan.clone(),
-        )
-        .unwrap();
-        assert!(validate(&wrong_requirement, &receipt, None, &refs).is_err());
         let mut foreign = inputs.clone();
         foreign[2].manifest.payload_digest = Digest::sha256(b"foreign exact retained source");
         assert!(validate(

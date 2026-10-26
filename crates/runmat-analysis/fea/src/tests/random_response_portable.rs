@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisSequence, CoordinateFrame, CrossPowerSpectralDensity, FormulationRequirement,
-    ProcedureStep, RandomExcitationChannel, RandomExcitationChannelId, RandomExcitationId,
+    AnalysisSequence, CoordinateFrame, CrossPowerSpectralDensity, ProcedureStep,
+    RandomExcitationChannel, RandomExcitationChannelId, RandomExcitationId,
     RandomExcitationQuantity, RandomExcitationSpectrum, RandomSpectrumEvidence,
     RandomSpectrumExtrapolation, RandomSpectrumInterpolation, ReferenceStatePolicy,
     SequenceDependencyReason, SpectralDensityConvention, SpectrumDirection, StateTransition,
@@ -84,7 +84,6 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
         model: model.clone(),
         step_id: modal.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -247,7 +246,6 @@ fn execute_with_group_size(
         model: model.clone(),
         step_id: response.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         modal_basis_transition: transition,
         integration_policy: integration_policy(),
@@ -291,6 +289,7 @@ fn execute_with_group_size(
                     prepared_inputs(),
                     prepared_output(payload),
                     prepared_output_set(),
+                    crate::planning::resource::LocalExecutionPlan::serial(),
                 )
                 .unwrap();
             let FeaResourceDemand::StructuralRandomResponseInterval(demand) = &plan.input.demand
@@ -334,6 +333,7 @@ fn execute_with_group_size(
                         prepared_inputs(),
                         prepared_output(payload - 1),
                         prepared_output_set(),
+                        crate::planning::resource::LocalExecutionPlan::serial(),
                     )
                     .is_err());
             }
@@ -376,7 +376,8 @@ fn execute_with_group_size(
                 assembly.scope().topology_digest(),
             ).unwrap().encoded_bytes_upper_bound),
             prepared_output_set(),
-        )
+crate::planning::resource::LocalExecutionPlan::serial(),
+)
         .unwrap();
     let FeaResourceDemand::StructuralRandomResponseAssembly(demand) = &assembly_plan.input.demand
     else {

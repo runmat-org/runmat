@@ -68,6 +68,7 @@ pub enum CheckedExpressionKind {
     Quantity {
         value: Box<CheckedExpression>,
         unit: runmat_types::physical::UnitDefinition,
+        /// The unit exactly as authored, for diagnostics that name what was found.
         source_unit_symbol: String,
     },
     Missing,
@@ -214,7 +215,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                             CheckedExpressionKind::Quantity {
                                 value: Box::new(value),
                                 unit,
-                                source_unit_symbol: unit_source.to_owned(),
+                                source_unit_symbol: unit_source.trim().to_owned(),
                             },
                             value_type,
                         )

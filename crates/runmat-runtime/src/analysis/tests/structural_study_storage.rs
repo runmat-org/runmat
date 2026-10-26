@@ -150,7 +150,6 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
     let generated = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisRunOptions::default()
@@ -279,7 +278,6 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -322,7 +320,7 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     let artifact: serde_json::Value =
         serde_json::from_slice(&fs::read(&artifact_path).unwrap()).unwrap();
     assert_eq!(
-        artifact["run"]["run"]["fields"][0]["values"]["host_f64"],
+        artifact["metadata"]["run"]["fields"][0]["values"]["host_f64"],
         serde_json::json!([])
     );
     let field_manifest = &artifact["fields"]
@@ -486,7 +484,6 @@ fn run_storage_rejects_ambiguous_duplicate_field_ids() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -511,7 +508,6 @@ fn conventional_field_paging_rejects_an_ambiguous_complete_suffix() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -545,7 +541,6 @@ fn run_storage_rejects_process_local_device_field_references() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -680,7 +675,6 @@ fn remote_completion_uses_a_new_artifact_key_for_the_numbered_schema() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -708,7 +702,6 @@ fn filesystem_run_publication_is_create_if_absent_across_store_instances() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -796,7 +789,6 @@ fn filesystem_run_store_rejects_non_token_ids_before_path_resolution() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -835,7 +827,6 @@ fn filesystem_run_publication_never_steals_a_corrupt_final_target() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -865,7 +856,6 @@ fn filesystem_run_store_rejects_valid_json_with_wrong_envelope_identity() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -900,7 +890,6 @@ fn memory_provider_run_publication_is_linearizable() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -950,7 +939,6 @@ fn filesystem_run_store_rejects_symlink_targets_and_owned_directories() {
     let generated = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )

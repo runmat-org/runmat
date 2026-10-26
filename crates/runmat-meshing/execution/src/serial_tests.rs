@@ -9,7 +9,7 @@ use crate::{
     ArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
     MeshingTaskEffectPolicy,
 };
-use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
+use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -26,7 +26,7 @@ use runmat_meshing_core::{
     MeshingCapabilityRequirement, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
     MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingInputRef,
     MeshingManifestDisposition, MeshingPartitionDescriptor, MeshingPartitionKind,
-    MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
+    MeshingQualityTargets, MeshingRequest, MeshingSizeLimits, MeshingStageIdentity,
     MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest, MeshingWorkloadResult,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
     SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
@@ -235,14 +235,14 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
 
     let success = completed.attempt_success();
     assert_eq!(
-        success.result_objects.len(),
+        success.result_objects().len(),
         completed.publication().result_objects().len() + 1
     );
     assert_eq!(
         crate::import_stage_evidence_observation(
             &fixture.store,
             &fixture.host,
-            &success.result_objects,
+            success.result_objects(),
             ObjectInventoryLimits::default(),
         )
         .unwrap(),
@@ -300,14 +300,17 @@ fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let mut success = completed.attempt_success();
-    success
-        .result_objects
-        .retain(|reference| reference.media_type != crate::STAGE_EVIDENCE_MEDIA_TYPE);
+    let without_evidence = completed
+        .attempt_success()
+        .result_objects()
+        .iter()
+        .filter(|reference| reference.media_type != crate::STAGE_EVIDENCE_MEDIA_TYPE)
+        .cloned()
+        .collect::<Vec<_>>();
     assert!(crate::import_stage_evidence_observation(
         &fixture.store,
         &fixture.host,
-        &success.result_objects,
+        &without_evidence,
         ObjectInventoryLimits::default(),
     )
     .unwrap_err()
@@ -316,7 +319,7 @@ fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
 
     let success = completed.attempt_success();
     let evidence = success
-        .result_objects
+        .result_objects()
         .iter()
         .find(|reference| reference.media_type == crate::STAGE_EVIDENCE_MEDIA_TYPE)
         .unwrap();
@@ -327,7 +330,7 @@ fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
     assert!(crate::import_stage_evidence_observation(
         &fixture.store,
         &fixture.host,
-        &success.result_objects,
+        success.result_objects(),
         ObjectInventoryLimits::default(),
     )
     .unwrap_err()
@@ -754,13 +757,14 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
     let pool_id = PoolId::derive(&[b"serial-stage-pool"]);
     let submission = build_task_submission(
         &fixture.host,
-        &fixture.program.arguments,
+        &fixture.program,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
             pool_id,
-            program_artifact_id: ArtifactId::derive(&[fixture.program.artifact.id.0.bytes()]),
-            host: crate::task_tests::host_requirement(),
+            permitted_trust_tiers: BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
             artifact_access: fixture.host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,
@@ -799,6 +803,9 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
     ));
 }
 
+// witness: FEA-MESH-EXECUTION-001/budgets_and_cancellation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A serial stage reports typed cancellation and search-budget failures.
 #[test]
 fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
     let mut cancelled = Fixture::new();
@@ -973,15 +980,16 @@ fn stage_control_enforces_every_algorithm_local_resource_counter() {
 
 #[test]
 fn exact_geometry_control_projects_cancellation_and_hard_counters() {
-    let mut bounded = request();
-    bounded.resources.maximum_iterations = 2;
-    bounded.resources.maximum_search_work = 3;
-    bounded.resources.maximum_memory_bytes = 4;
+    let mut ceilings = ceilings();
+    let bounded = request();
+    ceilings.maximum_iterations = 2;
+    ceilings.maximum_search_work = 3;
+    ceilings.maximum_memory_bytes = 4;
     let mut progress = Progress::default();
     let stage = MeshingStageControl::new(
         MeshingStageKind::CurveMesh,
         0,
-        &bounded,
+        &bounded, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1011,7 +1019,7 @@ fn exact_geometry_control_projects_cancellation_and_hard_counters() {
     let cancelled_stage = MeshingStageControl::new(
         MeshingStageKind::CurveMesh,
         0,
-        &bounded,
+        &bounded, ceilings,
         &Cancelled,
         &mut cancelled_progress,
     )
@@ -1028,13 +1036,14 @@ fn exact_geometry_control_projects_cancellation_and_hard_counters() {
 
 #[test]
 fn exact_geometry_checkpoints_renew_the_enclosing_stage_deadline() {
+    let ceilings = ceilings();
     let mut bounded = request();
     bounded.cancellation.maximum_checkpoint_latency_ms = 1_000;
     let mut progress = Progress::default();
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &bounded,
+        &bounded, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1050,13 +1059,14 @@ fn exact_geometry_checkpoints_renew_the_enclosing_stage_deadline() {
 
 #[test]
 fn exact_geometry_checkpoints_publish_search_work_to_the_enclosing_stage() {
+    let ceilings = ceilings();
     let mut bounded = request();
     bounded.cancellation.maximum_work_units_between_checks = 2;
     let mut progress = Progress::default();
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &bounded,
+        &bounded, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1079,13 +1089,14 @@ fn exact_geometry_checkpoints_publish_search_work_to_the_enclosing_stage() {
 
 #[test]
 fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() {
-    let mut timed = request();
-    timed.resources.maximum_wall_time_ms = 1;
+    let mut ceilings = ceilings();
+    let timed = request();
+    ceilings.maximum_wall_time_ms = 1;
     let mut progress = Progress::default();
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &timed,
+        &timed, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1099,9 +1110,9 @@ fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() 
         MeshingFailureCategory::TimeBudgetExceeded
     );
 
-    let mut bounded = request();
-    bounded.resources.maximum_artifact_bytes = 3000;
-    let mut fixture = Fixture::with_request(bounded);
+    let bounded = request();
+    ceilings.maximum_artifact_bytes = 3000;
+    let mut fixture = Fixture::with_request_and_ceilings(bounded, ceilings);
     let error = execute_serial_stage(
         &fixture.program,
         &mut fixture.store,
@@ -1154,6 +1165,13 @@ impl Fixture {
     }
 
     fn with_request(request: MeshingRequest) -> Self {
+        Self::with_request_and_ceilings(request, ceilings())
+    }
+
+    fn with_request_and_ceilings(
+        request: MeshingRequest,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings,
+    ) -> Self {
         let access = ArtifactAccess {
             authorization_scope: "serial-meshing-run".into(),
             encryption_context: Digest::sha256(b"serial-meshing-encryption-context"),
@@ -1212,7 +1230,7 @@ impl Fixture {
                 },
             ],
         };
-        let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
+        let host = MeshingHostWorkload::new(workload, identity, request, ceilings, access, None).unwrap();
         let program = host_program(&host, std::slice::from_ref(&root), &mut store);
         Self {
             host,
@@ -1282,6 +1300,7 @@ impl Fixture {
         relaxed_volume: bool,
         element_order: ElementOrder,
     ) -> Self {
+        let mut ceilings = ceilings();
         let access = ArtifactAccess {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
@@ -1361,12 +1380,12 @@ impl Fixture {
             request.quality.curve.maximum_chordal_deviation_m =
                 runmat_types::physical::Length::new(0.05);
             request.quality.curve.maximum_tangent_change_degrees = 20.0;
-            request.resources.maximum_nodes = 10_000;
-            request.resources.maximum_elements = 10_000;
-            request.resources.maximum_memory_bytes = 64_000_000;
-            request.resources.maximum_artifact_bytes = 16_000_000;
-            request.resources.maximum_search_work = 1_000_000;
-            request.resources.maximum_iterations = if relaxed_volume { 2_000_000 } else { 100_000 };
+            request.limits.maximum_nodes = 10_000;
+            request.limits.maximum_elements = 10_000;
+            ceilings.maximum_memory_bytes = 64_000_000;
+            ceilings.maximum_artifact_bytes = 16_000_000;
+            ceilings.maximum_search_work = 1_000_000;
+            ceilings.maximum_iterations = if relaxed_volume { 2_000_000 } else { 100_000 };
         }
         let root_digest = StableDigest::from_bytes(*input.root_input().logical_digest.bytes());
         let exact_input = MeshingInputRef {
@@ -1380,11 +1399,7 @@ impl Fixture {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage,
             geometry: GeometryRevisionRef {
-                source_unit_evidence:
-                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
-                        runmat_geometry_core::LengthUnit::Meter,
-                        "canonical solver fixture",
-                    ),
+                source_unit_evidence: document.source.unit_evidence.clone(),
                 source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
                 geometry_revision: document.revision.revision,
                 persistent_mapping_version: document.revision.persistent_mapping_version,
@@ -1426,7 +1441,7 @@ impl Fixture {
             ],
         };
         let host =
-            MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
+            MeshingHostWorkload::new(workload, identity, request, ceilings, access, Some(document)).unwrap();
         let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
@@ -1465,11 +1480,7 @@ impl Fixture {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage: MeshingStageKind::SurfaceMesh,
             geometry: GeometryRevisionRef {
-                source_unit_evidence:
-                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
-                        runmat_geometry_core::LengthUnit::Meter,
-                        "canonical solver fixture",
-                    ),
+                source_unit_evidence: document.source.unit_evidence.clone(),
                 source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
                 geometry_revision: document.revision.revision,
                 persistent_mapping_version: document.revision.persistent_mapping_version,
@@ -1509,7 +1520,7 @@ impl Fixture {
             ],
         };
         let host =
-            MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
+            MeshingHostWorkload::new(workload, identity, request, ceilings(), access, Some(document)).unwrap();
         let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
@@ -1528,12 +1539,13 @@ fn checkpoint() -> MeshingStageCheckpoint {
 }
 
 fn checkpoint_failure(checkpoint: MeshingStageCheckpoint) -> Box<MeshingFailure> {
+    let ceilings = ceilings();
     let request = request();
     let mut progress = Progress::default();
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request,
+        &request, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1600,6 +1612,7 @@ pub(crate) fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 7,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -1618,10 +1631,12 @@ pub(crate) fn request() -> MeshingRequest {
             maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -1643,25 +1658,20 @@ pub(crate) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 4_000_000,
-            maximum_scratch_bytes: 4_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 100,
             maximum_recursion_depth: 32,
-            maximum_iterations: 100,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 1000,
             maximum_work_units_between_checks: 1000,
         },
+        size_controls: Vec::new(),
     }
 }
 
-fn revision() -> ProgramRevision {
+pub(crate) fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"serial-meshing-graph"),
         Digest::sha256(b"serial-meshing-source"),
@@ -1704,5 +1714,17 @@ fn stage_input(digest: StableDigest) -> MeshingInputRef {
     MeshingInputRef {
         kind: MeshingInputKind::StageArtifact,
         digest,
+    }
+}
+
+/// Execution ceilings of the serial test fixture.
+pub(crate) fn ceilings() -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 4_000_000,
+        maximum_scratch_bytes: 4_000_000,
+        maximum_wall_time_ms: 10_000,
+        maximum_artifact_bytes: 1_000_000,
+        maximum_search_work: 100,
+        maximum_iterations: 100,
     }
 }

@@ -52,6 +52,12 @@ pub(super) fn numeric_inventory_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Count-only numerical profiling covers real codec arrays across header-width
+    //   transitions and plans100million values without constructing or visiting that array. Domain
+    //   metadata and transport remain separately reserved. This is structural codec accounting, not
+    //   measured RSS or whole study admission.
     #[test]
     fn count_only_inventory_covers_real_codec_headers_and_large_arrays() {
         let limits = CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);

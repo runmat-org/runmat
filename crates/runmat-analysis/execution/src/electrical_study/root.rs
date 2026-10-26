@@ -47,6 +47,10 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    /// The machine memory the root was planned under, so every task plans with one budget.
+    machine_memory_bytes: u64,
     policy: ElectricalStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: ElectricalStaticWorkload,
@@ -65,6 +69,8 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.workload().clone();
         Self {
+            local_execution: preparation.local_execution,
+            machine_memory_bytes: preparation.machine_memory_bytes,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -94,7 +100,7 @@ impl PreparationWire {
         if output_policy.chunk_bytes() != self.chunk_bytes {
             return Err(invalid("noncanonical electrical output chunk size"));
         }
-        let workload = plan_electrical_study(&self.compiled, self.policy)
+        let workload = plan_electrical_study(&self.compiled, self.policy.clone())
             .map_err(|error| invalid(&error.to_string()))?;
         if workload != self.workload {
             return Err(invalid(
@@ -102,6 +108,8 @@ impl PreparationWire {
             ));
         }
         Ok(ElectricalStudyPreparation {
+            local_execution: self.local_execution,
+            machine_memory_bytes: self.machine_memory_bytes,
             policy: self.policy,
             product: ElectricalStudyProduct {
                 compiled: self.compiled,

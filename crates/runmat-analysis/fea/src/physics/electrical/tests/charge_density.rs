@@ -6,13 +6,13 @@ pub(crate) fn charged_model(charge: f64, gauge: f64) -> AnalysisModel {
     prescribe(
         &mut input,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         gauge,
     );
     prescribe(
         &mut input,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         gauge,
     );
     input.signals = vec![PhysicalSignal::ElectricChargeDensity(Signal {
@@ -82,7 +82,7 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
                 assert!(field[1].abs() < 1e-9 && field[2].abs() < 1e-9);
             }
             let source = response.charge_sources.as_ref().unwrap();
-            assert_relative(source.integrated_charge_c, sign * 2.0 * epsilon, 1e-10);
+            assert_relative(source.integrated_source, sign * 2.0 * epsilon, 1e-10);
             assert!(source.projection_evidence.iter().all(|e| e.accepted));
             for terminal in &response.terminals {
                 assert_relative(
@@ -109,6 +109,9 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4/numerical_kernel;
+//   boundary: Uniform-charge Tet4 slab on three meshes: independent quadratic potential, linear
+//   field, charge conservation and energy convergence; no Tet10 or nonlinear dielectric claim.
 #[test]
 fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
     let epsilon = coefficient(StaticElectricalEquation::Electrostatics);
@@ -166,7 +169,7 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
                 .charge_sources
                 .as_ref()
                 .unwrap()
-                .integrated_charge_c,
+                .integrated_source,
             2.0 * epsilon,
             1e-10,
         );
@@ -182,6 +185,10 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
     assert!(finest.0 < 0.005 && finest.1 < 0.1 && finest.2 < 0.025);
 }
 
+// witness: FEA-EM-INPUT-001/excitation @ electrostatic/tet4|tet10/numerical_kernel;
+//   boundary: Both orders, constant real volume-charge exact target and signed superposition
+//   preserve potential, net/absolute charge and two projection records; no generated or frequency
+//   artifact equivalence.
 #[test]
 fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -195,7 +202,7 @@ fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
             .iter()
             .all(|e| e.region_id == region));
         let mut input = charged_model(3.0 * epsilon, 0.0);
-        let mut target = RegionTarget::volume("resolved-charge-volume");
+        let mut target = RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("resolved-charge-volume"));
         target.bind_resolved_entities(vec![region]).unwrap();
         input.excitations[0].excitation_mut().target = ExcitationTarget::Region(target);
         let mut negative = charged_model(-epsilon, 0.0);
@@ -221,8 +228,8 @@ fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
             assert!((a - b).abs() < 1e-9);
         }
         let source = actual.charge_sources.as_ref().unwrap();
-        assert_relative(source.integrated_charge_c, 2.0 * epsilon, 1e-10);
-        assert_relative(source.absolute_charge_c, 4.0 * epsilon, 1e-10);
+        assert_relative(source.integrated_source, 2.0 * epsilon, 1e-10);
+        assert_relative(source.absolute_source, 4.0 * epsilon, 1e-10);
         assert_eq!(source.projection_evidence.len(), 2);
     }
 }
@@ -235,28 +242,14 @@ fn charge_sources_reject_conduction_unmatched_region_complex_and_wrong_target() 
     wrong.electromagnetic = Some(ElectromagneticDomain::Static {
         equation: StaticElectricalEquation::SteadyConduction,
     });
-    assert!(solve_canonical_static(
-        &wrong,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-11
-    )
-    .is_err());
+    assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
     for target in [
-        RegionTarget::volume("missing"),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("missing")),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
     ] {
         let mut wrong = input.clone();
         wrong.excitations[0].excitation_mut().target = ExcitationTarget::Region(target);
-        assert!(solve_canonical_static(
-            &wrong,
-            &mesh,
-            "potential",
-            FormulationRequirement::Experimental,
-            1e-11
-        )
-        .is_err());
+        assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
     }
     let mut wrong = input;
     let PhysicalSignal::ElectricChargeDensity(signal) = &mut wrong.signals[0] else {
@@ -275,12 +268,5 @@ fn charge_sources_reject_conduction_unmatched_region_complex_and_wrong_target() 
         interpolation: SignalInterpolation::Linear,
         extrapolation: SignalExtrapolation::HoldEndpoint,
     });
-    assert!(solve_canonical_static(
-        &wrong,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-11
-    )
-    .is_err());
+    assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
 }

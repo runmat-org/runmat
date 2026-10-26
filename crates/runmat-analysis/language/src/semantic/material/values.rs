@@ -104,6 +104,12 @@ fn quantity(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
     if !(value.value_type).is_quantity((dimension).into()) {
+        if let Some((message, label)) =
+            crate::semantic::units::unit_mismatch(name, value, dimension)
+        {
+            diagnostics.push(diagnostic(declaration, value.span, message).with_label(label));
+            return None;
+        }
         invalid(
             declaration,
             name,

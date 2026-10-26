@@ -117,11 +117,11 @@ fn thermal_reference_model() -> (
                 .all(|node| coordinates[node][2].abs() <= 1.0e-12)
         })
         .expect("canonical tetrahedron has a z=0 base face");
-    let base_region = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "thermal_base".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let base_region = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "thermal_base".into(),
+        vec!["root".into()],
+    );
     base_face.provenance.push(base_region.clone());
     base_face.provenance.sort();
     let base_nodes = base_face.node_ids.clone();
@@ -139,7 +139,7 @@ fn thermal_reference_model() -> (
         .position(|node| node.node_id == free_node_id)
         .unwrap();
     mesh.seal_canonical_digest().unwrap();
-    (model, mesh, free_node_index, base_region.source_topology_id)
+    (model, mesh, free_node_index, base_region.source_topology_id.clone())
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
     let (mut model, mesh, _, region) = thermal_reference_model();
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "radiation".into(),
-        target: RegionTarget::boundary(region),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region))),
         operator: BoundaryOperator::ThermalRadiation {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
             emissivity: runmat_analysis_core::SurfaceEmissivity::new(0.8),
@@ -156,7 +156,7 @@ fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -196,7 +196,7 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
     let baseline = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -206,7 +206,7 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
     let changed = assemble(
         &with_unused_material,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -224,7 +224,7 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
 fn prepared_properties_are_reused_across_load_samples_and_reject_topology_substitution() {
     let (model, mesh, _, _) = thermal_reference_model();
     let properties = crate::properties::compile_thermal_property_map(&model, Some(&mesh)).unwrap();
-    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
     let first = super::assemble(
         &model,
         &mesh,
@@ -309,7 +309,7 @@ fn prescribe_base(model: &mut AnalysisModel, base_region: String, temperature_k:
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "base_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(base_region),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(base_region))),
                 value: PrescribedValue::Constant(Temperature::new(temperature_k)),
             },
         }));
@@ -322,7 +322,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -365,7 +365,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
     let unanchored = assemble(
         &unanchored_model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -390,7 +390,7 @@ fn thermal_nullspace_proof_rejects_metadata_only_semidefinite_claims() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -430,7 +430,7 @@ fn positive_convection_anchors_a_steady_thermal_component() {
         .unwrap();
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "positive_robin_anchor".into(),
-        target: RegionTarget::boundary(selector),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(295.0)),
             coefficient: HeatTransferCoefficient::new(4.0),
@@ -439,7 +439,7 @@ fn positive_convection_anchors_a_steady_thermal_component() {
     let system = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -469,7 +469,7 @@ fn deserialization_discards_process_local_nullspace_proof() {
     let system = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -500,7 +500,7 @@ fn deserialization_rejects_caller_asserted_nullspace_proof() {
     let system = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -528,3 +528,98 @@ mod numerical;
 mod signals;
 mod steady;
 mod target_resolution;
+
+#[test]
+fn thermal_operators_are_bitwise_independent_of_the_admitted_thread_count() {
+    let (model, _, _, _) = thermal_reference_model();
+    let mesh = runmat_meshing_core::fixtures::connected_quadratic_tetrahedron_solver_mesh();
+    let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+    let run = || {
+        assemble(
+            &model,
+            &mesh,
+            facts.support(),
+            &heat_generation(3.0),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap()
+    };
+    let serial = run();
+    for threads in [2, 3, 4] {
+        let parallel = runmat_cpu_execution::with_cpu_pool(threads, run).unwrap();
+        assert_eq!(parallel.conductivity, serial.conductivity, "{threads} threads");
+        assert_eq!(parallel.capacity, serial.capacity, "{threads} threads");
+        assert_eq!(parallel.applied_source, serial.applied_source);
+        let temperature = (0..mesh.topology.nodes.len())
+            .map(|node| 300.0 + node as f64)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            runmat_cpu_execution::with_cpu_pool(threads, || serial
+                .recover_element_heat_flux(&temperature)
+                .unwrap())
+            .unwrap(),
+            serial.recover_element_heat_flux(&temperature).unwrap()
+        );
+    }
+}
+
+#[test]
+fn ambient_temperature_excitation_supplies_the_convection_ambient_on_its_faces() {
+    let (mut model, mesh, _, _) = thermal_reference_model();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let selector = projection.boundary_faces[0].provenance[0]
+        .analysis_selection_id()
+        .unwrap();
+    let authored = PrescribedValue::Constant(Temperature::new(295.0));
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "film".into(),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector.clone()))),
+        operator: BoundaryOperator::ThermalConvection {
+            ambient_temperature: authored.clone(),
+            coefficient: HeatTransferCoefficient::new(4.0),
+        },
+    });
+    let sample = || ExcitationSamplePoint::Static;
+    assert_eq!(
+        super::sample_ambient_temperature(&model, "film", &authored, sample()).unwrap(),
+        295.0
+    );
+    model.signals.push(PhysicalSignal::Temperature(Signal {
+        signal_id: SignalId("chamber".into()),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(Temperature::new(
+            310.0,
+        ))),
+        precision: SignalPrecision::Real64,
+        provenance: SignalProvenance::Authored,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+    }));
+    model
+        .excitations
+        .push(runmat_analysis_core::ExcitationAction::AmbientTemperature(runmat_analysis_core::AnalysisExcitation {
+            excitation_id: ExcitationId("chamber".into()),
+            target: runmat_analysis_core::ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)))),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("chamber".into()),
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: false,
+                preserve_moment: false,
+                relative_tolerance: 1e-12,
+            },
+        }));
+    assert_eq!(
+        super::sample_ambient_temperature(&model, "film", &authored, sample()).unwrap(),
+        310.0
+    );
+}

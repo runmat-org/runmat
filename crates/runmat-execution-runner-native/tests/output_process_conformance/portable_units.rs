@@ -22,18 +22,18 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
     let unit = session.compile_executable_unit(source, None).await.unwrap();
     let envelope = unit.portable_envelope_for(selected).unwrap();
     let recipe = ProgramBuildRecipe {
+        foreign_policy: None,
+        accelerators: Vec::new(),
+        interop: runmat_types::InteropManifest::empty(),
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
         entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
-            requested_outputs: outputs,
             owned_work: None,
+            requested_outputs: outputs,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("original-session-worker"),
-        interop: envelope.manifest.interop.clone(),
-        accelerators: vec![],
-        foreign_policy: None,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: vec![],
@@ -212,8 +212,8 @@ async fn transitive_request() -> ProgramExecutionRequest {
     let (recipe, artifact) = ProgramArtifact::materialize_executable_unit(
         &envelope,
         OutputContract {
-            requested_outputs: 1,
             owned_work: None,
+            requested_outputs: 1,
         },
         ProgramTarget::portable("original-session-worker"),
     )

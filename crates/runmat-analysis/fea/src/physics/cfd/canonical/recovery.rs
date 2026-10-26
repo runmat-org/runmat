@@ -9,6 +9,8 @@ use crate::algebra::spmv;
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidResidual {
     pub face_forces: super::flux_evidence::CanonicalFluidFaceForces,
+    /// Cell vorticity ∇×u, 1/s, from the boundary-aware gradient of the viscous stress.
+    pub cell_vorticity_per_s: Vec<V>,
     /// Sorted exact authored boundary IDs, with original outward force/flow terms.
     pub boundary_balances: Vec<super::CanonicalFluidBoundaryBalance>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
@@ -185,7 +187,14 @@ pub(super) fn evaluate_with_time(
     let continuity_relative = continuity.relative.iter().copied().fold(0.0, f64::max);
     let momentum_relative = relative(momentum_norm, momentum_scale);
     let flux_constitutive_relative = relative(discrepancy, discrepancy_scale);
-    let face_forces = super::flux_evidence::evaluate(p, u, pressure_fluctuation_pa, q)?;
+    let (face_forces, cell_vorticity_per_s) = super::flux_evidence::evaluate(
+        p,
+        u,
+        pressure_fluctuation_pa,
+        q,
+        time.and_then(|t| t.motion)
+            .map(|m| m.face_mesh_flux_m3_per_s),
+    )?;
     let mut independent_cells = vec![[0.0; 3]; n];
     let mut local_scales = vec![0.0; n];
     let mut global_momentum = [0.0; 3];
@@ -224,6 +233,18 @@ pub(super) fn evaluate_with_time(
         global_momentum = sub(global_momentum, body);
         global_scale += norm(body);
     }
+    for c in 0..n {
+        if let Some((linear, quadratic)) = p.porous[c] {
+            let drag = scale(
+                u[c],
+                p.topology.cells[c].volume_m3 * (linear + quadratic * norm(u[c])),
+            );
+            independent_cells[c] = add(independent_cells[c], drag);
+            local_scales[c] += norm(drag);
+            global_momentum = add(global_momentum, drag);
+            global_scale += norm(drag);
+        }
+    }
     if let Some(time) = time {
         for c in 0..n {
             let inertia = time.force(p, c, u[c])?;
@@ -242,6 +263,7 @@ pub(super) fn evaluate_with_time(
     let boundary_balances = p.boundary_balance_plan.evaluate(p, q, &face_forces)?;
     Ok(CanonicalFluidResidual {
         face_forces,
+        cell_vorticity_per_s,
         boundary_balances,
         cell_momentum_n:
             runmat_types::physical::Quantity::<runmat_types::physical::kind::Force, _>::new(
@@ -284,4 +306,41 @@ pub(super) fn relative(numerator: f64, denominator: f64) -> f64 {
     } else {
         numerator / denominator
     }
+}
+
+/// The cell with the largest independent momentum residual: index, centroid, volume, its
+/// exterior face laws and relative residual, for exhaustion diagnostics.
+pub(super) fn describe_worst_cell(
+    p: &CanonicalFluidProblem<'_>,
+    residual: &CanonicalFluidResidual,
+) -> (f64, String) {
+    let (cell, relative) = residual
+        .cell_momentum_relative
+        .iter()
+        .enumerate()
+        .fold((0, 0.0f64), |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc });
+    let Some(geometry) = p.topology.cells.get(cell) else {
+        return (relative, "no cells".into());
+    };
+    let laws = p
+        .topology
+        .faces
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.owner == cell && f.neighbor.is_none())
+        .map(|(i, _)| match &p.boundaries[i] {
+            super::boundary::FaceBoundary::Interior => "interior",
+            super::boundary::FaceBoundary::Velocity { moving_wall: true, .. } => "moving_wall",
+            super::boundary::FaceBoundary::Velocity { .. } => "velocity",
+            super::boundary::FaceBoundary::PressureOutlet { .. } => "outlet",
+            super::boundary::FaceBoundary::Symmetry { .. } => "symmetry",
+        })
+        .collect::<Vec<_>>();
+    (
+        relative,
+        format!(
+            "cell {cell} at {:?} m, volume {:e} m^3, exterior faces {laws:?}, relative residual {relative:e}",
+            geometry.centroid_m, geometry.volume_m3
+        ),
+    )
 }

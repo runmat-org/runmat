@@ -172,7 +172,7 @@ fn support_motion_model() -> runmat_analysis_core::AnalysisModel {
         constraint_id: "moving_root_x".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             translations: vec![TranslationDofMotion {
                 dof: StructuralTranslationDof::Ux,
                 history: StructuralKinematicHistory::AccelerationDriven {
@@ -191,7 +191,7 @@ fn support_motion_model() -> runmat_analysis_core::AnalysisModel {
             constraint_id: "fixed_root_yz".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 translations: vec![
                     TranslationDofValue {
                         dof: StructuralTranslationDof::Uy,
@@ -251,7 +251,6 @@ fn transient_workload(
         model: model.clone(),
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: options.formulation_requirement,
         solver: crate::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: options.time_step_policy,
         residual_target: options.residual_target,
@@ -315,7 +314,7 @@ fn modal_support_motion_workloads(
         ModalSolveOptions {
             truncation: crate::ModalTruncationPolicy::requested(1),
             solver_mesh: Some(mesh.clone()),
-            ..experimental_modal_options()
+            ..baseline_modal_options()
         },
     )
     .expect("support motion should be homogeneous during modal extraction");
@@ -355,7 +354,6 @@ fn modal_support_motion_workloads(
         model: direct_model,
         step_id: ProcedureStepId("transient".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: crate::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
         residual_target: 1.0e-11,
@@ -366,7 +364,6 @@ fn modal_support_motion_workloads(
         model: model.clone(),
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: crate::execution::StructuralTransientSolverPlan::ModalReduced {
             basis_transition: Box::new(transition),
         },
@@ -482,6 +479,10 @@ fn execute_transient_workload(
     .unwrap()
 }
 
+// witness: FEA-DYNAMICS-GOVERNANCE-001/motion_restart_branches @
+//   linear_structural_dynamics/tet4/numerical_kernel; coverage: partial;
+//   boundary: Modal support motion matches direct physics and restarts exactly; durable and remote
+//   restart are not covered.
 #[test]
 fn modal_support_motion_matches_direct_physics_and_restarts_exactly() {
     let interval_count = 40;
@@ -589,6 +590,9 @@ fn modal_support_motion_matches_direct_physics_and_restarts_exactly() {
     }
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/fixed_component_motion @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: Tet4 prescribed motion keeps absolute constraint kinematics.
 #[test]
 fn physical_tet4_prescribed_motion_keeps_absolute_constraint_kinematics() {
     let model = support_motion_model();
@@ -600,7 +604,7 @@ fn physical_tet4_prescribed_motion_keeps_absolute_constraint_kinematics() {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 40 },
             residual_target: 1.0e-10,
             solver_mesh: Some(mesh),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("the physical Tet4 support-motion response should solve");
@@ -652,7 +656,7 @@ fn physical_transient_publishes_velocity_dependent_dashpot_response() {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 40 },
             residual_target: 1.0e-10,
             solver_mesh: Some(mesh),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("the physical Tet4 response with an axial dashpot should solve");
@@ -759,7 +763,7 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
         residual_target: 1.0e-10,
         solver_mesh: Some(mesh.clone()),
-        ..experimental_transient_options()
+        ..baseline_transient_options()
     };
     let uninterrupted =
         crate::run_transient_with_options(&model, ComputeBackend::Cpu, options.clone()).unwrap();
@@ -927,7 +931,7 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 9 },
         residual_target: 1.0e-10,
         solver_mesh: Some(mesh.clone()),
-        ..experimental_transient_options()
+        ..baseline_transient_options()
     };
     let workload = transient_workload(&model, &options);
     let uninterrupted =
@@ -1007,12 +1011,15 @@ fn governed_support_motion_fixture_uses_the_physical_constraint_row_space() {
             },
             residual_target: 1.0e-10,
             solver_mesh: Some(mesh),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("the governed support-motion fixture should execute on its physical constraint rows");
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/fixed_component_motion @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A fully prescribed Tet4 advances the complete motion schedule.
 #[test]
 fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     use runmat_analysis_core::*;
@@ -1027,7 +1034,7 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     };
     let history = root_motion.translations[0].history.clone();
     model.constraints = [
-        ("moving_root", RegionTarget::boundary("root")),
+        ("moving_root", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root"))),
         ("moving_free_node", RegionTarget::point("node:4")),
     ]
     .into_iter()
@@ -1057,7 +1064,7 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
         residual_target: 1.0e-10,
         solver_mesh: Some(mesh.clone()),
-        ..experimental_transient_options()
+        ..baseline_transient_options()
     };
     let result = crate::run_transient_with_options(&model, ComputeBackend::Cpu, options.clone())
         .expect("the fully prescribed physical Tet4 should traverse its complete schedule");
@@ -1195,7 +1202,7 @@ fn acceleration_point_continuity_changes_public_reaction_but_not_interval_work()
                 time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 16 },
                 residual_target: 1.0e-10,
                 solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(model)),
-                ..experimental_transient_options()
+                ..baseline_transient_options()
             },
         )
         .expect("the discontinuous prescribed support motion should solve")
@@ -1385,7 +1392,7 @@ fn physical_tet4_support_motion_converges_to_an_independent_closed_form() {
                 time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
                 residual_target: 1.0e-11,
                 solver_mesh: Some(mesh.clone()),
-                ..experimental_transient_options()
+                ..baseline_transient_options()
             },
         )
         .unwrap();
@@ -1470,7 +1477,7 @@ fn physical_tet4_finite_pulse_converges_across_a_force_discontinuity() {
                 time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
                 residual_target: 1.0e-10,
                 solver_mesh: Some(mesh.clone()),
-                ..experimental_transient_options()
+                ..baseline_transient_options()
             },
         )
         .expect("the physical Tet4 finite-pulse response should solve");
@@ -1507,7 +1514,7 @@ fn physical_tet4_undamped_step_preserves_work_energy_balance() {
                 time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
                 residual_target: 1.0e-10,
                 solver_mesh: Some(mesh.clone()),
-                ..experimental_transient_options()
+                ..baseline_transient_options()
             },
         )
         .expect("the undamped physical Tet4 response should solve");

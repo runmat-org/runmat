@@ -3,10 +3,13 @@ mod acoustic;
 mod common;
 mod electrical_static;
 mod fluid;
+mod electrical_recovery;
 mod magnetic_recovery;
 pub(super) mod magnetic_static;
 pub(super) mod maxwell_harmonic;
 mod maxwell_recovery;
+mod acoustic_response;
+mod acoustic_recovery;
 mod nonlinear_recovery;
 mod result_publication;
 mod state_publication;
@@ -57,6 +60,20 @@ use runmat_execution::{resource::ResourceRequest, Digest};
 pub fn build_resource_plan(
     input: FeaResourcePlanningInput,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let plan = build_resource_plan_unlogged(input)?;
+    tracing::debug!(
+        "fea resource plan {:?}: request memory {} scratch {}; breakdown {:?}",
+        plan.input.phase,
+        plan.request.memory_bytes,
+        plan.request.scratch_bytes,
+        plan.breakdown
+    );
+    Ok(plan)
+}
+
+fn build_resource_plan_unlogged(
+    input: FeaResourcePlanningInput,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
         (
@@ -78,7 +95,6 @@ pub fn build_resource_plan(
                     &[
                         &demand.result_output,
                         &demand.publication_output,
-                        &demand.fields_output,
                     ],
                 ),
             )
@@ -114,9 +130,25 @@ pub fn build_resource_plan(
             FeaResourceDemand::MagneticFieldRecovery(demand),
         ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
         (
+            FeaResourcePhase::ElectricalFieldRecovery(request),
+            FeaResourceDemand::ElectricalFieldRecovery(demand),
+        ) if *request == demand.request => electrical_recovery::build(input.clone(), demand),
+        (
+            FeaResourcePhase::AcousticResponse(workload),
+            FeaResourceDemand::AcousticResponse(demand),
+        ) if *workload == demand.workload => acoustic_response::build(input.clone(), demand),
+        (
+            FeaResourcePhase::StatisticalFieldRecovery(request),
+            FeaResourceDemand::StatisticalFieldRecovery(demand),
+        ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
+        (
             FeaResourcePhase::MaxwellFieldRecovery(request),
             FeaResourceDemand::MaxwellFieldRecovery(demand),
         ) if *request == demand.request => maxwell_recovery::build(input.clone(), demand),
+        (
+            FeaResourcePhase::AcousticFieldRecovery(request),
+            FeaResourceDemand::AcousticFieldRecovery(demand),
+        ) if *request == demand.request => acoustic_recovery::build(input.clone(), demand),
         (FeaResourcePhase::Magnetostatic(workload), FeaResourceDemand::Magnetostatic(demand))
             if *workload == demand.workload =>
         {

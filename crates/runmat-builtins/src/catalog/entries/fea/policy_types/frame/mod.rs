@@ -14,6 +14,7 @@ mod cylindrical;
 pub use self::cylindrical::FEA_COORDINATE_FRAME_CYLINDRICAL_CATALOG_ENTRY;
 mod spherical;
 pub use self::spherical::FEA_COORDINATE_FRAME_SPHERICAL_CATALOG_ENTRY;
+#[cfg(test)]
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &FEA_COORDINATE_FRAME_GLOBAL_CATALOG_ENTRY,
     &FEA_COORDINATE_FRAME_MATERIAL_CATALOG_ENTRY,

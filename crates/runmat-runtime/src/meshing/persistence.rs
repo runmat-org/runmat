@@ -9,20 +9,41 @@ pub fn write_canonical_artifact_pair(
     second_bytes: &[u8],
     force: bool,
 ) -> Result<(), String> {
-    if first_path == second_path {
-        return Err("canonical artifact destinations must be distinct".to_string());
-    }
-    let first = StagedArtifact::prepare(first_path, first_bytes, force)?;
-    let second = match StagedArtifact::prepare(second_path, second_bytes, force) {
-        Ok(staged) => staged,
-        Err(error) => {
-            return match first.remove_temporary() {
-                Ok(()) => Err(error),
-                Err(cleanup) => Err(format!("{error}; cleanup also failed: {cleanup}")),
-            };
+    write_canonical_artifacts(
+        &[(first_path, first_bytes), (second_path, second_bytes)],
+        force,
+    )
+}
+
+/// Publish a set of related artifacts as one unit: every file is staged before
+/// any destination is replaced, and a publication failure restores the files
+/// already replaced. Existing destinations are protected unless `force`.
+pub fn write_canonical_artifacts(artifacts: &[(&Path, &[u8])], force: bool) -> Result<(), String> {
+    for (index, (path, _)) in artifacts.iter().enumerate() {
+        if artifacts[..index].iter().any(|(other, _)| other == path) {
+            return Err("canonical artifact destinations must be distinct".to_string());
         }
-    };
-    let mut staged = [first, second];
+    }
+    let mut staged = Vec::with_capacity(artifacts.len());
+    for (path, bytes) in artifacts {
+        match StagedArtifact::prepare(path, bytes, force) {
+            Ok(artifact) => staged.push(artifact),
+            Err(error) => {
+                let cleanup = staged
+                    .iter()
+                    .filter_map(|artifact: &StagedArtifact| artifact.remove_temporary().err())
+                    .collect::<Vec<_>>();
+                return if cleanup.is_empty() {
+                    Err(error)
+                } else {
+                    Err(format!(
+                        "{error}; cleanup also failed: {}",
+                        cleanup.join("; ")
+                    ))
+                };
+            }
+        }
+    }
     for index in 0..staged.len() {
         if let Err(error) = staged[index].publish() {
             let mut rollback_errors = Vec::new();

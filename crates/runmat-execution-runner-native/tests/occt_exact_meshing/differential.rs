@@ -11,6 +11,11 @@ const EXPECTED_BOX_VOLUME: f64 = 6.0;
 const EXPECTED_LINEAR_ENERGY: f64 = 84.0;
 const TOLERANCE: f64 = 1.0e-10;
 
+// witness: FEA-MESH-DISCRETIZATION-001/independent_mesher_differential @
+//   shared_infrastructure/canonical_mixed_topology/native_process; features: occt-native;
+//   coverage: partial;
+//   boundary: RunMat and the OCCT incremental mesher agree on box invariants (volume and gradient
+//   energy); box only, no curved or real part.
 #[test]
 fn runmat_and_independent_meshers_agree_on_box_invariants() {
     let (topology, result) = execute_box();

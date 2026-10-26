@@ -98,6 +98,7 @@ impl ObservationTopology<'_> {
             oriented_faces: Vec::new(),
             finite_volume: None,
             face_boundary_sources: Vec::new(),
+            face_elements: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             node_selectors: SortedValues::derive_grouped(

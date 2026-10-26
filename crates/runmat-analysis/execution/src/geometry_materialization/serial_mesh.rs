@@ -44,6 +44,7 @@ pub fn materialize_and_mesh_serial<S: CacheImport + CacheExport>(
     program: &ProgramExecutionRequest,
     store: &mut S,
     settings: MeshingRequestSettings,
+    ceilings: runmat_meshing_core::MeshingExecutionCeilings,
     platform: PlatformBuildIdentity,
     inventory: ObjectInventoryLimits,
     cancellation: &dyn MeshingCancellationSignal,
@@ -98,6 +99,7 @@ pub fn materialize_and_mesh_serial<S: CacheImport + CacheExport>(
         ExactMeshingDagRun {
             geometry: &geometry,
             request,
+            ceilings,
             artifact_access: access,
             capability_cohort: Some(platform.capability_cohort.clone()),
             program_revision: program.recipe.program_revision.clone(),
@@ -109,6 +111,9 @@ pub fn materialize_and_mesh_serial<S: CacheImport + CacheExport>(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: runmat_meshing_core::NamedRegionEntities::from_resolved_regions(
+                &output.regions,
+            ),
         },
         &mut executor,
     )?;

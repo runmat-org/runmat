@@ -7,7 +7,9 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, SemanticStatePublicationSource, StructuralLinearWorkload,
 };
-use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
+use runmat_analysis_fea::planning::resource::{
+    recorded_static_solve_path, LocalExecutionPlan, StaticSolvePath, StaticSolveSelection,
+};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -50,6 +52,68 @@ pub struct StructuralSequencePreparation {
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
     pub local_execution: LocalExecutionPlan,
+    /// How each step's static solve path is chosen.
+    pub solve_selection: StructuralSequenceSolveSelection,
+}
+
+/// How a structural sequence chooses each step's static solve path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StructuralSequenceSolveSelection {
+    /// A fresh solve: every step chooses within min(authored ceiling, this machine's admitted
+    /// memory when known).
+    WithinCeiling { machine_memory_bytes: Option<u64> },
+    /// An imported completion: every solve step reproduces the path its admitted plan recorded,
+    /// whatever machine performs the import.
+    Recorded(BTreeMap<ProcedureStepId, StaticSolvePath>),
+}
+
+impl StructuralSequenceSolveSelection {
+    /// The paths recorded by a completed sequence's solve closures.
+    pub fn recorded(closures: &[StructuralSequenceResultClosure]) -> AnalysisBridgeResult<Self> {
+        let mut paths = BTreeMap::new();
+        for closure in closures {
+            match (&closure.node, closure.static_solve_path) {
+                (StructuralSequenceNode::Solve(step), Some(path)) => {
+                    if paths.insert(step.clone(), path).is_some() {
+                        return Err(AnalysisBridgeError::Invalid(
+                            "structural sequence closure records a solve path twice".into(),
+                        ));
+                    }
+                }
+                (StructuralSequenceNode::PublishState { .. }, None) => {}
+                (StructuralSequenceNode::Solve(_), None) => {
+                    return Err(AnalysisBridgeError::Invalid(
+                        "structural sequence solve closure records no static solve path".into(),
+                    ))
+                }
+                (StructuralSequenceNode::PublishState { .. }, Some(_)) => {
+                    return Err(AnalysisBridgeError::Invalid(
+                        "structural state publication closure records a solve path".into(),
+                    ))
+                }
+            }
+        }
+        Ok(Self::Recorded(paths))
+    }
+
+    fn for_step(&self, step: &ProcedureStepId) -> AnalysisBridgeResult<StaticSolveSelection> {
+        match self {
+            Self::WithinCeiling {
+                machine_memory_bytes,
+            } => Ok(StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: *machine_memory_bytes,
+            }),
+            Self::Recorded(paths) => paths
+                .get(step)
+                .copied()
+                .map(StaticSolveSelection::Recorded)
+                .ok_or_else(|| {
+                    AnalysisBridgeError::Invalid(format!(
+                        "imported structural sequence records no solve path for step {step:?}"
+                    ))
+                }),
+        }
+    }
 }
 
 pub struct PreparedStructuralSolveTask {
@@ -97,6 +161,8 @@ pub struct CompletedStructuralSequenceStep {
     pub numerical_receipt_objects: PreparedAnalysisObjects,
     pub resource_usage: Option<PreparedResourceUsage>,
     pub response: ProgramExecutionResponse,
+    /// The static solve path the step's admitted plan recorded.
+    pub static_solve_path: StaticSolvePath,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,6 +194,9 @@ pub struct CompletedStructuralSequence {
 pub struct StructuralSequenceResultClosure {
     pub node: StructuralSequenceNode,
     pub response: ProgramExecutionResponse,
+    /// The recorded static solve path of a solve node (`None` for state publications), so an
+    /// import re-prepares exactly the admitted plan instead of re-selecting on its own machine.
+    pub static_solve_path: Option<StaticSolvePath>,
 }
 
 impl CompletedStructuralSequence {
@@ -138,6 +207,7 @@ impl CompletedStructuralSequence {
             .map(|step| StructuralSequenceResultClosure {
                 node: StructuralSequenceNode::Solve(step.step_id.clone()),
                 response: step.response.clone(),
+                static_solve_path: Some(step.static_solve_path),
             });
         let states = self
             .states
@@ -148,6 +218,7 @@ impl CompletedStructuralSequence {
                     state_id: state.state_id.clone(),
                 },
                 response: state.response.clone(),
+                static_solve_path: None,
             });
         Ok(steps.chain(states).collect())
     }
@@ -339,6 +410,7 @@ impl StructuralSequenceCoordinator {
                 required_capabilities: self.preparation.required_capabilities.clone(),
                 accelerator_requests: self.preparation.accelerator_requests.clone(),
                 local_execution: self.preparation.local_execution,
+                solve_selection: self.preparation.solve_selection.for_step(step_id)?,
             })?;
             tasks.push(PreparedStructuralSolveTask {
                 node: StructuralSequenceNode::Solve(step_id.clone()),
@@ -486,7 +558,12 @@ impl StructuralSequenceCoordinator {
                     prepared,
                 });
             }
+            let static_solve_path = recorded_static_solve_path(&task.prepared.resource_plan)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "structural solve plan records no static solve path",
+                ))?;
             completed_steps.push(CompletedStructuralSequenceStep {
+                static_solve_path,
                 step_id: step_id.clone(),
                 host: task.prepared.host,
                 result_identity: imported.identity,

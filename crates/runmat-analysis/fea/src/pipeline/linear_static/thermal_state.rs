@@ -1,8 +1,6 @@
 //! Static physical consumption of an immutable, topology-bound thermal solution.
 
-use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, FormulationRequirement, ProcedureStep, ProcedureStepId,
-};
+use runmat_analysis_core::{AnalysisModel, AnalysisProcedure, ProcedureStep, ProcedureStepId};
 
 #[cfg(test)]
 mod qualification;
@@ -43,11 +41,7 @@ pub fn run_linear_static_from_thermal_state(
     options: LinearStaticSolveOptions,
     source: &CanonicalSemanticState,
 ) -> Result<ThermoelasticStaticResult, FeaRunError> {
-    let step = super::super::admission::require_structural(
-        model,
-        AnalysisProcedure::Static,
-        options.formulation_requirement,
-    )?;
+    let step = super::super::admission::require_structural(model, AnalysisProcedure::Static)?;
     let result = super::run_linear_static_with_constraint_plan(
         model,
         backend,
@@ -71,11 +65,7 @@ pub fn run_linear_static_from_thermal_state_with_prepared_constraint_plan(
     options: LinearStaticSolveOptions,
     input: PreparedThermoelasticStaticInput<'_>,
 ) -> Result<ThermoelasticStaticResult, FeaRunError> {
-    require_selected_step(
-        model,
-        input.consumer_step_id,
-        options.formulation_requirement,
-    )?;
+    require_selected_step(model, input.consumer_step_id)?;
     let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
         FeaRunError::InvalidModel(
             "thermal state consumption requires a canonical solver mesh".into(),
@@ -102,7 +92,6 @@ pub fn run_linear_static_from_thermal_state_with_prepared_constraint_plan(
 pub(super) fn require_selected_step<'a>(
     model: &'a AnalysisModel,
     step_id: &ProcedureStepId,
-    requirement: FormulationRequirement,
 ) -> Result<&'a ProcedureStep, FeaRunError> {
     runmat_analysis_core::validate_model_sequence(model)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
@@ -124,7 +113,7 @@ pub(super) fn require_selected_step<'a>(
             "selected thermal consumer must be a thermomechanical static procedure".into(),
         ));
     }
-    super::super::admission::require_structural_step(model, step, requirement)?;
+    super::super::admission::require_structural_step(model, step)?;
     Ok(step)
 }
 

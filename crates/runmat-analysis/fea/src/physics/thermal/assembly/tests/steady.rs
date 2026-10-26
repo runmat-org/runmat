@@ -1,5 +1,8 @@
 use super::*;
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel;
+//   boundary: Three components with prescribed/convection anchoring; removal of an anchor rejects
+//   coercivity. Does not exercise tied, periodic or affine jumps.
 #[test]
 fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each_anchor() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -21,13 +24,13 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                     .iter_mut()
                     .find(|face| face.face_id == 10 + 100 * component as u64)
                     .unwrap();
-                face.provenance.push(PersistentEntityId {
-                    kind: PersistentEntityKind::Face,
-                    source_topology_id: name.clone(),
-                    assembly_path: vec!["root".into()],
-                });
+                face.provenance.push(PersistentEntityId::new(
+                    PersistentEntityKind::Face,
+                    name.clone(),
+                    vec!["root".into()],
+                ));
                 face.provenance.sort();
-                let target = RegionTarget::boundary(name.clone());
+                let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name.clone())));
                 if mixed_anchors && component > 0 {
                     model.boundaries.push(AnalysisBoundary {
                         boundary_id: name,
@@ -56,7 +59,7 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                 assemble(
                     model,
                     &mesh,
-                    crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                    crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                         .unwrap()
                         .support(),
                     &RealizedExcitations::default(),
@@ -141,7 +144,7 @@ fn component_reference_preserves_dirichlet_contrasts_within_a_connected_body() {
         let mut assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),

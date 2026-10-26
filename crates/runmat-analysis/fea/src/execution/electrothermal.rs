@@ -9,12 +9,23 @@ use crate::{ComputeBackend, FeaThermalRunResult, ThermalProcedureControl};
 use runmat_analysis_core::{
     AnalysisExcitation, CoordinateFrame, ExcitationAction, ExcitationCase,
     ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
-    ExcitationKinematics, FormulationRequirement, ProjectionRequirement, SignalId,
+    ExcitationKinematics, ProjectionRequirement, SignalId,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
+mod coupled;
+pub use coupled::{
+    bind_element_heat_source, conductivity_at, electrical_part, element_temperatures, execute_coupled_electrothermal,
+    thermal_part, CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
+    ElectrothermalElectricalSample, ElectrothermalSweep,
+};
+mod operating_point;
+pub use operating_point::{
+    conduction_operating_temperatures, electrothermal_conduction_study, is_electrothermal_study, solve_electrothermal_heat_study,
+    ElectrothermalOperatingPoint,
+};
 mod transfer;
 pub use transfer::RetainedJouleHeatTransfer;
 mod source;
@@ -44,9 +55,7 @@ pub fn bind_retained_joule_heat(
 ) -> AnalysisExecutionResult<(RetainedJouleHeatTransfer, ThermalWorkload)> {
     electrical.validate()?;
     thermal.validate()?;
-    if electrical.formulation_requirement != FormulationRequirement::Experimental
-        || thermal.formulation_requirement != FormulationRequirement::Experimental
-        || thermal.backend != ComputeBackend::Cpu
+    if thermal.backend != ComputeBackend::Cpu
         || thermal.procedure != ThermalProcedureControl::Steady
         || !thermal.initial_fields.is_empty()
         || !thermal.model.excitations.is_empty()
@@ -66,7 +75,7 @@ pub fn bind_retained_joule_heat(
                     || !m.conductivity_frequency_response.is_empty()
             })
     {
-        return Err(invalid("one-way steady electrothermal composition requires experimental CPU constant-coefficient conduction and a source-free steady thermal target"));
+        return Err(invalid("one-way steady electrothermal composition requires CPU constant-coefficient conduction and a source-free steady thermal target"));
     }
     let transfer =
         RetainedJouleHeatTransfer::from_result(electrical, result, mesh, expected_result)?;

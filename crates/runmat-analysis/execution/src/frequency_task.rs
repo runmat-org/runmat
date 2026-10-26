@@ -45,6 +45,7 @@ pub struct StructuralFrequencyEntryPreparation {
 }
 
 pub struct StructuralFrequencyFanoutPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
     pub prestress_state: Option<PreparedAnalysisObjects>,
@@ -157,6 +158,7 @@ pub fn prepare_structural_frequency_fanout(
                     crate::prepared_input_resource_facts(&phase_inputs)?,
                     output,
                     crate::projected_output_set_resource_facts(),
+                    preparation.local_execution,
                 )
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             let resource_plan_objects = crate::prepare_analysis_objects(
@@ -314,6 +316,10 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
                 )?,
                 output_set: crate::projected_output_set_resource_facts(),
             },
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
     };

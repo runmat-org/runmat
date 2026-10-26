@@ -16,6 +16,9 @@ pub(super) fn solve_with_time(
     if crate::is_fea_cancelled() {
         return Err(Error::Cancelled);
     }
+    if p.policy.pressure_velocity_coupling == super::PressureVelocityCoupling::Coupled {
+        return super::coupled::solve_with_time(p, initial, time, numerical_input_identity);
+    }
     let n = p.topology.cells.len();
     let (mut u, mut pressure_fluctuation, mut q) = match initial {
         Some(fields) => (
@@ -31,6 +34,8 @@ pub(super) fn solve_with_time(
     };
     let mut linear_iterations = 0;
     let mut last = [f64::INFINITY; 5];
+    let mut worst = String::from("not evaluated");
+    let mut first_worst: Option<f64> = None;
     let mut acceleration_history = None;
     for iteration in 1..=p.policy.maximum_outer_iterations {
         if crate::is_fea_cancelled() {
@@ -48,7 +53,8 @@ pub(super) fn solve_with_time(
         for k in 0..3 {
             let b = m.rhs.iter().map(|v| v[k]).collect::<Vec<_>>();
             let current = u.iter().map(|v| v[k]).collect::<Vec<_>>();
-            let (x, count) = linear::solve(p, &m.matrix, &b, &current)?;
+            let (x, count) =
+                linear::solve(p, &m.matrix, &b, &current, linear::LinearSystem::Momentum)?;
             linear_iterations += count;
             for c in 0..n {
                 predicted[c][k] = x[c];
@@ -131,6 +137,9 @@ pub(super) fn solve_with_time(
                 .copied()
                 .fold(0.0, f64::max),
         ];
+        let (worst_relative, description) = recovery::describe_worst_cell(p, &residual);
+        let first = *first_worst.get_or_insert(worst_relative);
+        worst = format!("{description}; it was {first:e} at the first evaluated step");
         if residual.accepted(p.policy.physical_relative_tolerance) {
             let pressure_pa = pressure_fluctuation
                 .iter()
@@ -183,5 +192,6 @@ pub(super) fn solve_with_time(
         flux_constitutive_relative: last[2],
         global_momentum_relative: last[3],
         maximum_cell_momentum_relative: last[4],
+        worst_cell: worst,
     })
 }

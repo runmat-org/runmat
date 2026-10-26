@@ -22,9 +22,10 @@ use super::{
     structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
-    ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
-    PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, ResourcePlanningError,
-    SolveResourcePolicy, StructuralModalResponseSpectrumAssemblyResourceDemand,
+    LocalExecutionPlan, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
+    PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
+    ResourcePlanningError, SolveResourcePolicy,
+    StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralModalResponseSpectrumDirectionResourceDemand, StructuralOperatorResourceDemand,
     WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
@@ -68,11 +69,29 @@ pub struct StructuralModalResponseSpectrumResourceProjection {
     linear_field_value_count_upper_bound: u64,
     missing_mass_reduced_dof_count: u64,
     missing_mass_system_workspace_bytes_upper_bound: u64,
-    worker: WorkerResourcePolicy,
+    maximum_wall_milliseconds: u64,
     accuracy_ceiling: runmat_analysis_core::AccuracyResourceCeiling,
 }
 
 impl StructuralModalResponseSpectrumResourceProjection {
+    /// One worker sized by the admitted local execution plan; the projection itself is
+    /// thread-independent so one projection serves every scheduled phase.
+    fn worker(
+        &self,
+        local_execution: LocalExecutionPlan,
+    ) -> Result<WorkerResourcePolicy, ResourcePlanningError> {
+        Ok(WorkerResourcePolicy {
+            cpu_millicores: local_execution
+                .checked_cpu_millicores()
+                .map_err(invalid_error)?,
+            maximum_wall_milliseconds: self.maximum_wall_milliseconds,
+            fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
+            fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
+            required_capabilities: BTreeSet::new(),
+            accelerators: Vec::new(),
+        })
+    }
+
     pub fn new(
         mesh: &SolverMeshArtifact,
         constraints: &CanonicalStructuralConstraintPlan,
@@ -242,14 +261,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
             linear_field_value_count_upper_bound,
             missing_mass_reduced_dof_count,
             missing_mass_system_workspace_bytes_upper_bound,
-            worker: WorkerResourcePolicy {
-                cpu_millicores: 1_000,
-                maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
-                fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
-                fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
-                required_capabilities: BTreeSet::new(),
-                accelerators: Vec::new(),
-            },
+            maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             accuracy_ceiling: step.accuracy.resources,
         })
     }
@@ -260,6 +272,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
         inputs: PreparedInputResourceFacts,
         output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
+        local_execution: LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request
             .validate_for(&self.workload)
@@ -360,7 +373,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
                 },
             ),
             output_set: Some(output_set),
-            worker: self.worker.clone(),
+            worker: self.worker(local_execution)?,
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }
@@ -371,6 +384,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
         inputs: PreparedInputResourceFacts,
         outputs: PreparedStructuralResponseSpectrumAssemblyOutputs,
         output_set: PreparedOutputSetResourceFacts,
+        local_execution: LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         let PreparedStructuralResponseSpectrumAssemblyOutputs {
             result: result_output,
@@ -508,7 +522,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
                 },
             ),
             output_set: Some(output_set),
-            worker: self.worker.clone(),
+            worker: self.worker(local_execution)?,
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }

@@ -131,7 +131,7 @@ mod tests {
     use super::ProcedureTimeGrid;
 
     fn time_step(start: f64, end: f64) -> ProcedureStep {
-        ProcedureStep::experimental(
+        ProcedureStep::new(
             "transient",
             PhysicsFamily::Structural,
             AnalysisProcedure::TransientResponse,

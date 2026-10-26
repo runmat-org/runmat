@@ -85,7 +85,6 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
     let completed = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         options.clone(),
         context,
     )
@@ -109,7 +108,6 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
         execution: AnalysisExecutionStep {
             step_id: ProcedureStepId("response".into()),
             backend: ComputeBackend::Cpu,
-            requirement: FormulationRequirement::Experimental,
             solver_options: AnalysisSolverOptions::StructuralTransient(options),
         },
         identity: run.run.identity.clone(),
@@ -118,11 +116,9 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
         run_id: run.run_id.clone(),
         run_status: run.run_status,
         numerically_acceptable: run.numerically_acceptable,
-        production_publishable: run.production_publishable,
         solver_convergence: run.solver_convergence,
         result_quality: run.result_quality,
         quality_reasons: run.quality_reasons.clone(),
-        production_publication_reasons: run.production_publication_reasons.clone(),
         provenance: run.provenance.clone(),
         numerical_result: AnalysisStudyStepNumericalResultData::Standard,
         evidence_artifact_path: String::new(),

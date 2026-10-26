@@ -100,19 +100,5 @@ pub(crate) fn volume_shape(
     (values, derivatives)
 }
 
-pub(crate) fn tensor_tetrahedron_rule(
-    rule: &[(f64, f64)],
-) -> impl Iterator<Item = ([f64; 4], f64)> + '_ {
-    rule.iter().flat_map(move |&(r, rw)| {
-        rule.iter().flat_map(move |&(s, sw)| {
-            rule.iter().map(move |&(t, tw)| {
-                let a = 1.0 - r;
-                let b = 1.0 - s;
-                (
-                    [a * b * (1.0 - t), r, a * s, a * b * t],
-                    rw * sw * tw * a * a * b,
-                )
-            })
-        })
-    })
-}
+// The collapsed tensor rule is owned by meshing core with the Tet10 element-validity rule.
+pub(crate) use runmat_meshing_core::tensor_tetrahedron_rule;

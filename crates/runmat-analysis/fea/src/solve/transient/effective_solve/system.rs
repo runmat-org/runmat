@@ -23,6 +23,7 @@ impl EffectiveLinearSystem<'_> {
             operator: &self.operator,
             constraint_matrix: self.constraint_matrix.as_ref(),
             affine_constraint_reduction: self.affine_constraint_reduction.as_ref(),
+            planned_reduced_support: None,
         }
     }
 }

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -59,7 +60,12 @@ double admitted_parameter(double value,
     value = start + offset;
   }
   if (value < start - tolerance || value > end + tolerance) {
-    throw std::runtime_error("OCCT exact surface parameter is outside the face domain");
+    std::ostringstream message;
+    message.precision(17);
+    message << "OCCT exact surface parameter is outside the face domain: " << role << " "
+            << value << " outside [" << start << ", " << end << "]"
+            << (periodic ? " (periodic)" : "");
+    throw std::runtime_error(message.str());
   }
   return std::clamp(value, start, end);
 }

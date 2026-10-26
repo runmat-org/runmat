@@ -1,9 +1,9 @@
 use super::*;
 use crate::analysis_kernel::NativeAnalysisKernel;
 use runmat_analysis_core::{
-    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, FormulationRequirement,
-    Frequency, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep,
-    ProcedureStepId, PropertyRegionTarget, RegionTarget,
+    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, Frequency, IndependentDomain,
+    MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep, ProcedureStepId,
+    PropertyRegionTarget, RegionTarget,
 };
 use runmat_analysis_execution::{
     prepare_acoustic_harmonic_task, AcousticHarmonicTaskPreparation, AnalysisKernel,
@@ -55,6 +55,26 @@ fn task_with_boundary(
     SolverMeshArtifact,
     PreparedAcousticHarmonicTask,
 ) {
+    task_with_threads(
+        order,
+        chunk,
+        constraint_name,
+        radiation,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+    )
+}
+
+fn task_with_threads(
+    order: ElementOrder,
+    chunk: usize,
+    constraint_name: &str,
+    radiation: bool,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+) -> (
+    AcousticHarmonicWorkload,
+    SolverMeshArtifact,
+    PreparedAcousticHarmonicTask,
+) {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
     );
@@ -69,7 +89,7 @@ fn task_with_boundary(
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.sequence.steps = vec![step];
@@ -79,7 +99,7 @@ fn task_with_boundary(
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: format!("{constraint_name}:{face}"),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                     value: PrescribedValue::Constant(Pressure::new(1.0)),
                 },
             }));
@@ -88,7 +108,7 @@ fn task_with_boundary(
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "matched".into(),
-            target: RegionTarget::boundary("face:3"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")),
             operator: if radiation {
                 runmat_analysis_core::BoundaryOperator::AcousticRadiation
             } else {
@@ -101,18 +121,13 @@ fn task_with_boundary(
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
-        solver: AcousticHarmonicPolicy {
-            uniqueness: Some(
-                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            ),
-            ..Default::default()
-        },
+        solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     };
     let mesh = canonical_tetrahedron_solver_mesh(order);
     let digest = Digest::sha256("acoustic-native-test");
     let prepared = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+        local_execution,
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(
@@ -362,26 +377,25 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
     .is_err());
 }
 
+// witness: FEA-ACOUSTIC-EXECUTION-001/admission @ acoustic_harmonic/tet4/native_process;
+//   boundary: Tet4 native worker plan substitution rejection; not measured RSS, whole-family
+//   lifetime or complete cancellation evidence.
 #[test]
 fn native_acoustic_rejects_valid_but_substituted_resource_plan() {
-    for substitution in 0..3 {
+    for substitution in 0..2 {
         let (_, _, mut task) = task(ElementOrder::Tet4, 1024);
         let mut input = task.resource_plan.input.clone();
         match substitution {
             0 => input.worker.fixed_memory_bytes.0 += 1,
-            1 | 2 => {
+            1 => {
                 let runmat_analysis_fea::planning::resource::FeaResourceDemand::AcousticHarmonic(
                     demand,
                 ) = &mut input.demand
                 else {
                     panic!("acoustic demand")
                 };
-                let proof = demand.uniqueness.as_mut().unwrap();
-                if substitution == 1 {
-                    proof.resident_bytes -= 1;
-                } else {
-                    proof.scalar_operations -= 1;
-                }
+                // A larger, still self-consistent reservation is a different plan identity.
+                demand.numerical_reservation_bytes.0 += 1;
             }
             _ => unreachable!(),
         }
@@ -461,4 +475,35 @@ fn native_acoustic_rejects_wrong_output_and_execution_identity() {
             output_policy: policy
         })
         .is_err());
+}
+
+#[test]
+fn native_acoustic_plan_carries_admitted_threads_and_kernel_runs_on_that_pool() {
+    let threads =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(2_000)
+            .unwrap();
+    let (workload, mesh, task) =
+        task_with_threads(ElementOrder::Tet4, 1024, "pressure", false, threads);
+    assert_eq!(task.resource_plan.request.cpu_millicores, 2_000);
+    let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
+    assert_eq!(
+        rederive_acoustic_harmonic_resource_plan(&workload, &mesh, &task.inputs, policy).unwrap(),
+        task.resource_plan
+    );
+    let threaded = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::SolveAcousticHarmonic,
+            host: &task.host,
+            inputs: &task.inputs,
+            output_policy: policy,
+        })
+        .unwrap();
+    let objects = threaded
+        .into_iter()
+        .next()
+        .unwrap()
+        .into_prepared(1024, ObjectInventoryLimits::default())
+        .unwrap();
+    let result = AcousticHarmonicSolverResult::from_canonical_bytes(&objects.payload()).unwrap();
+    result.validate_for(&workload, &mesh).unwrap();
 }

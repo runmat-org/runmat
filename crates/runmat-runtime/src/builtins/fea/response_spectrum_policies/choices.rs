@@ -1,232 +1,155 @@
 use super::*;
 
-noarg_policy!(
+/// Closed response-spectrum choices. Descriptors and documentation are owned by
+/// the catalog entries under `fea/policy_types/choices/spectrum`.
+macro_rules! spectrum_choice {
+    ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
+        #[runtime_builtin(
+                    name = $builtin,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::response_spectrum_policies::choices"
+                )]
+        pub async fn $function() -> BuiltinResult<Value> {
+            typed_value($builtin, $class, $value)
+        }
+    };
+}
+
+spectrum_choice!(
     response_relative_displacement,
-    RESPONSE_RD_DESCRIPTOR,
-    RESPONSE_RD_SIGNATURES,
     "fea.SpectrumResponse.relativeDisplacement",
-    "response = fea.SpectrumResponse.relativeDisplacement()",
-    "Select relative-displacement response.",
     RESPONSE_CLASS,
-    SpectrumResponse::RelativeDisplacement
+    SpectrumResponse::RelativeDisplacement,
 );
-noarg_policy!(
+spectrum_choice!(
     response_relative_velocity,
-    RESPONSE_RV_DESCRIPTOR,
-    RESPONSE_RV_SIGNATURES,
     "fea.SpectrumResponse.relativeVelocity",
-    "response = fea.SpectrumResponse.relativeVelocity()",
-    "Select relative-velocity response.",
     RESPONSE_CLASS,
-    SpectrumResponse::RelativeVelocity
+    SpectrumResponse::RelativeVelocity,
 );
-noarg_policy!(
+spectrum_choice!(
     response_relative_acceleration,
-    RESPONSE_RA_DESCRIPTOR,
-    RESPONSE_RA_SIGNATURES,
     "fea.SpectrumResponse.relativeAcceleration",
-    "response = fea.SpectrumResponse.relativeAcceleration()",
-    "Select relative-acceleration response.",
     RESPONSE_CLASS,
-    SpectrumResponse::RelativeAcceleration
+    SpectrumResponse::RelativeAcceleration,
 );
-noarg_policy!(
+spectrum_choice!(
     response_absolute_acceleration,
-    RESPONSE_AA_DESCRIPTOR,
-    RESPONSE_AA_SIGNATURES,
     "fea.SpectrumResponse.absoluteAcceleration",
-    "response = fea.SpectrumResponse.absoluteAcceleration()",
-    "Select absolute-acceleration response.",
     RESPONSE_CLASS,
-    SpectrumResponse::AbsoluteAcceleration
+    SpectrumResponse::AbsoluteAcceleration,
 );
-noarg_policy!(
+spectrum_choice!(
     response_pseudo_velocity,
-    RESPONSE_PV_DESCRIPTOR,
-    RESPONSE_PV_SIGNATURES,
     "fea.SpectrumResponse.pseudoVelocity",
-    "response = fea.SpectrumResponse.pseudoVelocity()",
-    "Select pseudo-velocity response.",
     RESPONSE_CLASS,
-    SpectrumResponse::PseudoVelocity
+    SpectrumResponse::PseudoVelocity,
 );
-noarg_policy!(
+spectrum_choice!(
     response_pseudo_acceleration,
-    RESPONSE_PA_DESCRIPTOR,
-    RESPONSE_PA_SIGNATURES,
     "fea.SpectrumResponse.pseudoAcceleration",
-    "response = fea.SpectrumResponse.pseudoAcceleration()",
-    "Select pseudo-acceleration response.",
     RESPONSE_CLASS,
-    SpectrumResponse::PseudoAcceleration
+    SpectrumResponse::PseudoAcceleration,
 );
-noarg_policy!(
+spectrum_choice!(
     envelope_positive,
-    ENVELOPE_POS_DESCRIPTOR,
-    ENVELOPE_POS_SIGNATURES,
     "fea.SpectrumEnvelope.positive",
-    "envelope = fea.SpectrumEnvelope.positive()",
-    "Select the positive response envelope.",
     ENVELOPE_CLASS,
-    SpectrumEnvelope::Positive
+    SpectrumEnvelope::Positive,
 );
-noarg_policy!(
+spectrum_choice!(
     envelope_negative,
-    ENVELOPE_NEG_DESCRIPTOR,
-    ENVELOPE_NEG_SIGNATURES,
     "fea.SpectrumEnvelope.negative",
-    "envelope = fea.SpectrumEnvelope.negative()",
-    "Select the negative response envelope.",
     ENVELOPE_CLASS,
-    SpectrumEnvelope::Negative
+    SpectrumEnvelope::Negative,
 );
-noarg_policy!(
+spectrum_choice!(
     envelope_maximax,
-    ENVELOPE_MAX_DESCRIPTOR,
-    ENVELOPE_MAX_SIGNATURES,
     "fea.SpectrumEnvelope.maximax",
-    "envelope = fea.SpectrumEnvelope.maximax()",
-    "Select the maximax response envelope.",
     ENVELOPE_CLASS,
-    SpectrumEnvelope::Maximax
+    SpectrumEnvelope::Maximax,
 );
-noarg_policy!(
+spectrum_choice!(
     interpolation_frequency,
-    INTERP_FREQ_DESCRIPTOR,
-    INTERP_FREQ_SIGNATURES,
     "fea.SpectrumInterpolation.linearFrequency",
-    "interpolation = fea.SpectrumInterpolation.linearFrequency()",
-    "Select linear interpolation in frequency.",
     INTERPOLATION_CLASS,
-    SpectrumInterpolation::LinearFrequency
+    SpectrumInterpolation::LinearFrequency,
 );
-noarg_policy!(
+spectrum_choice!(
     interpolation_period,
-    INTERP_PERIOD_DESCRIPTOR,
-    INTERP_PERIOD_SIGNATURES,
     "fea.SpectrumInterpolation.linearPeriod",
-    "interpolation = fea.SpectrumInterpolation.linearPeriod()",
-    "Select linear interpolation in period.",
     INTERPOLATION_CLASS,
-    SpectrumInterpolation::LinearPeriod
+    SpectrumInterpolation::LinearPeriod,
 );
-noarg_policy!(
+spectrum_choice!(
     interpolation_loglog,
-    INTERP_LOG_DESCRIPTOR,
-    INTERP_LOG_SIGNATURES,
     "fea.SpectrumInterpolation.logLog",
-    "interpolation = fea.SpectrumInterpolation.logLog()",
-    "Select log-log spectrum interpolation.",
     INTERPOLATION_CLASS,
-    SpectrumInterpolation::LogLog
+    SpectrumInterpolation::LogLog,
 );
-noarg_policy!(
+spectrum_choice!(
     extrapolation_reject,
-    EXTRAP_REJECT_DESCRIPTOR,
-    EXTRAP_REJECT_SIGNATURES,
     "fea.SpectrumExtrapolation.reject",
-    "extrapolation = fea.SpectrumExtrapolation.reject()",
-    "Reject response-spectrum extrapolation.",
     EXTRAPOLATION_CLASS,
-    SpectrumExtrapolation::Reject
+    SpectrumExtrapolation::Reject,
 );
-noarg_policy!(
+spectrum_choice!(
     extrapolation_hold,
-    EXTRAP_HOLD_DESCRIPTOR,
-    EXTRAP_HOLD_SIGNATURES,
     "fea.SpectrumExtrapolation.holdEndpoint",
-    "extrapolation = fea.SpectrumExtrapolation.holdEndpoint()",
-    "Hold the response-spectrum endpoint when extrapolating.",
     EXTRAPOLATION_CLASS,
-    SpectrumExtrapolation::HoldEndpoint
+    SpectrumExtrapolation::HoldEndpoint,
 );
-noarg_policy!(
+spectrum_choice!(
     modal_srss,
-    MODAL_SRSS_DESCRIPTOR,
-    MODAL_SRSS_SIGNATURES,
     "fea.ModalCombination.srss",
-    "combination = fea.ModalCombination.srss()",
-    "Select square-root-of-sum-of-squares modal combination.",
     MODAL_COMBINATION_CLASS,
-    ModalCombination::Srss
+    ModalCombination::Srss,
 );
-noarg_policy!(
+spectrum_choice!(
     modal_cqc,
-    MODAL_CQC_DESCRIPTOR,
-    MODAL_CQC_SIGNATURES,
     "fea.ModalCombination.completeQuadratic",
-    "combination = fea.ModalCombination.completeQuadratic()",
-    "Select complete-quadratic modal combination.",
     MODAL_COMBINATION_CLASS,
-    ModalCombination::CompleteQuadraticCombination
+    ModalCombination::CompleteQuadraticCombination,
 );
-noarg_policy!(
+spectrum_choice!(
     modal_ten_percent,
-    MODAL_TEN_DESCRIPTOR,
-    MODAL_TEN_SIGNATURES,
     "fea.ModalCombination.tenPercent",
-    "combination = fea.ModalCombination.tenPercent()",
-    "Select the ten-percent modal combination rule.",
     MODAL_COMBINATION_CLASS,
-    ModalCombination::TenPercent
+    ModalCombination::TenPercent,
 );
-noarg_policy!(
+spectrum_choice!(
     modal_absolute_sum,
-    MODAL_ABS_DESCRIPTOR,
-    MODAL_ABS_SIGNATURES,
     "fea.ModalCombination.absoluteSum",
-    "combination = fea.ModalCombination.absoluteSum()",
-    "Select absolute modal summation.",
     MODAL_COMBINATION_CLASS,
-    ModalCombination::AbsoluteSum
+    ModalCombination::AbsoluteSum,
 );
-noarg_policy!(
+spectrum_choice!(
     directional_srss,
-    DIR_SRSS_DESCRIPTOR,
-    DIR_SRSS_SIGNATURES,
     "fea.DirectionalCombination.srss",
-    "combination = fea.DirectionalCombination.srss()",
-    "Select SRSS directional combination.",
     DIRECTIONAL_COMBINATION_CLASS,
-    DirectionalCombination::Srss
+    DirectionalCombination::Srss,
 );
-noarg_policy!(
+spectrum_choice!(
     directional_absolute_sum,
-    DIR_ABS_DESCRIPTOR,
-    DIR_ABS_SIGNATURES,
     "fea.DirectionalCombination.absoluteSum",
-    "combination = fea.DirectionalCombination.absoluteSum()",
-    "Select absolute directional summation.",
     DIRECTIONAL_COMBINATION_CLASS,
-    DirectionalCombination::AbsoluteSum
+    DirectionalCombination::AbsoluteSum,
 );
-noarg_policy!(
+spectrum_choice!(
     truncation_correction_none,
-    CORRECTION_NONE_DESCRIPTOR,
-    CORRECTION_NONE_SIGNATURES,
     "fea.ModalTruncationCorrection.none",
-    "correction = fea.ModalTruncationCorrection.none()",
-    "Disable high-frequency truncation correction.",
     TRUNCATION_CORRECTION_CLASS,
-    ModalTruncationCorrection::None
+    ModalTruncationCorrection::None,
 );
-noarg_policy!(
+spectrum_choice!(
     truncation_correction_residual_mode,
-    CORRECTION_RESIDUAL_DESCRIPTOR,
-    CORRECTION_RESIDUAL_SIGNATURES,
     "fea.ModalTruncationCorrection.residualMode",
-    "correction = fea.ModalTruncationCorrection.residualMode()",
-    "Request a load-dependent residual mode.",
     TRUNCATION_CORRECTION_CLASS,
-    ModalTruncationCorrection::ResidualMode
+    ModalTruncationCorrection::ResidualMode,
 );
-noarg_policy!(
+spectrum_choice!(
     rigid_response_disabled,
-    RIGID_DISABLED_DESCRIPTOR,
-    RIGID_DISABLED_SIGNATURES,
     "fea.RigidResponse.disabled",
-    "policy = fea.RigidResponse.disabled()",
-    "Disable rigid-response separation.",
     RIGID_RESPONSE_CLASS,
-    RigidResponsePolicy::Disabled
+    RigidResponsePolicy::Disabled,
 );

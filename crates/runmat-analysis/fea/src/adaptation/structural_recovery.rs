@@ -431,6 +431,6 @@ fn checkpoint(
 }
 
 #[cfg(test)]
-mod qualification_tests;
+pub(crate) mod qualification_tests;
 #[cfg(test)]
 mod tests;

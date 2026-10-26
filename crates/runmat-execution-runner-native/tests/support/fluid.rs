@@ -31,11 +31,13 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     model.sequence =
         AnalysisSequence::from_steps("native-fluid", vec![ProcedureStep::fluid_static("steady")]);
@@ -50,12 +52,12 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
             constraint_id: "wall".into(),
             kind: if nonzero {
                 FluidConstraintKind::MovingWall {
-                    target: RegionTarget::boundary("slab_insulated"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
                     velocity: PrescribedValue::Constant(velocity),
                 }
             } else {
                 FluidConstraintKind::NoSlipWall {
-                    target: RegionTarget::boundary("slab_insulated"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
                 }
             },
         }));
@@ -64,13 +66,13 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant(velocity),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(reference_pa)),
         },
@@ -109,8 +111,8 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
@@ -125,11 +127,11 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
             maximum_authority_items: 100,
         },
         geometry_policy: FiniteVolumeProjectionPolicy {
-            max_cells: 100,
-            max_face_incidences: 400,
-            max_boundary_faces: 400,
-            max_scratch_bytes: 10_000_000,
-            max_traversal_operations: 1_000_000,
+            max_cells: Some(100),
+            max_face_incidences: Some(400),
+            max_boundary_faces: Some(400),
+            max_scratch_bytes: Some(10_000_000),
+            max_traversal_operations: Some(1_000_000),
         },
     };
     (workload, mesh)

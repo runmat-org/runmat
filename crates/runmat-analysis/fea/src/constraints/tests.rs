@@ -44,11 +44,11 @@ fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -70,7 +70,7 @@ fn plan_is_invariant_to_authored_constraint_order() {
             constraint_id: constraint_id.into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 translations: vec![TranslationDofValue {
                     dof,
                     value: PrescribedValue::Constant(Displacement::new(meters)),
@@ -125,7 +125,7 @@ fn unsupported_frame_fails_and_equivalent_overlaps_are_evidenced() {
     let mut framed = structural.clone();
     framed.frame = CoordinateFrame::Material;
     framed.kind = StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-        target: RegionTarget::boundary("root"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
         translations: vec![TranslationDofValue {
             dof: StructuralTranslationDof::Ux,
             value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -224,7 +224,7 @@ fn symmetry_uses_outward_geometry_normals_on_one_persistent_face() {
         constraint_id: "symmetry_plane".into(),
         frame: CoordinateFrame::BoundaryNormalTangent,
         kind: StructuralConstraintKind::Symmetry {
-            target: RegionTarget::boundary(face_entity),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_entity))),
         },
     })];
 
@@ -249,7 +249,7 @@ fn symmetry_uses_outward_geometry_normals_on_one_persistent_face() {
 #[test]
 fn fixed_constraint_projects_a_logical_region_bound_to_multiple_faces() {
     let (mut model, mesh) = model_and_mesh();
-    let mut target = RegionTarget::boundary("mounting-surfaces");
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("mounting-surfaces"));
     target
         .bind_resolved_entities(vec![
             mesh.topology.boundary_faces[0].provenance[0].clone(),
@@ -272,6 +272,10 @@ fn fixed_constraint_projects_a_logical_region_bound_to_multiple_faces() {
     assert_eq!(plan.rows.len(), selected_nodes.len() * 3);
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/normal_symmetry_rigid_coupling @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: Normal displacement and antisymmetry compile distinct normal and tangent spaces on a
+//   fixture mesh (Tet4).
 #[test]
 fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces() {
     let (mut model, mesh) = model_and_mesh();
@@ -282,7 +286,7 @@ fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces()
         .unwrap()
         .source_topology_id
         .clone();
-    let target = RegionTarget::boundary(face_entity);
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_entity)));
     model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
         constraint_id: "normal_offset".into(),
         frame: CoordinateFrame::BoundaryNormalTangent,
@@ -415,7 +419,7 @@ fn geometric_tie_projects_secondary_node_to_primary_surface() {
         constraint_id: "surface_tie".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Tie(PairedConstraint {
-            primary: RegionTarget::boundary(primary),
+            primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(primary))),
             secondary: RegionTarget::point("node:4"),
             pairing: PairingPolicy::GeometricTolerance(Length::new(0.02)),
         }),
@@ -443,7 +447,7 @@ fn rigid_coupling_compiles_mesh_motion_against_six_reference_dofs() {
         constraint_id: "rigid_end".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             reference_point: ReferencePoint {
                 reference_point_id: "control".into(),
                 position: Position::new([0.25, 0.25, 0.25]),
@@ -481,7 +485,7 @@ fn distributing_coupling_uses_area_weights_and_six_resultant_relations() {
         constraint_id: "distributed_end".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-            target: RegionTarget::boundary(face),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
             reference_point: ReferencePoint {
                 reference_point_id: "control".into(),
                 position: Position::new([0.25, 0.25, 0.0]),
@@ -556,7 +560,7 @@ fn conflicting_prescriptions_fail_with_both_constraint_identities() {
                 constraint_id: constraint_id.into(),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                    target: RegionTarget::boundary("root"),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                     translations: vec![TranslationDofValue {
                         dof: StructuralTranslationDof::Ux,
                         value: PrescribedValue::Constant(Displacement::new(meters)),
@@ -650,6 +654,9 @@ fn prescribed_constraint(
     })
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A general equation compiles to one canonical sparse row.
 #[test]
 fn general_equation_compiles_to_one_canonical_sparse_row() {
     let (mut model, mesh) = model_and_mesh();
@@ -695,6 +702,10 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
     assert_eq!(matrix.right_hand_side, vec![0.01]);
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/compatible_enforcement @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A dense global equation selects multiplier enforcement before any affine fill; direct
+//   elimination and penalty selection are separate cases.
 #[test]
 fn dense_global_equation_selects_multiplier_enforcement_before_affine_fill() {
     let constraint = equation_constraint("global", 1, 2, 0.0);
@@ -793,6 +804,9 @@ mod curved_normals;
 #[path = "tests/normal_solve.rs"]
 mod normal_solve;
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A canonical solid solve enforces an affine equation and recovers reactions.
 #[test]
 fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     let (mut model, mesh) = model_and_mesh();
@@ -1064,7 +1078,7 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
     assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     assert_eq!(
         solve.solver_method,
-        crate::contracts::SolverMethod::MatrixFreeSaddlePointGmres
+        crate::contracts::SolverMethod::SparseDirectCholesky
     );
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-9);
     let execution = crate::planning::resource::LocalExecutionPlan::fixed(
@@ -1193,7 +1207,7 @@ fn multiplier_solver_rejects_an_unremoved_mechanism_before_iteration() {
         solve
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "FEA_INVALID_MULTIPLIER_SOLVER_ADMISSION"),
+            .any(|diagnostic| diagnostic.code == "FEA_INVALID_AFFINE_SOLVER_ADMISSION"),
         "{:?}",
         solve.diagnostics
     );
@@ -1470,6 +1484,9 @@ fn transient_direct_prescription_refinement_is_scale_consistent() {
     }
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/nonlinear_inequality_state @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Nonlinear accepted states preserve complete constraint kinematics.
 #[test]
 fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
     for lifting in [0.0, 0.001] {
@@ -1518,7 +1535,6 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
             &model,
             &summary,
             &NonlinearSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 increment_count: 2,
                 max_newton_iters: 8,
                 solver_mesh: Some(mesh),
@@ -1526,14 +1542,9 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
             },
             ComputeBackend::Cpu,
         );
-        if lifting != 0.0 {
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("nonzero initial lifting"));
-            continue;
-        }
-        let result = result.expect("homogeneous affine constraints admit actual solid equilibrium");
+        // Prescribed (affine) supports scale with the load factor like the applied loads, so a
+        // nonzero lifting is reached at load factor one through admissible increments.
+        let result = result.expect("affine constraints admit actual solid equilibrium");
         assert_eq!(result.displacement_snapshots.len(), 2);
         assert!(result
             .displacement_snapshots
@@ -1541,7 +1552,11 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
             .unwrap()
             .iter()
             .any(|value| value.abs() > 0.0));
-        for state in &result.displacement_snapshots {
+        for (state, load_factor) in result
+            .displacement_snapshots
+            .iter()
+            .zip(&result.load_factors)
+        {
             for row in 0..constraints.row_count() {
                 let start = constraints.row_offsets[row];
                 let end = constraints.row_offsets[row + 1];
@@ -1550,16 +1565,85 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
                     .zip(&constraints.coefficients[start..end])
                     .map(|(column, coefficient)| coefficient * state[*column])
                     .sum::<f64>();
+                let expected = load_factor * constraints.right_hand_side[row];
                 assert!(
-                    (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
-                    "row {row} expected={} actual={value}",
-                    constraints.right_hand_side[row]
+                    (value - expected).abs() <= 1.0e-8,
+                    "row {row} expected={expected} actual={value}"
                 );
             }
         }
     }
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet4/public_study; coverage: partial;
+//   boundary: The linear static pipeline admits and solves a reference-point wrench through a
+//   distributing coupling under its preflight solver admission. Resultant accuracy is covered by
+//   the kernel test below; rigid couplings and other procedures are not exercised.
+#[test]
+fn preflight_admits_a_reference_point_wrench_through_distributing_coupling() {
+    let (mut model, mesh) = model_and_mesh();
+    let boundary_ids = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            face.provenance
+                .iter()
+                .find(|entity| entity.source_topology_id != "root")
+                .unwrap()
+                .source_topology_id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    model.constraints = vec![
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "anchor".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Fixed {
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0]))),
+            },
+        }),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "remote_load".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3]))),
+                reference_point: ReferencePoint {
+                    reference_point_id: "control".into(),
+                    position: Position::new([1.0 / 3.0; 3]),
+                },
+            }),
+        }),
+    ];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "remote_wrench".into(),
+            region_id: "control".into(),
+            kind: FixtureExcitationKind::Wrench {
+                force: [10.0, 0.0, 0.0],
+                moment: [0.0, 1.0, 0.0],
+                point_m: [1.0 / 3.0; 3],
+            },
+        }],
+    );
+
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        crate::LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..crate::LinearStaticSolveOptions::default()
+        },
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+}
+
+
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A reference-point wrench solves through distributing coupling on a fixture solid.
 #[test]
 fn reference_point_wrench_solves_through_distributing_coupling() {
     let (mut model, mesh) = model_and_mesh();
@@ -1581,14 +1665,14 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
             constraint_id: "anchor".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Fixed {
-                target: RegionTarget::boundary(&boundary_ids[0]),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0]))),
             },
         }),
         AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "remote_load".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-                target: RegionTarget::boundary(&boundary_ids[3]),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3]))),
                 reference_point: ReferencePoint {
                     reference_point_id: "control".into(),
                     position: Position::new([1.0 / 3.0; 3]),

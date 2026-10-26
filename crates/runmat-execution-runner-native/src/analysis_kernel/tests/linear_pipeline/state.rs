@@ -175,6 +175,9 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     let warm_outputs = NativeAnalysisKernel
@@ -277,7 +280,6 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh.clone()),
             ..ThermalSolveOptions::default()

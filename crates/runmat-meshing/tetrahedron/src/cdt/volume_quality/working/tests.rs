@@ -34,6 +34,12 @@ fn materialize(
     .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Uniform and scoped insertion trials compare every quality field and both ranking
+//   spectra with full canonical evaluation through new identity orderings. Rollback restores
+//   original graph-slot ownership and quality. This finite family does not cover every possible
+//   metric or original CAD model.
 #[test]
 fn local_quality_matches_full_reference_through_inserted_identity_reordering_and_rollback() {
     check_insert_and_rollback(false);

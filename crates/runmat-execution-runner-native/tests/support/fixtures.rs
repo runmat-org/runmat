@@ -1,0 +1,177 @@
+//! Shared contract fixtures for this crate's integration tests.
+#![allow(dead_code)]
+use std::collections::BTreeSet;
+use std::sync::OnceLock;
+
+use runmat_execution::{
+    host::{ExecutionHostInventory, ExecutionHostRequirement},
+    resource::{
+        AcceleratorAllocationDomainId, AcceleratorClass, AcceleratorDevice, AcceleratorDeviceId,
+        AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId, AcceleratorProviderVersion,
+        AcceleratorRequest,
+    },
+    security::ExecutionTrustTier,
+    Digest,
+};
+
+/// Requirement for portable work built against this host's MATLAB-mode environment.
+pub(crate) fn host_requirement() -> ExecutionHostRequirement {
+    ExecutionHostRequirement::portable(
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::from([ExecutionTrustTier::CustomerTrusted]),
+    )
+    .unwrap()
+}
+
+/// What a native worker on this host actually advertises.
+pub(crate) fn host_inventory() -> ExecutionHostInventory {
+    static INVENTORY: OnceLock<ExecutionHostInventory> = OnceLock::new();
+    INVENTORY
+        .get_or_init(|| {
+            runmat_core::RunMatSession::with_options(false, false)
+                .unwrap()
+                .execution_host_inventory(ExecutionTrustTier::CustomerTrusted)
+                .unwrap()
+        })
+        .clone()
+}
+
+pub(crate) fn accelerator_class(name: &str) -> AcceleratorClass {
+    AcceleratorClass::new(name).unwrap()
+}
+
+pub(crate) fn accelerator_request(
+    class: &str,
+    minimum_allocation_bytes: u64,
+) -> AcceleratorRequest {
+    AcceleratorRequest {
+        class: accelerator_class(class),
+        count: 1,
+        minimum_allocation_bytes,
+        provider: None,
+        required_features: BTreeSet::new(),
+    }
+}
+
+pub(crate) fn accelerator_device(class: &str, max_allocation_bytes: u64) -> AcceleratorDevice {
+    AcceleratorDevice {
+        id: AcceleratorDeviceId::new("device:runner-test").unwrap(),
+        allocation_domain: AcceleratorAllocationDomainId::new("allocation:runner-test").unwrap(),
+        class: accelerator_class(class),
+        provider: AcceleratorProvider {
+            id: AcceleratorProviderId::new("runmat.test").unwrap(),
+            version: AcceleratorProviderVersion::new("1.0.0").unwrap(),
+            abi_fingerprint: Digest::sha256(b"runner-test-accelerator-abi"),
+        },
+        max_allocation_bytes,
+        features: BTreeSet::from([AcceleratorFeature::Compute]),
+        inventory_epoch: 1,
+    }
+}
+
+/// A minimal program task request in the given scope and pool.
+pub(crate) fn task_request(
+    name: &str,
+    scope_id: runmat_execution::ExecutionScopeId,
+    pool_id: runmat_execution::PoolId,
+    resources: runmat_execution::resource::ResourceRequest,
+    retry: runmat_execution::task::RetryPolicy,
+) -> runmat_execution::task::TaskRequest {
+    runmat_execution::task::TaskRequest {
+        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+        id: runmat_execution::TaskId::derive(&[name.as_bytes()]),
+        scope_id,
+        pool_id,
+        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+            runmat_execution::identity::ArtifactId::derive(&[name.as_bytes()]),
+        ),
+        callable: runmat_execution::task::Callable::for_program(
+            "test",
+            &runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                Some(name.into()),
+            ),
+        ),
+        host: host_requirement(),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+        inputs: Vec::new(),
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        console: None,
+        outputs: runmat_execution::OutputContract {
+            requested_outputs: 0,
+            owned_work: None,
+        },
+        resources,
+        retry,
+        deadline_unix_millis: None,
+    }
+}
+
+/// One device per requested accelerator, sized to the request.
+pub(crate) fn accelerator_devices(requests: &[AcceleratorRequest]) -> Vec<AcceleratorDevice> {
+    requests
+        .iter()
+        .flat_map(|request| (0..request.count).map(move |ordinal| (request, ordinal)))
+        .enumerate()
+        .map(|(index, (request, _))| {
+            let mut device =
+                accelerator_device(request.class.as_str(), request.minimum_allocation_bytes);
+            device.id = AcceleratorDeviceId::new(format!("device:runner-test-{index}")).unwrap();
+            device.allocation_domain =
+                AcceleratorAllocationDomainId::new(format!("allocation:runner-test-{index}"))
+                    .unwrap();
+            if let Some(provider) = &request.provider {
+                device.provider = provider.clone();
+            }
+            device
+                .features
+                .extend(request.required_features.iter().cloned());
+            device
+        })
+        .collect()
+}
+
+/// The accounting slot of a value-producing attempt result.
+pub(crate) fn attempt_resources_mut(
+    success: &mut runmat_execution_runner::AttemptSuccess,
+) -> &mut Option<Box<runmat_execution_runner::AttemptResourceAccounting>> {
+    match success {
+        runmat_execution_runner::AttemptSuccess::Values { resources, .. } => resources,
+        other => panic!("test attempt is not a value result: {other:?}"),
+    }
+}
+
+/// A worker host that serves exactly what `requirement` asks for.
+pub(crate) fn host_inventory_for(requirement: &ExecutionHostRequirement) -> ExecutionHostInventory {
+    let environment = &requirement.environment;
+    ExecutionHostInventory {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        semantic_schema: environment.semantic_schema,
+        compiler_schema: environment.compiler_schema,
+        runtime_fingerprint: environment.runtime_fingerprint,
+        catalog_fingerprint: environment.catalog_fingerprint,
+        compatibility_modes: requirement
+            .additional_units
+            .iter()
+            .map(|unit| unit.environment.compatibility_mode)
+            .chain([environment.compatibility_mode])
+            .collect(),
+        target: match &requirement.native_target {
+            Some(target) => runmat_execution::host::ExecutionHostTarget::Native(target.clone()),
+            None => runmat_execution::host::ExecutionHostTarget::BrowserWasm,
+        },
+        capabilities: requirement.capabilities.clone(),
+        adapters: Vec::new(),
+        process_stack_available: true,
+        host_bridge_available: true,
+        trust_tier: *requirement
+            .permitted_trust_tiers
+            .iter()
+            .next()
+            .expect("host requirement permits a trust tier"),
+    }
+}

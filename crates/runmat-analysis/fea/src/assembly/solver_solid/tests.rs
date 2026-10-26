@@ -56,6 +56,9 @@ fn scoped_solid_assembly_matches_serial_operators_exactly() {
     }
 }
 
+// witness: FEA-STRUCTURAL-REFERENCE-001/balance_independent_reference @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A connected affine patch balances independent boundary tractions.
 #[test]
 fn connected_tet4_affine_patch_balances_independent_boundary_tractions() {
     // u = (0.1 x, 0.2 y, 0.3 z), E = 100 Pa, nu = 0.25 gives the constant
@@ -97,7 +100,7 @@ fn connected_tet4_affine_patch_balances_independent_boundary_tractions() {
 }
 
 #[test]
-fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
+fn scoped_solid_assembly_preserves_shared_row_sum_across_batches() {
     let artifact = artifact(ElementOrder::Tet10);
     let properties = inventory(&artifact, material(70.0e9, 2_700.0));
     let nodes = artifact
@@ -115,7 +118,7 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
     // Repeated contributions deliberately target identical rows. This exercises summation
     // order and a second bounded wave without admitting a duplicate canonical mesh element.
     let elements = vec![artifact.topology.volume_elements[0].clone(); 19];
-    let serial = assemble_solid_rows(
+    let serial = assemble_solid_operators(
         &elements,
         &properties,
         &nodes,
@@ -129,9 +132,10 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
     )
     .unwrap();
     let parallel =
-        assemble_solid_rows(&elements, &properties, &nodes, nodes.len() * 3, plan, None).unwrap();
+        assemble_solid_operators(&elements, &properties, &nodes, nodes.len() * 3, plan, None)
+            .unwrap();
     assert_eq!(parallel.stiffness, serial.stiffness);
-    assert_eq!(parallel.mass, serial.mass);
+    assert_eq!(parallel.consistent_mass, serial.consistent_mass);
     assert_eq!(parallel.damping, serial.damping);
     assert_eq!(parallel.lumped_mass_diag, serial.lumped_mass_diag);
     assert_eq!(parallel.total_mass_kg, serial.total_mass_kg);
@@ -238,6 +242,10 @@ fn multi_material_assembly_rejects_an_unassigned_mesh_region() {
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/unique_constitutive_coverage @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Solid material coverage rejects overlap, stale revision and wrong role at assembly;
+//   beam, shell and composite coverage are separate.
 #[test]
 fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
     let artifact = artifact(ElementOrder::Tet4);
@@ -262,7 +270,7 @@ fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
 
     model.material_assignments.pop();
     let mut stale = model.material_assignments[0].clone();
-    stale.target = runmat_analysis_core::PropertyRegionTarget::solid("stale-region");
+    stale.target = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("stale-region"));
     model.material_assignments.push(stale);
     assert!(matches!(
         crate::properties::compile_solid_property_map(&model, &artifact),
@@ -271,7 +279,7 @@ fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
 
     model.material_assignments.truncate(1);
     model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::cell("region");
+        runmat_analysis_core::PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("region"));
     assert!(matches!(
         crate::properties::compile_solid_property_map(&model, &artifact),
         Err(
@@ -294,7 +302,7 @@ fn explicit_all_solids_scope_covers_every_solid_and_overlaps_fail_closed() {
         .expect("an explicit all-solids scope should cover the canonical solid mesh");
 
     let mut selected = model.material_assignments[0].clone();
-    selected.target = runmat_analysis_core::PropertyRegionTarget::solid("region");
+    selected.target = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("region"));
     model.material_assignments.push(selected);
     assert!(matches!(
         crate::properties::compile_solid_property_map(&model, &artifact),

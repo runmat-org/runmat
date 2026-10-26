@@ -33,8 +33,8 @@ use super::{
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
     PartitioningPolicy, PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,
-    ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy,
-    StructuralLinearPipelineResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
+    ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticSolvePath,
+    StaticSolveSelection, StructuralLinearPipelineResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
@@ -94,6 +94,7 @@ pub fn build_structural_resource_plan(
 
 /// The shared numerical preflight for portable and direct static execution. The portable
 /// entry point additionally validates the workload's sequencing and replay contract.
+#[derive(Clone, Copy)]
 pub(crate) struct StaticResourcePreflight<'a> {
     pub model: &'a AnalysisModel,
     pub step: &'a ProcedureStep,
@@ -109,15 +110,157 @@ pub(crate) struct StaticResourcePreflight<'a> {
     pub prepared_inputs: Option<&'a PreparedInputResourceFacts>,
 }
 
+/// The static solve path a structural plan recorded (`None` for other plans).
+pub fn recorded_static_solve_path(plan: &FeaResourcePlan) -> Option<StaticSolvePath> {
+    match &plan.input.demand {
+        FeaResourceDemand::StructuralLinearPipeline(demand) => {
+            demand.operator.solve.static_solve_path()
+        }
+        _ => None,
+    }
+}
+
+/// Plans within the authored ceiling alone (no machine memory is known).
 pub(crate) fn build_static_resource_plan(
     input: StaticResourcePreflight<'_>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    build_resource_plan(build_static_resource_input(input)?)
+    build_static_resource_plan_selecting(
+        input,
+        StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
+    )
+}
+
+pub(crate) fn build_static_resource_plan_selecting(
+    input: StaticResourcePreflight<'_>,
+    selection: StaticSolveSelection,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let path = match selection {
+        StaticSolveSelection::Recorded(path) => path,
+        StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes,
+        } => select_static_solve_path(input, machine_memory_bytes)?,
+    };
+    build_resource_plan(build_static_resource_input(input, path)?)
+}
+
+/// The proving factorization when its plan fits the effective ceiling; otherwise the elastic
+/// rigidity path for a model it admits. An explicit AMG request takes the elastic path whenever
+/// the model admits it (the factor is never needed); direct, Jacobi and ILU requests keep the
+/// factor proof.
+fn select_static_solve_path(
+    input: StaticResourcePreflight<'_>,
+    machine_memory_bytes: Option<u64>,
+) -> Result<StaticSolvePath, ResourcePlanningError> {
+    if !elastic_rigidity_admits(&input) {
+        return Ok(StaticSolvePath::ProvingFactorization);
+    }
+    match input.preconditioner {
+        SpdPreconditionerKind::Amg => return Ok(StaticSolvePath::ElasticRigidityMultigrid),
+        SpdPreconditionerKind::Auto => {}
+        SpdPreconditionerKind::Direct
+        | SpdPreconditionerKind::Jacobi
+        | SpdPreconditionerKind::Ilu0 => return Ok(StaticSolvePath::ProvingFactorization),
+    }
+    let authored = input.step.accuracy.resources.maximum_resident_bytes;
+    let ceiling = machine_memory_bytes.map_or(authored, |machine| machine.min(authored));
+    match build_resource_plan(build_static_resource_input(
+        input,
+        StaticSolvePath::ProvingFactorization,
+    )?) {
+        Ok(plan) if plan.request.memory_bytes <= ceiling => {
+            Ok(StaticSolvePath::ProvingFactorization)
+        }
+        Ok(_) | Err(ResourcePlanningError::AccuracyCeiling { .. }) => {
+            Ok(StaticSolvePath::ElasticRigidityMultigrid)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The elastic rigidity proof covers a linear static solid continuum: a solver mesh of
+/// tetrahedra, no connectors, couplings or explicit structural elements, and constraints that
+/// only fix or keep whole DOFs.
+fn elastic_rigidity_admits(input: &StaticResourcePreflight<'_>) -> bool {
+    let Some(mesh) = input.mesh else {
+        return false;
+    };
+    input.step.procedure == runmat_analysis_core::AnalysisProcedure::Static
+        && input.step.state_inputs.is_empty()
+        && crate::assembly::solver_solid::SolidEnergyPreparation::supports_model(input.model)
+        && matches!(
+            input.constraints.enforcement,
+            ConstraintEnforcement::DirectElimination
+        )
+        && !mesh.topology.volume_elements.is_empty()
+        && mesh
+            .topology
+            .volume_elements
+            .iter()
+            .all(|element| matches!(element.node_ids.len(), 4 | 10))
+}
+
+/// Inventory of the elastic rigidity proof: retained capture bytes and scalar operations.
+fn elastic_rigidity_admission(
+    mesh: &SolverMeshArtifact,
+    dimension: u64,
+) -> SolverAdmissionResourcePolicy {
+    let widths = || {
+        mesh.topology
+            .volume_elements
+            .iter()
+            .map(|element| element.node_ids.len())
+    };
+    let operations = widths().fold(0_u64, |sum, w| {
+        sum.saturating_add((9 * w * w * 40 + w * 64) as u64)
+    });
+    SolverAdmissionResourcePolicy {
+        dimension: Count(dimension),
+        factor_nonzero_upper_bound: Count(0),
+        update_count_upper_bound: Count(operations),
+        resident_bytes_upper_bound: ByteCount(
+            crate::algebra::elastic_rigidity::ElasticRigidityCapture::resident_bytes_for(
+                mesh.topology.nodes.len() as u64,
+                widths(),
+            ),
+        ),
+    }
+}
+
+/// The factor that proves coercivity is reserved in full: the topology-derived envelope bounds
+/// the exact factorization of any numerical support of the pattern.
+fn factor_admission(
+    pattern: &crate::algebra::SparsePattern,
+) -> Result<SolverAdmissionResourcePolicy, ResourcePlanningError> {
+    let bound = CoercivityWorkEnvelope::derive(pattern)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    Ok(SolverAdmissionResourcePolicy {
+        dimension: Count(bound.dimension()),
+        factor_nonzero_upper_bound: Count(bound.factor_nonzero_limit()),
+        update_count_upper_bound: Count(bound.factor_flop_limit()),
+        // The factor's values, column indices and row offsets are resident while it proves
+        // and solves; the solver's own peak estimate is never allowed below that payload.
+        resident_bytes_upper_bound: ByteCount(
+            bound
+                .factor_nonzero_limit()
+                .checked_mul(16)
+                .and_then(|bytes| bytes.checked_add((bound.dimension() + 1) * 8))
+                .ok_or(ResourcePlanningError::Overflow("static factor payload"))?
+                .max(bound.factor_resident_limit()),
+        ),
+    })
 }
 
 pub(super) fn build_static_resource_input(
     input: StaticResourcePreflight<'_>,
+    path: StaticSolvePath,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
+    if path == StaticSolvePath::ElasticRigidityMultigrid && !elastic_rigidity_admits(&input) {
+        return Err(ResourcePlanningError::Invalid(
+            "the elastic rigidity path requires a linear static tetrahedral solid with fixed-DOF constraints".into(),
+        ));
+    }
     let compiler_peak = compilation::original_peak(&input)?;
     let StaticResourcePreflight {
         compilation: _,
@@ -186,16 +329,17 @@ pub(super) fn build_static_resource_input(
     // fill-reducing ordering is recalculated for the exact graph. Even a successful symbolic
     // proof on the superset is therefore not an upper bound on exact fill or update work.
     // Reserve the graph-count envelope; exact coercivity is proved after numerical assembly.
-    let bound = CoercivityWorkEnvelope::derive(&admission_pattern)
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let admission = SolverAdmissionResourcePolicy {
-        dimension: Count(bound.dimension()),
-        factor_nonzero_upper_bound: Count(bound.factor_nonzero_limit()),
-        update_count_upper_bound: Count(bound.update_limit()),
-        resident_bytes_upper_bound: ByteCount(bound.resident_bytes_limit()),
+    // The planned path decides the proof: the proving factorization reserves the factor; the
+    // elastic rigidity path reserves only its element and anchor inventory.
+    let admission = match (path, mesh) {
+        (StaticSolvePath::ElasticRigidityMultigrid, Some(mesh)) => {
+            elastic_rigidity_admission(mesh, admission_pattern.rows() as u64)
+        }
+        _ => factor_admission(&admission_pattern)?,
     };
     let solve = solve_policy(
         preconditioner,
+        path,
         dofs,
         u64::try_from(facts.constraint_matrix.row_count())
             .map_err(|_| ResourcePlanningError::Overflow("constraint row count"))?,

@@ -5,6 +5,7 @@ use crate::{
 };
 use serde::Serialize;
 mod compound;
+mod probe;
 mod serializer;
 #[cfg(test)]
 mod tests;
@@ -51,7 +52,23 @@ pub(crate) fn encode<T: Serialize>(
     limits: CanonicalLimits,
     control: &dyn CanonicalCodecControl,
 ) -> Result<Vec<u8>, CanonicalCodecError> {
-    encode_with_capacity(prefix, domain, value, limits, control, None)
+    // Reserve the profiled output once so it never regrows; the encoding workspace profile
+    // assumes this. Shape limits are the encoder's own; a profile it cannot produce leaves
+    // the output to grow as before.
+    let capacity = crate::profile_canonical_encoding_with_control(
+        value,
+        CanonicalLimits::new(
+            limits.maximum_encoded_bytes,
+            usize::MAX,
+            usize::MAX,
+            usize::MAX,
+        ),
+        control,
+    )
+    .ok()
+    .and_then(|profile| usize::try_from(profile.encoded_bytes_upper_bound).ok())
+    .filter(|capacity| *capacity <= limits.maximum_encoded_bytes);
+    encode_with_capacity(prefix, domain, value, limits, control, capacity)
 }
 
 pub(crate) fn encode_with_capacity<T: Serialize>(
@@ -87,10 +104,7 @@ pub(crate) fn encode_with_capacity<T: Serialize>(
         wire_bytes: 0,
     };
     state.charge(output.len())?;
-    value.serialize(Serializer {
-        output: &mut output,
-        state: &mut state,
-    })?;
+    value.serialize(Serializer::child(&mut output, &mut state, value))?;
     checkpoint(control)?;
     debug_assert_eq!(state.wire_bytes, output.len());
     Ok(output)

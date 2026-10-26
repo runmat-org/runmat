@@ -41,7 +41,7 @@ fn partition_shape_profile_bounds_actual_contract_without_numeric_storage() {
         .unwrap();
         let partition = RecoveredFieldPartition::select(&field, (0..count).collect()).unwrap();
         let profile = RecoveredFieldPartition::profile_shape(&definition, sample, count).unwrap();
-        let actual = runmat_canonical_codec::profile_serialized(
+        let actual = runmat_canonical_codec::profile_serialized_shape(
             &partition,
             runmat_canonical_codec::CanonicalLimits::new(
                 64 * 1024 * 1024,
@@ -117,7 +117,7 @@ fn partition_shape_profile_covers_vector_and_tensor_widths() {
         let profile =
             RecoveredFieldPartition::profile_shape(&definition, RecoveredFieldSample::Final, 3)
                 .unwrap();
-        let actual = runmat_canonical_codec::profile_serialized(
+        let actual = runmat_canonical_codec::profile_serialized_shape(
             &partition,
             runmat_canonical_codec::CanonicalLimits::new(
                 64 * 1024 * 1024,

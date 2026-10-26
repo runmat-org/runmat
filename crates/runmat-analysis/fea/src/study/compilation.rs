@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use runmat_analysis_core::{
     realize_analysis_model, validate_authored_outputs, AnalysisModel,
     AnalysisModelRealizationError, AnalysisModelRealizationInput, AuthoredMaterialRef,
-    AuthoredOutput, AuthoredStudyInputBinding, CoupledPhysicsFamily, FormulationRequirement,
-    MaterialModel, PhysicsFamily, RealizedStudy,
+    AuthoredOutput, AuthoredStudyInputBinding, CoupledPhysicsFamily, MaterialModel, PhysicsFamily,
+    RealizedStudy,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -33,7 +33,6 @@ const STUDY_IDENTITY_LIMITS: CanonicalLimits =
 pub struct CompiledAnalysisStudy {
     pub module_path: String,
     pub study_id: String,
-    pub formulation_requirement: FormulationRequirement,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
     pub outputs: Vec<AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -99,7 +98,6 @@ impl CompiledAnalysisStudy {
             &(
                 &self.module_path,
                 &self.study_id,
-                self.formulation_requirement,
                 &self.study_inputs,
                 &self.outputs,
                 &self.model,
@@ -172,7 +170,6 @@ pub fn compile_analysis_study(
     let compiled = CompiledAnalysisStudy {
         module_path: study.module_path.clone(),
         study_id: study.study_id.clone(),
-        formulation_requirement: study.formulation_requirement,
         study_inputs: study.study_inputs.clone(),
         assessments: study.assessments.clone(),
         outputs: study.outputs.clone(),
@@ -254,13 +251,13 @@ fn validate_realized_geometry_source(
         let file_evidence_matches = match &geometry.source.unit_evidence {
             runmat_types::physical::LengthUnitEvidence::ExplicitFallback {
                 declaration, ..
-            } => imported.unit_fallback == Some(declaration.unit),
+            } => imported.authored_units == Some(declaration.unit),
             _ => imported.unit_evidence == geometry.source.unit_evidence,
         };
         if !file_evidence_matches
             || imported.content_digest != geometry.source.content_digest
             || imported.format != geometry.source.format
-            || matches!(&geometry.source.unit_evidence,runmat_types::physical::LengthUnitEvidence::ExplicitFallback{declaration,..} if imported.unit_fallback.is_some_and(|unit|unit!=declaration.unit))
+            || matches!(&geometry.source.unit_evidence,runmat_types::physical::LengthUnitEvidence::ExplicitFallback{declaration,..} if imported.authored_units.is_some_and(|unit|unit!=declaration.unit))
         {
             return Err(AnalysisStudyCompilationError::ImportedGeometrySourceMismatch);
         }

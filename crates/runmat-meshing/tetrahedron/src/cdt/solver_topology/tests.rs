@@ -6,7 +6,7 @@ mod metric_authority;
 use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
     GeometryTolerancePolicy, MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest,
-    MeshingResourceBudget, NeverCancelled, SurfaceQualityTargets, VolumeQualityTargets,
+    MeshingSizeLimits, NeverCancelled, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
@@ -17,6 +17,7 @@ fn request(order: ElementOrder) -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: order,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/current".into(),
@@ -35,10 +36,12 @@ fn request(order: ElementOrder) -> MeshingRequest {
             maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
             maximum_grading_ratio: 1.5,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -60,21 +63,16 @@ fn request(order: ElementOrder) -> MeshingRequest {
                 maximum_metric_edge_length: 2.0,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
+        size_controls: Vec::new(),
     }
 }
 
@@ -293,6 +291,10 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
     )));
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/tet10_elevation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Tet10 elevation is deterministic and shares exact boundary midpoints; the
+//   scaled-Jacobian floor on thin or curved real parts is not asserted.
 #[test]
 fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
@@ -376,7 +378,7 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
 
     let mut limited_request = request.clone();
-    limited_request.resources.maximum_nodes = 9;
+    limited_request.limits.maximum_nodes = 9;
     let limited = DelaunaySolverTopologyInput {
         request: &limited_request,
         ..input()
@@ -480,11 +482,11 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
     let face_a = topology.faces[0].id.clone();
     let face_b = topology.faces[1].id.clone();
     let region_a = topology.regions[0].id.clone();
-    let region_b = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "region:b".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let region_b = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "region:b".into(),
+        vec!["root".into()],
+    );
     topology.interfaces = vec![ExactSharedInterface {
         face_id: face_a.clone(),
         side_a_region_id: region_a.clone(),
@@ -506,11 +508,11 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
 
     drop(index);
     topology.interfaces.clear();
-    let contact_id = PersistentEntityId {
-        kind: PersistentEntityKind::Contact,
-        source_topology_id: "contact".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let contact_id = PersistentEntityId::new(
+        PersistentEntityKind::Contact,
+        "contact".into(),
+        vec!["root".into()],
+    );
     topology.contacts = vec![ExactContactPair {
         id: contact_id.clone(),
         side_a_face_ids: vec![face_a.clone()],

@@ -8,17 +8,28 @@ use crate::class_registry::RuntimeMethod;
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_types::MethodName;
 
-const STRUCTURAL_DOF_CLASS: &str = "fea.StructuralDof";
-const STRUCTURAL_DOF_VALUE_CLASS: &str = "fea.StructuralDofValue";
-const TRANSLATION_DOF_CLASS: &str = "fea.StructuralTranslationDof";
-const ROTATION_DOF_CLASS: &str = "fea.StructuralRotationDof";
-const TRANSLATION_VALUE_CLASS: &str = "fea.StructuralTranslationDofValue";
-const ROTATION_VALUE_CLASS: &str = "fea.StructuralRotationDofValue";
+const STRUCTURAL_DOF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_DOF_CLASS.display_name();
+const STRUCTURAL_DOF_VALUE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_DOF_VALUE_CLASS
+        .display_name();
+const TRANSLATION_DOF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_TRANSLATION_DOF_CLASS
+        .display_name();
+const ROTATION_DOF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_ROTATION_DOF_CLASS
+        .display_name();
+const TRANSLATION_VALUE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_TRANSLATION_DOF_VALUE_CLASS
+        .display_name();
+const ROTATION_VALUE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_ROTATION_DOF_VALUE_CLASS
+        .display_name();
 const AXIS_FIELDS: &[&str] = &["axis"];
 const DOF_VALUE_FIELDS: &[&str] = &["dof", "value"];
 
 macro_rules! dof_builtin {
-    ($function:ident, $name:literal, $class:expr, $axis:expr) => {
+    ($function:ident, $descriptor:ident, $name:literal, $class:expr, $axis:expr) => {
         #[runtime_builtin(
                             name = $name,
                             builtin_path = "crate::builtins::fea::constraints::support::dof",
@@ -28,6 +39,7 @@ macro_rules! dof_builtin {
         pub async fn $function(
             runtime: Option<crate::context::RuntimeContext>,
         ) -> BuiltinResult<Value> {
+            crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             ensure_dof_classes_registered();
             let axis = Value::Int(IntValue::U8($axis));
             let fields = [("axis", axis)];
@@ -43,36 +55,42 @@ macro_rules! dof_builtin {
 
 dof_builtin!(
     structural_dof_ux_builtin,
+    FEA_STRUCTURAL_DOF_UX_DESCRIPTOR,
     "fea.StructuralDof.ux",
     TRANSLATION_DOF_CLASS,
     0
 );
 dof_builtin!(
     structural_dof_uy_builtin,
+    FEA_STRUCTURAL_DOF_UY_DESCRIPTOR,
     "fea.StructuralDof.uy",
     TRANSLATION_DOF_CLASS,
     1
 );
 dof_builtin!(
     structural_dof_uz_builtin,
+    FEA_STRUCTURAL_DOF_UZ_DESCRIPTOR,
     "fea.StructuralDof.uz",
     TRANSLATION_DOF_CLASS,
     2
 );
 dof_builtin!(
     structural_dof_rx_builtin,
+    FEA_STRUCTURAL_DOF_RX_DESCRIPTOR,
     "fea.StructuralDof.rx",
     ROTATION_DOF_CLASS,
     0
 );
 dof_builtin!(
     structural_dof_ry_builtin,
+    FEA_STRUCTURAL_DOF_RY_DESCRIPTOR,
     "fea.StructuralDof.ry",
     ROTATION_DOF_CLASS,
     1
 );
 dof_builtin!(
     structural_dof_rz_builtin,
+    FEA_STRUCTURAL_DOF_RZ_DESCRIPTOR,
     "fea.StructuralDof.rz",
     ROTATION_DOF_CLASS,
     2
@@ -89,6 +107,10 @@ pub async fn structural_translation_value_builtin(
     dof: Value,
     value: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_STRUCTURAL_DOF_VALUE_TRANSLATION_DESCRIPTOR,
+        "fea.StructuralDofValue.translation",
+    )?;
     translation_dof_from_value("fea.StructuralDofValue.translation", &dof)?;
     quantity_scalar(
         "fea.StructuralDofValue.translation",
@@ -110,6 +132,10 @@ pub async fn structural_rotation_value_builtin(
     dof: Value,
     value: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_STRUCTURAL_DOF_VALUE_ROTATION_DESCRIPTOR,
+        "fea.StructuralDofValue.rotation",
+    )?;
     rotation_dof_from_value("fea.StructuralDofValue.rotation", &dof)?;
     quantity_scalar(
         "fea.StructuralDofValue.rotation",

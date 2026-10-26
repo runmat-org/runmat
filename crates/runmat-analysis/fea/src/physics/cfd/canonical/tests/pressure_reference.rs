@@ -6,6 +6,9 @@ use runmat_analysis_core::{
     Pressure, SignalRepresentation, SignalValue, Velocity,
 };
 
+// witness: FEA-FLUID-EQUATIONS-001/pressure_state @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: A uniform translation is balanced at both pressure references.
 #[test]
 fn independent_uniform_translation_is_balanced_at_both_pressure_references() {
     for reference in [0.0, 101325.0] {
@@ -49,6 +52,10 @@ fn independent_uniform_translation_is_balanced_at_both_pressure_references() {
     }
 }
 
+// witness: FEA-FLUID-EQUATIONS-001/pressure_state @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Fourier duct scaling and two gauges retain bitwise original velocity/fluctuation/flux
+//   with and without acceleration; cold JSON replay only.
 #[test]
 fn original_fluctuation_survives_absolute_rounding_fresh_solve_and_cold_recovery() {
     for acceleration in [

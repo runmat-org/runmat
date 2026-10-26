@@ -16,6 +16,9 @@ use crate::{
     },
 };
 
+// witness: FEA-THERMAL-DOMAIN-001/assembly @ thermal_steady/tet4/numerical_kernel;
+//   boundary: Aligned Tet4 two-material series resistance, temperature and flux plus property-order
+//   invariance; no arbitrary nonuniform interface claim.
 #[test]
 fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant() {
     // Independent steady 1-D reference: two half-meter layers in series, k=1 and k=4 W/(m K).
@@ -72,9 +75,9 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
         .unwrap()
         .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(4.0);
     model.materials.push(right_material);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("left_material");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("left_material"));
     let mut right_assignment = model.material_assignments[0].clone();
-    right_assignment.target = PropertyRegionTarget::solid("right_material");
+    right_assignment.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("right_material"));
     right_assignment.assigned_material_id = "right_conductor".into();
     right_assignment.expected_material_id = "right_conductor".into();
     model.material_assignments.push(right_assignment);
@@ -87,7 +90,7 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: id.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(region),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region))),
                     value: PrescribedValue::Constant(Temperature::new(temperature_k)),
                 },
             }));
@@ -97,7 +100,7 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
         let assembly = assemble(
             model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),
@@ -202,7 +205,7 @@ fn transient_slab_has_second_order_spatial_convergence() {
                 .push(AnalysisConstraint::Thermal(ThermalConstraint {
                     constraint_id: id.into(),
                     kind: ThermalConstraintKind::Prescribed {
-                        target: RegionTarget::boundary(region),
+                        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region))),
                         value: PrescribedValue::Constant(Temperature::new(300.0)),
                     },
                 }));
@@ -210,7 +213,7 @@ fn transient_slab_has_second_order_spatial_convergence() {
         let assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),

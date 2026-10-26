@@ -16,6 +16,7 @@ mod translation_value;
 pub use self::translation_value::FEA_STRUCTURAL_DOF_VALUE_TRANSLATION_CATALOG_ENTRY;
 mod rotation_value;
 pub use self::rotation_value::FEA_STRUCTURAL_DOF_VALUE_ROTATION_CATALOG_ENTRY;
+#[cfg(test)]
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &FEA_STRUCTURAL_DOF_UX_CATALOG_ENTRY,
     &FEA_STRUCTURAL_DOF_UY_CATALOG_ENTRY,

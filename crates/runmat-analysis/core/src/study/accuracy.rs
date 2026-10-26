@@ -86,7 +86,7 @@ pub enum RequiredAccuracyEvidence {
 #[serde(rename_all = "snake_case")]
 pub enum UnavailableEvidencePolicy {
     Fail,
-    MarkIndeterminateExperimental,
+    MarkIndeterminate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -96,7 +96,6 @@ pub enum AccuracyLimitAction {
     TightenSolver,
     ExtendSampling,
     Fail,
-    WarnExperimental,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -118,8 +117,10 @@ pub struct AccuracyResourceCeiling {
 }
 
 impl AccuracyPlan {
-    /// Explicit baseline for formulations that have not yet earned production accuracy evidence.
-    pub fn experimental_baseline(id: impl Into<String>) -> Self {
+    /// Baseline plan: a mandatory relative algebraic residual bound of 1e-8. Every solver produces
+    /// that evidence, so a result without it is indeterminate and is not published; a study may
+    /// opt into publishing such results, labeled indeterminate, with `MarkIndeterminate`.
+    pub fn baseline(id: impl Into<String>) -> Self {
         Self {
             accuracy_plan_id: AccuracyPlanId(id.into()),
             criteria: vec![AccuracyCriterion {
@@ -130,7 +131,7 @@ impl AccuracyPlan {
                 evidence: RequiredAccuracyEvidence::ResidualBound,
                 mandatory: true,
             }],
-            unavailable_evidence: UnavailableEvidencePolicy::MarkIndeterminateExperimental,
+            unavailable_evidence: UnavailableEvidencePolicy::Fail,
             exceeded_limit: AccuracyLimitAction::Fail,
             equivalence: NumericalEquivalencePolicy::RelativeTolerance(1.0e-10),
             resources: AccuracyResourceCeiling {
@@ -138,13 +139,15 @@ impl AccuracyPlan {
                 maximum_solver_tightenings: 0,
                 maximum_samples: 1_000_000,
                 maximum_wall_time_milliseconds: 3_600_000,
-                maximum_resident_bytes: 8 * 1024 * 1024 * 1024,
+                // Unbounded by default: resident memory is execution policy, limited at placement
+                // by the machine-capacity authority. An authored ceiling stays in the definition.
+                maximum_resident_bytes: u64::MAX,
             },
         }
     }
 
     pub fn modal_response_spectrum(id: impl Into<String>) -> Self {
-        let mut plan = Self::experimental_baseline(id);
+        let mut plan = Self::baseline(id);
         plan.criteria = vec![AccuracyCriterion {
             criterion_id: "modal_mass_capture".into(),
             target: AccuracyTarget::NumericalResult,
@@ -157,7 +160,7 @@ impl AccuracyPlan {
     }
 
     pub fn random_response(id: impl Into<String>) -> Self {
-        let mut plan = Self::experimental_baseline(id);
+        let mut plan = Self::baseline(id);
         plan.criteria = vec![AccuracyCriterion {
             criterion_id: "frequency_quadrature".into(),
             target: AccuracyTarget::NumericalResult,

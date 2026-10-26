@@ -50,7 +50,6 @@ fn signed_source_reports_fit_full_original_history_profiles() {
     let workload = FluidTransientWorkload {
         model,
         step_id: ProcedureStepId("advance".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: f.policy,
         geometry_policy: crate::physics::cfd::canonical::qualification::fixture::geometry_policy(),
         initial_fields: Vec::new(),
@@ -74,10 +73,10 @@ fn signed_source_reports_fit_full_original_history_profiles() {
         .unwrap();
     cold.recover(&workload, &f.mesh).unwrap();
     assert_eq!(
-        cold.original_results().collect::<Vec<_>>(),
-        original.original_results().collect::<Vec<_>>()
+        cold.retained_results().collect::<Vec<_>>(),
+        original.retained_results().collect::<Vec<_>>()
     );
-    for result in cold.original_results() {
+    for (_, result) in cold.retained_results() {
         for id in ["mass-inlet", "mass-outlet"] {
             assert!(result
                 .residual

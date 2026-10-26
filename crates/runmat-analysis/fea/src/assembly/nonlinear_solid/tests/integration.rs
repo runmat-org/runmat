@@ -67,3 +67,73 @@ fn cancelled_original_basis_preparation_preserves_typed_cancellation() {
     drop(guard);
     assert!(CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &summary).is_ok());
 }
+
+// witness: FEA-NONLINEAR-OPERATOR-001/references @ small_strain_j2/tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: a curved Tet10 integrates its per-point nonlinear state on the converged points of
+//   the shared Tet10 element-validity rule (not the requested Keast15), and its elastic tangent
+//   equals the stiffness formed from the same rule's moments; plastic response is not covered.
+#[test]
+fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
+    let (model, _, _) = fixture(ElementOrder::Tet10, false);
+    let mut mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    mesh.topology.nodes[4].coordinates_m.canonical_value()[1] -= 0.05;
+    mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+    let initial = assemble_structural_system_borrowed(
+        &model,
+        &RealizedExcitations::default(),
+        Some(&mesh),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let coordinates: [[f64; 3]; 10] = std::array::from_fn(|index| {
+        let id = mesh.topology.volume_elements[0].node_ids[index];
+        mesh.topology
+            .nodes
+            .iter()
+            .find(|node| node.node_id == id)
+            .unwrap()
+            .coordinates_m
+            .canonical_value()
+    });
+    let shared = runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates).unwrap();
+    let expected_rule =
+        crate::topology::solid_integration_curved_rule(shared.rule).expect("curved element");
+    let plan =
+        CanonicalSolidIntegrationPlan::derive(&mesh, CanonicalSolidIntegrationRule::Keast15).unwrap();
+    assert_eq!(plan.elements()[0].rule, expected_rule);
+    let plan_points = expected_rule.reference_points().collect::<Vec<_>>();
+    assert_eq!(plan_points, shared.quadrature_points());
+
+    let basis = CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &initial).unwrap();
+    assert_eq!(basis.point_count(), plan_points.len());
+    let zero = vec![0.0; basis.dof_count];
+    let tangent = basis.evaluate(&zero, &basis.zero_state()).unwrap().tangent;
+    let linear = crate::assembly::elements::solid::tetrahedron10_global_stiffness_matrix(
+        crate::assembly::elements::solid::SolidMaterial {
+            youngs_modulus_pa: runmat_types::physical::Quantity::new(1200.0),
+            poisson_ratio: runmat_types::physical::Quantity::new(0.25),
+            density_kg_per_m3: runmat_types::physical::Quantity::new(1.0),
+        },
+        crate::assembly::elements::solid::Tetrahedron10ElementGeometry {
+            nodes_m: coordinates,
+        },
+    )
+    .unwrap();
+    let dofs = basis.elements[0].dofs.iter().flatten().copied().collect::<Vec<_>>();
+    for probe in 0..dofs.len() {
+        let mut vector = vec![0.0; basis.dof_count];
+        vector[dofs[probe]] = 1.0;
+        let column = spmv(&tangent, &vector).unwrap();
+        for (row, &dof) in dofs.iter().enumerate() {
+            let scale = linear.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
+            assert!(
+                (column[dof] - linear[row][probe]).abs() <= 1e-9 * scale,
+                "entry ({row}, {probe}): {} vs {}",
+                column[dof],
+                linear[row][probe]
+            );
+        }
+    }
+}

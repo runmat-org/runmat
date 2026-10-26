@@ -154,7 +154,7 @@ pub(super) fn solve_initial_acceleration_reusing(
         &effective_summary,
         backend,
         None,
-        SpdPreconditionerKind::Jacobi,
+        SpdPreconditionerKind::Auto,
         preparation,
     )?;
     let mut acceleration = linear_solve.solution.clone();
@@ -205,7 +205,7 @@ pub(super) fn solve_average_acceleration_step_reusing(
         &effective_summary,
         backend,
         Some(state.acceleration()),
-        SpdPreconditionerKind::Jacobi,
+        SpdPreconditionerKind::Auto,
         preparation,
     )?;
     let mut acceleration = linear_solve.solution.clone();
@@ -269,7 +269,7 @@ impl EquilibriumRefinement<'_> {
                 None,
                 // The correction operator is SPD. ILU0 does not guarantee an SPD
                 // preconditioner and can break CG even when the operator is valid.
-                SpdPreconditionerKind::Jacobi,
+                SpdPreconditionerKind::Auto,
                 self.preparation,
             )?;
             let mut correction_values = match correction_equation.expansion.as_ref() {

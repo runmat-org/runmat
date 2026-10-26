@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    ExcitationTarget, FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, RegionTarget, SequenceDependency, SequenceDependencyReason,
-    StateTransition, StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    ExcitationTarget, IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy,
+    RegionTarget, SequenceDependency, SequenceDependencyReason, StateTransition,
+    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
     execute_serial_analysis, import_structural_buckling_result, prepare_analysis_objects,
@@ -22,7 +22,7 @@ use runmat_analysis_fea::{
     results::observation::ObservationExecutionPolicy,
     ComputeBackend, LinearStaticSolveOptions,
 };
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
@@ -36,14 +36,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("buckling-graph"),
         digest("buckling-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("buckling-runtime"),
-            digest("buckling-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }
@@ -53,7 +46,7 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
     model.constraints.truncate(1);
     model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("tip"));
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")));
     let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
         panic!("structural fixture must carry a force signal");
     };
@@ -90,21 +83,17 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
     for (face_index, region) in [(0, "root"), (3, "tip")] {
         mesh.topology.boundary_faces[face_index]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: region.into(),
-                assembly_path: vec!["root".into()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                region.into(),
+                vec!["root".into()],
+            ));
         mesh.topology.boundary_faces[face_index].provenance.sort();
     }
-    let volume_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: model.material_assignments[0]
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -121,7 +110,6 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -163,7 +151,6 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
         model,
         step_id: ProcedureStepId("buckling".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(1, 1.0e-10, 8).unwrap(),
     }
@@ -180,6 +167,7 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
         encryption_context: digest("buckling-encryption"),
     };
     let prepared = prepare_structural_buckling_task(StructuralBucklingTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest("buckling-study"),
         frozen_project_digest: None,
         program_revision: revision(),

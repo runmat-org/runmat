@@ -152,34 +152,6 @@ impl ObservationPublicationCatalog {
                 .map_err(invalid)?;
             for partition in &plan.partitions {
                 let indices = match context {
-                    ObservationHistorySourceContext::FluidSteady { workload, mesh } => {
-                        let ObservationFieldCatalogSource::FiniteVolumeRecovery { layout, .. } =
-                            self.source.source()
-                        else {
-                            return Err(invalid(
-                                "finite-volume execution requires original native catalog",
-                            ));
-                        };
-                        let projection =
-                            crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
-                        let geometry = crate::topology::FiniteVolumeTopology::derive(
-                            &projection,
-                            workload.geometry_policy,
-                        )
-                        .map_err(invalid)?;
-                        super::super::finite_volume_observation_partition_source_indices(
-                            &source.plan,
-                            &plan,
-                            partition,
-                            FiniteVolumeObservationSource {
-                                layout,
-                                projection: &projection,
-                                geometry: &geometry,
-                            },
-                            ObservationLimits::default(),
-                        )
-                        .map_err(invalid)?
-                    }
                     ObservationHistorySourceContext::Magnetostatic { mesh, .. }
                     | ObservationHistorySourceContext::MaxwellHarmonic { mesh, .. } => {
                         let ObservationFieldCatalogSource::SampledRecovery { sampling, .. } =
@@ -209,7 +181,8 @@ impl ObservationPublicationCatalog {
                         mesh,
                     )
                     .map_err(invalid)?,
-                    ObservationHistorySourceContext::Thermal { mesh, .. } => {
+                    ObservationHistorySourceContext::Thermal { mesh, .. }
+                    | ObservationHistorySourceContext::VolumeMesh { mesh } => {
                         let projection =
                             crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
                         solid_observation_partition_source_indices(
@@ -295,12 +268,14 @@ impl ObservationPublicationCatalog {
                     {
                         let mut source_catalog = &self.source;
                         let coordinate = match self.source.source() {
-                            ObservationFieldCatalogSource::SampledRecovery { .. }
-                            | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. } => {
+                            ObservationFieldCatalogSource::SampledRecovery { .. } => {
                                 return Err(invalid("sampled native histories are not admitted"));
                             }
                             ObservationFieldCatalogSource::Structural { .. } => {
                                 ObservationSelectionCoordinate::StructuralRecovery
+                            }
+                            ObservationFieldCatalogSource::VolumeMeshRecovery { .. } => {
+                                ObservationSelectionCoordinate::VolumeMeshRecovery
                             }
                             ObservationFieldCatalogSource::StructuralFrequencyHistory {
                                 samples,

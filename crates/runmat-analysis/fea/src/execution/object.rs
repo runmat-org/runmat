@@ -15,6 +15,9 @@ const MANIFEST_PREFIX: &[u8] = b"runmat-analysis-object-manifest/v1\0";
 const MANIFEST_DOMAIN: &str = "numerical-object-manifest";
 const MANIFEST_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 4096, 32);
 pub const ANALYSIS_MANIFEST_MAX_ENCODED_BYTES: u64 = 8 * 1024 * 1024;
+/// Schema bound of the one output-set root a workload returns. The root lists output roots only;
+/// numerical payloads are bounded separately by each phase's prepared output facts.
+pub const ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_CHUNKS: usize = 1_000_000;
 
 mod incremental;
@@ -41,6 +44,7 @@ pub enum AnalysisNumericalObjectKind {
     FluidTransientCheckpoint,
     FluidStudyCompletion,
     AcousticStudyCompletion,
+    AcousticResponseStudyCompletion,
     ElectricalStudyCompletion,
     MagneticStudyCompletion,
     MaxwellStudyCompletion,
@@ -50,6 +54,8 @@ pub enum AnalysisNumericalObjectKind {
     FrequencySamplePublication,
     AcousticHarmonicWorkload,
     AcousticFrequencyWorkload,
+    AcousticResponseWorkload,
+    AcousticFrequencyAssemblyRequest,
     ElectricalStaticWorkload,
     MagnetostaticWorkload,
     MaxwellHarmonicWorkload,

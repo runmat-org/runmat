@@ -777,7 +777,7 @@ fn assembled_free_oscillator_converges_quadratically_in_native_state() {
                 constraint_id: "second_synthetic_anchor".into(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                    target: runmat_analysis_core::RegionTarget::authored("second_anchor"),
+                    target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("second_anchor")),
                 },
             },
         ));
@@ -788,7 +788,7 @@ fn assembled_free_oscillator_converges_quadratically_in_native_state() {
         &model,
         &excitations,
         None,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .expect("the oscillator reference must exercise an admitted assembled operator");
     assert_eq!(summary.operator.constrained_dofs(), &[true, false, true]);

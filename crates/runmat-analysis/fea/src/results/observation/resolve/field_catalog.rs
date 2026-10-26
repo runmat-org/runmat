@@ -51,6 +51,51 @@ pub(super) fn validate_field_catalog<'a>(
 
 pub(super) fn bind_field<'a>(
     spec: &ObservationSpec,
+    fields: impl Iterator<Item = &'a RecoveredFieldDefinition> + Clone,
+) -> Result<&'a RecoveredFieldDefinition, ObservationError> {
+    match bind_declared_field(spec, fields.clone()) {
+        Err(ObservationError::Field { .. })
+            if spec.recovery == RecoveryPolicy::Native
+                || spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation =>
+        {
+            bind_located_field(spec, fields)
+        }
+        result => result,
+    }
+}
+
+/// A field named at a location the solver provides only by transfer (nodal von Mises is the
+/// volume-weighted average of element values) binds to that single declared transfer. The
+/// bound declaration, and so the observation's identity, records how the values were produced.
+fn bind_located_field<'a>(
+    spec: &ObservationSpec,
+    fields: impl Iterator<Item = &'a RecoveredFieldDefinition>,
+) -> Result<&'a RecoveredFieldDefinition, ObservationError> {
+    let mut matches = fields.filter(|field| {
+        matches!(
+            field.derivation(),
+            RecoveredFieldDerivation::LocationTransfer { .. }
+        ) && field.location() == spec.source_location
+            && field.quantity() == spec.quantity
+            && field.value_shape() == &spec.value_shape
+    });
+    match (matches.next(), matches.next()) {
+        (Some(field), None) => Ok(field),
+        (None, _) => Err(ObservationError::Field {
+            observation_id: spec.observation_id.0.clone(),
+            reason: "no declaration matches quantity, location, and value shape".into(),
+        }),
+        _ => Err(ObservationError::Field {
+            observation_id: spec.observation_id.0.clone(),
+            reason:
+                "multiple declarations match; recovery must provide an unambiguous field catalog"
+                    .into(),
+        }),
+    }
+}
+
+fn bind_declared_field<'a>(
+    spec: &ObservationSpec,
     fields: impl Iterator<Item = &'a RecoveredFieldDefinition>,
 ) -> Result<&'a RecoveredFieldDefinition, ObservationError> {
     let mut matches = fields.filter(|field| {

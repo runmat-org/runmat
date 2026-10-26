@@ -55,7 +55,7 @@ fn both_coupling_kinds_and_surface_directions_preserve_original_row_shape() {
         let mut model =
             crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
         let coupling = ReferencePointCoupling {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             reference_point: ReferencePoint {
                 reference_point_id: "original-reference".into(),
                 position: Position::new([0.2, 0.3, -1.0]),
@@ -65,10 +65,10 @@ fn both_coupling_kinds_and_surface_directions_preserve_original_row_shape() {
             StructuralConstraintKind::RigidCoupling(coupling.clone()),
             StructuralConstraintKind::DistributingCoupling(coupling.clone()),
             StructuralConstraintKind::Symmetry {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
             },
             StructuralConstraintKind::Antisymmetry {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
             },
         ] {
             model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {

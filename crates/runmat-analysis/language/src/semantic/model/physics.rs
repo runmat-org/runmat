@@ -1,10 +1,11 @@
-use super::{diagnostic, properties::*, region_source};
+use super::{diagnostic, properties::*, region_source, signals};
 use crate::{
     BoundFeaProgram, CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind,
-    FeaDiagnostic, PhysicalDimension,
+    FeaDiagnostic, FeaType, PhysicalDimension,
 };
 use runmat_analysis_core::{
-    AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
+    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector,
+    AuthoredConnectorKind, CanonicalQuantity,
     AuthoredInterface, AuthoredInterfaceKind, Damping, FoundationModulus, FrictionCoefficient,
     HeatFlux, HeatTransferCoefficient, PrescribedValue, Pressure, SpecificAcousticImpedance,
     Stiffness, SurfaceEmissivity, Temperature, ThermalContactResistance,
@@ -20,6 +21,7 @@ pub(super) struct LoweredModelPhysics {
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    tables: &super::tables::ImpedanceTables,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> LoweredModelPhysics {
     let mut boundaries = Vec::new();
@@ -37,7 +39,8 @@ pub(super) fn lower(
         match kind {
             FeaModelDefinitionKind::Load => {
                 if !is_applied_excitation(statements) {
-                    if let Some(value) = boundary(declaration, bound, name, statements, diagnostics)
+                    if let Some(value) =
+                        boundary(declaration, bound, tables, name, statements, diagnostics)
                     {
                         boundaries.push(value);
                     }
@@ -76,6 +79,7 @@ fn is_applied_excitation(statements: &[CheckedFeaStatement]) -> bool {
 fn boundary(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    tables: &super::tables::ImpedanceTables,
     id: &str,
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -94,7 +98,8 @@ fn boundary(
         "thermal.convection" => &["target", "ambient_temperature", "coefficient"][..],
         "thermal.radiation" => &["target", "ambient_temperature", "emissivity"][..],
         "acoustic.impedance" => &["target", "impedance"][..],
-        "magnetic.insulation" | "acoustic.rigid_wall" | "acoustic.radiation" => &["target"][..],
+        "acoustic.radiation" => &["target", "center"][..],
+        "magnetic.insulation" | "acoustic.rigid_wall" => &["target"][..],
         _ => {
             diagnostic(
                 declaration,
@@ -133,13 +138,24 @@ fn boundary(
                 PhysicalDimension::TEMPERATURE,
                 diagnostics,
             )?)),
-            coefficient: HeatTransferCoefficient::new(required_quantity(
+            coefficient: boundary_coefficient::<HeatTransferCoefficient>(
                 declaration,
                 body,
                 "coefficient",
-                heat_transfer_coefficient()?,
+                &[FeaType::Quantity(
+                    PhysicalDimension::HEAT_TRANSFER_COEFFICIENT.into(),
+                )],
+                |diagnostics| {
+                    required_quantity(
+                        declaration,
+                        body,
+                        "coefficient",
+                        PhysicalDimension::HEAT_TRANSFER_COEFFICIENT,
+                        diagnostics,
+                    )
+                },
                 diagnostics,
-            )?),
+            )?,
         },
         "thermal.radiation" => AuthoredBoundaryKind::ThermalRadiation {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(required_quantity(
@@ -149,16 +165,60 @@ fn boundary(
                 PhysicalDimension::TEMPERATURE,
                 diagnostics,
             )?)),
-            emissivity: SurfaceEmissivity::new(required_scalar(
+            emissivity: boundary_coefficient::<SurfaceEmissivity>(
                 declaration,
                 body,
                 "emissivity",
+                &[
+                    FeaType::Real,
+                    FeaType::Quantity(PhysicalDimension::DIMENSIONLESS.into()),
+                ],
+                |diagnostics| required_scalar(declaration, body, "emissivity", diagnostics),
                 diagnostics,
-            )?),
+            )?,
         },
         "magnetic.insulation" => AuthoredBoundaryKind::MagneticInsulation,
         "acoustic.rigid_wall" => AuthoredBoundaryKind::AcousticRigidWall,
+        // Without `center` the outgoing wave is planar (normal incidence); with a center it
+        // is spherical about that point.
+        "acoustic.radiation" if optional_property_assignment(body, "center").is_some() => {
+            AuthoredBoundaryKind::AcousticSphericalRadiation {
+                center_m: required_vector(
+                    declaration,
+                    body,
+                    "center",
+                    PhysicalDimension::LENGTH,
+                    diagnostics,
+                )?,
+            }
+        }
         "acoustic.radiation" => AuthoredBoundaryKind::AcousticRadiation,
+        // `impedance = table.<name>` takes a complex, frequency-dependent law; a quantity is
+        // a constant real impedance.
+        "acoustic.impedance"
+            if optional_property_assignment(body, "impedance").is_some_and(|value| {
+                matches!(&value.kind, crate::semantic::expression::CheckedExpressionKind::Reference(path) if path.first().map(String::as_str) == Some("table"))
+            }) =>
+        {
+            let value = optional_property_assignment(body, "impedance")?;
+            let crate::semantic::expression::CheckedExpressionKind::Reference(path) = &value.kind
+            else {
+                return None;
+            };
+            let Some(law) = path
+                .get(1)
+                .and_then(|name| tables.get(&(declaration.module.clone(), name.clone())))
+            else {
+                diagnostic(
+                    declaration,
+                    value.span,
+                    "impedance table is unknown or invalid",
+                    diagnostics,
+                );
+                return None;
+            };
+            AuthoredBoundaryKind::AcousticImpedanceLaw { law: law.clone() }
+        }
         "acoustic.impedance" => AuthoredBoundaryKind::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(required_quantity(
                 declaration,
@@ -362,7 +422,7 @@ fn interface(
                     declaration,
                     body,
                     "coefficient",
-                    heat_transfer_coefficient()?,
+                    PhysicalDimension::HEAT_TRANSFER_COEFFICIENT,
                     diagnostics,
                 )?),
             },
@@ -418,10 +478,32 @@ fn validate_physics<E: std::fmt::Display>(
     }
 }
 
-fn heat_transfer_coefficient() -> Option<PhysicalDimension> {
-    PhysicalDimension::POWER
-        .divide(PhysicalDimension::AREA)?
-        .divide(PhysicalDimension::TEMPERATURE)
+/// A boundary coefficient is a constant, or pure arithmetic over numeric model inputs that study
+/// realization evaluates for each bound input set.
+fn boundary_coefficient<Q: CanonicalQuantity>(
+    declaration: &CheckedFeaDeclaration,
+    body: &[CheckedFeaStatement],
+    name: &str,
+    input_types: &[FeaType],
+    constant: impl FnOnce(&mut Vec<FeaDiagnostic>) -> Option<f64>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<AuthoredBoundaryCoefficient<Q>> {
+    let value = required_assignment(declaration, body, name, diagnostics)?;
+    if !signals::depends_on_model_input(value) {
+        return constant(diagnostics)
+            .map(|value| AuthoredBoundaryCoefficient::Constant(Q::from_canonical_value(value)));
+    }
+    if !input_types.contains(&value.value_type) {
+        diagnostic(
+            declaration,
+            value.span,
+            format!("definition member `{name}` requires a quantity of the required dimension"),
+            diagnostics,
+        );
+        return None;
+    }
+    signals::model_input_expression(declaration, value, diagnostics)
+        .map(AuthoredBoundaryCoefficient::ModelInput)
 }
 
 fn specific_acoustic_impedance() -> Option<PhysicalDimension> {

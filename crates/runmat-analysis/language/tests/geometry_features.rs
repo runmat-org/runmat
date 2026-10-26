@@ -3,6 +3,10 @@ pub mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-GEOMETRY-001/persistent_topology @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Compiler checks source alias versus persistent-id selectors remain distinct typed
+//   values; no native CAD feature history, regeneration or AP242 export evidence.
 #[test]
 fn imported_source_aliases_are_rejected() {
     let source = r#"geometry part {
@@ -18,16 +22,12 @@ fn imported_source_aliases_are_rejected() {
             },
         });
     assert!(!program.is_valid());
-    assert!(format!("{:?}", program.diagnostics).contains("named CAD selection"));
+    assert!(format!("{:?}", program.diagnostics).contains("canonical occurrence-qualified ID"));
 }
 
 #[test]
 fn canonical_occurrence_selection_is_preserved_by_the_compiler() {
-    let entity = runmat_geometry_core::PersistentEntityId {
-        kind: runmat_geometry_core::PersistentEntityKind::Face,
-        source_topology_id: "exact-face".into(),
-        assembly_path: vec!["root".into(), "part-a".into()],
-    };
+    let entity = runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Face, "exact-face".into(), vec!["root".into(), "part-a".into()]);
     let id = entity.analysis_selection_id().unwrap();
     let source = r#"geometry part {
         file = "./part.brep"
@@ -97,6 +97,9 @@ geometry rounded_block {
     );
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A B-rep geometry without authored units fails closed at check with a located diagnostic naming the missing units.
 #[test]
 fn imported_geometry_without_units_names_the_missing_units() {
     let source = r#"
@@ -131,6 +134,9 @@ geometry bracket {
     );
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Omitted units resolve to the single unit the STEP file declares, without diagnostics.
 #[test]
 fn imported_geometry_without_units_uses_the_file_declared_unit() {
     let source = r#"
@@ -156,6 +162,7 @@ geometry bracket {
         ],
         exchange: None,
         resolved_units: Some(runmat_geometry_core::LengthUnit::Millimeter),
+        authored_names: Default::default(),
     };
     let program = FeaCompiler::new(
         &TestHost::default().with_geometry_inspection("project/part.step", inspection),
@@ -175,13 +182,12 @@ geometry bracket {
     ));
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Authored `units = m` over a STEP file declaring millimetres resolves to metres and reports a located units-override warning; the check stays valid.
 #[test]
 fn readable_inline_geometry_uses_asset_owned_named_selections() {
-    let entity = runmat_geometry_core::PersistentEntityId {
-        kind: runmat_geometry_core::PersistentEntityKind::Solid,
-        source_topology_id: "exact-bracket".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let entity = runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Solid, "exact-bracket".into(), vec!["root".into()]);
     let id = entity.analysis_selection_id().unwrap();
     let metadata = runmat_geometry_core::GeometryNamedSelections {
         schema_version: 1,
@@ -200,6 +206,7 @@ material steel { mass_density = 7850 kg/m^3 }
 model loaded_bracket { assign material.steel to geometry.bracket.region.body }
 "#;
     let inspection = GeometryInspection {
+            authored_names: Default::default(),
         preview_extent_m: None,
         named_selections: Some(metadata),
         content_digest: SourceDigest([3; 32]),
@@ -243,4 +250,64 @@ model loaded_bracket { assign material.steel to geometry.bracket.region.body }
         .source_dependencies()
         .unwrap()
         .contains(&LogicalSourcePath::new("project/.runmat/geometry/bracket.brep.json").unwrap()));
+}
+
+#[test]
+fn authored_units_override_a_different_file_declaration_with_a_warning() {
+    let source = r#"
+geometry channel {
+    file = "./channel.step"
+    units = m
+}
+"#;
+    let inspection = GeometryInspection {
+            named_selections: None,
+        content_digest: SourceDigest([3; 32]),
+        topology_digest: SourceDigest([4; 32]),
+        capabilities: vec![
+            GeometryInspectionCapability::Topology,
+            GeometryInspectionCapability::PersistentIds,
+        ],
+        exchange: None,
+        preview_extent_m: None,
+        resolved_units: Some(runmat_geometry_core::LengthUnit::Meter),
+        unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
+            contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {
+                context: "STEP representation #1".into(),
+                source_symbol: "mm".into(),
+                unit: runmat_geometry_core::LengthUnit::Millimeter,
+            }],
+        },
+        authored_names: Default::default(),
+    };
+    let program = FeaCompiler::new(
+        &TestHost::default().with_geometry_inspection("project/channel.step", inspection),
+    )
+    .check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let warning = program
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "fea.semantic.geometry_units_override")
+        .expect("units override must be reported");
+    assert_eq!(warning.severity, FeaDiagnosticSeverity::Warning);
+    assert!(warning.location.is_some());
+    assert!(
+        warning.message.contains("declares millimeters"),
+        "{}",
+        warning.message
+    );
+    let geometry = program.geometries.values().next().unwrap();
+    assert!(matches!(
+        &geometry.source,
+        runmat_geometry_core::GeometryDefinitionSource::Imported(imported)
+            if imported.authored_units == Some(runmat_geometry_core::LengthUnit::Meter)
+                && imported.unit_evidence.overridden_declared_unit()
+                    == Some(runmat_geometry_core::LengthUnit::Millimeter)
+    ));
 }

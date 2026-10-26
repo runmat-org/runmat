@@ -16,7 +16,7 @@ use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::resource::ResourceAccounting;
 use runmat_execution::value::ValueRefKind;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
@@ -31,7 +31,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("graph"),
         digest("source"),
-        ProgramEnvironment::new(1, 1, digest("runtime"), digest("catalog"), "matlab").unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

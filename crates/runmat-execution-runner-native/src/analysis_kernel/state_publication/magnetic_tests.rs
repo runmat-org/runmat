@@ -42,7 +42,7 @@ fn retained_result() -> MagnetostaticSolverResult {
         completeness: StateCompleteness::Complete,
         persistence: StatePersistence::Canonical,
     }];
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
@@ -57,7 +57,7 @@ fn retained_result() -> MagnetostaticSolverResult {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground:{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }
@@ -66,13 +66,12 @@ fn retained_result() -> MagnetostaticSolverResult {
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "gauge".into(),
             kind: MagneticConstraintKind::CoulombGauge {
-                target: RegionTarget::volume("solid"),
+                target: RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("solid")),
             },
         }));
     let result = MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
     .execute(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet4))

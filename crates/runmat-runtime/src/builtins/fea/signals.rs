@@ -18,32 +18,44 @@ use runmat_analysis_core::{
     SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
     Traction, VolumeFlowRate,
 };
+use runmat_builtins::fea_contract::policy_types::classes;
 use runmat_execution::value::{CallableOwner, CallableValue};
 use runmat_types::{MemberAccess, MemberName};
 
-pub(super) const DISPLACEMENT_SIGNAL_CLASS: &str = "fea.DisplacementSignal";
-pub(super) const ROTATION_SIGNAL_CLASS: &str = "fea.RotationSignal";
-pub(super) const VELOCITY_SIGNAL_CLASS: &str = "fea.VelocitySignal";
-pub(super) const ACCELERATION_SIGNAL_CLASS: &str = "fea.AccelerationSignal";
-pub(super) const ANGULAR_VELOCITY_SIGNAL_CLASS: &str = "fea.AngularVelocitySignal";
-pub(super) const ANGULAR_ACCELERATION_SIGNAL_CLASS: &str = "fea.AngularAccelerationSignal";
-pub(super) const FORCE_SIGNAL_CLASS: &str = "fea.ForceSignal";
-pub(super) const MOMENT_SIGNAL_CLASS: &str = "fea.MomentSignal";
-pub(super) const TRACTION_SIGNAL_CLASS: &str = "fea.TractionSignal";
-pub(super) const PRESSURE_SIGNAL_CLASS: &str = "fea.PressureSignal";
-pub(super) const BODY_FORCE_SIGNAL_CLASS: &str = "fea.BodyForceSignal";
-pub(super) const TEMPERATURE_SIGNAL_CLASS: &str = "fea.TemperatureSignal";
-pub(super) const TEMPERATURE_DIFFERENCE_SIGNAL_CLASS: &str = "fea.TemperatureDifferenceSignal";
-pub(super) const HEAT_FLUX_SIGNAL_CLASS: &str = "fea.HeatFluxSignal";
-pub(super) const HEAT_GENERATION_SIGNAL_CLASS: &str = "fea.HeatGenerationSignal";
-pub(super) const ELECTRIC_POTENTIAL_SIGNAL_CLASS: &str = "fea.ElectricPotentialSignal";
-pub(super) const ELECTRIC_CURRENT_SIGNAL_CLASS: &str = "fea.ElectricCurrentSignal";
-pub(super) const ELECTRIC_CHARGE_SIGNAL_CLASS: &str = "fea.ElectricChargeSignal";
-pub(super) const CURRENT_DENSITY_SIGNAL_CLASS: &str = "fea.CurrentDensitySignal";
-pub(super) const CHARGE_DENSITY_SIGNAL_CLASS: &str = "fea.ChargeDensitySignal";
-pub(super) const MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS: &str = "fea.MagneticVectorPotentialSignal";
-pub(super) const MASS_FLOW_SIGNAL_CLASS: &str = "fea.MassFlowSignal";
-pub(super) const VOLUME_FLOW_SIGNAL_CLASS: &str = "fea.VolumeFlowSignal";
+// Signal class spellings are owned by the catalog's typed class identities.
+
+pub(super) const DISPLACEMENT_SIGNAL_CLASS: &str = classes::DISPLACEMENT_SIGNAL.display_name();
+pub(super) const ROTATION_SIGNAL_CLASS: &str = classes::ROTATION_SIGNAL.display_name();
+pub(super) const VELOCITY_SIGNAL_CLASS: &str = classes::VELOCITY_SIGNAL.display_name();
+pub(super) const ACCELERATION_SIGNAL_CLASS: &str = classes::ACCELERATION_SIGNAL.display_name();
+pub(super) const ANGULAR_VELOCITY_SIGNAL_CLASS: &str =
+    classes::ANGULAR_VELOCITY_SIGNAL.display_name();
+pub(super) const ANGULAR_ACCELERATION_SIGNAL_CLASS: &str =
+    classes::ANGULAR_ACCELERATION_SIGNAL.display_name();
+pub(super) const FORCE_SIGNAL_CLASS: &str = classes::FORCE_SIGNAL.display_name();
+pub(super) const MOMENT_SIGNAL_CLASS: &str = classes::MOMENT_SIGNAL.display_name();
+pub(super) const TRACTION_SIGNAL_CLASS: &str = classes::TRACTION_SIGNAL.display_name();
+pub(super) const PRESSURE_SIGNAL_CLASS: &str = classes::PRESSURE_SIGNAL.display_name();
+pub(super) const BODY_FORCE_SIGNAL_CLASS: &str = classes::BODY_FORCE_SIGNAL.display_name();
+pub(super) const TEMPERATURE_SIGNAL_CLASS: &str = classes::TEMPERATURE_SIGNAL.display_name();
+pub(super) const TEMPERATURE_DIFFERENCE_SIGNAL_CLASS: &str =
+    classes::TEMPERATURE_DIFFERENCE_SIGNAL.display_name();
+pub(super) const HEAT_FLUX_SIGNAL_CLASS: &str = classes::HEAT_FLUX_SIGNAL.display_name();
+pub(super) const HEAT_GENERATION_SIGNAL_CLASS: &str =
+    classes::HEAT_GENERATION_SIGNAL.display_name();
+pub(super) const ELECTRIC_POTENTIAL_SIGNAL_CLASS: &str =
+    classes::ELECTRIC_POTENTIAL_SIGNAL.display_name();
+pub(super) const ELECTRIC_CURRENT_SIGNAL_CLASS: &str =
+    classes::ELECTRIC_CURRENT_SIGNAL.display_name();
+pub(super) const ELECTRIC_CHARGE_SIGNAL_CLASS: &str =
+    classes::ELECTRIC_CHARGE_SIGNAL.display_name();
+pub(super) const CURRENT_DENSITY_SIGNAL_CLASS: &str =
+    classes::CURRENT_DENSITY_SIGNAL.display_name();
+pub(super) const CHARGE_DENSITY_SIGNAL_CLASS: &str = classes::CHARGE_DENSITY_SIGNAL.display_name();
+pub(super) const MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS: &str =
+    classes::MAGNETIC_VECTOR_POTENTIAL_SIGNAL.display_name();
+pub(super) const MASS_FLOW_SIGNAL_CLASS: &str = classes::MASS_FLOW_SIGNAL.display_name();
+pub(super) const VOLUME_FLOW_SIGNAL_CLASS: &str = classes::VOLUME_FLOW_SIGNAL.display_name();
 
 const SIGNAL_FIELDS: &[&str] = &["signal", FROZEN_GENERATOR_PROPERTY];
 const SIGNAL_REQUIRED_FIELDS: &[&str] = &["signal"];
@@ -65,44 +77,6 @@ pub(super) struct FrozenSignalGenerator {
 pub(super) struct RuntimeSignal {
     pub(super) signal: PhysicalSignal,
     pub(super) frozen_generator: Option<FrozenSignalGenerator>,
-}
-
-const SCALAR_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable signal identifier.",
-    ),
-    required(
-        "value",
-        BuiltinParamType::NumericScalar,
-        "Finite scalar in the canonical SI unit named by the constructor.",
-    ),
-];
-const VECTOR_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable signal identifier.",
-    ),
-    required(
-        "components",
-        BuiltinParamType::NumericArray,
-        "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor.",
-    ),
-];
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
 }
 
 fn signal_object(
@@ -193,30 +167,13 @@ fn constant_signal<Q>(
 
 macro_rules! scalar_signal {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin:literal, $label:literal, $summary:literal, $class:expr,
-        $quantity:ty, $variant:path
+        $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &SCALAR_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-            name = $builtin,
-            category = "fea",
-            summary = $summary,
-            keywords = "fea,signal,constant,typed,si",
-            descriptor($descriptor),
-            integer_capabilities(crate::builtins::fea::values::QUANTITY_INTEGER_CAPABILITIES),
-            builtin_path = "crate::builtins::fea::signals"
-        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::signals"
+                                )]
         pub async fn $function(id: String, value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin, &value, "value")?;
             signal_object(
@@ -235,30 +192,13 @@ macro_rules! scalar_signal {
 
 macro_rules! vector_signal {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin:literal, $label:literal, $summary:literal, $class:expr,
-        $quantity:ty, $variant:path
+        $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &VECTOR_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-            name = $builtin,
-            category = "fea",
-            summary = $summary,
-            keywords = "fea,signal,constant,vector,typed,si",
-            descriptor($descriptor),
-            integer_capabilities(crate::builtins::fea::values::VECTOR_QUANTITY_INTEGER_CAPABILITIES),
-            builtin_path = "crate::builtins::fea::signals"
-        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::signals"
+                                )]
         pub async fn $function(id: String, components: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin, &components, "components")?;
             signal_object(
@@ -277,256 +217,164 @@ macro_rules! vector_signal {
 
 vector_signal!(
     displacement_constant,
-    DISPLACEMENT_DESCRIPTOR,
-    DISPLACEMENT_SIGNATURES,
     "fea.DisplacementSignal.constantMeters",
-    "signal = fea.DisplacementSignal.constantMeters(id, components)",
-    "Create a constant displacement signal in meters.",
     DISPLACEMENT_SIGNAL_CLASS,
     Displacement,
-    PhysicalSignal::Displacement
+    PhysicalSignal::Displacement,
 );
 vector_signal!(
     rotation_constant,
-    ROTATION_DESCRIPTOR,
-    ROTATION_SIGNATURES,
     "fea.RotationSignal.constantRadians",
-    "signal = fea.RotationSignal.constantRadians(id, components)",
-    "Create a constant rotation signal in radians.",
     ROTATION_SIGNAL_CLASS,
     Rotation,
-    PhysicalSignal::Rotation
+    PhysicalSignal::Rotation,
 );
 vector_signal!(
     velocity_constant,
-    VELOCITY_DESCRIPTOR,
-    VELOCITY_SIGNATURES,
     "fea.VelocitySignal.constantMetersPerSecond",
-    "signal = fea.VelocitySignal.constantMetersPerSecond(id, components)",
-    "Create a constant velocity signal in meters per second.",
     VELOCITY_SIGNAL_CLASS,
     Velocity,
-    PhysicalSignal::Velocity
+    PhysicalSignal::Velocity,
 );
 vector_signal!(
     acceleration_constant,
-    ACCELERATION_DESCRIPTOR,
-    ACCELERATION_SIGNATURES,
     "fea.AccelerationSignal.constantMetersPerSecondSquared",
-    "signal = fea.AccelerationSignal.constantMetersPerSecondSquared(id, components)",
-    "Create a constant acceleration signal in meters per second squared.",
     ACCELERATION_SIGNAL_CLASS,
     Acceleration,
-    PhysicalSignal::Acceleration
+    PhysicalSignal::Acceleration,
 );
 vector_signal!(
     angular_velocity_constant,
-    ANGULAR_VELOCITY_DESCRIPTOR,
-    ANGULAR_VELOCITY_SIGNATURES,
     "fea.AngularVelocitySignal.constantRadiansPerSecond",
-    "signal = fea.AngularVelocitySignal.constantRadiansPerSecond(id, components)",
-    "Create a constant angular-velocity signal in radians per second.",
     ANGULAR_VELOCITY_SIGNAL_CLASS,
     AngularVelocity,
-    PhysicalSignal::AngularVelocity
+    PhysicalSignal::AngularVelocity,
 );
 vector_signal!(
     angular_acceleration_constant,
-    ANGULAR_ACCELERATION_DESCRIPTOR,
-    ANGULAR_ACCELERATION_SIGNATURES,
     "fea.AngularAccelerationSignal.constantRadiansPerSecondSquared",
-    "signal = fea.AngularAccelerationSignal.constantRadiansPerSecondSquared(id, components)",
-    "Create a constant angular-acceleration signal in radians per second squared.",
     ANGULAR_ACCELERATION_SIGNAL_CLASS,
     AngularAcceleration,
-    PhysicalSignal::AngularAcceleration
+    PhysicalSignal::AngularAcceleration,
 );
 vector_signal!(
     force_constant,
-    FORCE_DESCRIPTOR,
-    FORCE_SIGNATURES,
     "fea.ForceSignal.constantNewtons",
-    "signal = fea.ForceSignal.constantNewtons(id, components)",
-    "Create a constant force signal in newtons.",
     FORCE_SIGNAL_CLASS,
     Force,
-    PhysicalSignal::Force
+    PhysicalSignal::Force,
 );
 vector_signal!(
     moment_constant,
-    MOMENT_DESCRIPTOR,
-    MOMENT_SIGNATURES,
     "fea.MomentSignal.constantNewtonMeters",
-    "signal = fea.MomentSignal.constantNewtonMeters(id, components)",
-    "Create a constant moment signal in newton-meters.",
     MOMENT_SIGNAL_CLASS,
     Moment,
-    PhysicalSignal::Moment
+    PhysicalSignal::Moment,
 );
 vector_signal!(
     traction_constant,
-    TRACTION_DESCRIPTOR,
-    TRACTION_SIGNATURES,
     "fea.TractionSignal.constantPascals",
-    "signal = fea.TractionSignal.constantPascals(id, components)",
-    "Create a constant traction signal in pascals.",
     TRACTION_SIGNAL_CLASS,
     Traction,
-    PhysicalSignal::Traction
+    PhysicalSignal::Traction,
 );
 scalar_signal!(
     pressure_constant,
-    PRESSURE_DESCRIPTOR,
-    PRESSURE_SIGNATURES,
     "fea.PressureSignal.constantPascals",
-    "signal = fea.PressureSignal.constantPascals(id, value)",
-    "Create a constant pressure signal in pascals.",
     PRESSURE_SIGNAL_CLASS,
     Pressure,
-    PhysicalSignal::Pressure
+    PhysicalSignal::Pressure,
 );
 vector_signal!(
     body_force_constant,
-    BODY_FORCE_DESCRIPTOR,
-    BODY_FORCE_SIGNATURES,
     "fea.BodyForceSignal.constantNewtonsPerCubicMeter",
-    "signal = fea.BodyForceSignal.constantNewtonsPerCubicMeter(id, components)",
-    "Create a constant body-force-density signal in newtons per cubic meter.",
     BODY_FORCE_SIGNAL_CLASS,
     BodyForceDensity,
-    PhysicalSignal::BodyForceDensity
+    PhysicalSignal::BodyForceDensity,
 );
 scalar_signal!(
     temperature_constant,
-    TEMPERATURE_DESCRIPTOR,
-    TEMPERATURE_SIGNATURES,
     "fea.TemperatureSignal.constantKelvin",
-    "signal = fea.TemperatureSignal.constantKelvin(id, value)",
-    "Create a constant absolute-temperature signal in kelvin.",
     TEMPERATURE_SIGNAL_CLASS,
     Temperature,
-    PhysicalSignal::Temperature
+    PhysicalSignal::Temperature,
 );
 scalar_signal!(
     temperature_difference_constant,
-    TEMPERATURE_DIFFERENCE_DESCRIPTOR,
-    TEMPERATURE_DIFFERENCE_SIGNATURES,
     "fea.TemperatureDifferenceSignal.constantKelvin",
-    "signal = fea.TemperatureDifferenceSignal.constantKelvin(id, value)",
-    "Create a constant temperature-difference signal in kelvin.",
     TEMPERATURE_DIFFERENCE_SIGNAL_CLASS,
     TemperatureDifference,
-    PhysicalSignal::TemperatureDifference
+    PhysicalSignal::TemperatureDifference,
 );
 scalar_signal!(
     heat_flux_constant,
-    HEAT_FLUX_DESCRIPTOR,
-    HEAT_FLUX_SIGNATURES,
     "fea.HeatFluxSignal.constantWattsPerSquareMeter",
-    "signal = fea.HeatFluxSignal.constantWattsPerSquareMeter(id, value)",
-    "Create a constant heat-flux signal in watts per square meter.",
     HEAT_FLUX_SIGNAL_CLASS,
     HeatFlux,
-    PhysicalSignal::HeatFlux
+    PhysicalSignal::HeatFlux,
 );
 scalar_signal!(
     heat_generation_constant,
-    HEAT_GENERATION_DESCRIPTOR,
-    HEAT_GENERATION_SIGNATURES,
     "fea.HeatGenerationSignal.constantWattsPerCubicMeter",
-    "signal = fea.HeatGenerationSignal.constantWattsPerCubicMeter(id, value)",
-    "Create a constant volumetric heat-generation signal in watts per cubic meter.",
     HEAT_GENERATION_SIGNAL_CLASS,
     HeatGenerationDensity,
-    PhysicalSignal::HeatGenerationDensity
+    PhysicalSignal::HeatGenerationDensity,
 );
 scalar_signal!(
     electric_potential_constant,
-    ELECTRIC_POTENTIAL_DESCRIPTOR,
-    ELECTRIC_POTENTIAL_SIGNATURES,
     "fea.ElectricPotentialSignal.constantVolts",
-    "signal = fea.ElectricPotentialSignal.constantVolts(id, value)",
-    "Create a constant electric-potential signal in volts.",
     ELECTRIC_POTENTIAL_SIGNAL_CLASS,
     ElectricPotential,
-    PhysicalSignal::ElectricPotential
+    PhysicalSignal::ElectricPotential,
 );
 scalar_signal!(
     electric_current_constant,
-    ELECTRIC_CURRENT_DESCRIPTOR,
-    ELECTRIC_CURRENT_SIGNATURES,
     "fea.ElectricCurrentSignal.constantAmperes",
-    "signal = fea.ElectricCurrentSignal.constantAmperes(id, value)",
-    "Create a constant electric-current signal in amperes.",
     ELECTRIC_CURRENT_SIGNAL_CLASS,
     ElectricCurrent,
-    PhysicalSignal::ElectricCurrent
+    PhysicalSignal::ElectricCurrent,
 );
 scalar_signal!(
     electric_charge_constant,
-    ELECTRIC_CHARGE_DESCRIPTOR,
-    ELECTRIC_CHARGE_SIGNATURES,
     "fea.ElectricChargeSignal.constantCoulombs",
-    "signal = fea.ElectricChargeSignal.constantCoulombs(id, value)",
-    "Create a constant electric-charge signal in coulombs.",
     ELECTRIC_CHARGE_SIGNAL_CLASS,
     ElectricCharge,
-    PhysicalSignal::ElectricCharge
+    PhysicalSignal::ElectricCharge,
 );
 vector_signal!(
     current_density_constant,
-    CURRENT_DENSITY_DESCRIPTOR,
-    CURRENT_DENSITY_SIGNATURES,
     "fea.CurrentDensitySignal.constantAmperesPerSquareMeter",
-    "signal = fea.CurrentDensitySignal.constantAmperesPerSquareMeter(id, components)",
-    "Create a constant current-density signal in amperes per square meter.",
     CURRENT_DENSITY_SIGNAL_CLASS,
     ElectricCurrentDensity,
-    PhysicalSignal::ElectricCurrentDensity
+    PhysicalSignal::ElectricCurrentDensity,
 );
 scalar_signal!(
     charge_density_constant,
-    CHARGE_DENSITY_DESCRIPTOR,
-    CHARGE_DENSITY_SIGNATURES,
     "fea.ChargeDensitySignal.constantCoulombsPerCubicMeter",
-    "signal = fea.ChargeDensitySignal.constantCoulombsPerCubicMeter(id, value)",
-    "Create a constant charge-density signal in coulombs per cubic meter.",
     CHARGE_DENSITY_SIGNAL_CLASS,
     ElectricChargeDensity,
-    PhysicalSignal::ElectricChargeDensity
+    PhysicalSignal::ElectricChargeDensity,
 );
 vector_signal!(
     magnetic_vector_potential_constant,
-    MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR,
-    MAGNETIC_VECTOR_POTENTIAL_SIGNATURES,
     "fea.MagneticVectorPotentialSignal.constantWebersPerMeter",
-    "signal = fea.MagneticVectorPotentialSignal.constantWebersPerMeter(id, components)",
-    "Create a constant magnetic-vector-potential signal in webers per meter.",
     MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS,
     MagneticVectorPotential,
-    PhysicalSignal::MagneticVectorPotential
+    PhysicalSignal::MagneticVectorPotential,
 );
 scalar_signal!(
     mass_flow_constant,
-    MASS_FLOW_DESCRIPTOR,
-    MASS_FLOW_SIGNATURES,
     "fea.MassFlowSignal.constantKilogramsPerSecond",
-    "signal = fea.MassFlowSignal.constantKilogramsPerSecond(id, value)",
-    "Create a constant mass-flow signal in kilograms per second.",
     MASS_FLOW_SIGNAL_CLASS,
     MassFlowRate,
-    PhysicalSignal::MassFlowRate
+    PhysicalSignal::MassFlowRate,
 );
 scalar_signal!(
     volume_flow_constant,
-    VOLUME_FLOW_DESCRIPTOR,
-    VOLUME_FLOW_SIGNATURES,
     "fea.VolumeFlowSignal.constantCubicMetersPerSecond",
-    "signal = fea.VolumeFlowSignal.constantCubicMetersPerSecond(id, value)",
-    "Create a constant volume-flow signal in cubic meters per second.",
     VOLUME_FLOW_SIGNAL_CLASS,
     VolumeFlowRate,
-    PhysicalSignal::VolumeFlowRate
+    PhysicalSignal::VolumeFlowRate,
 );
 
 pub(super) mod bindings;
@@ -997,6 +845,7 @@ fn signal_schemas() -> [SignalSchema; 23] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod current_density;
     mod volume_flow;
     use crate::builtins::fea::signal_policies::{
         extrapolation_reject, interpolation_linear, point_continuity_right,

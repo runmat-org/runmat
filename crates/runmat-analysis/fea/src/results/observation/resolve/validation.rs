@@ -112,6 +112,7 @@ pub(super) fn validate_supported_spec(
                 | SpatialReduction::Maximum
                 | SpatialReduction::Resultant
                 | SpatialReduction::Moment { .. }
+                | SpatialReduction::NormalFlux
         ) {
             return Err(ObservationError::Unsupported(
                 "unsupported spatial reduction",
@@ -165,11 +166,24 @@ pub(super) fn validate_resolved_spatial_reduction(
             | SpatialReduction::EuclideanNorm
             | SpatialReduction::Resultant
             | SpatialReduction::Moment { .. }
+            | SpatialReduction::NormalFlux
     ) && spec.output_location != FieldLocation::Global
     {
         return Err(ObservationError::Invalid(
             "integrated spatial reductions require global output location".into(),
         ));
+    }
+    if operation == SpatialReduction::NormalFlux {
+        if source.value_shape() != &ObservationValueShape::Vector3
+            || source.numeric_representation() != RecoveredFieldNumericRepresentation::Real
+            || spec.component != ObservationComponent::All
+            || !matches!(target, ResolvedObservationTarget::Boundary { .. })
+        {
+            return Err(ObservationError::Unsupported(
+                "a normal flux reduces a real vector field through boundary faces",
+            ));
+        }
+        return Ok(());
     }
     if !matches!(
         operation,

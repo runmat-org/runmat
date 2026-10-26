@@ -1,11 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Once;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{GEOMETRY_REGION_ERROR_INPUT, GEOMETRY_REGION_ERROR_INVALID as REGION_ERROR};
 use runmat_geometry_core::{GeometryAsset, Region};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, ObjectInstance, Value};
@@ -14,9 +10,10 @@ use crate::class_registry::declaration::{immutable_properties, register_value_cl
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use super::geometry_asset_from_value_with_builtin;
+use super::geometry_asset_from_value_with_error;
 
-pub const GEOMETRY_REGION_CLASS: &str = "geometry.Region";
+/// Derived from the catalog class identity.
+pub const GEOMETRY_REGION_CLASS: &str = runmat_builtins::GEOMETRY_REGION_CLASS.display_name();
 pub const GEOMETRY_REGION_NAME: &str = "geometry.region";
 const GEOMETRY_REGION_TYPE_IDENTITY: &str = "runmat.geometry.region";
 const GEOMETRY_REGION_FIELDS: &[&str] = &[
@@ -29,56 +26,6 @@ const GEOMETRY_REGION_FIELDS: &[&str] = &[
 const GEOMETRY_REGION_REQUIRED_FIELDS: &[&str] =
     &["geometry_id", "geometry_revision", "region_id", "name"];
 
-const REGION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "asset",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Loaded geometry.Asset object.",
-    },
-    BuiltinParamDescriptor {
-        name: "selector",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Exact region ID, name, or tag; optionally prefixed with id:, name:, or tag:.",
-    },
-];
-const REGION_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "region",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Resolved immutable geometry.Region value.",
-}];
-const REGION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "region = geometry.region(asset, selector)",
-    inputs: &REGION_INPUTS,
-    outputs: &REGION_OUTPUTS,
-}];
-const REGION_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GEOMETRY.REGION.INVALID",
-    identifier: Some("RunMat:geometry:region:InvalidRegion"),
-    when: "The asset is invalid, or the selector is empty, missing, or ambiguous.",
-    message: "geometry.region: invalid region selection",
-};
-const REGION_ERRORS: [BuiltinErrorDescriptor; 1] = [REGION_ERROR];
-
-pub const GEOMETRY_REGION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGION_ERRORS,
-};
-
-pub const GEOMETRY_REGION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "geometry.region resolves text metadata from a geometry.Asset; its revision is returned as a native uint32 value and it has no integer input role.",
-    };
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GeometryRegionRef {
     pub geometry_id: String,
@@ -90,17 +37,51 @@ pub(crate) struct GeometryRegionRef {
 
 #[runtime_builtin(
     name = "geometry.region",
-    category = "geometry",
-    summary = "Resolve one region from a geometry asset by exact ID, name, or tag.",
-    keywords = "geometry,region,selector,cad,fea",
-    descriptor(crate::builtins::geometry::region::GEOMETRY_REGION_DESCRIPTOR),
-    integer_audit(crate::builtins::geometry::region::GEOMETRY_REGION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::region"
 )]
+pub async fn geometry_region_binding(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
+    let [asset, selector] = args.as_slice() else {
+        return Err(input_error(format!(
+            "expected an asset and a selector, got {} arguments",
+            args.len()
+        )));
+    };
+    let selector = match selector {
+        Value::String(text) => text.to_string(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].to_string(),
+        Value::CharArray(chars) if chars.rows == 1 => runmat_value::decode_utf16_code_units(chars.data())
+            .map_err(|_| input_error("selector must be valid text"))?,
+        _ => return Err(input_error("selector must be scalar text")),
+    };
+    geometry_region_builtin(asset.clone(), selector).await
+}
+
+/// Resolve one region of `asset`; shared by the binding and FEA unit tests.
 pub async fn geometry_region_builtin(asset: Value, selector: String) -> BuiltinResult<Value> {
-    let asset = geometry_asset_from_value_with_builtin(&asset, GEOMETRY_REGION_NAME)?;
+    let asset = geometry_asset_from_value_with_error(
+        &asset,
+        GEOMETRY_REGION_NAME,
+        &GEOMETRY_REGION_ERROR_INPUT,
+    )?;
     let region = resolve_region(&asset, &selector)?;
     region_to_value(&asset, region)
+}
+
+fn input_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(format!(
+        "{}: {}",
+        GEOMETRY_REGION_ERROR_INPUT.message,
+        message.into()
+    ))
+    .with_builtin(GEOMETRY_REGION_NAME)
+    .with_identifier(
+        GEOMETRY_REGION_ERROR_INPUT
+            .identifier
+            .unwrap_or("RunMat:geometry:region:InvalidInput"),
+    )
+    .build()
 }
 
 pub(crate) fn region_ref_from_value(
@@ -113,7 +94,10 @@ pub(crate) fn region_ref_from_value(
             format!("expected {GEOMETRY_REGION_CLASS}"),
         ));
     };
-    if object.class_name().display_name() != GEOMETRY_REGION_CLASS {
+    if !object
+        .class_name()
+        .is(runmat_builtins::GEOMETRY_REGION_CLASS)
+    {
         return Err(region_error(
             builtin,
             format!(
@@ -259,9 +243,7 @@ pub(crate) fn ensure_region_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register {GEOMETRY_REGION_CLASS}: {error}"));
     });
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
-            GEOMETRY_REGION_CLASS,
-        ));
+        crate::class_registry::ClassRegistration::new(runmat_builtins::GEOMETRY_REGION_CLASS);
     RUNTIME_CLASS.ensure(|| {
         register_value_class(
             GEOMETRY_REGION_CLASS,
@@ -330,8 +312,12 @@ mod tests {
             crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("fixture geometry should load");
-        let mut asset = geometry_asset_from_value_with_builtin(&value, GEOMETRY_REGION_NAME)
-            .expect("fixture asset should decode");
+        let mut asset = geometry_asset_from_value_with_error(
+            &value,
+            GEOMETRY_REGION_NAME,
+            &GEOMETRY_REGION_ERROR_INPUT,
+        )
+        .expect("fixture asset should decode");
         asset.geometry_id = "fixture".into();
         asset.revision = 7;
         asset.regions = vec![
@@ -368,6 +354,56 @@ mod tests {
         assert_eq!(
             decode_inline_value(&encode_inline_value(&value).expect("encode")).expect("decode"),
             value
+        );
+    }
+
+    #[test]
+    fn binding_reports_input_errors_with_the_region_identifier() {
+        for args in [
+            vec![Value::Num(1.0), Value::String("face:1".into())],
+            vec![Value::String("only one argument".into())],
+        ] {
+            let error = block_on(geometry_region_binding(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect_err("invalid input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:geometry:region:InvalidInput")
+            );
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("fixture.stl");
+        std::fs::write(
+            &path,
+            "solid fixture\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid fixture\n",
+        )
+        .unwrap();
+        let asset = block_on(geometry_load_builtin(
+            Value::String(path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("fixture geometry should load");
+        let error = block_on(geometry_region_binding(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                asset.clone(),
+                Value::Num(3.0),
+            ]),
+        ))
+        .expect_err("numeric selector");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:geometry:region:InvalidInput")
+        );
+        let region = block_on(geometry_region_binding(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                asset,
+                Value::String("tag:mesh_default".into()),
+            ]),
+        ))
+        .expect("tag selector");
+        assert!(
+            matches!(&region, Value::Object(object) if object.class_name().is(runmat_builtins::GEOMETRY_REGION_CLASS))
         );
     }
 

@@ -3,11 +3,8 @@ use crate::builtins::fea::values::{ELECTRIC_CURRENT_CLASS, ELECTRIC_POTENTIAL_CL
 
 define_simple_constraint!(
     electrical_equipotential_builtin,
-    ELECTRICAL_EQUIPOTENTIAL_DESCRIPTOR,
-    ELECTRICAL_EQUIPOTENTIAL_SIGNATURES,
+    FEA_ELECTRICAL_CONSTRAINT_EQUIPOTENTIAL_DESCRIPTOR,
     "fea.ElectricalConstraint.equipotential",
-    "constraint = fea.ElectricalConstraint.equipotential(id, region)",
-    "Create an electrical equipotential constraint.",
     FEA_ELECTRICAL_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::electrical",
     |constraint_id, target| ElectricalConstraint {
@@ -18,11 +15,8 @@ define_simple_constraint!(
 
 define_simple_constraint!(
     electrical_floating_conductor_builtin,
-    ELECTRICAL_FLOATING_CONDUCTOR_DESCRIPTOR,
-    ELECTRICAL_FLOATING_CONDUCTOR_SIGNATURES,
+    FEA_ELECTRICAL_CONSTRAINT_FLOATING_CONDUCTOR_DESCRIPTOR,
     "fea.ElectricalConstraint.floatingConductor",
-    "constraint = fea.ElectricalConstraint.floatingConductor(id, region)",
-    "Create an electrical floating-conductor constraint.",
     FEA_ELECTRICAL_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::electrical",
     |constraint_id, target| ElectricalConstraint {
@@ -33,11 +27,8 @@ define_simple_constraint!(
 
 define_simple_constraint!(
     electrical_potential_reference_builtin,
-    ELECTRICAL_POTENTIAL_REFERENCE_DESCRIPTOR,
-    ELECTRICAL_POTENTIAL_REFERENCE_SIGNATURES,
+    FEA_ELECTRICAL_CONSTRAINT_POTENTIAL_REFERENCE_DESCRIPTOR,
     "fea.ElectricalConstraint.potentialReference",
-    "constraint = fea.ElectricalConstraint.potentialReference(id, region)",
-    "Create an electrical potential-reference constraint.",
     FEA_ELECTRICAL_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::electrical",
     |constraint_id, target| ElectricalConstraint {
@@ -48,15 +39,10 @@ define_simple_constraint!(
 
 define_quantity_constraint!(
     electrical_prescribed_potential_builtin,
-    ELECTRICAL_PRESCRIBED_POTENTIAL_DESCRIPTOR,
-    ELECTRICAL_PRESCRIBED_POTENTIAL_SIGNATURES,
-    ELECTRICAL_PRESCRIBED_POTENTIAL_INPUTS,
+    FEA_ELECTRICAL_CONSTRAINT_PRESCRIBED_POTENTIAL_DESCRIPTOR,
     "fea.ElectricalConstraint.prescribedPotential",
-    "constraint = fea.ElectricalConstraint.prescribedPotential(id, region, potential)",
-    "Create a prescribed electric-potential constraint.",
     FEA_ELECTRICAL_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::electrical",
-    "potential",
     ELECTRIC_POTENTIAL_CLASS,
     "volts",
     |constraint_id, target, volts| ElectricalConstraint {
@@ -70,15 +56,10 @@ define_quantity_constraint!(
 
 define_quantity_constraint!(
     electrical_integral_current_builtin,
-    ELECTRICAL_INTEGRAL_CURRENT_DESCRIPTOR,
-    ELECTRICAL_INTEGRAL_CURRENT_SIGNATURES,
-    ELECTRICAL_INTEGRAL_CURRENT_INPUTS,
+    FEA_ELECTRICAL_CONSTRAINT_INTEGRAL_CURRENT_DESCRIPTOR,
     "fea.ElectricalConstraint.integralCurrent",
-    "constraint = fea.ElectricalConstraint.integralCurrent(id, region, current)",
-    "Create an electrical integral-current constraint.",
     FEA_ELECTRICAL_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::electrical",
-    "current",
     ELECTRIC_CURRENT_CLASS,
     "amperes",
     |constraint_id, target, amperes| ElectricalConstraint {

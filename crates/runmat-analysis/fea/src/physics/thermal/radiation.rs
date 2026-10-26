@@ -1,4 +1,4 @@
-//! Experimental surface-to-ambient gray radiation forms; not an admitted thermal
+//! Surface-to-ambient gray radiation forms; not an admitted thermal
 //! procedure. No view factors, enclosure exchange or participating medium.
 use runmat_analysis_core::SurfaceEmissivity;
 use thiserror::Error;

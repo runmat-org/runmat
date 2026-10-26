@@ -111,10 +111,14 @@ pub fn detect_completed_nonlinear_events(
                 occurrence_index: 0,
             });
         }
-        let next_contact_status = active_contact_status(
-            &result.contact_pressure_snapshots[index],
-            &result.contact_gap_snapshots[index],
-        );
+        // A run without contact has no contact history and no contact status changes.
+        let next_contact_status = match (
+            result.contact_pressure_snapshots.get(index),
+            result.contact_gap_snapshots.get(index),
+        ) {
+            (Some(pressure), Some(gap)) => active_contact_status(pressure, gap),
+            _ => contact_status.clone(),
+        };
         if next_contact_status != contact_status {
             events.push(NonlinearCompletedSolverEvent {
                 event: SolverObservationEvent::ContactStatusChange,
@@ -200,8 +204,6 @@ fn validate_event_source(
         result.von_mises_snapshots.len(),
         result.plastic_strain_snapshots.len(),
         result.equivalent_plastic_strain_snapshots.len(),
-        result.contact_pressure_snapshots.len(),
-        result.contact_gap_snapshots.len(),
         result.residual_norms.len(),
         result.increment_norms.len(),
         result.relative_increment_norms.len(),
@@ -209,6 +211,10 @@ fn validate_event_source(
     ];
     if !result.initial_load_factor.is_finite()
         || snapshot_counts.iter().any(|candidate| *candidate != count)
+        // Contact history is complete for a contact run and absent otherwise.
+        || result.contact_pressure_snapshots.len() != result.contact_gap_snapshots.len()
+        || !matches!(result.contact_pressure_snapshots.len(), 0)
+            && result.contact_pressure_snapshots.len() != count
         || result
             .load_factors
             .iter()

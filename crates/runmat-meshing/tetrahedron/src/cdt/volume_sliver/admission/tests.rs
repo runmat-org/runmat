@@ -3,6 +3,12 @@ use super::*;
 use crate::cdt::test_fixtures::coupled_quality::{fixture, metric};
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Canonical coupled admission accepts a strictly lower combined size/shape defect and
+//   rejects a reverse trade under either primary source objective; the standalone shape treatment
+//   still preserves refinement. The reference comparator independently merges cell records. This is
+//   an algebraic policy witness, not a terminal physical-mesh or original-study qualification.
 #[test]
 fn coupled_canonical_admission_uses_joint_order_while_standalone_preserves_refinement() {
     let (topology, provenance) = fixture(false, 0);

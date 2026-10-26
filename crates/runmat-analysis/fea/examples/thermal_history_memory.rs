@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let planning_reservation =
         ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)?.0;
     let baseline = peak_allocator::begin_measurement();
-    let planning = ThermalOperatorResourceFacts::derive(&mesh);
+    let planning = ThermalOperatorResourceFacts::derive(&mesh, &[]);
     let planning_growth = peak_allocator::end_measurement().saturating_sub(baseline);
     drop(planning?);
     if planning_growth > planning_reservation {
@@ -126,7 +126,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         step_id: ProcedureStepId("insulated".into()),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler {
             snapshot_count: samples,
         },
@@ -145,7 +144,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(&mesh),
             runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
             runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            workload.formulation_requirement,
         )?,
     )?;
     let expected_evidence = samples

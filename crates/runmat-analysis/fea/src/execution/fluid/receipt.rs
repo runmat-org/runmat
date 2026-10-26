@@ -10,7 +10,7 @@ use crate::{
 };
 use runmat_canonical_codec::{
     canonical_payload_materialization_resident_bytes_estimate, decode_contract, encode_contract,
-    profile_serialized, CanonicalLimits, SerializedCanonicalProfile,
+    profile_serialized, profile_serialized_shape, CanonicalLimits, SerializedCanonicalProfile,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -71,6 +71,7 @@ const RESERVATION_KEYS: &[&str] = &[
     "faces",
     "sparse_entries",
     "resident_bytes_upper_bound",
+    "verification_resident_bytes_upper_bound",
     "operator_work_upper_bound",
     "linear_iterations_upper_bound",
 ];
@@ -87,7 +88,7 @@ pub const FLUID_RECEIPT_MAX_ENCODED_BYTES: u64 = 128
     + PROVENANCE.len() as u64
     + 18 * 9
     + keys(RESERVATION_KEYS)
-    + 6 * 9;
+    + RESERVATION_KEYS.len() as u64 * 9;
 const LIMITS: CanonicalLimits =
     CanonicalLimits::new(FLUID_RECEIPT_MAX_ENCODED_BYTES as usize, 32, 128, 16);
 
@@ -121,7 +122,7 @@ pub fn fluid_receipt_encoding_profile() -> AnalysisExecutionResult<SerializedCan
             map.end()
         }
     }
-    Ok(profile_serialized(&Shape(0), LIMITS)?)
+    Ok(profile_serialized_shape(&Shape(0), LIMITS)?)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

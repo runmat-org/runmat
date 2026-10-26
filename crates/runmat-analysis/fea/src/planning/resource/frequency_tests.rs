@@ -1,8 +1,8 @@
 mod compiler;
 use runmat_analysis_core::{
-    FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateTransition,
-    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    TopologyTransitionPolicy, TransitionId,
 };
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::Digest;
@@ -113,7 +113,6 @@ fn direct_case(
         model,
         step_id: runmat_analysis_core::ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct {
@@ -175,7 +174,6 @@ fn modal_case() -> (
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(3),
             solver_mesh: Some(mesh.clone()),
-            formulation_requirement: FormulationRequirement::Experimental,
             ..ModalSolveOptions::default()
         },
     )
@@ -198,7 +196,6 @@ fn modal_case() -> (
         model,
         step_id: ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::ModalReduced {
@@ -231,6 +228,7 @@ fn direct_frequency_entry_plan_binds_request_and_concrete_gmres_growth() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&small_request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert_eq!(
@@ -269,6 +267,7 @@ fn direct_frequency_entry_plan_binds_request_and_concrete_gmres_growth() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), understated_output),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .is_err());
 
@@ -281,6 +280,7 @@ fn direct_frequency_entry_plan_binds_request_and_concrete_gmres_growth() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&large_request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert!(
@@ -307,6 +307,7 @@ fn decoded_frequency_inputs_remain_resident_during_the_solve_peak() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(inputs.clone(), output.clone()),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let mut larger_inputs = inputs;
@@ -319,6 +320,7 @@ fn decoded_frequency_inputs_remain_resident_during_the_solve_peak() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(larger_inputs, output),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert_eq!(
@@ -337,11 +339,14 @@ fn frequency_entry_preflight_rejects_accelerator_and_request_substitution() {
         &request,
         StructuralFrequencyStateInputs::default(),
         &[AcceleratorRequest {
-            class: "gpu".into(),
+            class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
             count: 1,
-            memory_bytes_each: 1024,
+            minimum_allocation_bytes: 1024,
+            provider: None,
+            required_features: Default::default(),
         }],
         prepared(input_facts(1024), entry_output(&request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .is_err());
 
@@ -354,6 +359,7 @@ fn frequency_entry_preflight_rejects_accelerator_and_request_substitution() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .is_err());
     assert_ne!(request.identity(), other_request.identity());
@@ -373,6 +379,7 @@ fn modal_frequency_entry_plan_accounts_for_the_exact_basis_and_dense_solver() {
         },
         &[],
         prepared(input_facts(1024), entry_output(&request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let mode_count = u64::try_from(state.payload.modal_basis().unwrap().modes().len()).unwrap();
@@ -401,6 +408,7 @@ fn modal_frequency_entry_plan_accounts_for_the_exact_basis_and_dense_solver() {
         },
         &[],
         prepared(input_facts(4 * 1024 * 1024), entry_output(&request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert!(large_basis_inputs.request.memory_bytes > plan.request.memory_bytes);
@@ -414,6 +422,7 @@ fn modal_frequency_entry_plan_accounts_for_the_exact_basis_and_dense_solver() {
         StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&request)),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .is_err());
 }
@@ -451,6 +460,7 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
             input_facts(1024),
             recovery_output(&mesh, &constraints, &workload),
         ),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     compiler::assert_recovery_compilation(&mesh, &workload, &request, &entry, &plan);
@@ -546,6 +556,39 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
             input_facts(1024),
             recovery_output(&mesh, &constraints, &workload),
         ),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .is_err());
+}
+
+#[test]
+fn frequency_entry_plan_carries_admitted_threads_without_changing_demand() {
+    let (workload, mesh, constraints, request) = direct_case(2);
+    let plan_for = |local_execution| {
+        build_structural_frequency_entry_resource_plan(
+            &mesh,
+            &constraints,
+            &workload,
+            &request,
+            StructuralFrequencyStateInputs::default(),
+            &[],
+            prepared(input_facts(1024), entry_output(&request)),
+            local_execution,
+        )
+        .unwrap()
+    };
+    let threads =
+        crate::planning::resource::LocalExecutionPlan::from_cpu_millicores(4_000).unwrap();
+    let serial = plan_for(crate::planning::resource::LocalExecutionPlan::serial());
+    let threaded = plan_for(threads);
+    assert_eq!(serial.request.cpu_millicores, 1_000);
+    assert_eq!(threaded.request.cpu_millicores, 4_000);
+    assert_eq!(threaded.input.demand, serial.input.demand);
+    assert_eq!(
+        crate::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+            threaded.request.cpu_millicores
+        )
+        .unwrap(),
+        threads
+    );
 }

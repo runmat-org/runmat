@@ -180,16 +180,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-        let mut elements = solid_recovery::build(
-            &mesh,
-            &properties,
-            None,
-            Some(runmat_types::physical::Quantity::<
-                runmat_types::physical::kind::Temperature,
-                _,
-            >::new(temperature.as_slice())),
-        )
-        .unwrap();
+        let mut elements =
+            solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperature.clone()))).unwrap();
         let element = &mut elements[0];
         // Deliberately poison the four visualization/recovery samples: arbitrary-point
         // integration must use the complete nodal polynomial, not fit these samples.

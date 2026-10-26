@@ -47,6 +47,19 @@ impl Norm {
             root: 1.0,
         }
     }
+    fn from_magnitude(magnitude: f64) -> Self {
+        Self {
+            scale: magnitude,
+            root: 1.0,
+        }
+    }
+    /// The plain magnitude of a norm produced by a native kernel.
+    pub(super) fn native_magnitude(self) -> Option<f64> {
+        (self.root == 1.0 && self.scale.is_finite() && self.scale > 0.0).then_some(self.scale)
+    }
+    fn is_one(self) -> bool {
+        self.scale == 1.0 && self.root == 1.0
+    }
     pub(super) fn is_zero(self) -> bool {
         self.scale == 0.0
     }
@@ -73,6 +86,19 @@ impl Norm {
             return false;
         }
         other.scale.is_infinite() && self.scale.is_finite() || self.relative(other) < 1.0
+    }
+    /// `self · factor` for a finite non-negative factor, keeping the scale separate.
+    pub(super) fn times(self, factor: f64) -> Self {
+        if factor == 0.0 || self.is_zero() {
+            return Self {
+                scale: 0.0,
+                root: 1.0,
+            };
+        }
+        Self {
+            scale: self.scale * factor,
+            root: self.root,
+        }
     }
     pub(super) fn normalize(self, value: Complex64) -> Complex64 {
         (value / self.scale) / self.root
@@ -127,6 +153,10 @@ pub(super) async fn norm<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
     values: &[T],
     operations: &mut O,
 ) -> Result<Option<Norm>, O::Error> {
+    if let Some(magnitude) = operations.native_norm(values) {
+        operations.cooperate(values.len() as u64).await?;
+        return Ok(Some(Norm::from_magnitude(magnitude)));
+    }
     // LAPACK-style scaled sum of squares avoids intermediate overflow for
     // otherwise representable norms.
     let mut scale = 0.0_f64;
@@ -166,6 +196,10 @@ pub(super) async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperation
     if left.len() != right.len() {
         return Ok(None);
     }
+    if let Some(product) = operations.native_dot(left, right) {
+        operations.cooperate(left.len() as u64).await?;
+        return Ok(Some(product));
+    }
     let mut sum = Complex64::new(0.0, 0.0);
     let mut compensation = Complex64::new(0.0, 0.0);
     for (index, (&left_value, &right_value)) in left.iter().zip(right).enumerate() {
@@ -204,6 +238,10 @@ pub(super) async fn scaled_axpy<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresO
 ) -> Result<bool, O::Error> {
     if target.len() != source.len() {
         return Ok(false);
+    }
+    if norm.is_one() && operations.native_axpy(target, scale, source) {
+        operations.cooperate(target.len() as u64).await?;
+        return Ok(true);
     }
     let count = target.len();
     for (index, (target, source)) in target.iter_mut().zip(source).enumerate() {

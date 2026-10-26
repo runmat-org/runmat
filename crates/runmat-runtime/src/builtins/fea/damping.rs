@@ -9,79 +9,40 @@ use crate::class_registry::declaration::{
 };
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
-pub(super) const MECHANICAL_DAMPING_CLASS: &str = "fea.MechanicalDamping";
+pub(super) const MECHANICAL_DAMPING_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_MECHANICAL_DAMPING_CLASS
+        .display_name();
 const KIND: &str = "kind";
 const MASS_COEFFICIENT: &str = "mass_coefficient";
 const STIFFNESS_COEFFICIENT: &str = "stiffness_coefficient";
 const FIELDS: &[&str] = &[KIND, MASS_COEFFICIENT, STIFFNESS_COEFFICIENT];
 const REQUIRED_FIELDS: &[&str] = &[KIND];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const RAYLEIGH_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "massCoefficient",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.RayleighMassCoefficient multiplying the mass matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "stiffnessCoefficient",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.RayleighStiffnessCoefficient multiplying the stiffness matrix.",
-    },
-];
-const UNDAMPED_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "damping = fea.MechanicalDamping.undamped()",
-    inputs: &NO_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const RAYLEIGH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "damping = fea.MechanicalDamping.rayleigh(massCoefficient, stiffnessCoefficient)",
-    inputs: &RAYLEIGH_INPUTS,
-    outputs: &OUT_ANY,
-}];
-
-pub(super) const UNDAMPED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNDAMPED_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const RAYLEIGH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RAYLEIGH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.MechanicalDamping.undamped",
-    category = "fea",
-    summary = "Create an explicitly undamped mechanical material law.",
-    keywords = "fea,material,damping,undamped,typed",
-    descriptor(crate::builtins::fea::damping::UNDAMPED_DESCRIPTOR),
-    integer_audit(FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::damping"
 )]
 pub async fn mechanical_damping_undamped_builtin() -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_MECHANICAL_DAMPING_UNDAMPED_DESCRIPTOR,
+        "fea.MechanicalDamping.undamped",
+    )?;
     damping_object("undamped", None, None)
 }
 
 #[runtime_builtin(
     name = "fea.MechanicalDamping.rayleigh",
-    category = "fea",
-    summary = "Create a Rayleigh damping law from typed mass and stiffness coefficients.",
-    keywords = "fea,material,damping,rayleigh,mass,stiffness,typed",
-    descriptor(crate::builtins::fea::damping::RAYLEIGH_DESCRIPTOR),
-    integer_audit(FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::damping"
 )]
 pub async fn mechanical_damping_rayleigh_builtin(
     mass_coefficient: Value,
     stiffness_coefficient: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_MECHANICAL_DAMPING_RAYLEIGH_DESCRIPTOR,
+        "fea.MechanicalDamping.rayleigh",
+    )?;
     let mass = quantity_scalar(
         "fea.MechanicalDamping.rayleigh",
         &mass_coefficient,
@@ -119,7 +80,10 @@ pub(super) fn mechanical_damping_from_value(
             "Damping must be a typed fea.MechanicalDamping value",
         ));
     };
-    if object.class_name().display_name() != MECHANICAL_DAMPING_CLASS {
+    if !object
+        .class_name()
+        .is(runmat_builtins::fea_contract::model_types::classes::FEA_MECHANICAL_DAMPING_CLASS)
+    {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

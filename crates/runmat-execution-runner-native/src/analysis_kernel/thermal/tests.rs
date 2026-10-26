@@ -4,9 +4,7 @@ mod initial_fields;
 mod profile_rejection;
 mod publication_admission;
 use crate::analysis_kernel::NativeAnalysisKernel;
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_analysis_execution::{
     decode_prepared_thermal_manifest, prepare_thermal_task, AnalysisKernel, AnalysisOutputPolicy,
     PreparedThermalTask, ThermalTaskPreparation,
@@ -16,7 +14,7 @@ use runmat_analysis_fea::{
     results::field::RecoveredFieldPartition,
     ComputeBackend, ThermalProcedureControl,
 };
-use runmat_execution::{ProgramEnvironment, ProgramRevision};
+use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -29,7 +27,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest,
         digest,
-        ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }
@@ -48,7 +46,6 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };
@@ -72,6 +69,9 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
     (workload, prepared)
 }
 
+// witness: FEA-THERMAL-EXECUTION-001/publication @ thermal_transient/tet4|tet10/native_process;
+//   boundary: Both-order serial native artifact import and semantic terminal state roundtrip; no
+//   producer-death, remote, partitioned or GPU credit.
 #[test]
 fn native_thermal_serial_transport_import_and_terminal_state_round_trip() {
     use runmat_analysis_execution::{

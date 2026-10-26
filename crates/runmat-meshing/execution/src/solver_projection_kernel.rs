@@ -64,75 +64,104 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             .checkpoint(MeshingStageCheckpoint::default())?;
         let control = invocation.control.geometry_evaluation_control();
         let (surface, surface_storage) = sources.surface(&invocation, &control)?;
+        log_phase(&control, "exact surface decoded");
         phase_checkpoint(
             invocation.control,
             "exact surface artifact decoding and validation",
         )?;
 
-        let evaluator = self
-            .evaluator_provider
-            .evaluator(sources.geometry, &control)
-            .map_err(|error| {
-                failure(MeshingFailureCategory::InvalidGeometry, &error.to_string())
-            })?;
-        let metric = self
-            .evaluator_provider
-            .geometry_metric(
-                sources.geometry,
-                evaluator.as_ref(),
-                &control,
-                &invocation.host.resolved_request,
-            )
-            .map_err(crate::curve_kernel::map_curve_error)?;
+        let request = &invocation.host.resolved_request;
+        if request.dimension.is_solid() != sources.volume.is_some() {
+            return Err(invalid_inputs());
+        }
         let retained = runmat_geometry_core::GeometryAllocationScope::new(&control);
         let codec = crate::codec_control::CodecControl::new(&retained);
-        let reconstruction = runmat_geometry_core::GeometryAllocationScope::new(&codec);
-        let volume_bytes = sources
-            .volume_record(&codec, &reconstruction)
-            .map_err(|failure| error::map_record_error(failure, &codec))?;
-        let topology = decode_delaunay_solver_topology(
-            volume_bytes,
-            DelaunaySolverProjectionInput {
-                exact_topology: &sources.geometry.topology,
-                exact_surface: &surface,
-                volume_metric: &metric,
-                volume_options: volume_options(&invocation.host.resolved_request),
-                request: &invocation.host.resolved_request,
-                exact_evaluation: Some(DelaunayExactEvaluation {
-                    evaluator: evaluator.as_ref(),
-                    control: &codec,
-                }),
-            },
-            solver_options(&invocation.host.resolved_request),
-            &codec,
-        )
-        .map_err(|error| match error {
-            DelaunaySolverProjectionError::Control(error) => {
-                failure(crate::geometry_failure::category(error.kind), &error.reason)
-            }
-            DelaunaySolverProjectionError::Decode(error) => {
-                error::map_volume_codec_error(error, &codec)
-            }
-            DelaunaySolverProjectionError::Projection(error) => {
-                if let Some(original) = codec.take_failure() {
-                    failure(
-                        crate::geometry_failure::category(original.kind),
-                        &original.reason,
-                    )
-                } else {
-                    map_solver_error(error)
+        let topology = if sources.volume.is_none() {
+            // Shell and beam meshes publish the exact surface (or its edges) directly.
+            let topology = runmat_meshing_surface::build_surface_solver_topology(
+                &surface,
+                &sources.geometry.topology,
+                request,
+                &codec,
+            )
+            .map_err(|error| {
+                failure(
+                    MeshingFailureCategory::InvalidGeometry,
+                    &error.to_string(),
+                )
+            })?;
+            drop(surface);
+            drop(surface_storage);
+            topology
+        } else {
+            let evaluator = self
+                .evaluator_provider
+                .evaluator(sources.geometry, &control)
+                .map_err(|error| {
+                    failure(MeshingFailureCategory::InvalidGeometry, &error.to_string())
+                })?;
+            let metric = self
+                .evaluator_provider
+                .geometry_metric(
+                    sources.geometry,
+                    evaluator.as_ref(),
+                    &control,
+                    &invocation.host.resolved_request,
+                )
+                .map_err(crate::curve_kernel::map_curve_error)?;
+            log_phase(&control, "geometry metric prepared");
+            let reconstruction = runmat_geometry_core::GeometryAllocationScope::new(&codec);
+            let volume_bytes = sources
+                .volume_record(&codec, &reconstruction)
+                .map_err(|failure| error::map_record_error(failure, &codec))?;
+            log_phase(&control, "volume record admitted");
+            let topology = decode_delaunay_solver_topology(
+                volume_bytes,
+                DelaunaySolverProjectionInput {
+                    exact_topology: &sources.geometry.topology,
+                    exact_surface: &surface,
+                    volume_metric: &metric,
+                    volume_options: volume_options(&invocation.host.resolved_request),
+                    request: &invocation.host.resolved_request,
+                    exact_evaluation: Some(DelaunayExactEvaluation {
+                        evaluator: evaluator.as_ref(),
+                        control: &codec,
+                    }),
+                },
+                solver_options(&invocation.host.resolved_request),
+                &codec,
+            )
+            .map_err(|error| match error {
+                DelaunaySolverProjectionError::Control(error) => {
+                    failure(crate::geometry_failure::category(error.kind), &error.reason)
                 }
-            }
-        })?;
-        drop(reconstruction);
-        drop(metric);
-        drop(evaluator);
-        drop(surface);
-        drop(surface_storage);
+                DelaunaySolverProjectionError::Decode(error) => {
+                    error::map_volume_codec_error(error, &codec)
+                }
+                DelaunaySolverProjectionError::Projection(error) => {
+                    if let Some(original) = codec.take_failure() {
+                        failure(
+                            crate::geometry_failure::category(original.kind),
+                            &original.reason,
+                        )
+                    } else {
+                        map_solver_error(error)
+                    }
+                }
+            })?;
+            drop(reconstruction);
+            drop(metric);
+            drop(evaluator);
+            drop(surface);
+            drop(surface_storage);
+            topology
+        };
+        log_phase(&control, "solver topology constructed");
         phase_checkpoint(
             invocation.control,
             "solver topology construction and validation",
         )?;
+        let elevation = topology.elevation_report();
         let projection = topology
             .into_projection(invocation.host.stage_identity.geometry.clone())
             .map_err(|error| {
@@ -141,7 +170,23 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                     &error.to_string(),
                 )
             })?;
+        if sources.volume.is_none() {
+            // The surface topology was built from owned vectors, not through the geometry
+            // allocator; charge its retained size to this scope before transferring it.
+            let bytes = projection
+                .retained_storage_bytes(u64::MAX, &mut || Ok(()))
+                .map_err(|error| {
+                    failure(MeshingFailureCategory::MemoryBudgetExceeded, &error.to_string())
+                })?;
+            runmat_geometry_core::GeometryEvaluationControl::consume_allocation_bytes(
+                &retained, bytes,
+            )
+            .map_err(|error| {
+                failure(crate::geometry_failure::category(error.kind), &error.reason)
+            })?;
+        }
         let projection = storage::admit(projection, &retained, &codec)?;
+        log_phase(&control, "projection retained");
         drop(codec);
         drop(retained);
         let codec = crate::codec_control::CodecControl::new(&control);
@@ -157,6 +202,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             encoding_profile.resident_workspace_bytes_estimate,
         )
         .map_err(|error| failure(crate::geometry_failure::category(error.kind), &error.reason))?;
+        log_phase(&control, "encoding workspace reserved");
         let encoded = projection.encode(&codec).map_err(|error| {
             if let Some(original) = codec.take_failure() {
                 failure(
@@ -172,7 +218,11 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
         })?;
         phase_checkpoint(invocation.control, "solver projection canonical encoding")?;
         let node_count = projection.topology.nodes.len() as u64;
-        let element_count = projection.topology.volume_elements.len() as u64;
+        let element_count = (match projection.resolved_request.dimension {
+            runmat_meshing_core::MeshDimension::Solid => projection.topology.volume_elements.len(),
+            runmat_meshing_core::MeshDimension::Surface => projection.topology.boundary_faces.len(),
+            runmat_meshing_core::MeshDimension::Curve => projection.topology.boundary_edges.len(),
+        }) as u64;
         let completed_work = node_count.checked_add(element_count).ok_or_else(|| {
             failure(
                 MeshingFailureCategory::ElementBudgetExceeded,
@@ -199,6 +249,11 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                     control.usage().allocation_bytes,
                 ),
                 ("solver_nodes".into(), node_count),
+                (
+                    "tet10_straightened_elements".into(),
+                    elevation.straightened_elements,
+                ),
+                ("tet10_straightened_edges".into(), elevation.straightened_edges),
                 ("solver_volume_elements".into(), element_count),
                 (
                     "solver_boundary_faces".into(),
@@ -232,6 +287,18 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
     }
 }
 
+/// Live and peak admitted geometry storage at each order-elevation phase.
+fn log_phase(control: &crate::MeshingGeometryEvaluationControl<'_>, phase: &'static str) {
+    let usage = control.usage();
+    tracing::info!(
+        event_code = "meshing.order_elevation.phase",
+        phase,
+        live_bytes = usage.live_allocation_bytes,
+        peak_bytes = usage.allocation_bytes,
+        "order elevation phase"
+    );
+}
+
 fn phase_checkpoint(
     control: &mut MeshingStageControl<'_>,
     phase: &'static str,
@@ -247,7 +314,8 @@ fn phase_checkpoint(
 struct SolverProjectionSources<'a> {
     geometry: &'a PreparedExactGeometryObjects,
     surface: &'a PreparedMeshingResultPublication,
-    volume: &'a PreparedMeshingResultPublication,
+    /// Absent for surface and curve requests, which project the exact surface directly.
+    volume: Option<&'a PreparedMeshingResultPublication>,
 }
 
 impl<'a> SolverProjectionSources<'a> {
@@ -280,7 +348,7 @@ impl<'a> SolverProjectionSources<'a> {
         Ok(Self {
             geometry: geometry.ok_or_else(invalid_inputs)?,
             surface: surface.ok_or_else(invalid_inputs)?,
-            volume: volume.ok_or_else(invalid_inputs)?,
+            volume,
         })
         .and_then(Self::validate_source_closure)
     }
@@ -294,18 +362,15 @@ impl<'a> SolverProjectionSources<'a> {
             .stage_objects()
             .manifest
             .prerequisite_manifest_digests;
-        let volume_prerequisites = &self
-            .volume
-            .stage_objects()
-            .manifest
-            .prerequisite_manifest_digests;
+        let volume_closes = self.volume.is_none_or(|volume| {
+            let volume_prerequisites = &volume.stage_objects().manifest.prerequisite_manifest_digests;
+            volume_prerequisites.binary_search(&geometry_digest).is_ok()
+                && volume_prerequisites.binary_search(&surface_digest).is_ok()
+        });
         if surface_prerequisites
             .binary_search(&geometry_digest)
             .is_err()
-            || volume_prerequisites
-                .binary_search(&geometry_digest)
-                .is_err()
-            || volume_prerequisites.binary_search(&surface_digest).is_err()
+            || !volume_closes
         {
             return Err(invalid_inputs());
         }
@@ -344,12 +409,12 @@ impl<'a> SolverProjectionSources<'a> {
                         .absolute_floor_m
                         .canonical_value(),
                 ),
-                maximum_nodes: invocation.host.resolved_request.resources.maximum_nodes,
-                maximum_triangles: invocation.host.resolved_request.resources.maximum_elements,
+                maximum_nodes: invocation.host.resolved_request.limits.maximum_nodes,
+                maximum_triangles: invocation.host.resolved_request.limits.maximum_elements,
                 maximum_boundary_segments: invocation
                     .host
                     .resolved_request
-                    .resources
+                    .limits
                     .maximum_elements,
             },
             &codec,
@@ -395,7 +460,7 @@ impl<'a> SolverProjectionSources<'a> {
         control: &dyn MeshingCancellationSignal,
         allocations: &dyn runmat_geometry_core::GeometryEvaluationControl,
     ) -> Result<Vec<u8>, Box<MeshingFailure>> {
-        let stage = self.volume.stage_objects();
+        let stage = self.volume.ok_or_else(invalid_inputs)?.stage_objects();
         if stage.result_identity.stage != MeshingStageKind::Tetrahedralization
             || stage.result_identity.result_kind != MeshingStageResultKind::WholeStage
         {
@@ -421,17 +486,20 @@ impl<'a> SolverProjectionSources<'a> {
     }
 }
 
+/// Algorithm bounds for curved-node optimization. They are properties of the algorithm, not of
+/// the machine: the same request produces the same mesh under any execution ceiling.
+const CURVED_OPTIMIZATION_CANDIDATES: u64 = 1_000_000_000;
+const CURVED_OPTIMIZATION_ROUNDS: u32 = 1_000_000_000;
+
 fn solver_options(request: &runmat_meshing_core::MeshingRequest) -> DelaunaySolverTopologyOptions {
-    let resources = request.resources;
+    let limits = request.limits;
     DelaunaySolverTopologyOptions {
-        maximum_boundary_faces: resources.maximum_elements.saturating_mul(4),
-        maximum_boundary_edges: resources.maximum_elements.saturating_mul(6),
-        maximum_curved_optimization_candidates: resources.maximum_search_work,
-        maximum_curved_optimization_rounds: resources.maximum_iterations.min(u64::from(u32::MAX))
-            as u32,
+        maximum_boundary_faces: limits.maximum_elements.saturating_mul(4),
+        maximum_boundary_edges: limits.maximum_elements.saturating_mul(6),
+        maximum_curved_optimization_candidates: CURVED_OPTIMIZATION_CANDIDATES,
+        maximum_curved_optimization_rounds: CURVED_OPTIMIZATION_ROUNDS,
         maximum_curved_optimization_sweeps: DelaunaySolverTopologyOptions::default()
-            .maximum_curved_optimization_sweeps
-            .min(resources.maximum_iterations.min(u64::from(u32::MAX)) as u32),
+            .maximum_curved_optimization_sweeps,
         trim_boundary_tolerance_uv: 1.0e-10,
         cancellation_check_interval: request
             .cancellation

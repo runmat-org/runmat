@@ -102,6 +102,12 @@ impl DirectionalMetricEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Sampled directional quadratic forms preserve the input SPD constraint and unrelated
+    //   orthogonal directions while satisfying the measured directional length. Invalid direction and
+    //   length rejection has separate tests. This is a finite numerical kernel family, not an interval
+    //   proof or a complete geometric sizing qualification.
     #[test]
     fn refinement_preserves_unrelated_axes_and_existing_constraints() {
         let base = MetricTensor3::isotropic_length_m(0.01).unwrap();
@@ -141,6 +147,12 @@ mod tests {
         }
     }
 
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Nine,33 and4097 rotating tangent constraints retain one planar envelope with at most
+    //   three basis directions, without repeated density growth or refinement of the orthogonal axis.
+    //   This finite numerical component test is not an interval proof, a spatially local sizing policy
+    //   or original CAD/PDE acceptance.
     #[test]
     fn repeated_rotating_tangents_have_one_bounded_planar_envelope() {
         let base = MetricTensor3::isotropic_length_m(0.01).unwrap();

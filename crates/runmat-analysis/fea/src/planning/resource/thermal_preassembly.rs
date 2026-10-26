@@ -106,7 +106,7 @@ impl ThermalPreassemblyResourceFacts {
                 "thermal resource identity differs from the selected procedure".into(),
             ));
         }
-        let history = ThermalHistoryResourceFacts::derive(mesh, schedule)?;
+        let history = ThermalHistoryResourceFacts::derive(mesh, schedule, &model.interfaces)?;
         history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
         // Reuse the workload's bounded input envelope; do not allocate canonical bytes or a
         // serde value tree to decide whether the model fits the authored resident ceiling.
@@ -128,7 +128,7 @@ impl ThermalPreassemblyResourceFacts {
             before_projection,
             step.accuracy.resources.maximum_resident_bytes,
         )?;
-        let operators = ThermalOperatorResourceFacts::derive(mesh)?;
+        let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
         operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = match observations {
@@ -141,8 +141,10 @@ impl ThermalPreassemblyResourceFacts {
         };
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
         let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
-        let field_construction = ThermalFieldConstructionResourceFacts::derive(mesh, schedule)?;
-        let manifest_catalog = ThermalManifestCatalogResourceFacts::derive(mesh, schedule)?;
+        let field_construction =
+            ThermalFieldConstructionResourceFacts::derive(mesh, schedule, history.interface_nodes)?;
+        let manifest_catalog =
+            ThermalManifestCatalogResourceFacts::derive(mesh, schedule, history.interface_nodes)?;
         let manifest_metadata = ThermalManifestMetadataResourceFacts::derive(
             identity,
             mesh,
@@ -150,10 +152,11 @@ impl ThermalPreassemblyResourceFacts {
             &metadata,
             &sources,
             &manifest_catalog,
+            history.interface_nodes,
         )?;
         let catalog_bytes = manifest_catalog.reservation_bytes()?.0;
         let manifest_retained = ThermalManifestRetainedResourceFacts::derive(
-            model, step, mesh, schedule, identity, &metadata, &sources,
+            model, step, mesh, schedule, identity, &metadata, &sources, history.interface_nodes,
         )?;
         let retained_bytes = manifest_retained.reservation_bytes()?.0;
         let base = component_bytes(

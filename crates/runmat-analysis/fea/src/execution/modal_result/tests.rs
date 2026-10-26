@@ -1,4 +1,4 @@
-use runmat_analysis_core::{FormulationRequirement, IndependentDomain, ProcedureStep};
+use runmat_analysis_core::{IndependentDomain, ProcedureStep};
 
 use super::*;
 use crate::{
@@ -18,7 +18,6 @@ fn modal_workload_and_result() -> (StructuralModalWorkload, StructuralModalSolve
         model: model.clone(),
         step_id: runmat_analysis_core::ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation,
         convergence: ModalConvergencePolicy::exploratory(),
@@ -30,7 +29,6 @@ fn modal_workload_and_result() -> (StructuralModalWorkload, StructuralModalSolve
         &model,
         ComputeBackend::Cpu,
         crate::ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -87,7 +85,6 @@ fn portable_result_and_receipt_bind_residual_vector_inventory() {
         model: model.clone(),
         step_id: runmat_analysis_core::ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation,
         convergence: ModalConvergencePolicy::exploratory(),
@@ -99,7 +96,6 @@ fn portable_result_and_receipt_bind_residual_vector_inventory() {
         &model,
         ComputeBackend::Cpu,
         crate::ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: vec![direction],
@@ -128,7 +124,6 @@ fn portable_result_and_receipt_bind_residual_vector_inventory() {
         model,
         step_id: runmat_analysis_core::ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation,
         convergence: ModalConvergencePolicy::exploratory(),

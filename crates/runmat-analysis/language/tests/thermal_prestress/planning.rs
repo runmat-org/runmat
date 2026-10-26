@@ -1,7 +1,5 @@
 use super::support::{source_module, TestHost};
-use runmat_analysis_core::{
-    AnalysisProcedure, FormulationRequirement, SolutionSpace, StateKind, StateSource, StateUse,
-};
+use runmat_analysis_core::{AnalysisProcedure, SolutionSpace, StateKind, StateSource, StateUse};
 use runmat_analysis_fea::{study::*, ComputeBackend};
 use runmat_analysis_language::*;
 use runmat_geometry_core::{GeometryRegionRole, ResolvedGeometryRegion};
@@ -38,9 +36,8 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     // This language/planning test supplies the canonical STEP tetrahedron through
     // the inspection host, so only its asset reference differs from the example.
     // The native driver-replacement test uses the original box.brep and OCCT meshing.
-    let mut source =
-        include_str!("../../../../../docs/simulation/examples/thermal-prestress-experimental.fea")
-            .replace("./geometry/box.brep", "./geometry/tetrahedron.step");
+    let mut source = include_str!("../../../../../docs/simulation/examples/thermal-prestress.fea")
+        .replace("./geometry/box.brep", "./geometry/tetrahedron.step");
     if order == ElementOrder::Tet10 {
         source = source.replace("order = linear", "order = quadratic");
     }
@@ -78,7 +75,126 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
         "project/geometry/tetrahedron.step",
         GeometryInspection {preview_extent_m: None,
             named_selections: Some({
-                let mut metadata: runmat_geometry_core::GeometryNamedSelections = serde_json::from_str(include_str!("../../../../../docs/simulation/examples/geometry/.runmat/geometry/box.brep.json")).unwrap();
+                let mut metadata: runmat_geometry_core::GeometryNamedSelections = serde_json::from_str(r#"{
+  "schema_version": 1,
+  "source_digest": [
+    121,
+    173,
+    34,
+    177,
+    204,
+    101,
+    47,
+    35,
+    7,
+    161,
+    216,
+    249,
+    195,
+    236,
+    86,
+    68,
+    250,
+    47,
+    134,
+    222,
+    29,
+    151,
+    0,
+    130,
+    13,
+    35,
+    78,
+    225,
+    25,
+    158,
+    109,
+    52
+  ],
+  "regions": [
+    {
+      "region_id": "body",
+      "role": "solid",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "support",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "load_face",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "hot",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "bulk",
+      "role": "solid",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "left",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "right",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "bottom_y",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:ae08f150d6636feb8607ede706d4202f4481fb1d7b9399842aae13d235837e33"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "bottom_z",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:1f2056eadc83682feeabae84eae920614441a06141b296350bb4d4548218a75e"
+      },
+      "cardinality": "exactly_one"
+    }
+  ]
+}"#).unwrap();
                 metadata.source_digest = document.source.content_digest;
                 metadata
             }),
@@ -91,6 +207,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             ],
             exchange: None,
             resolved_units: None,
+            authored_names: Default::default(),
         },
     );
     let checked = FeaCompiler::new(&host).check(CheckRequest {
@@ -188,7 +305,6 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
         mesh: &mesh,
         planning: StructuralStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
     })

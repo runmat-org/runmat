@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 mod tests;
 
-const PREFIX: &[u8] = b"runmat-magnetic-system-plan/v1\0";
+const PREFIX: &[u8] = b"runmat-magnetic-system-plan/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(512 * 1024 * 1024, 64_000_000, 256, 16);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -25,6 +25,8 @@ pub struct MagneticSystemPlan {
 #[serde(deny_unknown_fields)]
 struct PlanData {
     projection_digest: Digest,
+    /// Exterior faces with tangential A = 0, sorted; the rest are insulated.
+    grounded_face_identities: Vec<StableDigest>,
     edge_identities: Vec<[StableDigest; 2]>,
     free_edge_indices: Vec<usize>,
     gauge_node_identities: Vec<StableDigest>,
@@ -45,8 +47,14 @@ impl<'de> Deserialize<'de> for MagneticSystemPlan {
 impl MagneticSystemPlan {
     /// No material coefficients, current values, physical quadrature or matrices
     /// are constructed here. Existing canonical topology owns every edge/row.
-    pub fn derive(projection: &AnalysisProjection) -> Result<Self, MagnetostaticError> {
-        let (edges, boundary) = super::validated_spaces(projection)?;
+    pub fn derive(
+        projection: &AnalysisProjection,
+        grounded_faces: &[StableDigest],
+    ) -> Result<Self, MagnetostaticError> {
+        let mut grounded_face_identities = grounded_faces.to_vec();
+        grounded_face_identities.sort_unstable();
+        grounded_face_identities.dedup();
+        let (edges, boundary) = super::validated_spaces(projection, &grounded_face_identities)?;
         let free = boundary.free_edges.len();
         let dimension = free
             .checked_add(boundary.gauge_nodes.len())
@@ -90,6 +98,7 @@ impl MagneticSystemPlan {
         let value = Self {
             data: PlanData {
                 projection_digest: projection.projection_digest,
+                grounded_face_identities,
                 edge_identities: edges.edges().iter().map(|e| e.node_identities).collect(),
                 free_edge_indices: boundary.free_edges,
                 gauge_node_identities: boundary
@@ -111,6 +120,8 @@ impl MagneticSystemPlan {
             .checked_add(d.gauge_node_identities.len())
             .ok_or_else(|| invalid("dimension overflow"))?;
         if d.edge_identities.is_empty()
+            || d.grounded_face_identities.is_empty()
+            || d.grounded_face_identities.windows(2).any(|p| p[0] >= p[1])
             || d.edge_identities.iter().any(|[a, b]| a >= b)
             || d.edge_identities.windows(2).any(|p| p[0] >= p[1])
             || d.free_edge_indices
@@ -133,10 +144,13 @@ impl MagneticSystemPlan {
     }
     pub fn validate_for(&self, projection: &AnalysisProjection) -> Result<(), MagnetostaticError> {
         self.validate()?;
-        if self != &Self::derive(projection)? {
+        if self != &Self::derive(projection, &self.data.grounded_face_identities)? {
             return Err(invalid("plan is not exact canonical magnetic support"));
         }
         Ok(())
+    }
+    pub fn grounded_faces(&self) -> &[StableDigest] {
+        &self.data.grounded_face_identities
     }
     pub fn physical_pattern(&self) -> &SparsePattern {
         &self.data.physical_pattern

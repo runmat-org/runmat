@@ -1,5 +1,7 @@
 mod static_convergence;
-pub use static_convergence::StructuralStaticConvergence;
+pub use static_convergence::{
+    SpectralErrorEstimate, StaticOperatorProof, StructuralStaticConvergence,
+};
 mod field_ids;
 mod run_error;
 mod solver_compatibility;
@@ -13,7 +15,7 @@ pub use solver_compatibility::{
     validate_solver_formulation_compatibility, SolverFormulationCompatibilityError,
 };
 
-use runmat_analysis_core::{AnalysisField, FormulationRequirement};
+use runmat_analysis_core::AnalysisField;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +56,10 @@ pub enum SolverPreconditioner {
     None,
     Jacobi,
     Ilu0,
+    /// Smoothed-aggregation algebraic multigrid V-cycle.
+    Amg,
+    /// Exact sparse Cholesky factor (the inner solve of a composite method is direct).
+    SparseCholesky,
     BlockJacobi,
     FiniteVolumePressureBalance,
     ThermalCfdProjection,
@@ -65,6 +71,8 @@ impl SolverPreconditioner {
         match kind {
             SpdPreconditionerKind::Jacobi => Self::Jacobi,
             SpdPreconditionerKind::Ilu0 => Self::Ilu0,
+            SpdPreconditionerKind::Amg => Self::Amg,
+            SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => Self::SparseCholesky,
         }
     }
 
@@ -73,6 +81,8 @@ impl SolverPreconditioner {
             Self::None => "none",
             Self::Jacobi => "jacobi",
             Self::Ilu0 => "ilu0",
+            Self::Amg => "amg",
+            Self::SparseCholesky => "sparse_cholesky",
             Self::BlockJacobi => "block_jacobi",
             Self::FiniteVolumePressureBalance => "finite_volume_pressure_balance",
             Self::ThermalCfdProjection => "thermal_cfd_projection",
@@ -157,8 +167,28 @@ impl FeaRunResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoRegionTemperatureDelta {
-    pub region_id: String,
+    /// The authored volume target with its resolved entities; solver elements match it through
+    /// their region or CAD provenance, never through the authored alias alone.
+    pub target: runmat_analysis_core::RegionTarget,
     pub temperature_delta_k: f64,
+}
+
+impl FeaThermoRegionTemperatureDelta {
+    pub fn region_id(&self) -> &str {
+        &self.target.region_id
+    }
+
+    /// Whether a solver element with this region and provenance lies in the target.
+    pub fn contains_element(
+        &self,
+        region: &runmat_meshing_core::PersistentEntityId,
+        provenance: &[runmat_meshing_core::PersistentEntityId],
+    ) -> bool {
+        self.target.matches_persistent_entity(region)
+            || provenance
+                .iter()
+                .any(|entity| self.target.matches_persistent_entity(entity))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -183,16 +213,27 @@ pub struct FeaElectroThermalContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaContactInterfaceContext {
-    pub enabled: bool,
+/// Run controls of penalty contact enforcement. The interfaces, their surfaces and their
+/// friction law come from the analysis model only.
+#[serde(deny_unknown_fields)]
+pub struct FeaContactEnforcement {
+    /// Multiplier on the default normal penalty `10 E_min / h` (h: mean secondary face size).
     pub penalty_stiffness_scale: f64,
+    /// Admitted initial penetration as a fraction of h.
     pub max_penetration_ratio: f64,
-    pub friction_coefficient: f64,
+}
+
+impl Default for FeaContactEnforcement {
+    fn default() -> Self {
+        Self {
+            penalty_stiffness_scale: 1.0,
+            max_penetration_ratio: 0.05,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearStaticSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub solver_mesh_artifact_path: Option<String>,
@@ -207,8 +248,7 @@ pub struct LinearStaticSolveOptions {
 impl Default for LinearStaticSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
-            preconditioner_kind: SpdPreconditionerKind::Jacobi,
+            preconditioner_kind: SpdPreconditionerKind::Auto,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             solver_mesh_artifact_path: None,
             solver_mesh: None,
@@ -221,7 +261,6 @@ impl Default for LinearStaticSolveOptions {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
     pub truncation: crate::pipeline::modal_governance::ModalTruncationPolicy,
     pub convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
     /// Global base-acceleration directions whose load-dependent residual vectors are retained in
@@ -233,7 +272,6 @@ pub struct ModalSolveOptions {
 impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
             truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),
             convergence: crate::pipeline::modal_governance::ModalConvergencePolicy::default(),
             residual_vector_directions: Vec::new(),

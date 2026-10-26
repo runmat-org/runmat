@@ -15,13 +15,19 @@ mod materialization;
 use materialization::materialization_resident_bytes_estimate;
 pub use materialization::{
     canonical_chunked_payload_materialization_resident_bytes_estimate,
+    canonical_chunked_payload_typed_resident_bytes_estimate,
     canonical_payload_materialization_resident_bytes_estimate,
+    canonical_payload_typed_resident_bytes_estimate,
     canonical_value_materialization_resident_bytes_estimate,
+    canonical_value_typed_resident_bytes_estimate, projected_canonical_encoding_resident_bytes_estimate,
     projected_canonical_materialization_resident_bytes_estimate,
+    projected_canonical_typed_decode_resident_bytes_estimate,
     CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
 };
 
 mod json;
+mod typed_resident;
+pub use typed_resident::typed_resident_bytes_estimate;
 pub use json::{encode_json_bounded, profile_json_bytes, write_json_bounded};
 
 mod controlled_serde;
@@ -30,7 +36,8 @@ mod value;
 
 pub use serialized_profile::{
     profile_canonical_encoding, profile_canonical_encoding_with_control, profile_serialized,
-    profile_serialized_shape, profile_serialized_with_control,
+    profile_direct_materialization, profile_serialized_shape, profile_serialized_with_control,
+    profile_typed_resident_bytes,
     serialized_materialization_resident_bytes_estimate, CanonicalEncodingProfile,
     SerializedCanonicalProfile,
 };
@@ -44,7 +51,7 @@ pub trait CanonicalCodecControl: Send + Sync {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct NeverCancelled;
+pub(crate) struct NeverCancelled;
 
 impl CanonicalCodecControl for NeverCancelled {
     fn is_cancelled(&self) -> bool {
@@ -76,6 +83,23 @@ impl CanonicalLimits {
             maximum_string_bytes,
             maximum_nesting_depth,
         }
+    }
+
+    /// Limits for contracts whose collections grow with admitted content (complete fields,
+    /// meshes, byte payloads). Every collection item occupies at least one encoded byte, so
+    /// the declared encoded-byte ceiling already bounds every collection length; a separate,
+    /// smaller item cap would reject admitted content that fits the byte ceiling.
+    pub const fn content_bounded(
+        maximum_encoded_bytes: usize,
+        maximum_string_bytes: usize,
+        maximum_nesting_depth: usize,
+    ) -> Self {
+        Self::new(
+            maximum_encoded_bytes,
+            maximum_encoded_bytes,
+            maximum_string_bytes,
+            maximum_nesting_depth,
+        )
     }
 }
 

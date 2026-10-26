@@ -1,4 +1,5 @@
 //! Shared count-only admission facts for the fixed-support factor and its apply.
+#[cfg(test)]
 use crate::algebra::RealSparseMatrix;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub(crate) struct SparseRightIluEnvelope {
     pub application_scalar_operations: u64,
 }
 impl SparseRightIluEnvelope {
+    #[cfg(test)]
     pub(crate) fn derive(matrix: &RealSparseMatrix) -> Option<Self> {
         if matrix.rows() != matrix.columns() {
             return None;
@@ -79,12 +81,7 @@ mod tests {
             SparseRightIluEnvelope::for_counts(3, 7, 3).unwrap()
         );
         let factor = SparseRightIlu::factor(&matrix, || false).unwrap();
-        let heap = (factor.row_offsets.capacity()
-            + factor.column_indices.capacity()
-            + factor.diagonal_entries.capacity())
-            * std::mem::size_of::<usize>()
-            + factor.factors.capacity() * std::mem::size_of::<f64>();
-        assert!((heap as u64) < envelope.resident_bytes_upper_bound);
+        assert!(factor.retained_bytes() < envelope.resident_bytes_upper_bound);
         assert!(SparseRightIluEnvelope::for_counts(u64::MAX, u64::MAX, u64::MAX).is_none());
         assert!(SparseRightIluEnvelope::for_counts(3, 10, 3).is_none());
     }

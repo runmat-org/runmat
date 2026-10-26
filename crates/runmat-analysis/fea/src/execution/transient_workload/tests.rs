@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateTransition,
-    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    TopologyTransitionPolicy, TransitionId,
 };
 
 use crate::{
@@ -57,7 +57,6 @@ fn modal_case() -> (
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(3),
             solver_mesh: Some(mesh.clone()),
-            formulation_requirement: FormulationRequirement::Experimental,
             ..ModalSolveOptions::default()
         },
     )
@@ -91,7 +90,6 @@ fn modal_case() -> (
         model: model.clone(),
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::ModalReduced {
             basis_transition: Box::new(basis_transition),
         },
@@ -109,7 +107,7 @@ fn modal_case() -> (
         &model,
         &excitations,
         Some(mesh.clone()),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let schedule = StructuralTransientSchedule::new(vec![

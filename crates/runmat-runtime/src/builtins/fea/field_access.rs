@@ -1,5 +1,7 @@
 use runmat_value::{ComplexTensor, IntValue, ObjectInstance, Tensor, Value};
 
+use runmat_builtins::fea_contract::identities;
+
 use crate::analysis::{
     analysis_field_page_by_run_id_op, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldRequestOptions, AnalysisFieldSelection, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
@@ -9,8 +11,7 @@ use crate::BuiltinResult;
 
 use super::{
     builtin_error, empty_double_value, ensure_value_classes_registered, operation_error,
-    usize_from_value, ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION, FEA_FIELD_CLASS,
-    FIELD_PAGE_NAME,
+    usize_from_value, ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION, FIELD_PAGE_NAME,
 };
 
 pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -28,7 +29,7 @@ pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "fea.fieldPage requires an fea.Field",
         ));
     };
-    if field.class_name().display_name() != FEA_FIELD_CLASS {
+    if !field.class_name().is(identities::FEA_FIELD_CLASS) {
         return Err(builtin_error(
             FIELD_PAGE_NAME,
             &ERROR_INPUT,
@@ -81,7 +82,7 @@ pub(super) fn selection_from_field_object(
     let field_id = required_nonempty_string_for_builtin(builtin, field, "field_id")?;
     let sample = match field.properties().get("sample") {
         Some(value @ Value::Object(sample))
-            if sample.class_name().display_name() == super::values::FREQUENCY_CLASS =>
+            if sample.class_name().is(identities::FEA_FREQUENCY_CLASS) =>
         {
             let hertz = super::values::quantity_scalar(
                 builtin,
@@ -97,6 +98,22 @@ pub(super) fn selection_from_field_object(
                 ));
             }
             Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(hertz))
+        }
+        Some(value @ Value::Object(sample)) if sample.class_name().is(identities::FEA_TIME_CLASS) => {
+            let seconds = super::values::quantity_scalar(
+                builtin,
+                value,
+                super::values::TIME_CLASS,
+                "seconds",
+            )?;
+            if !seconds.is_finite() {
+                return Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "fea.Field time sample must be finite",
+                ));
+            }
+            Some(runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(seconds))
         }
         Some(Value::Tensor(tensor)) if tensor.is_empty() => None,
         None => None,

@@ -8,6 +8,7 @@ mod acceleration;
 mod boundary;
 mod boundary_balances;
 mod continuity;
+mod coupled;
 mod flux_evidence;
 mod forcing;
 mod geometry_ops;
@@ -17,10 +18,13 @@ pub(crate) use input_authority::{
     potential_boundary_authorities, supports_action, supports_signal,
 };
 mod iterate;
+mod jacobian;
 pub mod qualification;
 pub use initial::CanonicalFluidInitialState;
 mod linear;
 mod momentum;
+mod moving;
+pub use moving::swept_face_flux;
 mod policy;
 mod pressure;
 mod pressure_gradient;
@@ -46,11 +50,16 @@ pub use boundary_balances::CanonicalFluidBoundaryBalance;
 pub use flux_evidence::CanonicalFluidFaceForces;
 pub use recovery::CanonicalFluidResidual;
 pub use resources::CanonicalFluidReservation;
-pub use transient::{CanonicalFluidBackwardEulerStep, CanonicalFluidFields};
+pub use transient::{
+    CanonicalFluidBackwardEulerStep, CanonicalFluidFields, CanonicalFluidMeshMotion,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidPolicy {
+    /// How the pressure–velocity fixed point is reached; the discrete equations are the same.
+    #[serde(default)]
+    pub pressure_velocity_coupling: PressureVelocityCoupling,
     #[serde(deserialize_with = "deserialize_acceleration")]
     pub fixed_point_acceleration: Option<crate::solve::fixed_point::AndersonOnePolicy>,
     pub maximum_outer_iterations: usize,
@@ -66,9 +75,22 @@ pub struct CanonicalFluidPolicy {
     pub maximum_authority_items: usize,
 }
 
+/// Solution path of the incompressible pressure–velocity system.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PressureVelocityCoupling {
+    /// Picard steps on the whole (u, p) system by flexible GMRES with a SIMPLE
+    /// block preconditioner.
+    #[default]
+    Coupled,
+    /// Relaxed SIMPLE outer iteration (segregated momentum and pressure solves).
+    Segregated,
+}
+
 impl Default for CanonicalFluidPolicy {
     fn default() -> Self {
         Self {
+            pressure_velocity_coupling: PressureVelocityCoupling::Coupled,
             fixed_point_acceleration: Some(crate::solve::fixed_point::AndersonOnePolicy::default()),
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
@@ -78,8 +100,10 @@ impl Default for CanonicalFluidPolicy {
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-8,
             physical_relative_tolerance: 1e-8,
-            maximum_resident_bytes: 1024 * 1024 * 1024,
-            maximum_operator_work: 1_000_000_000_000,
+            // No fixed size caps: the step's authored resource budget (accuracy resources)
+            // bounds resident memory, and the execution envelope bounds time.
+            maximum_resident_bytes: u64::MAX,
+            maximum_operator_work: u64::MAX,
             maximum_authority_items: 1_000_000,
         }
     }
@@ -144,7 +168,7 @@ pub enum CanonicalFluidError {
         relative_residual: Option<f64>,
         breakdown: bool,
     },
-    #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}")]
+    #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}; worst {worst_cell}")]
     IterationExhausted {
         outer_iterations: usize,
         linear_iterations: u64,
@@ -153,6 +177,8 @@ pub enum CanonicalFluidError {
         flux_constitutive_relative: f64,
         global_momentum_relative: f64,
         maximum_cell_momentum_relative: f64,
+        /// Where the largest cell momentum residual sits at the last step and how it moved.
+        worst_cell: String,
     },
 }
 
@@ -162,6 +188,10 @@ pub struct CanonicalFluidProblem<'a> {
     topology: &'a FiniteVolumeTopology,
     density: f64,
     viscosity: f64,
+    /// Shear-rate dependent viscosity law; `viscosity` is then its low-shear reference.
+    rheology: Option<runmat_analysis_core::GeneralizedNewtonianLaw>,
+    /// Per cell: the porous-zone linear (μ/K) and quadratic (½ρC₂) resistance coefficients.
+    porous: Vec<Option<(f64, f64)>>,
     boundaries: Vec<boundary::FaceBoundary<'a>>,
     boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
@@ -173,8 +203,13 @@ pub struct CanonicalFluidProblem<'a> {
     pressure_reference_pa:
         runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
     pressure_reference_plan: pressure_reference::PressureReferencePlan,
-    pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
+    pressure_stencils: pressure_gradient::PressureGradientStencils,
     velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
+    /// Two-ring structure of the coupled momentum block, derived once per problem.
+    momentum_jacobian: jacobian::MomentumJacobianPattern,
+    /// Cell-adjacency CSR support shared (by reference count) by every momentum/pressure
+    /// operator of this problem; derived once instead of per outer iteration.
+    operator_pattern: crate::algebra::SparsePattern,
 }
 
 /// Shared authored authorities are borrowed during preparation, never replaced by
@@ -311,6 +346,32 @@ impl<'a> CanonicalFluidProblem<'a> {
                 "positive finite density and dynamic viscosity required",
             ));
         }
+        if material.rheology.is_some_and(|law| !law.is_valid()) {
+            return Err(CanonicalFluidError::Invalid("generalized-Newtonian viscosity law"));
+        }
+        if material
+            .porous_zones
+            .iter()
+            .any(|zone| !zone.law.is_valid() || zone.regions.is_empty())
+        {
+            return Err(CanonicalFluidError::Invalid("porous zone law or regions"));
+        }
+        let porous = topology
+            .cells
+            .iter()
+            .map(|cell| {
+                material
+                    .porous_zones
+                    .iter()
+                    .find(|zone| zone.regions.binary_search(&cell.region).is_ok())
+                    .map(|zone| {
+                        (
+                            viscosity / zone.law.permeability_m2,
+                            0.5 * density * zone.law.inertial_coefficient_per_m,
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
         if material.turbulence_intensity.canonical_value() != 0.0 {
             return Err(CanonicalFluidError::Unsupported("turbulence closure"));
         }
@@ -338,14 +399,16 @@ impl<'a> CanonicalFluidProblem<'a> {
             )?;
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
+        let momentum_jacobian =
+            jacobian::MomentumJacobianPattern::derive(topology, &boundaries, &velocity_stencils)?;
         let numerical_input_identity = identity(
-            "fea-fluid-numerical-input/v7",
+            "fea-fluid-numerical-input/v8",
             &(
                 topology.mesh_digest,
                 topology.projection_digest,
                 topology.geometry_digest,
                 density,
-                viscosity,
+                (viscosity, material.rheology, &material.porous_zones),
                 &boundaries,
                 &body_force_n_per_m3,
                 &pressure_reference_pa,
@@ -359,6 +422,8 @@ impl<'a> CanonicalFluidProblem<'a> {
             topology,
             density,
             viscosity,
+            rheology: material.rheology,
+            porous,
             boundaries,
             boundary_balance_plan,
             body_force_n_per_m3,
@@ -374,6 +439,8 @@ impl<'a> CanonicalFluidProblem<'a> {
             pressure_reference_plan,
             pressure_stencils,
             velocity_stencils,
+            momentum_jacobian,
+            operator_pattern: linear::cell_operator_pattern(topology)?,
         })
     }
 
@@ -386,6 +453,11 @@ impl<'a> CanonicalFluidProblem<'a> {
         self.reservation
     }
 
+    /// Source-bound pressure reference of every cell, Pa.
+    pub fn pressure_reference(&self) -> &[f64] {
+        self.pressure_reference_pa.canonical_values()
+    }
+
     pub fn solve(&self) -> Result<CanonicalFluidResult, CanonicalFluidError> {
         if self.sample != crate::excitation::ProjectionSample::Static {
             return Err(CanonicalFluidError::Unsupported(
@@ -393,6 +465,35 @@ impl<'a> CanonicalFluidProblem<'a> {
             ));
         }
         iterate::solve(self)
+    }
+
+    /// Steady solve continuing from earlier fields of the same cell complex, such as the
+    /// previous iterate of a coupled study. The admitted equations, acceptance and retained
+    /// input identity are unchanged: only the starting iterate differs.
+    pub fn solve_from(
+        &self,
+        initial: CanonicalFluidFields<'_>,
+    ) -> Result<CanonicalFluidResult, CanonicalFluidError> {
+        if self.sample != crate::excitation::ProjectionSample::Static {
+            return Err(CanonicalFluidError::Unsupported(
+                "timed fluid solve requires original predecessor interval",
+            ));
+        }
+        let n = self.topology.cells.len();
+        if initial.velocity_m_per_s.canonical_values().len() != n
+            || initial.pressure_fluctuation_pa.canonical_values().len() != n
+            || initial.face_volume_flux_m3_per_s.canonical_values().len() != self.topology.faces.len()
+            || initial
+                .velocity_m_per_s
+                .canonical_values().iter()
+                .flatten()
+                .chain(initial.pressure_fluctuation_pa.canonical_values().iter())
+                .chain(initial.face_volume_flux_m3_per_s.canonical_values().iter())
+                .any(|v| !v.is_finite())
+        {
+            return Err(CanonicalFluidError::Invalid("steady starting iterate"));
+        }
+        iterate::solve_with_time(self, Some(initial), None, self.numerical_input_identity)
     }
 
     pub fn recover(
@@ -409,7 +510,12 @@ impl<'a> CanonicalFluidProblem<'a> {
 }
 
 const INPUT_IDENTITY_LIMITS: runmat_canonical_codec::CanonicalLimits =
-    runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32);
+    runmat_canonical_codec::CanonicalLimits::new(
+        crate::address_space_power_of_two(44),
+        crate::address_space_power_of_two(36),
+        65536,
+        32,
+    );
 
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(

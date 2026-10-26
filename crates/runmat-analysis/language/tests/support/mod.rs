@@ -17,6 +17,7 @@ impl TestHost {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_geometry(mut self, path: &str, digest: u8) -> Self {
         self = self.with_geometry_inspection(
             path,
@@ -32,9 +33,39 @@ impl TestHost {
                 ],
                 exchange: None,
                 resolved_units: None,
+                authored_names: Default::default(),
             },
         );
         self
+    }
+
+    /// A geometry whose exact inspection carries authored `(role, name)` pairs.
+    #[allow(dead_code)]
+    pub fn with_named_geometry(self, path: &str, digest: u8, names: &[(&str, &str)]) -> Self {
+        let mut authored_names = BTreeMap::<String, Vec<String>>::new();
+        for (role, name) in names {
+            authored_names
+                .entry((*role).to_string())
+                .or_default()
+                .push((*name).to_string());
+        }
+        self.with_geometry_inspection(
+            path,
+            GeometryInspection {
+            named_selections: None,
+                preview_extent_m: None,
+                content_digest: SourceDigest([digest; 32]),
+                topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
+                capabilities: vec![
+                    GeometryInspectionCapability::Topology,
+                    GeometryInspectionCapability::PersistentIds,
+                ],
+                exchange: None,
+                resolved_units: None,
+                unit_evidence: Default::default(),
+                authored_names,
+            },
+        )
     }
 
     pub fn with_geometry_inspection(mut self, path: &str, inspection: GeometryInspection) -> Self {

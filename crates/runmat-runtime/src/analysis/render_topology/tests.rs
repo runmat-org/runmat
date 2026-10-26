@@ -142,3 +142,53 @@ fn all_quadratic_pieces_retain_one_original_face_region() {
         [AnalysisRenderTriangleRange { start: 0, count: 4 }]
     );
 }
+
+// witness: FEA-STRUCTURAL-PUBLIC-001/result_publication_defects @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: every rendered boundary triangle faces out of its adjacent element whatever the
+//   stored face winding; shading and culling are not covered.
+#[test]
+fn boundary_triangles_face_out_of_their_elements_whatever_the_stored_winding() {
+    for order in [runmat_meshing_core::ElementOrder::Tet4, runmat_meshing_core::ElementOrder::Tet10] {
+        let mut mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        for flip in [false, true] {
+            if flip {
+                for face in &mut mesh.topology.boundary_faces {
+                    face.node_ids.swap(1, 2);
+                    if face.node_ids.len() == 6 {
+                        // Midsides 01, 12, 20 become 02, 21, 10 after swapping corners 1 and 2.
+                        face.node_ids.swap(3, 5);
+                    }
+                }
+            }
+            let topology = render_topology_from_solver_mesh(Some(&mesh)).unwrap();
+            let rendered = &topology.meshes[0];
+            let element = &mesh.topology.volume_elements[0];
+            let position = |id: u64| {
+                mesh.topology
+                    .nodes
+                    .iter()
+                    .find(|node| node.node_id == id)
+                    .unwrap()
+                    .coordinates_m
+            };
+            let centroid: [f64; 3] = std::array::from_fn(|axis| {
+                element.node_ids[..4].iter().map(|id| position(*id).canonical_values()[axis]).sum::<f64>() / 4.0
+            });
+            for triangle in &rendered.triangles {
+                let [a, b, c] = triangle.map(|index| rendered.vertices[index as usize]);
+                let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let normal = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
+                let outward: f64 = (0..3)
+                    .map(|axis| normal[axis] * ((a[axis] + b[axis] + c[axis]) / 3.0 - centroid[axis]))
+                    .sum();
+                assert!(outward > 0.0, "order={order:?} flip={flip}");
+            }
+        }
+    }
+}

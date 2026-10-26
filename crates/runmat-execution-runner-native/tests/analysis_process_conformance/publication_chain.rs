@@ -118,7 +118,9 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         inventory_limits: limits,
     })
     .unwrap();
-    let field_response = driver.execute(&fields.host, &fields.program, None).await;
+    let field_response = driver
+        .execute(&fields.host, &fields.program, Some(&fields.resource_plan))
+        .await;
     let imported_fields = import_structural_recovered_fields(
         driver.store(),
         field_response.response,
@@ -386,7 +388,6 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             .collect(),
         sequence,
         step,
-        formulation_requirement: workload.formulation_requirement,
         program_revision: program_revision.clone(),
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,
@@ -781,6 +782,21 @@ impl CacheImport for MemoryStore {
         digest: Digest,
     ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
+    }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        match self.0.get(&digest) {
+            Some(bytes) if bytes.len() as u64 > maximum_bytes => {
+                Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "object exceeds its read bound".into(),
+                ))
+            }
+            bytes => Ok(bytes.cloned()),
+        }
     }
 }
 

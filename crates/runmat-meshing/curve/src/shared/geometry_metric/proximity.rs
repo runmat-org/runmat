@@ -13,8 +13,13 @@ use runmat_meshing_size::metric::DirectionalMetricEnvelope;
 #[derive(Clone, Debug)]
 pub(super) struct EdgeWitness {
     pub edge_id: PersistentEntityId,
+    /// The exact edge's geometric tolerance; separations within the pair's combined
+    /// tolerance are the same location.
+    pub tolerance_m: f64,
     pub endpoint_ids: BTreeSet<PersistentEntityId>,
     pub face_ids: BTreeSet<PersistentEntityId>,
+    /// Solids bounded by the edge's faces; empty for sheet geometry.
+    pub solid_ids: BTreeSet<PersistentEntityId>,
     pub points_m: Vec<[f64; 3]>,
 }
 
@@ -29,6 +34,7 @@ pub(super) fn derive_proximity_contributions(
     contact_pairs: &ContactProximityPairs,
     base_metric: MetricTensor3,
     search_radius_m: f64,
+    cells_across_gap: u32,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<Vec<MetricContribution>, SharedCurveError> {
     if !search_radius_m.is_finite() || search_radius_m <= 0.0 {
@@ -111,8 +117,17 @@ pub(super) fn derive_proximity_contributions(
                     }
                 }
             }
-            if minimum == 0.0 {
-                if source == MetricSourceKind::Contact {
+            if minimum <= coincidence_tolerance_m(left, right) {
+                // Edges of separate bodies that touch (a part seated in a recess, stacked
+                // blocks) coincide; that is contact, with no gap to resolve. Two separately
+                // evaluated coincident edges agree only to their geometric tolerance and
+                // coordinate roundoff, so a separation inside that is coincidence, not a gap
+                // to size for. Within one body, coincident nonincident edges are a topology
+                // defect.
+                let separate_bodies = !left.solid_ids.is_empty()
+                    && !right.solid_ids.is_empty()
+                    && left.solid_ids.is_disjoint(&right.solid_ids);
+                if source == MetricSourceKind::Contact || separate_bodies {
                     continue;
                 }
                 return Err(SharedCurveError::new(
@@ -127,7 +142,7 @@ pub(super) fn derive_proximity_contributions(
                 for index in [left_index, right_index] {
                     let current = metrics[index][source_index].get_or_insert(base);
                     current
-                        .include(separation_direction, minimum * 0.5)
+                        .include(separation_direction, minimum / f64::from(cells_across_gap))
                         .map_err(|error| {
                             SharedCurveError::invalid_request(
                                 "directional proximity metric",
@@ -165,6 +180,171 @@ pub(super) fn derive_proximity_contributions(
     // The parent request performs the one authoritative canonical ordering
     // together with curvature and feature contributions.
     Ok(contributions)
+}
+
+/// Boundary samples of one face, for measuring gaps between facing surfaces.
+#[derive(Clone, Debug)]
+pub(super) struct FaceWitness {
+    pub face_id: PersistentEntityId,
+    /// The largest geometric tolerance of the face's edges.
+    pub tolerance_m: f64,
+    pub vertex_ids: BTreeSet<PersistentEntityId>,
+    /// World-space points where the face's edges land on it, with the unit surface normal.
+    pub samples: Vec<([f64; 3], [f64; 3])>,
+}
+
+impl FaceWitness {
+    pub fn new(face_id: PersistentEntityId) -> Self {
+        Self {
+            face_id,
+            tolerance_m: 0.0,
+            vertex_ids: BTreeSet::new(),
+            samples: Vec::new(),
+        }
+    }
+}
+
+/// Two surfaces face each other across a gap when the separation between their samples lies
+/// within this angle (about 25 degrees) of both surface normals, up to sign: the two sides of a
+/// thin wall, the inner and outer surfaces of a tube, the two walls of a slot. Surfaces meeting
+/// through a blend or a chamfer separate obliquely and are not a gap.
+const FACING_COSINE: f64 = 0.9;
+
+/// Gaps between facing surfaces: each pair of faces that share no vertex and whose samples face
+/// each other across a separation `g` below the search radius receives an isotropic size
+/// `g / cells_across_gap` over both faces, so the surface mesh and every volume cell touching
+/// either face resolve the gap with that many cells (the volume grades from there). Edges alone
+/// measure the gap only along the faces' boundaries; this is the same proximity source applied
+/// to the surfaces between them. Contact pairs and coincident faces of separate bodies have no
+/// gap to resolve.
+pub(super) fn derive_face_proximity_contributions(
+    mut witnesses: Vec<FaceWitness>,
+    contact_pairs: &ContactProximityPairs,
+    search_radius_m: f64,
+    cells_across_gap: u32,
+    control: &dyn GeometryEvaluationControl,
+) -> Result<Vec<MetricContribution>, SharedCurveError> {
+    if !search_radius_m.is_finite() || search_radius_m <= 0.0 {
+        return Err(SharedCurveError::invalid_request(
+            "surface proximity radius",
+            "must be finite and greater than zero",
+        ));
+    }
+    witnesses.retain(|witness| !witness.samples.is_empty());
+    let face_bounds = |witness: &FaceWitness| {
+        let mut minimum = [f64::INFINITY; 3];
+        let mut maximum = [f64::NEG_INFINITY; 3];
+        for (point, _) in &witness.samples {
+            for axis in 0..3 {
+                minimum[axis] = minimum[axis].min(point[axis]);
+                maximum[axis] = maximum[axis].max(point[axis]);
+            }
+        }
+        (minimum, maximum)
+    };
+    witnesses.sort_by(|left, right| {
+        face_bounds(left).0[0]
+            .total_cmp(&face_bounds(right).0[0])
+            .then_with(|| left.face_id.cmp(&right.face_id))
+    });
+    let mut gaps = vec![f64::INFINITY; witnesses.len()];
+    for left_index in 0..witnesses.len() {
+        let left = &witnesses[left_index];
+        let left_bounds = face_bounds(left);
+        for (right_index, right) in witnesses.iter().enumerate().skip(left_index + 1) {
+            let right_bounds = face_bounds(right);
+            if right_bounds.0[0] - left_bounds.1[0] > search_radius_m {
+                break;
+            }
+            if !left.vertex_ids.is_disjoint(&right.vertex_ids)
+                || bounds_distance(left_bounds, right_bounds) > search_radius_m
+                || contact_pairs
+                    .faces
+                    .contains(&ordered_pair(left.face_id.clone(), right.face_id.clone()))
+            {
+                continue;
+            }
+            let tolerance = (left.tolerance_m + right.tolerance_m).max(
+                64.0 * f64::EPSILON
+                    * left_bounds
+                        .0
+                        .iter()
+                        .chain(&left_bounds.1)
+                        .chain(&right_bounds.0)
+                        .chain(&right_bounds.1)
+                        .fold(0.0_f64, |largest, value| largest.max(value.abs())),
+            );
+            let mut minimum = f64::INFINITY;
+            for (left_point, left_normal) in &left.samples {
+                for (right_point, right_normal) in &right.samples {
+                    control.consume_search_work(1).map_err(|error| {
+                        SharedCurveError::new(
+                            SharedCurveErrorKind::GeometryEvaluation(error.kind),
+                            "surface proximity search",
+                            error.reason,
+                        )
+                    })?;
+                    let separation = distance(*left_point, *right_point);
+                    if separation >= minimum || separation >= search_radius_m {
+                        continue;
+                    }
+                    if separation <= tolerance {
+                        // Touching faces (separate bodies seated together) have no gap here;
+                        // edge proximity reports coincidence defects within one body.
+                        continue;
+                    }
+                    let direction: [f64; 3] = std::array::from_fn(|axis| {
+                        (right_point[axis] - left_point[axis]) / separation
+                    });
+                    let facing = |normal: &[f64; 3]| {
+                        (0..3)
+                            .map(|axis| normal[axis] * direction[axis])
+                            .sum::<f64>()
+                            .abs()
+                            >= FACING_COSINE
+                    };
+                    if facing(left_normal) && facing(right_normal) {
+                        minimum = separation;
+                    }
+                }
+            }
+            if minimum.is_finite() {
+                gaps[left_index] = gaps[left_index].min(minimum);
+                gaps[right_index] = gaps[right_index].min(minimum);
+            }
+        }
+    }
+    let mut contributions = Vec::new();
+    for (witness, gap) in witnesses.into_iter().zip(gaps) {
+        if !gap.is_finite() {
+            continue;
+        }
+        let metric = MetricTensor3::isotropic_length_m(gap / f64::from(cells_across_gap)).map_err(
+            |error| {
+                SharedCurveError::invalid_request("surface proximity metric", error.to_string())
+            },
+        )?;
+        contributions.push(MetricContribution {
+            source: MetricSourceKind::Proximity,
+            scope: MetricContributionScope::Entity {
+                entity_id: witness.face_id,
+            },
+            metric,
+        });
+    }
+    Ok(contributions)
+}
+
+/// Separations at or below this are one location: the edges' combined geometric tolerance,
+/// and never less than the roundoff of their coordinates.
+fn coincidence_tolerance_m(left: &EdgeWitness, right: &EdgeWitness) -> f64 {
+    let magnitude = left
+        .points_m
+        .iter()
+        .chain(&right.points_m)
+        .flatten()
+        .fold(0.0_f64, |largest, coordinate| largest.max(coordinate.abs()));
+    (left.tolerance_m + right.tolerance_m).max(64.0 * f64::EPSILON * magnitude)
 }
 
 fn bounds(witness: &EdgeWitness) -> ([f64; 3], [f64; 3]) {
@@ -256,6 +436,95 @@ mod tests {
     use super::*;
     use runmat_geometry_core::{GeometryEvaluationError, PersistentEntityKind};
 
+    fn face(seed: u8, vertices: &[u8], samples: Vec<([f64; 3], [f64; 3])>) -> FaceWitness {
+        let mut witness = FaceWitness::new(id(PersistentEntityKind::Face, seed));
+        witness.vertex_ids = vertices
+            .iter()
+            .map(|vertex| id(PersistentEntityKind::Vertex, *vertex))
+            .collect();
+        witness.samples = samples;
+        witness
+    }
+
+    #[test]
+    fn facing_surfaces_of_a_thin_wall_get_cells_across_the_gap() {
+        let grid = |z: f64, normal: [f64; 3]| {
+            (0..5)
+                .flat_map(|i| (0..5).map(move |j| ([i as f64 * 0.25, j as f64 * 0.25, z], normal)))
+                .collect::<Vec<_>>()
+        };
+        let top = face(1, &[1, 2, 3, 4], grid(0.02, [0.0, 0.0, 1.0]));
+        let bottom = face(2, &[5, 6, 7, 8], grid(0.0, [0.0, 0.0, -1.0]));
+        // A side face meets the top through a 45 degree blend: oblique, so no gap.
+        let blended = face(
+            3,
+            &[9, 10],
+            (0..5)
+                .map(|j| ([1.03, j as f64 * 0.25, -0.01], [1.0, 0.0, 0.0]))
+                .collect(),
+        );
+        // A face sharing a vertex with the bottom is adjacent, never a gap.
+        let adjacent = face(4, &[5, 11], grid(-0.01, [0.0, 0.0, 1.0]));
+        let contributions = derive_face_proximity_contributions(
+            vec![top, bottom, blended, adjacent],
+            &ContactProximityPairs::default(),
+            0.3,
+            4,
+            &Control,
+        )
+        .unwrap();
+        let sized = contributions
+            .iter()
+            .map(|contribution| match &contribution.scope {
+                MetricContributionScope::Entity { entity_id } => {
+                    (entity_id.clone(), contribution.metric)
+                }
+                other => panic!("unexpected scope {other:?}"),
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let expected = MetricTensor3::isotropic_length_m(0.02 / 4.0).unwrap();
+        assert_eq!(
+            sized.get(&id(PersistentEntityKind::Face, 1)),
+            Some(&expected)
+        );
+        assert_eq!(
+            sized.get(&id(PersistentEntityKind::Face, 2)),
+            Some(&expected)
+        );
+        // The adjacent face faces the top across 0.03 (no shared vertex), so it is a gap.
+        let adjacent_size = MetricTensor3::isotropic_length_m(0.03 / 4.0).unwrap();
+        assert_eq!(
+            sized.get(&id(PersistentEntityKind::Face, 4)),
+            Some(&adjacent_size)
+        );
+        assert!(!sized.contains_key(&id(PersistentEntityKind::Face, 3)));
+        assert!(contributions
+            .iter()
+            .all(|contribution| contribution.source == MetricSourceKind::Proximity));
+    }
+
+    #[test]
+    fn requested_cells_across_gap_divide_the_gap_into_that_many_layers() {
+        let densest = |cells| {
+            let contributions = derive_proximity_contributions(
+                vec![witness(1, 0.0), witness(2, 0.2)],
+                &ContactProximityPairs::default(),
+                MetricTensor3::isotropic_length_m(1.0).unwrap(),
+                1.0,
+                cells,
+                &Control,
+            )
+            .unwrap();
+            let metric = contributions[0].metric;
+            metric.xx.max(metric.yy).max(metric.zz)
+        };
+        // The directional size across the gap is gap / cells: density scales with cells squared.
+        let two = densest(2);
+        let five = densest(5);
+        assert!((two - 1.0 / (0.1 * 0.1)).abs() < 1.0e-9 * two);
+        assert!((five - 1.0 / (0.04 * 0.04)).abs() < 1.0e-9 * five);
+    }
+
     #[test]
     fn sweep_emits_canonical_nearby_constraints_and_skips_far_edges() {
         let mut witnesses = vec![witness(3, 5.0), witness(1, 0.0), witness(2, 0.2)];
@@ -265,6 +534,7 @@ mod tests {
             &ContactProximityPairs::default(),
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
+            2,
             &Control,
         )
         .unwrap();
@@ -282,6 +552,7 @@ mod tests {
             &ContactProximityPairs::default(),
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
+            2,
             &ExhaustedControl,
         )
         .unwrap_err();
@@ -291,6 +562,42 @@ mod tests {
                 runmat_geometry_core::GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
             )
         );
+    }
+
+    #[test]
+    fn coincident_edges_of_separate_bodies_are_contact_and_of_one_body_a_defect() {
+        let mut left = witness(1, 0.0);
+        let mut right = witness(2, 0.0);
+        left.solid_ids.insert(id(PersistentEntityKind::Solid, 21));
+        right.solid_ids.insert(id(PersistentEntityKind::Solid, 22));
+        let derive = |left: EdgeWitness, right: EdgeWitness| {
+            derive_proximity_contributions(
+                vec![left, right],
+                &ContactProximityPairs::default(),
+                MetricTensor3::isotropic_length_m(1.0).unwrap(),
+                1.0,
+                2,
+                &Control,
+            )
+        };
+        // A part seated against another (the speaker cone in the air's recess): no gap.
+        assert!(derive(left.clone(), right.clone()).unwrap().is_empty());
+        // Separately evaluated coincident edges differ by coordinate roundoff, or by up to
+        // their geometric tolerance; neither is a gap that sizes the mesh.
+        let mut offset = right.clone();
+        offset.points_m = vec![[0.08, 0.0, 9.0e-18]];
+        let mut seated = left.clone();
+        seated.points_m = vec![[0.08, 0.0, 0.0]];
+        assert!(derive(seated.clone(), offset.clone()).unwrap().is_empty());
+        offset.points_m = vec![[0.08, 0.0, 1.5e-7]];
+        seated.tolerance_m = 1.0e-7;
+        offset.tolerance_m = 1.0e-7;
+        assert!(derive(seated.clone(), offset.clone()).unwrap().is_empty());
+        // A real gap beyond the tolerance still sizes both edges.
+        offset.points_m = vec![[0.08, 0.0, 1.0e-3]];
+        assert_eq!(derive(seated, offset).unwrap().len(), 2);
+        right.solid_ids = left.solid_ids.clone();
+        assert!(derive(left, right).is_err());
     }
 
     #[test]
@@ -310,6 +617,7 @@ mod tests {
             },
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
+            2,
             &Control,
         )
         .unwrap();
@@ -337,6 +645,7 @@ mod tests {
             },
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
+            2,
             &Control,
         )
         .unwrap();
@@ -344,6 +653,12 @@ mod tests {
         assert!(contributions.is_empty());
     }
 
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Three translated/rotated long-edge pairs retain half-separation resolution across a
+    //   thin gap while preserving the long direction at the global baseline. Original contact and
+    //   search-control cases remain separate. Sampled witnesses are not a closest-distance certificate
+    //   or general local spatial-support qualification.
     #[test]
     fn thin_extrusion_gap_resolution_preserves_long_direction_under_rotation_and_translation() {
         for (long, gap) in [
@@ -370,6 +685,7 @@ mod tests {
                 &ContactProximityPairs::default(),
                 base,
                 0.02,
+                2,
                 &Control,
             )
             .unwrap();
@@ -394,18 +710,16 @@ mod tests {
     fn witness(seed: u8, x: f64) -> EdgeWitness {
         EdgeWitness {
             edge_id: id(PersistentEntityKind::Edge, seed),
+            tolerance_m: 0.0,
             endpoint_ids: BTreeSet::from([id(PersistentEntityKind::Vertex, seed)]),
             face_ids: BTreeSet::new(),
+            solid_ids: BTreeSet::new(),
             points_m: vec![[x, 0.0, 0.0]],
         }
     }
 
     fn id(kind: PersistentEntityKind, seed: u8) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: format!("entity-{seed}"),
-            assembly_path: Vec::new(),
-        }
+        PersistentEntityId::new(kind, format!("entity-{seed}"), Vec::new())
     }
 
     struct Control;

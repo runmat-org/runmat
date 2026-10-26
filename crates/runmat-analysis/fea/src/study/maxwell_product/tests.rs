@@ -17,14 +17,7 @@ fn both_affine_orders_preserve_exact_compiled_model_properties_and_complex_sourc
             formulation.realization(),
             &crate::admission::canonical_maxwell_realization(order)
         );
-        let physical = crate::physics::maxwell::compile_canonical_input(
-            &product.workload.model,
-            &mesh,
-            product.workload.step_id.as_str(),
-            product.workload.formulation_requirement,
-            product.workload.relative_residual_target,
-        )
-        .unwrap();
+        let physical = product.workload.compile_input(&mesh).unwrap();
         assert_eq!(
             physical.angular_frequency_rad_per_s.canonical_value(),
             std::f64::consts::TAU * 1e8
@@ -90,7 +83,11 @@ fn explicit_pec_positive_loss_and_original_current_are_not_inferred() {
         panic!()
     };
     source.signal_id = SignalId("missing-current".into());
-    for changed in [missing_pec, magnetic_ground, lossless, foreign_source] {
+    // Zero conductivity (air) needs no artificial loss.
+    assert!(plan_maxwell_study_product(compiled(lossless, &mesh), &mesh, policy()).is_ok());
+    // Faces without a ground are symmetry planes of the current (n x H = 0).
+    assert!(plan_maxwell_study_product(compiled(missing_pec, &mesh), &mesh, policy()).is_ok());
+    for changed in [magnetic_ground, foreign_source] {
         assert!(plan_maxwell_study_product(compiled(changed, &mesh), &mesh, policy()).is_err());
     }
 }

@@ -171,9 +171,9 @@ fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
                 .absolute_floor_m
                 .canonical_value(),
         ),
-        maximum_nodes: host.resolved_request.resources.maximum_nodes,
-        maximum_triangles: host.resolved_request.resources.maximum_elements,
-        maximum_boundary_segments: host.resolved_request.resources.maximum_elements,
+        maximum_nodes: host.resolved_request.limits.maximum_nodes,
+        maximum_triangles: host.resolved_request.limits.maximum_elements,
+        maximum_boundary_segments: host.resolved_request.limits.maximum_elements,
     };
     let partition_results = [partition_result];
     let pass = runmat_meshing_surface::decide_exact_surface_pass(
@@ -274,7 +274,7 @@ fn serial_curve_refinement_consumes_the_surface_restart_pass() {
     let host = MeshingHostWorkload::new(
         workload,
         identity,
-        request,
+        request, pass_host.ceilings,
         pass_host.artifact_access.clone(),
         pass_host.geometry_document.clone(),
     )

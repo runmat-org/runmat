@@ -1,20 +1,20 @@
 //! Typed static facts for FEA evidence operations. Runtime remains the final
-//! authority for document content, artifact availability, and solver validity.
+//! authority for study content, artifact availability, and solver validity.
 
-use super::constructor_inference::host_text;
+use super::constructor_inference::{
+    dynamic_object_fact, host_text, known_class, object_fact, possible_exact_scalar,
+    possible_object,
+};
 use super::identities::{
     FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS, FEA_SWEEP_PLAN_CLASS,
     FEA_SWEEP_RUN_RESULT_CLASS, FEA_SWEEP_VALIDATION_CLASS, FEA_TRENDS_CLASS, FEA_VALIDATION_CLASS,
 };
+use super::options::FeaTrendsOption;
 use crate::{
     catalog::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
 };
-use runmat_types::{
-    CallInference, CallRequest, NumericClass, NumericDomain, ObjectFact, ResidencyFact, ShapeFact,
-    StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
-};
-use std::collections::BTreeMap;
+use runmat_types::{CallInference, CallRequest, StaticClassIdentity, ValueFact};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeaEvidenceKind {
@@ -25,79 +25,33 @@ pub enum FeaEvidenceKind {
 }
 
 impl FeaEvidenceKind {
-    const fn result_class(self) -> StaticClassIdentity {
+    /// Result classes for a `fea.Study` and a `fea.Sweep` input respectively.
+    const fn result_classes(self) -> (StaticClassIdentity, StaticClassIdentity) {
         match self {
-            Self::Validate => FEA_VALIDATION_CLASS,
-            Self::Plan => FEA_PLAN_CLASS,
-            Self::Run => FEA_RUN_RESULT_CLASS,
-            Self::Trends => FEA_TRENDS_CLASS,
+            Self::Validate => (FEA_VALIDATION_CLASS, FEA_SWEEP_VALIDATION_CLASS),
+            Self::Plan => (FEA_PLAN_CLASS, FEA_SWEEP_PLAN_CLASS),
+            Self::Run => (FEA_RUN_RESULT_CLASS, FEA_SWEEP_RUN_RESULT_CLASS),
+            Self::Trends => (FEA_TRENDS_CLASS, FEA_TRENDS_CLASS),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Validate => "fea.validate",
+            Self::Plan => "fea.plan",
+            Self::Run => "fea.run",
+            Self::Trends => "fea.trends",
         }
     }
 }
 
-fn result_object(kind: FeaEvidenceKind, input: Option<&ValueFact>) -> ValueFact {
-    let class = if kind == FeaEvidenceKind::Trends {
-        Some(kind.result_class())
-    } else {
-        match input.map(|value| &value.kind) {
-            Some(ValueKindFact::Unknown) => None,
-            Some(ValueKindFact::Object(object)) => object.runtime_class.as_ref().map(|class| {
-                if class.is(FEA_SWEEP_CLASS) {
-                    match kind {
-                        FeaEvidenceKind::Validate => FEA_SWEEP_VALIDATION_CLASS,
-                        FeaEvidenceKind::Plan => FEA_SWEEP_PLAN_CLASS,
-                        FeaEvidenceKind::Run => FEA_SWEEP_RUN_RESULT_CLASS,
-                        FeaEvidenceKind::Trends => FEA_TRENDS_CLASS,
-                    }
-                } else {
-                    kind.result_class()
-                }
-            }),
-            _ => Some(kind.result_class()),
-        }
-    };
-    ValueFact::proven(
-        ValueKindFact::Object(ObjectFact {
-            class: None,
-            runtime_class: class.map(StaticClassIdentity::owned),
-            properties: BTreeMap::new(),
-            properties_complete: false,
-            handle_semantics: Some(false),
-        }),
-        ShapeFact::Scalar,
-        StorageFact::Opaque,
-    )
-}
-
-fn possible_document(value: &ValueFact) -> bool {
-    if matches!(value.residency, ResidencyFact::Device { .. })
-        || matches!(value.shape.element_count(), Some(count) if count != 1)
-    {
-        return false;
+fn study_result(kind: FeaEvidenceKind, input: Option<&ValueFact>) -> ValueFact {
+    let (study, sweep) = kind.result_classes();
+    match input {
+        Some(input) if known_class(input, FEA_STUDY_CLASS) => object_fact(study),
+        Some(input) if known_class(input, FEA_SWEEP_CLASS) => object_fact(sweep),
+        _ => dynamic_object_fact(),
     }
-    match &value.kind {
-        ValueKindFact::Unknown => true,
-        ValueKindFact::Object(object) => {
-            !matches!(value.shape.element_count(), Some(count) if count != 1)
-                && object
-                    .runtime_class
-                    .as_ref()
-                    .is_none_or(|class| class.is(FEA_STUDY_CLASS) || class.is(FEA_SWEEP_CLASS))
-        }
-        _ => false,
-    }
-}
-
-fn possible_positive_window(value: &ValueFact) -> bool {
-    !matches!(value.residency, ResidencyFact::Device { .. })
-        && !matches!(value.shape.element_count(), Some(count) if count != 1)
-        && match &value.kind {
-            ValueKindFact::Unknown => true,
-            ValueKindFact::Numeric(number) => {
-                number.domain == NumericDomain::Real && number.class != NumericClass::Single
-            }
-            _ => false,
-        }
 }
 
 pub fn infer_evidence(
@@ -110,10 +64,11 @@ pub fn infer_evidence(
         if !request.arguments.len().is_multiple_of(2) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-ARITY",
-                "fea.trends requires complete name/value pairs",
+                "fea.trends requires complete Name, Value pairs",
                 request.arguments.len(),
             ));
         }
+        let mut window_seen = false;
         for index in (0..request.arguments.len()).step_by(2) {
             if !host_text(&request.arguments[index]) {
                 diagnostics.push(argument_error(
@@ -123,18 +78,22 @@ pub fn infer_evidence(
                 ));
             }
             if let Some(name) = request.literals.literal_string_at(index) {
-                if super::options::FeaTrendsOption::decode(&name)
-                    != Some(super::options::FeaTrendsOption::WindowSize)
-                {
+                if FeaTrendsOption::decode(&name) != Some(FeaTrendsOption::WindowSize) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-OPTION",
                         "WindowSize is the only fea.trends option",
                         index,
                     ));
+                } else if std::mem::replace(&mut window_seen, true) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-DUPLICATE",
+                        "duplicate fea.trends option WindowSize",
+                        index,
+                    ));
                 }
             }
             if let Some(value) = request.arguments.get(index + 1) {
-                if !possible_positive_window(value) {
+                if !possible_exact_scalar(value) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-WINDOW",
                         "WindowSize must be a host real numeric scalar",
@@ -144,7 +103,7 @@ pub fn infer_evidence(
                 if request
                     .literals
                     .numeric_at(index + 1)
-                    .is_some_and(|value| !value.is_finite() || value <= 0.0 || value.fract() != 0.0)
+                    .is_some_and(|value| !value.is_finite() || value < 1.0 || value.fract() != 0.0)
                 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-WINDOW",
@@ -154,38 +113,37 @@ pub fn infer_evidence(
                 }
             }
         }
-    } else {
-        if request.arguments.len() != 1 {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-FEA-ARITY",
-                "FEA validation, planning, and solving require exactly one typed study or sweep",
-                request.arguments.len(),
-            ));
-        }
-        if let Some(input) = request.arguments.first() {
-            if !possible_document(input) {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-FEA-DOCUMENT",
-                    "FEA operation input must be a host fea.Study or fea.Sweep",
-                    0,
-                ));
-            }
-        }
+        return finish_fixed(entry, request, object_fact(FEA_TRENDS_CLASS), diagnostics);
     }
-    finish_fixed(
-        entry,
-        request,
-        result_object(kind, request.arguments.first()),
-        diagnostics,
-    )
+    if request.arguments.len() != 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FEA-ARITY",
+            format!(
+                "{} requires exactly one fea.Study or fea.Sweep",
+                kind.name()
+            ),
+            request.arguments.len(),
+        ));
+    }
+    let input = request.arguments.first();
+    if input.is_some_and(|input| !possible_object(input, &[FEA_STUDY_CLASS, FEA_SWEEP_CLASS])) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FEA-DOCUMENT",
+            format!(
+                "{} input must be a host fea.Study or fea.Sweep object; paths are not accepted",
+                kind.name()
+            ),
+            0,
+        ));
+    }
+    finish_fixed(entry, request, study_result(kind, input), diagnostics)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fea_contract::{
-        descriptors::FEA_TRENDS_DESCRIPTOR,
-        descriptors::FEA_VALIDATE_DESCRIPTOR,
+        descriptors::{FEA_TRENDS_DESCRIPTOR, FEA_VALIDATE_DESCRIPTOR},
         operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     };
     use crate::{
@@ -193,96 +151,161 @@ mod tests {
         BuiltinDocumentation,
     };
     use runmat_types::{
-        DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericFact, OutputSelection,
-        RequestedOutputCount,
+        DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ShapeFact, ValueKindFact,
     };
 
-    fn entry() -> BuiltinCatalogEntry {
+    fn entry(kind: FeaEvidenceKind) -> BuiltinCatalogEntry {
         operation_entry::entry(OperationEntryDefinition {
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-            name: "fea.validate",
+            name: kind.name(),
             documentation: BuiltinDocumentation::EMPTY,
-            descriptor: &FEA_VALIDATE_DESCRIPTOR,
+            descriptor: if kind == FeaEvidenceKind::Trends {
+                &FEA_TRENDS_DESCRIPTOR
+            } else {
+                &FEA_VALIDATE_DESCRIPTOR
+            },
             inference: |request, entry| infer_evidence(request, entry, FeaEvidenceKind::Validate),
             integer_capabilities: &[],
             integer_audit: None,
-            effects: OperationEffectProfile::EvidenceWrite,
+            effects: OperationEffectProfile::SynchronousEvidenceWrite,
             accelerator: BuiltinAcceleratorPolicy::Forbidden,
             distributed: BuiltinDistributedPolicy::Unsupported,
         })
     }
 
-    fn request(arguments: Vec<ValueFact>) -> CallRequest {
+    fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
         CallRequest {
-            literals: LiteralContext::new(vec![LiteralValue::Unknown; arguments.len()]),
+            literals: LiteralContext::new(literals),
             arguments,
             outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
         }
     }
 
-    #[test]
-    fn document_and_window_shapes_are_conservative() {
-        let mut possible_char = ValueFact::unknown(DynamicReason::RuntimeValue);
-        possible_char.shape = ShapeFact::from(vec![Some(1), Some(10)]);
-        assert!(!possible_document(&possible_char));
-        assert!(!possible_document(&ValueFact::scalar(
-            ValueKindFact::String
-        )));
-        let mut non_scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::UInt64,
-            domain: NumericDomain::Real,
-        }));
-        non_scalar.shape = ShapeFact::from(vec![Some(2), Some(1)]);
-        assert!(!possible_positive_window(&non_scalar));
-        let invalid = infer_evidence(
-            &request(vec![non_scalar]),
-            &entry(),
-            FeaEvidenceKind::Validate,
-        );
-        assert!(invalid
+    fn codes(inference: &CallInference) -> Vec<&str> {
+        inference
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-DOCUMENT"));
-        assert!(
-            matches!(&invalid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_VALIDATION_CLASS)))
-        );
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect()
+    }
+
+    fn runtime_class(fact: &ValueFact) -> Option<String> {
+        match &fact.kind {
+            ValueKindFact::Object(object) => {
+                object.runtime_class.as_ref().map(|class| class.to_string())
+            }
+            _ => None,
+        }
     }
 
     #[test]
-    fn normalized_window_size_is_a_known_trends_option() {
-        let trends = operation_entry::entry(OperationEntryDefinition {
-            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-            name: "fea.trends",
-            documentation: BuiltinDocumentation::EMPTY,
-            descriptor: &FEA_TRENDS_DESCRIPTOR,
-            inference: |request, entry| infer_evidence(request, entry, FeaEvidenceKind::Trends),
-            integer_capabilities: &[],
-            integer_audit: None,
-            effects: OperationEffectProfile::ArtifactRead,
-            accelerator: BuiltinAcceleratorPolicy::Forbidden,
-            distributed: BuiltinDistributedPolicy::Unsupported,
-        });
-        let inferred = infer_evidence(
-            &CallRequest {
-                arguments: vec![
-                    ValueFact::scalar(ValueKindFact::String),
-                    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                        class: NumericClass::UInt64,
-                        domain: NumericDomain::Real,
-                    })),
-                ],
-                literals: LiteralContext::new(vec![
+    fn study_and_sweep_inputs_select_their_result_classes() {
+        for (kind, study, sweep) in [
+            (
+                FeaEvidenceKind::Validate,
+                "fea.Validation",
+                "fea.SweepValidation",
+            ),
+            (FeaEvidenceKind::Plan, "fea.Plan", "fea.SweepPlan"),
+            (FeaEvidenceKind::Run, "fea.RunResult", "fea.SweepRunResult"),
+        ] {
+            let entry = entry(kind);
+            let inferred = infer_evidence(
+                &request(
+                    vec![object_fact(FEA_STUDY_CLASS)],
+                    vec![LiteralValue::Unknown],
+                ),
+                &entry,
+                kind,
+            );
+            assert!(
+                inferred.diagnostics.is_empty(),
+                "{:?}",
+                inferred.diagnostics
+            );
+            assert_eq!(runtime_class(&inferred.outputs[0]).as_deref(), Some(study));
+            let inferred = infer_evidence(
+                &request(
+                    vec![object_fact(FEA_SWEEP_CLASS)],
+                    vec![LiteralValue::Unknown],
+                ),
+                &entry,
+                kind,
+            );
+            assert_eq!(runtime_class(&inferred.outputs[0]).as_deref(), Some(sweep));
+        }
+    }
+
+    #[test]
+    fn paths_wrong_arity_and_unknown_inputs_are_classified() {
+        let entry = entry(FeaEvidenceKind::Validate);
+        let path = infer_evidence(
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String)],
+                vec![LiteralValue::String("cube.fea".into())],
+            ),
+            &entry,
+            FeaEvidenceKind::Validate,
+        );
+        assert!(codes(&path).contains(&"RM-CATALOG-FEA-DOCUMENT"));
+        let arity = infer_evidence(&request(vec![], vec![]), &entry, FeaEvidenceKind::Validate);
+        assert!(codes(&arity).contains(&"RM-CATALOG-FEA-ARITY"));
+        let unknown = infer_evidence(
+            &request(
+                vec![ValueFact::unknown(DynamicReason::RuntimeValue)],
+                vec![LiteralValue::Unknown],
+            ),
+            &entry,
+            FeaEvidenceKind::Validate,
+        );
+        assert!(unknown.diagnostics.is_empty(), "{:?}", unknown.diagnostics);
+        assert_eq!(runtime_class(&unknown.outputs[0]), None);
+    }
+
+    #[test]
+    fn trends_window_size_is_normalized_and_validated() {
+        let entry = entry(FeaEvidenceKind::Trends);
+        let uint = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }));
+        let valid = infer_evidence(
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String), uint.clone()],
+                vec![
                     LiteralValue::String("Window-Size".into()),
                     LiteralValue::Unknown,
-                ]),
-                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-            },
-            &trends,
+                ],
+            ),
+            &entry,
             FeaEvidenceKind::Trends,
         );
-        assert!(!inferred
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "RM-CATALOG-FEA-OPTION"));
+        assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
+        assert_eq!(
+            runtime_class(&valid.outputs[0]).as_deref(),
+            Some("fea.Trends")
+        );
+        let mut matrix = uint;
+        matrix.shape = ShapeFact::from(vec![Some(2), Some(1)]);
+        let invalid = infer_evidence(
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String), matrix],
+                vec![LiteralValue::String("Limit".into()), LiteralValue::Unknown],
+            ),
+            &entry,
+            FeaEvidenceKind::Trends,
+        );
+        assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-OPTION"));
+        assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-WINDOW"));
+        let odd = infer_evidence(
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String)],
+                vec![LiteralValue::Unknown],
+            ),
+            &entry,
+            FeaEvidenceKind::Trends,
+        );
+        assert!(codes(&odd).contains(&"RM-CATALOG-FEA-ARITY"));
     }
 }

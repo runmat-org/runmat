@@ -12,7 +12,7 @@ use crate::{
     PreparedSemanticStatePublication, ResultPublicationPreparation,
     SemanticStatePublicationPreparation,
 };
-use runmat_analysis_core::{FormulationRequirement, ProcedureStep};
+use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     planning::resource::FeaResourcePlan,
@@ -43,7 +43,6 @@ pub(crate) struct SteadyStudySource {
     pub accuracy_kind: AccuracySourceKind,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
-    pub formulation_requirement: FormulationRequirement,
     pub observations: Option<ObservationPublicationCatalog>,
     pub program_revision: ProgramRevision,
     pub output_policy: AnalysisOutputPolicy,
@@ -118,7 +117,6 @@ impl SteadyStudyTail {
                 .collect(),
             sequence: self.source.sequence,
             step: self.source.step.clone(),
-            formulation_requirement: self.source.formulation_requirement,
             program_revision: self.source.program_revision.clone(),
             chunk_bytes: self.source.output_policy.chunk_bytes(),
             inventory_limits: self.source.output_policy.inventory_limits(),

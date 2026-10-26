@@ -1,7 +1,9 @@
 //! Typed publication facade; each physics owner authenticates its own retained completion.
 pub(in crate::analysis) mod catalog;
 pub(in crate::analysis) mod preparation;
+pub use super::contracts::AnalysisAcousticResponseRunOptions;
 pub use super::contracts::AnalysisElectricalRunOptions;
+use super::{AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource};
 #[path = "magnetic_run_options.rs"]
 mod magnetic_run_options;
 #[path = "maxwell_run_options.rs"]
@@ -28,6 +30,11 @@ pub use maxwell_run_options::AnalysisMaxwellRunOptions;
 
 #[path = "acoustic_study_publication.rs"]
 mod acoustic;
+#[path = "acoustic_response_study_publication.rs"]
+mod acoustic_response;
+pub use acoustic_response::{
+    prepare_acoustic_response_study_publication, publish_acoustic_response_study_result,
+};
 #[path = "electrical_study_publication.rs"]
 mod electrical;
 pub use electrical::{prepare_electrical_study_publication, publish_electrical_study_result};
@@ -52,7 +59,8 @@ pub(super) mod thermal;
 
 pub use acoustic::{prepare_acoustic_study_publication, publish_acoustic_study_result};
 pub(in crate::analysis) use acoustic::{
-    AcousticFrequencyPersistence, CompletedAcousticFrequencyStep,
+    AcousticFrequencyCompletionResults, AcousticFrequencyPersistence,
+    CompletedAcousticFrequencyStep,
 };
 pub use structural::{prepare_structural_study_publication, publish_structural_study_result};
 pub use thermal::{prepare_thermal_study_publication, publish_thermal_study_result};

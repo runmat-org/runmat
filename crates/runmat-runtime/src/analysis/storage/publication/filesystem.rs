@@ -81,7 +81,14 @@ pub(in crate::analysis::storage) fn commit(
     let receipt = prepared.descriptor.receipt(Some(manifest_path.clone()))?;
     // Plan the complete retained inventory before allocating private files or evicting.
     let evictions = transaction::plan(store, &prepared.runs, Some(identity))?;
-    if reclamation::sweep(store, prepared.chunks.keys().copied())?
+    if reclamation::sweep(
+        store,
+        prepared
+            .chunks
+            .keys()
+            .copied()
+            .chain(prepared.spilled.digests()),
+    )?
         == reclamation::SweepOutcome::DeferredLegacyInventory
     {
         log::debug!("analysis object reclamation deferred: unsupported legacy inventory");
@@ -125,9 +132,18 @@ pub(in crate::analysis::storage) fn commit(
         }
         put(store, store.object_path(*digest), bytes)?;
     }
+    // Streamed field chunks are read back and written one at a time.
+    for digest in prepared.spilled.digests() {
+        let bytes = prepared
+            .spilled
+            .read(&digest)?
+            .ok_or("publication spilled chunk is absent")?;
+        put(store, store.object_path(digest), &bytes)?;
+    }
     for (id, record) in &prepared.runs {
         let path = root.join("runs").join(format!("{id}.json"));
-        let bytes = resources::json(&record_value(record)?, prepared.maximum_bytes)?;
+        // Written straight from the typed record; no JSON tree is built.
+        let bytes = resources::json(&resources::RecordView(record), prepared.maximum_bytes)?;
         match store
             .atomic_create_new(&path, &bytes)
             .map_err(AnalysisPublicationError::from_io)?
@@ -165,6 +181,9 @@ pub(in crate::analysis::storage) fn commit(
         evictions,
     )
     .map_err(|e| e.with_publication(receipt.clone()))?;
+    for id in prepared.runs.keys() {
+        store.record_run_attempt(id, identity)?;
+    }
     Ok(receipt)
 }
 pub(in crate::analysis::storage) fn load(

@@ -18,7 +18,7 @@ pub(in crate::study) fn model() -> AnalysisModel {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(boundary),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                 },
             }));
     }
@@ -61,7 +61,6 @@ pub(in crate::study) fn compiled(
     CompiledAnalysisStudy {
         module_path: "tests/maxwell.fea".into(),
         study_id: "maxwell".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],
@@ -71,9 +70,7 @@ pub(in crate::study) fn compiled(
     }
 }
 pub(in crate::study) fn policy() -> MaxwellStudyPlanningPolicy {
-    MaxwellStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    }
+    MaxwellStudyPlanningPolicy {}
 }
 
 #[test]
@@ -144,16 +141,11 @@ fn accuracy_static_sequence_frequency_and_restart_fail_closed() {
         .sequence
         .steps
         .push(sequence.model.sequence.steps[0].clone());
-    for changed in [static_intent, sweep, foreign_frequency, restart, sequence] {
+    // Several authored frequencies are one case each, not an error.
+    assert!(plan_maxwell_study(&sweep, policy()).is_ok());
+    // A domain reference frequency other than the analysis frequency only names the domain.
+    assert!(plan_maxwell_study(&foreign_frequency, policy()).is_ok());
+    for changed in [static_intent, restart, sequence] {
         assert!(plan_maxwell_study(&changed, policy()).is_err());
     }
-    assert!(matches!(
-        plan_maxwell_study(
-            &study,
-            MaxwellStudyPlanningPolicy {
-                formulation_requirement: FormulationRequirement::Production,
-            }
-        ),
-        Err(MaxwellStudyPlanningError::FormulationRequirementMismatch)
-    ));
 }

@@ -1,16 +1,9 @@
 use super::*;
-use crate::builtins::fea::constraints::{bound_region, require_geometry_binding};
+use crate::builtins::fea::constraints::{bound_region, fixed_outputs, require_geometry_binding};
 use crate::builtins::fea::values::{
     quantity_scalar, ACOUSTIC_IMPEDANCE_CLASS, HEAT_FLUX_CLASS, HEAT_TRANSFER_COEFFICIENT_CLASS,
     PRESSURE_CLASS, TEMPERATURE_CLASS,
 };
-
-const TYPED_BOUNDARY_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "Typed FEA boundary constructors accept identifiers, immutable geometry.Region values, and typed physical quantities; they have no integer input role.",
-    };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,7 +41,9 @@ impl GeometryBoundBoundary {
             BoundaryOperator::MagneticInsulation => FEA_MAGNETIC_BOUNDARY_CLASS,
             BoundaryOperator::AcousticRigidWall
             | BoundaryOperator::AcousticRadiation
-            | BoundaryOperator::AcousticImpedance { .. } => FEA_ACOUSTIC_BOUNDARY_CLASS,
+            | BoundaryOperator::AcousticSphericalRadiation { .. }
+            | BoundaryOperator::AcousticImpedance { .. }
+            | BoundaryOperator::AcousticImpedanceLaw { .. } => FEA_ACOUSTIC_BOUNDARY_CLASS,
             BoundaryOperator::FluidOutletPressure { .. } => FEA_FLUID_BOUNDARY_CLASS,
         };
         if class_name != expected {
@@ -61,113 +56,6 @@ impl GeometryBoundBoundary {
         Ok(())
     }
 }
-
-const REGION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required("id", BuiltinParamType::StringScalar, "Boundary identifier."),
-    required("region", BuiltinParamType::Any, "Typed geometry.Region."),
-];
-const VALUE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required("id", BuiltinParamType::StringScalar, "Boundary identifier."),
-    required("region", BuiltinParamType::Any, "Typed geometry.Region."),
-    required(
-        "value",
-        BuiltinParamType::Any,
-        "Typed dimensioned boundary value.",
-    ),
-];
-const CONVECTION_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required("id", BuiltinParamType::StringScalar, "Boundary identifier."),
-    required("region", BuiltinParamType::Any, "Typed geometry.Region."),
-    required(
-        "ambient_temperature",
-        BuiltinParamType::Any,
-        "Typed fea.Temperature.",
-    ),
-    required(
-        "coefficient",
-        BuiltinParamType::Any,
-        "Typed fea.HeatTransferCoefficient.",
-    ),
-];
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:ident) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &$inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-descriptor!(
-    STRUCTURAL_PRESSURE_DESCRIPTOR,
-    STRUCTURAL_PRESSURE_SIGNATURES,
-    "boundary = fea.StructuralBoundary.pressure(id, region, pressure)",
-    VALUE_INPUTS
-);
-descriptor!(
-    THERMAL_HEAT_FLUX_DESCRIPTOR,
-    THERMAL_HEAT_FLUX_SIGNATURES,
-    "boundary = fea.ThermalBoundary.heatFlux(id, region, heatFlux)",
-    VALUE_INPUTS
-);
-descriptor!(
-    THERMAL_CONVECTION_DESCRIPTOR,
-    THERMAL_CONVECTION_SIGNATURES,
-    "boundary = fea.ThermalBoundary.convection(id, region, ambientTemperature, coefficient)",
-    CONVECTION_INPUTS
-);
-descriptor!(
-    MAGNETIC_INSULATION_DESCRIPTOR,
-    MAGNETIC_INSULATION_SIGNATURES,
-    "boundary = fea.MagneticBoundary.insulation(id, region)",
-    REGION_INPUTS
-);
-descriptor!(
-    ACOUSTIC_RIGID_WALL_DESCRIPTOR,
-    ACOUSTIC_RIGID_WALL_SIGNATURES,
-    "boundary = fea.AcousticBoundary.rigidWall(id, region)",
-    REGION_INPUTS
-);
-descriptor!(
-    ACOUSTIC_RADIATION_DESCRIPTOR,
-    ACOUSTIC_RADIATION_SIGNATURES,
-    "boundary = fea.AcousticBoundary.radiation(id, region)",
-    REGION_INPUTS
-);
-descriptor!(
-    ACOUSTIC_IMPEDANCE_DESCRIPTOR,
-    ACOUSTIC_IMPEDANCE_SIGNATURES,
-    "boundary = fea.AcousticBoundary.impedance(id, region, impedance)",
-    VALUE_INPUTS
-);
-descriptor!(
-    FLUID_OUTLET_PRESSURE_DESCRIPTOR,
-    FLUID_OUTLET_PRESSURE_SIGNATURES,
-    "boundary = fea.FluidBoundary.outletPressure(id, region, pressure)",
-    VALUE_INPUTS
-);
 
 fn boundary_to_object(
     builtin: &'static str,
@@ -224,34 +112,28 @@ fn bound_boundary(
 }
 
 macro_rules! region_boundary {
-    ($function:ident, $descriptor:ident, $name:literal, $class:expr, $summary:literal, $operator:expr) => {
+    ($function:ident, $descriptor:ident, $name:literal, $class:expr, $operator:expr) => {
         #[runtime_builtin(
-                                    name = $name,
-                                    category = "fea",
-                                    summary = $summary,
-                                    keywords = "fea,boundary,region,typed",
-                                    descriptor(crate::builtins::fea::boundaries::$descriptor),
-                                    integer_audit(TYPED_BOUNDARY_INTEGER_AUDIT),
-                                    builtin_path = "crate::builtins::fea::boundaries"
-                                )]
+                                            name = $name,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::boundaries"
+                                        )]
         pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             bound_boundary($name, $class, id, &region, $operator)
         }
     };
 }
 
 macro_rules! scalar_boundary {
-    ($function:ident, $descriptor:ident, $name:literal, $class:expr, $summary:literal, $quantity_class:expr, $field:literal, $build:expr) => {
+    ($function:ident, $descriptor:ident, $name:literal, $class:expr, $quantity_class:expr, $field:literal, $build:expr) => {
         #[runtime_builtin(
-                                    name = $name,
-                                    category = "fea",
-                                    summary = $summary,
-                                    keywords = "fea,boundary,region,quantity,typed",
-                                    descriptor(crate::builtins::fea::boundaries::$descriptor),
-                                    integer_audit(TYPED_BOUNDARY_INTEGER_AUDIT),
-                                    builtin_path = "crate::builtins::fea::boundaries"
-                                )]
+                                            name = $name,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::boundaries"
+                                        )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let value = quantity_scalar($name, &value, $quantity_class, $field)?;
             bound_boundary($name, $class, id, &region, ($build)(value))
         }
@@ -260,10 +142,9 @@ macro_rules! scalar_boundary {
 
 scalar_boundary!(
     structural_pressure_builtin,
-    STRUCTURAL_PRESSURE_DESCRIPTOR,
+    FEA_STRUCTURAL_BOUNDARY_PRESSURE_DESCRIPTOR,
     "fea.StructuralBoundary.pressure",
     FEA_STRUCTURAL_BOUNDARY_CLASS,
-    "Create a structural pressure boundary.",
     PRESSURE_CLASS,
     "pascals",
     |value| BoundaryOperator::StructuralPressure {
@@ -272,10 +153,9 @@ scalar_boundary!(
 );
 scalar_boundary!(
     thermal_heat_flux_builtin,
-    THERMAL_HEAT_FLUX_DESCRIPTOR,
+    FEA_THERMAL_BOUNDARY_HEAT_FLUX_DESCRIPTOR,
     "fea.ThermalBoundary.heatFlux",
     FEA_THERMAL_BOUNDARY_CLASS,
-    "Create a prescribed thermal heat-flux boundary.",
     HEAT_FLUX_CLASS,
     "watts_per_square_meter",
     |value| BoundaryOperator::ThermalHeatFlux {
@@ -284,34 +164,30 @@ scalar_boundary!(
 );
 region_boundary!(
     magnetic_insulation_builtin,
-    MAGNETIC_INSULATION_DESCRIPTOR,
+    FEA_MAGNETIC_BOUNDARY_INSULATION_DESCRIPTOR,
     "fea.MagneticBoundary.insulation",
     FEA_MAGNETIC_BOUNDARY_CLASS,
-    "Create a magnetic-insulation boundary.",
     BoundaryOperator::MagneticInsulation
 );
 region_boundary!(
     acoustic_rigid_wall_builtin,
-    ACOUSTIC_RIGID_WALL_DESCRIPTOR,
+    FEA_ACOUSTIC_BOUNDARY_RIGID_WALL_DESCRIPTOR,
     "fea.AcousticBoundary.rigidWall",
     FEA_ACOUSTIC_BOUNDARY_CLASS,
-    "Create an acoustic rigid-wall boundary.",
     BoundaryOperator::AcousticRigidWall
 );
 region_boundary!(
     acoustic_radiation_builtin,
-    ACOUSTIC_RADIATION_DESCRIPTOR,
+    FEA_ACOUSTIC_BOUNDARY_RADIATION_DESCRIPTOR,
     "fea.AcousticBoundary.radiation",
     FEA_ACOUSTIC_BOUNDARY_CLASS,
-    "Create an acoustic radiation boundary.",
     BoundaryOperator::AcousticRadiation
 );
 scalar_boundary!(
     acoustic_impedance_builtin,
-    ACOUSTIC_IMPEDANCE_DESCRIPTOR,
+    FEA_ACOUSTIC_BOUNDARY_IMPEDANCE_DESCRIPTOR,
     "fea.AcousticBoundary.impedance",
     FEA_ACOUSTIC_BOUNDARY_CLASS,
-    "Create a specific acoustic-impedance boundary.",
     ACOUSTIC_IMPEDANCE_CLASS,
     "pascal_seconds_per_meter",
     |value| BoundaryOperator::AcousticImpedance {
@@ -320,10 +196,9 @@ scalar_boundary!(
 );
 scalar_boundary!(
     fluid_outlet_pressure_builtin,
-    FLUID_OUTLET_PRESSURE_DESCRIPTOR,
+    FEA_FLUID_BOUNDARY_OUTLET_PRESSURE_DESCRIPTOR,
     "fea.FluidBoundary.outletPressure",
     FEA_FLUID_BOUNDARY_CLASS,
-    "Create a fluid outlet-pressure boundary.",
     PRESSURE_CLASS,
     "pascals",
     |value| BoundaryOperator::FluidOutletPressure {
@@ -333,11 +208,7 @@ scalar_boundary!(
 
 #[runtime_builtin(
     name = "fea.ThermalBoundary.convection",
-    category = "fea",
-    summary = "Create a thermal convection boundary.",
-    keywords = "fea,thermal,boundary,convection,temperature,coefficient,typed",
-    descriptor(crate::builtins::fea::boundaries::THERMAL_CONVECTION_DESCRIPTOR),
-    integer_audit(TYPED_BOUNDARY_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::boundaries"
 )]
 pub async fn thermal_convection_builtin(
@@ -346,20 +217,25 @@ pub async fn thermal_convection_builtin(
     ambient_temperature: Value,
     coefficient: Value,
 ) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.ThermalBoundary.convection";
+    fixed_outputs(
+        &runmat_builtins::FEA_THERMAL_BOUNDARY_CONVECTION_DESCRIPTOR,
+        NAME,
+    )?;
     let ambient_temperature = Temperature::new(quantity_scalar(
-        "fea.ThermalBoundary.convection",
+        NAME,
         &ambient_temperature,
         TEMPERATURE_CLASS,
         "kelvin",
     )?);
     let coefficient = HeatTransferCoefficient::new(quantity_scalar(
-        "fea.ThermalBoundary.convection",
+        NAME,
         &coefficient,
         HEAT_TRANSFER_COEFFICIENT_CLASS,
         "watts_per_square_meter_kelvin",
     )?);
     bound_boundary(
-        "fea.ThermalBoundary.convection",
+        NAME,
         FEA_THERMAL_BOUNDARY_CLASS,
         id,
         &region,

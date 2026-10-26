@@ -33,16 +33,33 @@ impl SolidNewtonProblem<'_> {
             return self.reduction.expand_linear(&[]).map_err(constraint_error);
         }
         work.linear_solves += 1;
-        if let Some(contact) = &self.contact {
-            let admission = contact
-                .solve_resources
-                .ok_or(crate::solve::general::GeneralSolveError::Admission)?
-                .admit_operator(&reduced, contact.input.solve_policy)?;
+        // Contact and follower tangents are not symmetric: their Newton corrections use the
+        // certified general direct solve.
+        if self.contact.is_some() || self.follower.is_some() {
+            let (policy, admission) = match &self.contact {
+                Some(contact) => (
+                    contact.input.solve_policy,
+                    contact
+                        .solve_resources
+                        .ok_or(crate::solve::general::GeneralSolveError::Admission)?
+                        .admit_operator(&reduced, contact.input.solve_policy)?,
+                ),
+                None => {
+                    let policy = crate::solve::general::GeneralSolvePolicy::bounded(
+                        self.policy.linear_relative_tolerance,
+                    );
+                    (
+                        policy,
+                        crate::solve::general::GeneralSolveEnvelope::derive(&reduced, policy)
+                            .map_err(SolidNewtonError::General)?,
+                    )
+                }
+            };
             let rhs = residual.iter().map(|r| -r).collect::<Vec<_>>();
             let solved = crate::solve::general::solve_general_system(
                 &reduced,
                 &rhs,
-                contact.input.solve_policy,
+                policy,
                 admission,
             )
             .map_err(|error| match error {
@@ -85,7 +102,7 @@ impl SolidNewtonProblem<'_> {
         .map_err(constraint_error)?;
         let solved = solve_operator_system_scoped(
             &operator,
-            SpdPreconditionerKind::Jacobi,
+            SpdPreconditionerKind::Auto,
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,

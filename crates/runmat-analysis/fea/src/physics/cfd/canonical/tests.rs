@@ -4,11 +4,16 @@ mod acceleration;
 mod authority;
 mod boundary_balances;
 mod closed_reference;
+mod kinematic;
 use super::qualification::fixture;
 mod linear_correction;
 mod mass_flow;
+mod moving;
+mod porous;
 mod pressure_reference;
+mod rheology;
 mod reconstruction;
+mod symmetry;
 use super::qualification::reference;
 mod time_signals;
 mod transient;
@@ -79,6 +84,10 @@ fn provisional_outlet_backflow_is_solver_only_not_original_physics() {
     // converged path without any additional authored inflow boundary authority.
 }
 
+// witness: FEA-FLUID-EQUATIONS-001/flux @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent affine skew-face flux and integrated nonzero advection; no general
+//   nonlinear field-convergence credit.
 #[test]
 fn affine_skew_face_velocity_and_nonzero_convection_are_consistent() {
     let f = case(2, ReferenceCase::Convective, false);
@@ -139,6 +148,10 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
     }
 }
 
+// witness: FEA-FLUID-ACCURACY-001/steady_references @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent affine Couette velocity, wall shear and original balance; not
+//   cavity/backward-facing step.
 #[test]
 fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
     let fixture = case(2, ReferenceCase::Couette, false);
@@ -280,6 +293,10 @@ fn affine_nonzero_convection_reproduces_independent_velocity_and_pressure() {
     );
 }
 
+// witness: FEA-FLUID-ACCURACY-001/spatial @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement;
+//   not pressure/cavity/backward-facing-step envelope.
 #[test]
 fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
     assert!(reference::duct_tail(255) < 1e-5);
@@ -361,6 +378,11 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
     );
 }
 
+// witness: FEA-FLUID-INPUTS-001/boundaries @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: A tangential moving wall is supported and normal wall motion is rejected unless an
+//   ALE formulation governs it; velocity components, symmetry, periodic and pressure-reference
+//   boundaries are other cases.
 #[test]
 fn tangential_moving_wall_supported_but_normal_motion_requires_ale() {
     let mut f = case(1, ReferenceCase::Couette, false);
@@ -528,3 +550,80 @@ fn pressure_l2(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
 }
 
 mod time_block;
+
+// witness: FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields @ incompressible_laminar_steady/tet4/numerical_kernel;
+//   coverage: partial; boundary: Couette vorticity and wall shear stress equal the linear profile's;
+//   time-averaged WSS and the oscillatory shear index are not covered.
+#[test]
+fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
+    // u = (y, 0, 0) on the unit slab with μ = fixture viscosity: ω = (0, 0, −1),
+    // wall shear on the stationary y = 0 wall is μ (1, 0, 0) along the flow.
+    let f = case(2, ReferenceCase::Couette, false);
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let r = p.solve().unwrap();
+    for w in &r.residual.cell_vorticity_per_s {
+        assert!(norm(sub(*w, [0.0, 0.0, -1.0])) < 1e-6, "vorticity {w:?}");
+    }
+    let mu = f.material.dynamic_viscosity.canonical_value();
+    let mut walls = 0;
+    for (i, face) in p.topology.faces.iter().enumerate() {
+        if face.neighbor.is_some() || face.centroid_m[1].abs() > 1e-12 {
+            continue;
+        }
+        let n = face.owner_area_vector_m2.map(|x| x / face.area_m2.canonical_value());
+        let t = r.residual.face_forces.viscous_traction_n.canonical_values()[i];
+        let tn = geometry_ops::dot(t, n);
+        let shear: [f64; 3] = std::array::from_fn(|k| -(t[k] - tn * n[k]) / face.area_m2.canonical_value());
+        assert!(norm(sub(shear, [mu, 0.0, 0.0])) < 1e-6 * mu.max(1.0), "{shear:?}");
+        walls += 1;
+    }
+    assert!(walls > 0);
+}
+
+#[test]
+#[ignore = "convergence measurement, run with --ignored --nocapture"]
+fn measure_outer_iterations_against_refinement() {
+    for coupling in [PressureVelocityCoupling::Coupled, PressureVelocityCoupling::Segregated] {
+        for cells in [4, 8] {
+            let mut f = case(cells, ReferenceCase::Duct, false);
+            f.policy = CanonicalFluidPolicy::default();
+            f.policy.pressure_velocity_coupling = coupling;
+            f.policy.maximum_outer_iterations = 5000;
+            let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+            let start = std::time::Instant::now();
+            match p.solve() {
+                Ok(r) => eprintln!(
+                    "{coupling:?} n={} outer={} linear={} {:?}",
+                    p.topology.cells.len(),
+                    r.outer_iterations,
+                    r.linear_iterations,
+                    start.elapsed()
+                ),
+                Err(e) => eprintln!("{coupling:?} cells={cells} failed {e}"),
+            }
+        }
+    }
+}
+
+// witness: FEA-FLUID-SOLVERS-001/coupled_newton_continuation @ incompressible_laminar_steady/tet4/numerical_kernel;
+//   coverage: partial; boundary: the coupled Picard solve (FGMRES, SIMPLE block preconditioner)
+//   reaches the segregated solver's discrete solution in a fraction of the outer iterations;
+//   Newton linearization, pseudo-transient continuation and the Re 1000 cavity are not covered.
+#[test]
+fn coupled_solve_reaches_the_segregated_fixed_point_in_far_fewer_outer_iterations() {
+    let mut f = case(4, ReferenceCase::Duct, false);
+    f.policy = CanonicalFluidPolicy::default();
+    f.policy.maximum_outer_iterations = 2000;
+    let coupled = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
+    f.policy.pressure_velocity_coupling = PressureVelocityCoupling::Segregated;
+    let segregated = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
+    for (u, v) in coupled.velocity_m_per_s.canonical_values().iter().zip(segregated.velocity_m_per_s.canonical_values()) {
+        assert!(norm(sub(*u, *v)) < 1e-6 * norm(*v).max(1e-3));
+    }
+    assert!(
+        4 * coupled.outer_iterations < segregated.outer_iterations,
+        "coupled {} segregated {}",
+        coupled.outer_iterations,
+        segregated.outer_iterations
+    );
+}

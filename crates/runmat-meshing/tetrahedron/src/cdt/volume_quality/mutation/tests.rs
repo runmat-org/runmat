@@ -143,6 +143,13 @@ fn mutation_quality_preserves_cancellation_and_inventory_limits() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A physical four-cell centroid insertion reuses the unchanged neighboring cell while
+//   recomputing the new cells, with inserted identities before, between and after the baseline node
+//   identities. Complete quality evidence and independent validation match fresh evaluation under
+//   unchanged constant-metric controls. This component evidence excludes general scoped-metric
+//   reuse, arbitrary mutation locality and whole native qualification.
 #[test]
 fn insertion_recomputes_new_cells_and_preserves_original_quality_after_index_shifts() {
     use crate::cdt::DelaunayVolumeNode;
@@ -258,6 +265,14 @@ fn metric_changes_recompute_geometry_and_control_changes_reapply_policy() {
     assert_eq!(actual, expected);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: One physical node change recomputes its incident cell while reusing all unrelated
+//   cells across one and 128-cell constant-metric inventories. Every quality record, metadata
+//   field, aggregate and selected worst cell matches complete evaluation and independent quality
+//   validation. Inventory traversal and metadata materialization remain global; this does not
+//   establish sublinear work, scoped-metric propagation, measured native memory or accepted study
+//   results.
 #[test]
 fn local_geometry_change_reuses_unrelated_cells_across_inventory_growth() {
     use crate::cdt::DelaunayVolumeNode;

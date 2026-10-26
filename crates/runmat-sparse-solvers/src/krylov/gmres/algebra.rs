@@ -1,6 +1,13 @@
-use super::scalar::{copy, scaled_axpy, Norm};
+use super::scalar::{copy, fill, scaled_axpy, Norm};
 use super::Arithmetic;
-use super::{h_index, GmresOperations, GmresWork};
+use super::{h_index, GmresOperations, GmresWork, PreconditionerSide, PreconditionerStatus};
+
+/// Result of forming the candidate iterate from the projected solution.
+pub(super) enum Candidate {
+    Ready,
+    Breakdown,
+    PreconditionerFailure,
+}
 use num_complex::Complex64;
 pub fn rotation(a: Complex64, b: Complex64) -> Option<(f64, Complex64)> {
     let aa = a.norm();
@@ -55,8 +62,10 @@ pub(super) async fn candidate_from_basis<
     restart: usize,
     n: usize,
     beta: Norm,
+    side: PreconditionerSide,
+    flexible_basis: &[T],
     operations: &mut O,
-) -> Result<bool, O::Error> {
+) -> Result<Candidate, O::Error> {
     for (source, target) in work.rotated_rhs[..completed]
         .chunks(1024)
         .zip(work.coefficients[..completed].chunks_mut(1024))
@@ -77,29 +86,89 @@ pub(super) async fn candidate_from_basis<
         }
         let diagonal = work.hessenberg[h_index(row, row, restart)];
         if diagonal.norm() == 0.0 {
-            return Ok(false);
+            return Ok(Candidate::Breakdown);
         }
         let (real, imaginary) = A::divide_complex((value.re, value.im), (diagonal.re, diagonal.im));
         let result = Complex64::new(real, imaginary);
         if !result.re.is_finite() || !result.im.is_finite() {
-            return Ok(false);
+            return Ok(Candidate::Breakdown);
         }
         work.coefficients[row] = result;
     }
-    copy(work.x, work.candidate, operations).await?;
-    for column in 0..completed {
-        let basis = &work.basis[column * n..(column + 1) * n];
-        if !scaled_axpy::<T, A, O>(
-            work.candidate,
-            work.coefficients[column],
-            basis,
-            beta,
-            operations,
-        )
-        .await?
-        {
-            return Ok(false);
+    match side {
+        PreconditionerSide::Left => {
+            // x + V y.
+            copy(work.x, work.candidate, operations).await?;
+            for column in 0..completed {
+                let basis = &work.basis[column * n..(column + 1) * n];
+                if !scaled_axpy::<T, A, O>(
+                    work.candidate,
+                    work.coefficients[column],
+                    basis,
+                    beta,
+                    operations,
+                )
+                .await?
+                {
+                    return Ok(Candidate::Breakdown);
+                }
+            }
+        }
+        PreconditionerSide::Right => {
+            // x + M⁻¹ (V y).
+            fill(work.candidate, A::zero(), operations).await?;
+            for column in 0..completed {
+                let basis = &work.basis[column * n..(column + 1) * n];
+                if !scaled_axpy::<T, A, O>(
+                    work.candidate,
+                    work.coefficients[column],
+                    basis,
+                    beta,
+                    operations,
+                )
+                .await?
+                {
+                    return Ok(Candidate::Breakdown);
+                }
+            }
+            if operations
+                .precondition(work.candidate, work.product, work.intermediate)
+                .await?
+                == PreconditionerStatus::NumericalFailure
+            {
+                return Ok(Candidate::PreconditionerFailure);
+            }
+            copy(work.x, work.candidate, operations).await?;
+            if !scaled_axpy::<T, A, O>(
+                work.candidate,
+                Complex64::new(1.0, 0.0),
+                work.product,
+                Norm::one(),
+                operations,
+            )
+            .await?
+            {
+                return Ok(Candidate::Breakdown);
+            }
+        }
+        PreconditionerSide::Flexible => {
+            // x + Z y.
+            copy(work.x, work.candidate, operations).await?;
+            for column in 0..completed {
+                let direction = &flexible_basis[column * n..(column + 1) * n];
+                if !scaled_axpy::<T, A, O>(
+                    work.candidate,
+                    work.coefficients[column],
+                    direction,
+                    beta,
+                    operations,
+                )
+                .await?
+                {
+                    return Ok(Candidate::Breakdown);
+                }
+            }
         }
     }
-    Ok(true)
+    Ok(Candidate::Ready)
 }

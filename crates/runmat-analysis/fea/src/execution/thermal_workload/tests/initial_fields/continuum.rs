@@ -12,6 +12,9 @@ const GENERATION: f64 = 80.0;
 const FINAL_TIME: f64 = 0.1;
 const RESIDUAL: f64 = 1e-12;
 
+// witness: FEA-THERMAL-ACCURACY-001/time @ thermal_transient/tet4|tet10/public_study;
+//   boundary: Both-order uniform ramp heating, independent continuum error and energy law; no
+//   nonuniform mesh convergence credit.
 #[test]
 fn uniform_ramp_heating_has_continuum_backward_euler_time_convergence() {
     // rho=c=k=1, q(t)=2Bt on an insulated unit cube: T=300+B t².
@@ -115,20 +118,18 @@ fn uniform_ramp_heating_has_continuum_backward_euler_time_convergence() {
     }
 }
 
-#[test]
-fn solved_heated_cube_cold_cooling_converges_to_continuum_diffusion() {
-    cooling_convergence(false, [1, 2, 4]);
-}
-
+// One cell is outside the asymptotic range for both orders (a Tet4 cube of one cell has no free
+// thermal node), so the predeclared order gates are measured on two, four and eight cells.
 #[test]
 fn solved_heated_cube_cold_cooling_tet10_converges_to_continuum_diffusion() {
-    cooling_convergence(true, [1, 2, 4]);
+    cooling_convergence(true, [2, 4, 8]);
 }
 
+// witness: FEA-THERMAL-ACCURACY-001/space @ thermal_transient/tet4/public_study;
+//   boundary: Tet4 heated-cube cold cooling continuum temperature, flux, stored heat and power with
+//   temporal contamination bound; does not prove Tet10 spatial gate.
 #[test]
 fn resolved_tet4_heated_cube_cold_cooling_has_continuum_spatial_convergence() {
-    // Separate, independently justified window. The original [1,2,4] failed witness
-    // above remains executable; this does not relabel that witness as passing.
     cooling_convergence(false, [2, 4, 8]);
 }
 
@@ -177,7 +178,15 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
         let binding = solved_temperature_binding(&producer, &mesh);
         let producer_bytes = binding.artifact().canonical_bytes().unwrap();
         let mut results = Vec::new();
-        for intervals in [64, 128, 256] {
+        // Quadratic spatial errors fall below the O(dt^2) floor of one Richardson elimination by
+        // eight cells, so the quadratic measurement adds a fourth time level and a second
+        // elimination (O(dt^3) floor), keeping the floor under a tenth of the spatial error.
+        let interval_levels: &[usize] = if quadratic {
+            &[64, 128, 256, 512]
+        } else {
+            &[64, 128, 256]
+        };
+        for &intervals in interval_levels {
             let mut consumer = fixture::base();
             fixture::ends(&mut consumer);
             fixture::transient(&mut consumer, intervals);
@@ -256,3 +265,4 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
     assert!(finest.heat < if quadratic { 0.005 } else { 0.08 });
     assert!(finest.power < if quadratic { 0.02 } else { 0.15 });
 }
+

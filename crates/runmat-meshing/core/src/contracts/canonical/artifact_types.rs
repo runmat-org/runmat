@@ -158,8 +158,8 @@ pub struct FieldTopologyMap {
     pub ordered_entity_ids: Vec<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Serialized through the compact entity-table wire form in `topology_wire`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolverMeshTopology {
     pub nodes: Vec<SolverMeshNode>,
     pub volume_elements: Vec<SolverVolumeElement>,

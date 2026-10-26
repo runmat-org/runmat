@@ -60,7 +60,6 @@ pub(super) fn preparation(
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -74,7 +73,6 @@ pub(super) fn preparation(
         model,
         step_id: transient_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-8,
     };

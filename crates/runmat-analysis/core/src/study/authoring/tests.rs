@@ -121,7 +121,6 @@ fn study() -> AuthoredStudy {
                 }),
             }],
         },
-        formulation_requirement: crate::FormulationRequirement::Experimental,
         inputs: vec![AuthoredInputDefinition {
             input_id: "service_load".into(),
             value_type: AuthoredInputType::Quantity(PhysicalDimension::FORCE.into()),

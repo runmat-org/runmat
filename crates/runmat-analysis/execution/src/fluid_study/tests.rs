@@ -33,11 +33,13 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     model.sequence = AnalysisSequence::from_steps(
         "retained-fluid",
@@ -48,7 +50,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "stationary".into(),
             kind: FluidConstraintKind::NoSlipWall {
-                target: RegionTarget::boundary("slab_insulated"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
             },
         }));
     model
@@ -56,13 +58,13 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant([Velocity::new(0.0); 3]),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(0.0)),
         },
@@ -101,8 +103,8 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,
@@ -117,11 +119,11 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
             maximum_authority_items: 100,
         },
         geometry_policy: FiniteVolumeProjectionPolicy {
-            max_cells: 100,
-            max_face_incidences: 400,
-            max_boundary_faces: 400,
-            max_scratch_bytes: 10_000_000,
-            max_traversal_operations: 1_000_000,
+            max_cells: Some(100),
+            max_face_incidences: Some(400),
+            max_boundary_faces: Some(400),
+            max_scratch_bytes: Some(10_000_000),
+            max_traversal_operations: Some(1_000_000),
         },
     };
     (workload, mesh)
@@ -133,7 +135,6 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/fluid.fea".into(),
         study_id: "fluid".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),
@@ -142,12 +143,12 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
         solver_mesh_digest: mesh.canonical_digest,
     };
     let policy = FluidStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
         numerical: workload.policy,
         geometry: workload.geometry_policy,
     };
     let product = plan_fluid_study_product(compiled, &mesh, policy).unwrap();
     FluidStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product,
         mesh,
@@ -186,7 +187,7 @@ fn exact_authored_plan_and_owned_phases_fail_closed() {
     let mut study = FluidStudyCoordinator::new(preparation()).unwrap();
     assert_eq!(study.phase(), FluidStudyPhase::ReadyForSolve);
     assert!(study.prepare_field_recovery().is_err());
-    assert!(study.prepare_observation_reduction().is_err());
+    assert!(study.prepare_next_observation(&EmptyStore).is_err());
     assert!(study.prepare_accuracy().is_err());
     assert!(study.prepare_next_state().is_err());
     assert!(study.prepare_publication().is_err());

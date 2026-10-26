@@ -1,7 +1,7 @@
 use super::*;
+mod certificate;
 mod closure_diagnostics;
 mod periodic;
-mod preconditioning;
 use crate::{
     contracts::SolverPreconditioner,
     fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
@@ -9,9 +9,8 @@ use crate::{
 };
 use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
-    BoundaryOperator, FormulationMaturity, IndependentDomain, MaterialAcousticModel,
-    PrescribedValue, Pressure, PropertyRegionTarget, RegionTarget, SpecificAcousticImpedance,
-    TemporalImplementation,
+    BoundaryOperator, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure,
+    PropertyRegionTarget, RegionTarget, SpecificAcousticImpedance, TemporalImplementation,
 };
 
 pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
@@ -25,7 +24,7 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.sequence.steps = vec![step];
@@ -34,13 +33,13 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "matched".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -49,9 +48,7 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy {
-            uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
             relative_tolerance: 1e-10,
             ..Default::default()
         },
@@ -59,7 +56,6 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
     }
 }
 
-mod uniqueness;
 
 #[test]
 fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage() {
@@ -75,10 +71,6 @@ fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage
         let mesh: SolverMeshArtifact =
             serde_json::from_slice(&serde_json::to_vec(&mesh).unwrap()).unwrap();
         let result = cold.execute(&mesh).unwrap();
-        assert_eq!(
-            result.formulation().qualification(),
-            FormulationMaturity::Experimental
-        );
         assert_eq!(
             result.formulation().realization().temporals,
             vec![TemporalImplementation::AcousticCanonicalHarmonicSolve]
@@ -141,9 +133,6 @@ fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage
 fn acoustic_portable_admission_and_result_import_fail_closed() {
     let mut workload = workload();
     let mesh = slab_mesh(2);
-    workload.formulation_requirement = FormulationRequirement::Production;
-    assert!(workload.execute(&mesh).is_err());
-    workload.formulation_requirement = FormulationRequirement::Experimental;
     let result = workload.execute(&mesh).unwrap();
     assert!(validate_solver_formulation_compatibility(
         result.formulation(),
@@ -177,4 +166,85 @@ fn acoustic_portable_admission_and_result_import_fail_closed() {
         .steps
         .push(workload.model.sequence.steps[0].clone());
     assert!(workload.canonical_bytes().is_err());
+}
+
+// witness: FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power @ acoustic_harmonic/tet10/numerical_kernel;
+//   coverage: partial; boundary: plane-wave power through a matched duct end equals |p|²A/(2ρc) and
+//   the accounted input power to 0.1 %; the monopole sphere reference is not run.
+#[test]
+fn sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area() {
+    use crate::results::{
+        field::RecoveredFieldCatalog,
+        observation::{evaluate_observations, resolve_observation_plan, ObservationLimits},
+    };
+    use runmat_analysis_core::*;
+    // p = e^{-ikx} of 1 Pa into ρc = 6 Pa·s/m: I = |p|²/(2ρc) = 1/12 W/m² over the unit end.
+    let mut authored = workload();
+    authored.model.sequence.steps[0]
+        .observations
+        .push(ObservationRequest::Reduction(ObservationSpec {
+            observation_id: ObservationId("power".into()),
+            quantity: ObservationQuantity::AcousticIntensity,
+            value_shape: ObservationValueShape::Vector3,
+            target: ObservationTarget::Spatial(ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_right"),
+            ))),
+            source_location: FieldLocation::Element,
+            output_location: FieldLocation::Global,
+            recovery: RecoveryPolicy::Native,
+            component: ObservationComponent::All,
+            frame: CoordinateFrame::Global,
+            sign_convention: SignConvention::Native,
+            complex_representation: ComplexRepresentation::Real,
+            sampling: SamplingPolicy::Final,
+            reduction: Some(ReductionPolicy {
+                spatial: SpatialReduction::NormalFlux,
+                series: SeriesReduction::None,
+                extrema_ties: ExtremaTiePolicy::FirstCanonical,
+            }),
+            storage: ObservationStoragePolicy {
+                precision: SignalPrecision::Real64,
+                compression: CompressionPolicy::Lossless,
+                retention: RetentionPolicy::Canonical,
+                partial_access: PartialAccessPolicy::ManifestAndChunks,
+            },
+            purpose: ObservationPurpose::Publication,
+            cost: ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+                operation_count: 1_000_000,
+                peak_resident_bytes: 10_000_000,
+                stored_bytes: 1_000_000,
+                transfer_bytes: 1_000_000,
+                collective_count: 0,
+            }),
+        }));
+    let mesh = quadratic_slab_mesh(2);
+    let result = authored.execute(&mesh).unwrap();
+    let request = result.native_field_request(&authored, &mesh).unwrap();
+    let artifact = result
+        .recover_native_fields(&authored, &mesh, &request)
+        .unwrap();
+    let definitions = artifact
+        .fields()
+        .iter()
+        .map(|field| field.definition().clone())
+        .collect::<Vec<_>>();
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        projection.projection_digest,
+        artifact.entity_counts(),
+        artifact.into_fields(),
+    )
+    .unwrap();
+    let plan = resolve_observation_plan(
+        &authored.model.sequence.steps[0],
+        &projection,
+        &definitions,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observed = evaluate_observations(&plan, &projection, &catalog).unwrap();
+    let power = observed[0].field.as_host_f64().unwrap()[0];
+    assert!((power - 1.0 / 12.0).abs() < 1e-3 / 12.0, "{power}");
+    // The input power the solver accounts for leaves through the matched end.
+    assert!((power - result.mean_input_power_w()).abs() < 1e-3 * power);
 }

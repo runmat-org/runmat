@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     validate_model_sequence, AnalysisFieldValues, AnalysisModel, AnalysisProcedure,
-    AnalysisSequence, CoupledPhysicsFamily, FormulationRequirement, PhysicsFamily, ProcedureStep,
-    ProcedureStepId, RestartPolicy, SolutionSpace,
+    AnalysisSequence, CoupledPhysicsFamily, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    RestartPolicy, SolutionSpace,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,10 @@ pub use state_input::StructuralLinearStateInput;
 const SOLVE_PREFIX: &[u8] = b"runmat-analysis-solve/v1\0";
 const SOLVE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
+fn content_limits(encoded_bytes: usize) -> CanonicalLimits {
+    CanonicalLimits::new(encoded_bytes, encoded_bytes, 65_536, 64)
+}
+
 /// Solver-owned, path-free input for one structural linear workload. The mesh is a separate
 /// numerical object so it can be cached, transferred, and shared independently of authored state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -33,7 +37,6 @@ pub struct StructuralLinearWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub preconditioner: SpdPreconditionerKind,
     pub algebra_backend: LinearAlgebraBackendKind,
     pub observation_execution: ObservationExecutionPolicy,
@@ -342,13 +345,23 @@ impl StructuralLinearWorkloadResult {
         Ok(())
     }
 
+    /// Result fields grow with the mesh, so the codec bounds follow the content: encoding is
+    /// bounded by the profiled size of this owned result, and decoding by the received bytes
+    /// (every collection item occupies at least one encoded byte).
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;
+        let profile = runmat_canonical_codec::profile_canonical_encoding(
+            self,
+            content_limits(usize::MAX),
+        )?;
+        let bytes = usize::try_from(profile.encoded_bytes_upper_bound).map_err(|_| {
+            AnalysisExecutionError::Invalid("structural result exceeds the address space".into())
+        })?;
         Ok(encode_contract(
             SOLVE_PREFIX,
             "structural-linear-result",
             self,
-            SOLVE_LIMITS,
+            content_limits(bytes),
         )?)
     }
 
@@ -357,7 +370,7 @@ impl StructuralLinearWorkloadResult {
             SOLVE_PREFIX,
             "structural-linear-result",
             bytes,
-            SOLVE_LIMITS,
+            content_limits(bytes.len()),
         )?;
         result.validate()?;
         Ok(result)

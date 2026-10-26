@@ -1,6 +1,6 @@
 use super::{CanonicalFluidError as Error, CanonicalFluidPolicy};
 use crate::{
-    solve::krylov::{right_ilu::SparseRightIluEnvelope, GmresPolicy, GmresWorkEnvelope},
+    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
     topology::{AnalysisProjection, FiniteVolumeReservation, FiniteVolumeTopology},
 };
 use runmat_analysis_core::{
@@ -16,6 +16,11 @@ pub struct CanonicalFluidReservation {
     pub faces: u64,
     pub sparse_entries: u64,
     pub resident_bytes_upper_bound: u64,
+    /// Resident bound for verifying a retained result: the full bound minus the
+    /// solver-only workspace (GMRES, ILU, coupled momentum block with its component
+    /// AMG hierarchies, fixed-point acceleration). Verification re-assembles the
+    /// operators and re-evaluates the residual but runs no linear or outer solve.
+    pub verification_resident_bytes_upper_bound: u64,
     pub operator_work_upper_bound: u64,
     pub linear_iterations_upper_bound: u64,
 }
@@ -25,7 +30,7 @@ pub(super) fn reserve(
     t: &FiniteVolumeTopology,
     p: CanonicalFluidPolicy,
 ) -> Result<CanonicalFluidReservation, Error> {
-    let geometry = FiniteVolumeTopology::reserve(source, t.policy)
+    let geometry = FiniteVolumeTopology::reserve(source, t.policy, &t.selection)
         .map_err(|_| Error::Resource("source geometry admission"))?;
     if geometry.cell_count != t.cells.len() {
         return Err(Error::Invalid("finite-volume source count"));
@@ -126,9 +131,17 @@ pub(super) fn admit_authority_profile(
         mul(profile.maximum_entity_units.max(1), 2)?,
         u64::from(usize::BITS),
     )?;
+    // Every face-bound action (mass flow, inlet velocity, wall motion) selects faces.
     let mass_flow_actions = actions
         .iter()
-        .filter(|a| matches!(a, ExcitationAction::MassFlow(_)))
+        .filter(|a| {
+            matches!(
+                a,
+                ExcitationAction::MassFlow(_)
+                    | ExcitationAction::InletVelocity(_)
+                    | ExcitationAction::WallMotion(_)
+            )
+        })
         .count() as u64;
     let boundary_work = mul(
         mul(
@@ -266,14 +279,17 @@ impl CanonicalFluidReservation {
         let f = u64::try_from(face_count).map_err(|_| Error::Resource("face count"))?;
         // A tetrahedral cell has at most four distinct face-neighbours plus its diagonal.
         let nnz = mul(n, 5)?;
-        let ilu = SparseRightIluEnvelope::for_counts(n, nnz, 5)
-            .ok_or(Error::Resource("shared ILU envelope"))?;
+        let ilu = super::linear::PreconditionerEnvelope::for_counts(n, nnz)
+            .ok_or(Error::Resource("shared preconditioner envelope"))?;
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
+        // Per cell: velocity, pressure triple, two gradient fields (96 B), retained residual
+        // and vorticity (≈100 B), momentum right-hand sides and diagonal, one evaluation's
+        // coexisting copy of each, doubled for growth: well under 4 KiB.
         let baseline_bytes = add(
             add(
-                add(mul(nnz, 192)?, mul(n, 65536)?)?,
+                add(mul(nnz, 192)?, mul(n, 4096)?)?,
                 add(mul(f, 1024)?, gmres.resident_bytes_upper_bound)?,
             )?,
             add(geometry.scratch_bytes as u64, 128 * 1024 * 1024)?,
@@ -283,7 +299,21 @@ impl CanonicalFluidReservation {
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 32)?, 96)?)?;
-        bytes = add(bytes, ilu.resident_bytes_upper_bound)?;
+        // Solver-only workspace, which verification of a retained result never allocates:
+        // the shared ILU envelope, then the coupled momentum block: the two-ring pattern (at
+        // most 41 cells per row for tetrahedra), its 3 × 3-block values and the linear
+        // reconstruction terms, plus one AMG hierarchy per velocity component (each within
+        // the per-system envelope).
+        let solve_workspace = add(
+            add(
+                ilu.resident_bytes_upper_bound,
+                mul(n, 9 * 41 * (8 + 8 + 8) + 5 * 216 + 41 * 8)?,
+            )?,
+            mul(ilu.resident_bytes_upper_bound, 3)?,
+        )?;
+        bytes = add(bytes, solve_workspace)?;
+        // The shared GMRES peak is part of the baseline above.
+        let mut solver_bytes = add(solve_workspace, gmres.resident_bytes_upper_bound)?;
         // Frozen velocity reconstruction: four source/weight records per cell,
         // doubled payload growth plus the owning Vec header. No field is retained.
         bytes = add(
@@ -296,6 +326,8 @@ impl CanonicalFluidReservation {
                 48,
             )?,
         )?;
+        // Cell vorticity: one retained and one evaluated vector per cell, doubled payload.
+        bytes = add(bytes, add(mul(n, 2 * 2 * 24)?, 48)?)?;
         // Gauge selection/component arrays, original and reduced scalar systems,
         // compatibility traversal and mean-trace normalization coexist with GMRES.
         bytes = add(bytes, add(mul(n, 512)?, mul(f, 64)?)?)?;
@@ -303,11 +335,15 @@ impl CanonicalFluidReservation {
         // one descriptor per exterior face at most, and two coexisting report arrays
         // during safeguarded recovery. IDs obey the existing256-byte authority limit.
         // Doubled Vec/String payload allowance plus fixed headers.
+        // Index pairs exist only for exterior faces (the boundary faces), one report per face
+        // at most.
+        let exterior = u64::try_from(geometry.boundary_face_count)
+            .map_err(|_| Error::Resource("boundary face count"))?;
         bytes = add(
             bytes,
             add(
                 mul(
-                    f,
+                    exterior,
                     32 * 2
                         + 2 * (256
                             + std::mem::size_of::<super::CanonicalFluidBoundaryBalance>() as u64)
@@ -320,8 +356,13 @@ impl CanonicalFluidReservation {
             // Two images/residuals, U/p/q proposal and shared coefficient workspace;
             // one additional complete physical residual/face-force evaluation.
             // Doubled payload growth plus fixed Vec/record headers.
-            bytes = add(bytes, add(mul(add(mul(n, 26)?, mul(f, 15)?)?, 16)?, 4096)?)?;
+            let acceleration = add(mul(add(mul(n, 26)?, mul(f, 15)?)?, 16)?, 4096)?;
+            bytes = add(bytes, acceleration)?;
+            solver_bytes = add(solver_bytes, acceleration)?;
         }
+        let verification_resident_bytes_upper_bound = bytes
+            .checked_sub(solver_bytes)
+            .ok_or(Error::Resource("verification resident bytes"))?;
         let solves = mul(
             p.maximum_outer_iterations as u64,
             add(3, p.maximum_nonorthogonal_iterations as u64)?,
@@ -403,6 +444,7 @@ impl CanonicalFluidReservation {
             faces: f,
             sparse_entries: nnz,
             resident_bytes_upper_bound: bytes,
+            verification_resident_bytes_upper_bound,
             operator_work_upper_bound: work,
             linear_iterations_upper_bound,
         })

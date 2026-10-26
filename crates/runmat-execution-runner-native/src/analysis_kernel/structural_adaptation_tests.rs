@@ -45,7 +45,6 @@ fn prepare(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> PreparedStructur
             model: model.clone(),
             step_id: model.sequence.steps[0].step_id.clone(),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             preconditioner: SpdPreconditionerKind::Ilu0,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             observation_execution:
@@ -60,6 +59,9 @@ fn prepare(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> PreparedStructur
         required_capabilities: Default::default(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap()
 }

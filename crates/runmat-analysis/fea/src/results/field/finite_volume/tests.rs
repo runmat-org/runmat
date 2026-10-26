@@ -7,11 +7,11 @@ fn source() -> (AnalysisProjection, FiniteVolumeTopology) {
     let geometry = FiniteVolumeTopology::derive(
         &projection,
         FiniteVolumeProjectionPolicy {
-            max_cells: 100,
-            max_face_incidences: 400,
-            max_boundary_faces: 400,
-            max_scratch_bytes: 10_000_000,
-            max_traversal_operations: 1_000_000,
+            max_cells: Some(100),
+            max_face_incidences: Some(400),
+            max_boundary_faces: Some(400),
+            max_scratch_bytes: Some(10_000_000),
+            max_traversal_operations: Some(1_000_000),
         },
     )
     .unwrap();

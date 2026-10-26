@@ -1,8 +1,8 @@
 use runmat_analysis_core::{
-    ActivationLifecycle, FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateInput,
-    StateSource, StateTransition, StateTransitionMethod, StateUse, StepObjectActivation,
-    StepObjectRef, TopologyTransitionPolicy, TransitionId,
+    ActivationLifecycle, IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy,
+    SequenceDependency, SequenceDependencyReason, StateId, StateInput, StateSource,
+    StateTransition, StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef,
+    TopologyTransitionPolicy, TransitionId,
 };
 use runmat_execution::Digest;
 
@@ -145,7 +145,6 @@ fn direct_case(
         model,
         step_id: consumer_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(60.0, &[], &[]).unwrap(),
         solver: StructuralPrestressedFrequencySolverTemplate::Direct {
@@ -167,6 +166,11 @@ fn direct_case(
     (workload, mesh, state, request)
 }
 
+// witness: FEA-DYNAMICS-PRESTRESS-001/complete_base_operator @
+//   prestressed_structural/tet4/numerical_kernel;
+//   boundary: Fixed direct entry fixture compares preload response ordering and residual, canonical
+//   result roundtrip, and substituted topology rejection. No independent buckling reference,
+//   nonlinear producer or generic stability qualification.
 #[test]
 fn prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitution() {
     let solve = |force| {
@@ -330,7 +334,6 @@ fn complete_prestressed_modal_basis_matches_the_direct_harmonic_solution() {
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -382,7 +385,6 @@ fn complete_prestressed_modal_basis_matches_the_direct_harmonic_solution() {
         model,
         step_id: modal_frequency_step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(60.0, &[], &[]).unwrap(),
         solver: StructuralPrestressedFrequencySolverTemplate::ModalReduced,

@@ -25,6 +25,13 @@ use crate::{
     ExactSurfaceConvergenceOutcome, ExactSurfaceJoinOptions, ExactSurfacePassOutcome,
 };
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Move-based joining reproduces the original decision and canonical bytes. Independent
+//   borrowed prerequisite checks reject substituted coordinates, quality, evaluator parameters,
+//   face coverage and bounds. Construction-only accepted results cannot be restored from serialized
+//   flags. This is a finite lineage witness, not whole-operator storage or performance
+//   qualification.
 #[test]
 fn complete_face_partition_runs_the_exact_surface_pipeline() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
@@ -43,10 +50,12 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
     )
     .unwrap();
     let metric_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let partitions = face_partition_descriptors(&topology, 1).unwrap();
     let context = ExactFacePartitionContext {
@@ -429,10 +438,12 @@ fn authoritative_spherical_octant_runs_the_complete_face_partition() {
         ExactFaceChartErrorKind::InvalidInput
     );
     let metric_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let partitions = face_partition_descriptors(&topology, 1).unwrap();
     let context = ExactFacePartitionContext {

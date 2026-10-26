@@ -9,7 +9,9 @@ pub use receipt::{
 };
 mod profile;
 mod result;
-pub use fields::fluid_native_field_definition_inventory;
+pub use fields::{
+    fluid_native_field_definition_inventory, fluid_native_field_definitions,
+};
 mod checkpoint;
 mod source;
 pub use checkpoint::{
@@ -22,23 +24,32 @@ mod time_schedule;
 mod transient_workload;
 mod workload;
 pub use time_block::{
-    FluidTransientBlock, FluidTransientBlockReservation, FluidTransientBlockResult,
+    FluidIntervalEvidence, FluidTransientBlock, FluidTransientBlockReservation,
+    FluidTransientBlockResult,
 };
 pub use time_schedule::FluidTransientSchedule;
 pub use transient_workload::{
     FluidTransientSolverResult, FluidTransientWorkload, PreparedFluidTransient,
 };
 
-pub use result::FluidSteadySolverResult;
-pub use workload::FluidSteadyWorkload;
+pub use result::{FluidRetainedOriginal, FluidSteadySolverResult};
+pub use workload::{FluidCoupling, FluidSteadyWorkload};
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
 use runmat_canonical_codec::CanonicalLimits;
 
 const WORKLOAD_PREFIX: &[u8] = b"runmat-steady-fluid-workload/v1\0";
 const RESULT_PREFIX: &[u8] = b"runmat-steady-fluid-retained-result/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 2_000_000, 65_536, 64);
-const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+/// Codec limits of fluid workloads and retained results. They are structural sanity bounds, not
+/// size caps: a retained result grows with cells, faces and retained steps, and its memory is
+/// admitted by the phase resource plan before it is built or decoded.
+const LIMITS: CanonicalLimits = CanonicalLimits::new(
+    MAX_PAYLOAD_BYTES,
+    crate::address_space_power_of_two(36),
+    65_536,
+    64,
+);
+const MAX_PAYLOAD_BYTES: usize = crate::address_space_power_of_two(44);
 
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(error.to_string())

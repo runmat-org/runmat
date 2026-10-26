@@ -100,6 +100,12 @@ fn chain(count: usize) -> Graph {
     }
     graph
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Graph edits compare exact caps with the complete indexed grading oracle across
+//   cycles, ties, raw-length increases/decreases, removal/reinsertion and ratios from one through
+//   the largest finite f64. The fixture family does not establish complete native mesh performance
+//   or original-study acceptance.
 #[test]
 fn graph_edits_match_full_reference_across_cycles_ties_increases_and_deletions() {
     let mut random = 17_u64;
@@ -133,6 +139,12 @@ fn graph_edits_match_full_reference_across_cycles_ties_increases_and_deletions()
         }
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A fixed source-cap increase on connected chains of 16, 128 and4096 vertices retains
+//   at most five cap entries and reads fewer than40 neighbors while matching complete grading.
+//   Actual dependency changes can legitimately propagate across the full graph; this is no
+//   constant-work guarantee for arbitrary edits.
 #[test]
 fn changed_dependency_closure_does_not_scan_unrelated_connected_inventory() {
     for count in [16, 128, 4096] {
@@ -149,6 +161,11 @@ fn changed_dependency_closure_does_not_scan_unrelated_connected_inventory() {
         assert!(plan.caps.len() <= 5);
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cancellation interrupts a borrowed cap-update plan without modifying its admitted
+//   graph; invalid grading policy rejects, and an empty edit performs zero neighbor reads. Caller
+//   topology admission and atomic application remain separate contracts.
 #[test]
 fn cancellation_and_invalid_policy_leave_the_graph_unmodified() {
     let graph = chain(8);

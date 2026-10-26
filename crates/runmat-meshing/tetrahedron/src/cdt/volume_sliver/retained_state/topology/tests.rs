@@ -2,6 +2,13 @@ use super::super::test_fixtures::assigned;
 use super::*;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An exact three-to-two replacement retains only three removed and two created cells
+//   against one baseline, with zero or 64 unrelated cells and distinct region assignments.
+//   Materialization restores complete physical topology, orientation, neighbors, regions and
+//   incidence; streamed ordering matches the original full candidate. Changed nodes or reassigned
+//   unchanged cells reject. No sublinear work or whole-task resource claim.
 #[test]
 fn compact_seed_restores_exact_topology_and_order_with_unrelated_cells() {
     for unrelated in [0, 64] {
@@ -62,6 +69,11 @@ fn compact_seed_restores_exact_topology_and_order_with_unrelated_cells() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Compact reconnection seed materialization rejects cancellation and a one-cell
+//   topology ceiling for an exact two-cell candidate. This is a construction component boundary,
+//   not whole-task admission or measured native memory evidence.
 #[test]
 fn compact_seed_materialization_preserves_cancellation_and_resource_rejection() {
     struct Cancelled;

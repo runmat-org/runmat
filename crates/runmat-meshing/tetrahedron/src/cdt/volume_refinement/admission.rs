@@ -19,23 +19,37 @@ pub(super) enum RefinementProgressPolicy {
     Coupled,
 }
 impl RefinementProgressPolicy {
-    pub(super) fn accepts(self, quality: &WorkingVolumeQuality, parent: &SpectrumDelta) -> bool {
+    /// The first progress clause a rejected trial fails, for rejection diagnostics.
+    pub(super) fn rejection(
+        self,
+        quality: &WorkingVolumeQuality,
+        parent: &SpectrumDelta,
+    ) -> Option<&'static str> {
+        if quality.compare_target(parent, QualityObjective::Refinement) != Ordering::Less {
+            return Some("refinement spectrum did not improve");
+        }
         match self {
-            Self::PreserveShape => working_progress(quality, parent),
+            Self::PreserveShape => {
+                if quality.compare_target(parent, QualityObjective::Shape) == Ordering::Greater {
+                    return Some("shape spectrum regressed");
+                }
+            }
             Self::Coupled => {
-                quality.compare_target(parent, QualityObjective::Refinement) == Ordering::Less
-                    && quality.compare_joint_repair_target(parent) == Ordering::Less
-                    && !quality.creates_all_boundary_refinement_violation()
+                // Each insertion must outrank what it creates with what it removes (multiset
+                // order on the joint defect histogram). Requiring it to improve the single
+                // worst defect of the whole mesh instead rejected every insertion away from
+                // that defect and stalled refinement on plain plates and beams.
+                if quality.compare_joint_target(parent) != Ordering::Less {
+                    return Some("joint defect histogram did not decrease");
+                }
             }
         }
+        quality
+            .creates_all_boundary_refinement_violation()
+            .then_some("created an all-boundary refinement violation")
     }
 }
 
-pub(super) fn working_progress(quality: &WorkingVolumeQuality, parent: &SpectrumDelta) -> bool {
-    quality.compare_target(parent, QualityObjective::Refinement) == Ordering::Less
-        && quality.compare_target(parent, QualityObjective::Shape) != Ordering::Greater
-        && !quality.creates_all_boundary_refinement_violation()
-}
 
 pub(super) fn canonical_progress(
     prior: &DelaunayVolumeQuality,

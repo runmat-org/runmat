@@ -48,7 +48,7 @@ fn energy_assembly(
     assemble(
         model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &heat_generation(source_density),
@@ -57,6 +57,10 @@ fn energy_assembly(
     .unwrap()
 }
 
+// witness: FEA-THERMAL-FIELDS-001/global_energy @ thermal_steady/tet4|tet10/numerical_kernel,
+//   thermal_transient/tet4|tet10/numerical_kernel;
+//   boundary: Both-order physical heat-recovery identities and uniform zero flux; no arbitrary
+//   regional partition balance.
 #[test]
 fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -105,6 +109,10 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
     }
 }
 
+// witness: FEA-THERMAL-FIELDS-001/global_energy @ thermal_steady/tet4|tet10/numerical_kernel,
+//   thermal_transient/tet4|tet10/numerical_kernel;
+//   boundary: Both-order conductive prescribed reaction signs and internal-pair cancellation; no
+//   transient continuum convergence credit.
 #[test]
 fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pairs() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -199,7 +207,7 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
             let selector = face.provenance[0].analysis_selection_id().unwrap();
             model.boundaries = vec![AnalysisBoundary {
                 boundary_id: "physical_robin".into(),
-                target: RegionTarget::boundary(selector),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                 operator: BoundaryOperator::ThermalConvection {
                     ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient)),
                     coefficient: HeatTransferCoefficient::new(18.0),
@@ -280,7 +288,7 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let face = &projection.boundary_faces[0];
     let selector = face.provenance[0].analysis_selection_id().unwrap();
-    let target = RegionTarget::boundary(selector);
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)));
     model.boundaries = vec![
         AnalysisBoundary {
             boundary_id: "ambient".into(),
@@ -416,7 +424,7 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
             if robin_anchor {
                 model.boundaries.push(AnalysisBoundary {
                     boundary_id: "increment_robin".into(),
-                    target: RegionTarget::boundary(selector),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                     operator: BoundaryOperator::ThermalConvection {
                         ambient_temperature: PrescribedValue::Constant(Temperature::new(
                             equilibrium_k,
@@ -430,7 +438,7 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
                     .push(AnalysisConstraint::Thermal(ThermalConstraint {
                         constraint_id: "increment_fixed".into(),
                         kind: ThermalConstraintKind::Prescribed {
-                            target: RegionTarget::boundary(selector),
+                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                             value: PrescribedValue::Constant(Temperature::new(equilibrium_k)),
                         },
                     }));

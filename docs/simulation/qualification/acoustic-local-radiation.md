@@ -122,5 +122,5 @@ map, PML, spherical/cylindrical radiation, or a reflection-free oblique-incidenc
 Curved radiation surfaces and heterogeneous-interface wave accuracy remain outside
 this bounded evidence, although lowering resolves every face's medium. The only
 rotated geometry in the proposed envelope is the explicitly tested rigid 45-degree duct rotation.
-Cold artifact reopening does not establish process/iteration restart. Stage 8 and
-production qualification remain open; multi-frequency state semantics are unchanged.
+Cold artifact reopening does not establish process/iteration restart. Stage 8
+qualification remains open; multi-frequency state semantics are unchanged.

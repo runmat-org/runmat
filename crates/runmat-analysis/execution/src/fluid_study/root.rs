@@ -40,11 +40,15 @@ use crate::{
 const PREFIX: &[u8] = b"runmat-fluid-study-completion\0";
 // Full original task history replaces the previous winning-attempt payload.
 const COMPLETION_SCHEMA_VERSION: u16 = 2;
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
+/// The completion carries the solver mesh and workload of any admitted mesh, so collections are
+/// bounded by the encoded-byte ceiling rather than a fixed item count.
+const LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     policy: FluidStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: FluidSteadyWorkload,
@@ -63,6 +67,7 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.workload().clone();
         Self {
+            local_execution: preparation.local_execution,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -99,6 +104,7 @@ impl PreparationWire {
             return Err(invalid("fluid root workload differs from authored plan"));
         }
         Ok(FluidStudyPreparation {
+            local_execution: self.local_execution,
             policy: self.policy,
             product: FluidStudyProduct {
                 compiled: self.compiled,

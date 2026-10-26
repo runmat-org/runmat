@@ -23,6 +23,7 @@ mod physics;
 mod properties;
 mod signals;
 mod spectral_inputs;
+mod tables;
 
 pub fn lower_models(
     bound: &BoundFeaProgram,
@@ -30,13 +31,19 @@ pub fn lower_models(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel> {
     let mut result = BTreeMap::new();
+    let tables = tables::lower_impedance_tables(bound, declarations, diagnostics);
     for (identity, declaration) in declarations {
         if identity.1.kind != FeaSymbolKind::Model {
             continue;
         }
         let initial_errors = diagnostics.len();
-        let model = model(bound, declaration, diagnostics);
+        let model = model(bound, declaration, &tables, diagnostics);
         if diagnostics.len() != initial_errors {
+            continue;
+        }
+        // Whole-model validation of a declaration whose source already failed to check (an
+        // unresolved reference or an invalid unit) would only restate that failure.
+        if has_reported_error(declaration, diagnostics) {
             continue;
         }
         match model.validate() {
@@ -55,9 +62,21 @@ pub fn lower_models(
     result
 }
 
+fn has_reported_error(declaration: &CheckedFeaDeclaration, diagnostics: &[FeaDiagnostic]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == crate::FeaDiagnosticSeverity::Error
+            && diagnostic.location.as_ref().is_some_and(|location| {
+                location.path == declaration.module
+                    && location.span.start >= declaration.span.start
+                    && location.span.end <= declaration.span.end
+            })
+    })
+}
+
 fn model(
     bound: &BoundFeaProgram,
     declaration: &CheckedFeaDeclaration,
+    tables: &tables::ImpedanceTables,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> AuthoredModel {
     let inputs = super::input::lower_definitions(bound, declaration, diagnostics);
@@ -88,7 +107,7 @@ fn model(
         })
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
-    let lowered_physics = physics::lower(declaration, bound, diagnostics);
+    let lowered_physics = physics::lower(declaration, bound, tables, diagnostics);
     let (thermal, thermo_mechanical, electromagnetic) = domains::lower(declaration, diagnostics);
     let mut signals = signals::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, &signals, diagnostics);
@@ -179,6 +198,9 @@ pub(super) fn material_source(
     };
     match path.as_slice() {
         [namespace, _name] if namespace == "material" => {
+            if expression.value_type == FeaType::Error {
+                return None;
+            }
             let reference = resolve_declaration_ref(
                 bound,
                 declaration,
@@ -247,7 +269,9 @@ pub(super) fn region_source(
             if namespace == "geometry" && region_namespace == "region" =>
         {
             let FeaType::Region(role) = &expression.value_type else {
-                invalid_assignment(declaration, expression, "geometry region", diagnostics);
+                if expression.value_type != FeaType::Error {
+                    invalid_assignment(declaration, expression, "geometry region", diagnostics);
+                }
                 return None;
             };
             let reference = resolve_declaration_ref(

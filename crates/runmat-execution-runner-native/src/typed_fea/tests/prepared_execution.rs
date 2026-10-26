@@ -42,8 +42,7 @@ async fn prepared_execution_rejects_metadata_and_envelope_substitution_before_ex
     .unwrap();
     validate_prepared_execution(&prepared, &options).unwrap();
 
-    let PreparedFeaStudyRoot::Structural(root) = &prepared.root else {panic!("structural fixture")};
-    let current_threads=root.result_expectation().local_execution.thread_count().get();
+    let current_threads = prepared.root.local_execution.thread_count().get();
     let changed_options=LocalFeaExecutionOptions {
         cpu_threads_per_worker:Some(runmat_analysis_fea::planning::resource::LocalThreadCount::new(if current_threads==1 {2} else {1}).unwrap()),
         ..options.clone()
@@ -70,9 +69,11 @@ async fn prepared_execution_rejects_metadata_and_envelope_substitution_before_ex
         .contains("backend"));
     let changed_options = LocalFeaExecutionOptions {
         accelerators: vec![runmat_execution::resource::AcceleratorRequest {
-            class: "unadmitted".into(),
+            class: runmat_execution::resource::AcceleratorClass::new("unadmitted").unwrap(),
             count: 1,
-            memory_bytes_each: 1024,
+            minimum_allocation_bytes: 1024,
+            provider: None,
+            required_features: Default::default(),
         }],
         ..options.clone()
     };

@@ -15,6 +15,7 @@ mod preparation;
 mod run_admission;
 mod source_fields;
 mod source_phase;
+pub(in crate::analysis::storage) mod spill;
 mod typed_preparation;
 pub(in crate::analysis) use preparation::PreparationReservation;
 pub(in crate::analysis) use typed_preparation::retained_mesh_storage;
@@ -34,6 +35,8 @@ pub struct AnalysisPublicationBuilder {
     evidence_access: crate::analysis::structural_study::publication::evidence::StudyEvidenceAccess,
     admission: std::sync::Mutex<bool>,
     store: InMemoryAnalysisArtifactStore,
+    /// Field chunks streamed out of staging; the budget bounds only the bytes in flight.
+    spill: std::sync::Mutex<spill::SpilledChunks>,
 }
 
 pub struct PreparedAnalysisPublication {
@@ -44,6 +47,8 @@ pub struct PreparedAnalysisPublication {
     runs: HashMap<String, PersistedAnalysisArtifact>,
     chunks: HashMap<Digest, Arc<[u8]>>,
     observations: HashMap<String, observations::ObservationAttachment>,
+    /// Field chunks written to the private spill area during staging, read back at commit.
+    spilled: spill::SpilledChunks,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +149,7 @@ impl PreparedAnalysisPublication {
     }
 }
 
+#[cfg(test)]
 fn record_value(record: &PersistedAnalysisArtifact) -> Result<serde_json::Value, String> {
     match record {
         PersistedAnalysisArtifact::Standard(r) => serde_json::to_value(r),
@@ -153,7 +159,86 @@ fn record_value(record: &PersistedAnalysisArtifact) -> Result<serde_json::Value,
     .map_err(|e| e.to_string())
 }
 
+/// The record without its creation time, borrowed field by field. The canonical encoder orders
+/// keys, so encoding this view directly yields the same bytes as encoding the record's JSON tree
+/// with `created_at` removed, without materializing that tree.
+#[derive(Serialize)]
+struct StandardDigestView<'a> {
+    schema_version: &'a String,
+    op_version: &'a String,
+    run_digest: &'a Digest,
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
+    run: &'a serde_json::Value,
+    metadata: &'a AnalysisRunResult,
+    field_inventory: &'a Vec<AnalysisField>,
+    materialized_field_ids: &'a Vec<String>,
+    fields: &'a Vec<PersistedFieldArtifact>,
+    render_tiles: &'a Option<RenderTileIndex>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    observation_histories: &'a Vec<PersistedObservationHistory>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_fields: &'a Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dynamic_balance: &'a Option<PersistedDynamicBalance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observation_payload: &'a Option<AnalysisObjectManifest>,
+}
+
+#[derive(Serialize)]
+struct FrequencyDigestView<'a, S, C, R> {
+    schema_version: &'a String,
+    op_version: &'a String,
+    step: &'a S,
+    object_catalog: &'a C,
+    artifact_roots: &'a R,
+}
+
 pub(super) fn record_digest(record: &PersistedAnalysisArtifact) -> Result<Digest, String> {
+    const DOMAIN: &str = "analysis-publication-record";
+    match record {
+        PersistedAnalysisArtifact::Standard(r) => canonical_digest(
+            DOMAIN,
+            &StandardDigestView {
+                schema_version: &r.schema_version,
+                op_version: &r.op_version,
+                run_digest: &r.run_digest,
+                run: &r.run,
+                metadata: &r.metadata,
+                field_inventory: &r.field_inventory,
+                materialized_field_ids: &r.materialized_field_ids,
+                fields: &r.fields,
+                render_tiles: &r.render_tiles,
+                observation_histories: &r.observation_histories,
+                original_fields: &r.original_fields,
+                dynamic_balance: &r.dynamic_balance,
+                observation_payload: &r.observation_payload,
+            },
+        ),
+        PersistedAnalysisArtifact::StructuralFrequency(r) => canonical_digest(
+            DOMAIN,
+            &FrequencyDigestView {
+                schema_version: &r.schema_version,
+                op_version: &r.op_version,
+                step: &r.step,
+                object_catalog: &r.object_catalog,
+                artifact_roots: &r.artifact_roots,
+            },
+        ),
+        PersistedAnalysisArtifact::AcousticFrequency(r) => canonical_digest(
+            DOMAIN,
+            &FrequencyDigestView {
+                schema_version: &r.schema_version,
+                op_version: &r.op_version,
+                step: &r.step,
+                object_catalog: &r.object_catalog,
+                artifact_roots: &r.artifact_roots,
+            },
+        ),
+    }
+}
+
+#[cfg(test)]
+fn tree_record_digest(record: &PersistedAnalysisArtifact) -> Result<Digest, String> {
     let mut value = record_value(record)?;
     value
         .as_object_mut()
@@ -183,6 +268,7 @@ impl AnalysisPublicationBuilder {
             evidence_access: crate::analysis::structural_study::publication::evidence::StudyEvidenceAccess::capture(),
             admission: std::sync::Mutex::new(false),
             store: InMemoryAnalysisArtifactStore::staging(),
+            spill: std::sync::Mutex::new(spill::SpilledChunks::default()),
         })
     }
     fn admit(&self, additional: u64) -> Result<(), AnalysisPublicationError> {
@@ -231,8 +317,72 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit_run(run)?;
-        self.store.persist_run(run).map_err(Into::into)
+        validate_run_identity(run)?;
+        let mut requested = 0u64;
+        let mut denied = None;
+        let mut spill = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
+        // Field payloads stream to the spill area: each is charged only while in flight, on
+        // top of what staging already retains, and released once its chunks are written.
+        struct Streamed<'a> {
+            builder: &'a AnalysisPublicationBuilder,
+            run: &'a AnalysisRunResult,
+            spill: &'a mut spill::SpilledChunks,
+            denied: Option<AnalysisPublicationError>,
+        }
+        impl super::preparation::FieldChunkSink for Streamed<'_> {
+            fn admit_in_flight(&mut self, bytes: u64) -> Result<(), String> {
+                self.builder.admit(bytes).map_err(|error| {
+                    let error = error.context(&run_admission::run_failure_facts(
+                        self.run,
+                        self.builder.maximum_bytes,
+                    ));
+                    let message = error.to_string();
+                    self.denied = Some(error);
+                    message
+                })
+            }
+            fn put(&mut self, digest: Digest, bytes: &[u8]) -> Result<(), String> {
+                self.spill.put(digest, bytes)?;
+                self.builder
+                    .store
+                    .streamed
+                    .write()
+                    .map_err(|_| "streamed chunk lock poisoned")?
+                    .insert(digest);
+                Ok(())
+            }
+        }
+        let mut streamed = Streamed {
+            builder: self,
+            run,
+            spill: &mut spill,
+            denied: None,
+        };
+        let prepared = prepare_run_artifact_with_admission(
+            run,
+            Utc::now().to_rfc3339(),
+            &mut |bytes| {
+                requested = requested
+                    .checked_add(bytes)
+                    .ok_or("staging byte overflow")?;
+                self.admit(requested).map_err(|error| {
+                    let error =
+                        error.context(&run_admission::run_failure_facts(run, self.maximum_bytes));
+                    let message = error.to_string();
+                    denied = Some(error);
+                    message
+                })
+            },
+            Some(&mut streamed),
+        );
+        if let Some(error) = streamed.denied.take().or(denied) {
+            return Err(error);
+        }
+        drop(spill);
+        let prepared = prepared?;
+        self.store
+            .persist_prepared_run(run, prepared)
+            .map_err(Into::into)
     }
     pub fn stage_structural_frequency(
         &self,
@@ -249,7 +399,8 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit(frequency_bytes(step, catalog, roots, self.maximum_bytes)?)?;
+        self.admit(frequency_bytes(step, catalog, roots)?)
+            .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
             .persist_structural_frequency(step, catalog, roots, source)
             .map_err(Into::into)
@@ -269,10 +420,45 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit(frequency_bytes(step, catalog, roots, self.maximum_bytes)?)?;
+        self.admit(frequency_bytes(step, catalog, roots)?)
+            .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
             .persist_acoustic_frequency(step, catalog, roots, source)
             .map_err(Into::into)
+    }
+    /// Reads staged chunks where staging wrote them: records, tiles and histories stay resident
+    /// in the staging store, while field payloads stream to the spill area. Every reader of a
+    /// staged record goes through here.
+    pub(in crate::analysis::storage) fn read_staged_chunks<R>(
+        &self,
+        read: impl FnOnce(&mut dyn FnMut(Digest) -> Result<Option<Vec<u8>>, String>) -> Result<R, String>,
+    ) -> Result<R, String> {
+        let chunks = self
+            .store
+            .chunks
+            .read()
+            .map_err(|_| "publication chunks poisoned")?;
+        let spilled = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
+        read(&mut |digest| match chunks.get(&digest) {
+            Some(bytes) => Ok(Some(bytes.to_vec())),
+            None => spilled.read(&digest),
+        })
+    }
+    /// The staged standard run `run_id`, materialized with its field values.
+    pub(in crate::analysis::storage) fn load_staged_run(
+        &self,
+        run_id: &str,
+    ) -> Result<AnalysisRunResult, String> {
+        let runs = self
+            .store
+            .runs
+            .read()
+            .map_err(|_| "publication staging store poisoned")?;
+        let Some(PersistedAnalysisArtifact::Standard(persisted)) = runs.get(run_id) else {
+            return Err("staged standard run is absent".into());
+        };
+        validate_persisted_run(persisted, run_id)?;
+        self.read_staged_chunks(|read| materialize_run(persisted, read))
     }
     pub fn stage_thermal_observations(
         &self,
@@ -314,7 +500,10 @@ impl AnalysisPublicationBuilder {
                         message: "staging byte overflow".into(),
                     })
             })?;
-        let attachment = self.store.prepare_observations(run_id, completed, source)?;
+        let run = self.load_staged_run(run_id)?;
+        let attachment = self
+            .store
+            .prepare_observations(run_id, &run, completed, source)?;
         phase.with_transport(self, bytes, || {
             self.store
                 .install_observations(run_id, attachment, source)
@@ -355,8 +544,9 @@ impl AnalysisPublicationBuilder {
             )?;
             drop(observations);
             drop(runs);
-            self.admit(additional)
-                .map_err(|error| error.context("publication commit phase"))?;
+            self.admit(additional.total).map_err(|error| {
+                error.context(&format!("publication commit phase ({})", additional.facts))
+            })?;
         }
         if manifest.get("study_definition_digest")
             != Some(&serde_json::to_value(self.definition).map_err(|e| e.to_string())?)
@@ -425,10 +615,33 @@ impl AnalysisPublicationBuilder {
             runs,
             chunks,
             observations,
+            spilled: self
+                .spill
+                .into_inner()
+                .map_err(|_| "publication spill lock poisoned")?,
         })
     }
 }
 
+/// Typed storage of owned in-memory values (or their clones), priced from the serialization
+/// shape without a value tree.
+pub(in crate::analysis) fn typed_resident(
+    value: &impl Serialize,
+    maximum: u64,
+) -> Result<u64, AnalysisPublicationError> {
+    runmat_canonical_codec::profile_typed_resident_bytes(
+        value,
+        CanonicalLimits::new(
+            usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
+                message: "publication budget exceeds address space".into(),
+            })?,
+            100_000_000,
+            65_536,
+            64,
+        ),
+    )
+    .map_err(Into::into)
+}
 pub(in crate::analysis) fn resident(
     value: &impl Serialize,
     maximum: u64,
@@ -451,9 +664,10 @@ fn frequency_bytes(
     step: &AnalysisStudyStepRunData,
     catalog: &runmat_execution::value::PublishedObjectCatalog,
     roots: &impl Serialize,
-    maximum: u64,
 ) -> Result<u64, AnalysisPublicationError> {
-    let mut bytes = resident(&(step, catalog, roots), maximum)?;
+    // Frequency preparation clones these typed values and copies each published
+    // object; it builds no JSON tree.
+    let mut bytes = runmat_canonical_codec::typed_resident_bytes_estimate(&(step, catalog, roots))?;
     catalog.validate().map_err(|e| e.to_string())?;
     for object in &catalog.objects {
         bytes = bytes.checked_add(object.encoded_length).ok_or_else(|| {
@@ -511,3 +725,24 @@ pub(in crate::analysis::storage) mod reclamation;
 
 mod outcome;
 pub use outcome::AnalysisPublicationError;
+
+/// Stages `run` in a fresh publication and reads it back through the staged-record reader,
+/// returning the readback and how many chunks staging streamed to the spill area.
+#[cfg(test)]
+pub(in crate::analysis) fn stage_and_read_back_for_tests(
+    run: &AnalysisRunResult,
+) -> Result<(AnalysisRunResult, usize), String> {
+    let builder = AnalysisPublicationBuilder::new(
+        Digest::sha256(b"staged-run-readback"),
+        512 * 1024 * 1024,
+    )
+    .map_err(|error| error.to_string())?;
+    builder.stage_run(run).map_err(|error| error.to_string())?;
+    let spilled = builder
+        .spill
+        .lock()
+        .map_err(|_| "publication spill lock poisoned")?
+        .digests()
+        .count();
+    Ok((builder.load_staged_run(&run.run_id)?, spilled))
+}

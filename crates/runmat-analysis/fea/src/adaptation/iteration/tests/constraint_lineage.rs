@@ -11,6 +11,15 @@ use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind,
 };
 
+// witness: FEA-ADAPTATION-GOVERNANCE-001/family_transfer_constraints @
+//   adaptive_analysis/tet4|tet10/numerical_kernel;
+//   boundary: Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains entity identity
+//   and rejects foreign/missing lineage. No reaction/state transfer or adaptive solve convergence
+//   claim.
+// witness: FEA-SHARED-CONSTRAINTS-001/recovery_after_adaptation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A persistent clamp rebuilds new midside constraints without numeric node aliases
+//   after refinement.
 #[test]
 fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliases() {
     let mut source = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -18,11 +27,11 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
     for mesh in [&mut source, &mut target] {
         mesh.topology.boundary_faces[0]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: "adaptive_clamp".into(),
-                assembly_path: vec![],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                "adaptive_clamp".into(),
+                vec![],
+            ));
         mesh.topology.boundary_faces[0].provenance.sort();
         mesh.seal_canonical_digest().unwrap();
     }
@@ -31,7 +40,7 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
         constraint_id: "persistent_clamp".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: RegionTarget::boundary("adaptive_clamp"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("adaptive_clamp")),
         },
     })];
     let source_plan = CanonicalStructuralConstraintPlan::compile(&model, &source).unwrap();

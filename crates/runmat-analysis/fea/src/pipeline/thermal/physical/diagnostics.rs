@@ -112,7 +112,7 @@ pub(super) fn diagnostics(
             FeaDiagnosticSeverity::Error
         }),
         ThermalDiagnosticMessage::Recovery([
-            assembly.projection.nodes.len(),
+            assembly.dofs.node_count(),
             assembly.projection.elements.len(),
             assembly.projection.boundary_faces.len(),
         ])

@@ -36,8 +36,9 @@ pub fn workload() -> ThermalWorkload {
     model.excitation_cases.clear();
     model.signals.clear();
     model.initial_conditions.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(1.0));
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     let thermal = model.materials[0].thermal.as_mut().unwrap();
     thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(K);
     thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(1.0);
@@ -48,7 +49,7 @@ pub fn workload() -> ThermalWorkload {
         AnalysisSequence::from_steps("radiation", vec![ProcedureStep::thermal_steady("heat")]);
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "gray-radiation".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::ThermalRadiation {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(AMBIENT)),
             emissivity: SurfaceEmissivity::new(EMISSIVITY),
@@ -56,7 +57,7 @@ pub fn workload() -> ThermalWorkload {
     });
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "insulated-sides".into(),
-        target: RegionTarget::boundary("slab_insulated"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Constant(HeatFlux::new(0.0)),
         },
@@ -66,7 +67,6 @@ pub fn workload() -> ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::Steady,
         residual_target: TARGET,
     }
@@ -79,7 +79,7 @@ pub fn left_temperature(input: &mut ThermalWorkload, value: PrescribedValue<Temp
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "fixed-hot-left".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value,
             },
         }));

@@ -119,22 +119,86 @@ pub(super) fn face_pressure_offset(
     })
 }
 
-/// Single Newtonian face-physics authority shared by assembly and original recovery.
+/// Symmetry-plane viscous traction on the owner fluid: zero shear and the normal
+/// stress 2µ ∂u_n/∂n with zero normal velocity on the plane. Returns the implicit
+/// per-component coefficient 2µα and the traction −2µα (u·n̂) n̂ in newtons.
+pub(super) fn symmetry_traction(
+    p: &CanonicalFluidProblem<'_>,
+    i: usize,
+    owner_velocity: V,
+    owner_gradient: &[V; 3],
+) -> Result<(f64, V), Error> {
+    let f = &p.topology.faces[i];
+    let (alpha, _, _) = face_geometry(p, f)?;
+    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
+    let coefficient = 2.0 * face_viscosity(p, owner_gradient) * alpha;
+    let traction = scale(normal, -coefficient * dot(owner_velocity, normal));
+    if !coefficient.is_finite() || traction.iter().any(|x| !x.is_finite()) {
+        return Err(Error::Invalid("symmetry face traction"));
+    }
+    Ok((coefficient, traction))
+}
+
+/// Shear rate √(2 D:D) of a velocity gradient (row k is ∇u_k), D = ½(∇u + ∇uᵀ).
+pub(super) fn shear_rate(gradient: &[V; 3]) -> f64 {
+    let mut sum = 0.0;
+    for i in 0..3 {
+        for j in 0..3 {
+            let d = gradient[i][j] + gradient[j][i];
+            sum += 0.5 * d * d;
+        }
+    }
+    sum.sqrt()
+}
+
+/// Viscosity at a face or cell: the Newtonian constant, or the generalized-Newtonian law at
+/// the local shear rate (lagged on the current velocity in the outer iteration).
+pub(super) fn face_viscosity(p: &CanonicalFluidProblem<'_>, gradient: &[V; 3]) -> f64 {
+    match p.rheology {
+        None => p.viscosity,
+        Some(law) => law.viscosity(shear_rate(gradient)),
+    }
+}
+
+/// Single face-physics authority (Newtonian or generalized-Newtonian stress) shared by
+/// assembly and original recovery.
 pub(super) fn viscous_parts(
     p: &CanonicalFluidProblem<'_>,
     i: usize,
     gu: &[[V; 3]],
 ) -> Result<(f64, V), Error> {
+    viscous_parts_with(p, i, gu, gu)
+}
+
+/// Viscous face parts with the viscosity taken from `viscosity_gu` (a frozen iterate for a
+/// shear-rate dependent law) and the correction from `gu`.
+pub(super) fn viscous_parts_with(
+    p: &CanonicalFluidProblem<'_>,
+    i: usize,
+    gu: &[[V; 3]],
+    viscosity_gu: &[[V; 3]],
+) -> Result<(f64, V), Error> {
     let f = &p.topology.faces[i];
     let (alpha, tangent, w) = face_geometry(p, f)?;
-    let grad = if let Some(other) = f.neighbor {
-        std::array::from_fn(|k| interpolate(gu[f.owner][k], gu[other][k], w))
-    } else {
-        gu[f.owner]
+    let face_gradient = |g: &[[V; 3]]| -> [V; 3] {
+        if let Some(other) = f.neighbor {
+            std::array::from_fn(|k| interpolate(g[f.owner][k], g[other][k], w))
+        } else {
+            g[f.owner]
+        }
     };
+    let grad = face_gradient(gu);
     let normal_diffusion = !matches!(p.boundaries[i], FaceBoundary::PressureOutlet { .. });
+    let viscosity = if std::ptr::eq(gu, viscosity_gu) {
+        face_viscosity(p, &grad)
+    } else {
+        face_viscosity(p, &face_gradient(viscosity_gu))
+    };
+    if !viscosity.is_finite() || viscosity <= 0.0 {
+        return Err(Error::Invalid("nonpositive or nonfinite face viscosity"));
+    }
     let remainder = std::array::from_fn(|k| {
-        p.viscosity
+        viscosity
             * ((if normal_diffusion {
                 dot(grad[k], tangent)
             } else {
@@ -145,7 +209,7 @@ pub(super) fn viscous_parts(
     });
     Ok((
         if normal_diffusion {
-            p.viscosity * alpha
+            viscosity * alpha
         } else {
             0.0
         },

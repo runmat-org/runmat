@@ -24,6 +24,19 @@ pub(super) fn execute_study_step(
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     let model = solver_model(model, procedure_step);
     match &execution.solver_options {
+        AnalysisSolverOptions::AcousticResponse(_) => Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ACOUSTIC_TYPED_EXECUTION_REQUIRED",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "acoustic cavity-mode and transient studies run through their governed typed execution path",
+            std::collections::BTreeMap::new(),
+        )),
         AnalysisSolverOptions::ElectricalStatic(_) | AnalysisSolverOptions::Magnetostatic(_) | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -46,7 +59,6 @@ pub(super) fn execute_study_step(
             let run = execute_linear_static_with_executor(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
                 structural_executor,
@@ -146,7 +158,6 @@ pub(super) fn execute_study_step(
             let run = execute_modal_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -157,7 +168,6 @@ pub(super) fn execute_study_step(
             let run = execute_acoustic_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -172,7 +182,6 @@ pub(super) fn execute_study_step(
             let run = execute_thermal_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -187,7 +196,6 @@ pub(super) fn execute_study_step(
             let run = execute_transient_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -198,7 +206,6 @@ pub(super) fn execute_study_step(
             let run = analysis_run_cfd_with_options_op(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -213,7 +220,6 @@ pub(super) fn execute_study_step(
             let run = execute_cht_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -228,7 +234,6 @@ pub(super) fn execute_study_step(
             let run = execute_fsi_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;
@@ -246,7 +251,6 @@ pub(super) fn execute_study_step(
             let run = execute_nonlinear_with_options(
                 &model,
                 execution.backend,
-                execution.requirement,
                 options.clone(),
                 context.clone(),
             )?;

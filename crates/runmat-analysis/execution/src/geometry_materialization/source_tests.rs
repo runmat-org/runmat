@@ -104,7 +104,7 @@ fn imported_source_is_chunked_and_bound_to_declared_bytes_and_units() {
             unit_evidence: Default::default(),
             logical_path: "project/part.brep".into(),
             format: GeometrySourceFormat::Brep,
-            unit_fallback: Some(LengthUnit::Millimeter),
+            authored_units: Some(LengthUnit::Millimeter),
             content_digest: GeometryDigest::from_bytes(*digest.bytes()),
             topology_digest: GeometryDigest::from_bytes(*Digest::sha256(b"topology").bytes()),
             capabilities: GeometryAuthoringCapabilities {
@@ -113,7 +113,7 @@ fn imported_source_is_chunked_and_bound_to_declared_bytes_and_units() {
                 ..Default::default()
             },
             exchange: None,
-        })),
+            shared_interfaces: false,        })),
         regions: Vec::new(),
         cad_parameters: Vec::new(),
     };
@@ -171,7 +171,7 @@ fn definition_and_prepared_source_kind_must_converge() {
             unit_evidence: Default::default(),
             logical_path: "project/part.brep".into(),
             format: GeometrySourceFormat::Brep,
-            unit_fallback: Some(LengthUnit::Meter),
+            authored_units: Some(LengthUnit::Meter),
             content_digest: GeometryDigest::from_bytes(*digest.bytes()),
             topology_digest: GeometryDigest::from_bytes(*Digest::sha256(b"topology").bytes()),
             capabilities: GeometryAuthoringCapabilities {
@@ -180,7 +180,7 @@ fn definition_and_prepared_source_kind_must_converge() {
                 ..Default::default()
             },
             exchange: None,
-        })),
+            shared_interfaces: false,        })),
         regions: Vec::new(),
         cad_parameters: Vec::new(),
     };

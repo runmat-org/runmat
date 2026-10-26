@@ -69,14 +69,21 @@ fn iges_units(bytes: &[u8]) -> LengthUnitEvidence {
         10 => (0.01, "cm"),
         11 => (0.0000000254, "microinch"),
         3 => {
-            let definition = match name.to_ascii_lowercase().as_str() {
-                "inch" | "in" => Some(LengthUnit::Inch),
-                "mm" | "millimeter" | "millimetre" => Some(LengthUnit::Millimeter),
-                "m" | "meter" | "metre" => Some(LengthUnit::Meter),
-                "cm" => Some(LengthUnit::Centimeter),
-                "ft" | "foot" => Some(LengthUnit::Foot),
+            // IGES 5.3 global parameter 15 names that may accompany flag 3.
+            let meters = match name.to_ascii_lowercase().as_str() {
+                "inch" | "in" => Some(0.0254),
+                "mm" | "millimeter" | "millimetre" => Some(0.001),
+                "m" | "meter" | "metre" => Some(1.0),
+                "cm" => Some(0.01),
+                "ft" | "foot" => Some(0.3048),
+                "mi" => Some(1609.344),
+                "km" => Some(1000.0),
+                "mil" => Some(2.54e-5),
+                "um" | "micron" => Some(1.0e-6),
+                "uin" => Some(2.54e-8),
                 _ => None,
             };
+            let definition = meters.and_then(LengthUnit::from_meters_per_unit);
             return match definition {
                 Some(unit) => declared(unit, name),
                 None => LengthUnitEvidence::Unsupported {

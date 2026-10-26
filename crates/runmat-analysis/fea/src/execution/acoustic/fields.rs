@@ -16,6 +16,9 @@ use runmat_analysis_core::{
     RecoveryPolicy,
 };
 
+/// Element-average mean active intensity ½Re(p v*), W/m².
+pub const ACOUSTIC_INTENSITY_FIELD_ID: &str = "acoustic.intensity";
+
 #[cfg(test)]
 mod tests;
 
@@ -34,15 +37,10 @@ impl AcousticHarmonicSolverResult {
         };
         let request = self.native_field_request_from_result()?;
         let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().canonical_value());
-        let definitions = [
-            native_acoustic_field_definition("acoustic.pressure", &request.plan.requirements[0])?,
-            native_acoustic_field_definition(
-                "acoustic.particle_velocity",
-                &request.plan.requirements[1],
-            )?,
-        ];
+        let definitions = acoustic_native_field_definitions(&request)?;
         let counts = [
             self.ordered_node_ids().len(),
+            self.ordered_element_ids().len(),
             self.ordered_element_ids().len(),
         ];
         let catalog = RecoveredFieldArtifactManifest::profile_sampled_shape(
@@ -149,6 +147,13 @@ impl AcousticHarmonicSolverResult {
                     .flat_map(|v| (0..3).flat_map(move |axis| [v.real[axis], v.imaginary[axis]]))
                     .collect(),
             )?,
+            native_field(
+                ACOUSTIC_INTENSITY_FIELD_ID,
+                &request.plan.requirements[2],
+                sample,
+                vec![self.intensity_w_per_m2().len(), 3],
+                self.intensity_w_per_m2().iter().flatten().copied().collect(),
+            )?,
         ];
         request
             .plan
@@ -162,6 +167,71 @@ impl AcousticHarmonicSolverResult {
         )
         .map_err(invalid)
     }
+}
+
+impl AcousticHarmonicSolverResult {
+    /// Whether stored native fields (pressure, particle velocity, intensity, in inventory
+    /// order) carry exactly this result's values, bit for bit, without copying them.
+    pub fn native_fields_match(&self, fields: &[RecoveredField]) -> bool {
+        let matches = |field: &RecoveredField, expected: &mut dyn Iterator<Item = f64>| match &field
+            .storage()
+            .values
+        {
+            AnalysisFieldValues::HostF64(values) => values
+                .iter()
+                .map(|value| value.to_bits())
+                .eq(expected.map(f64::to_bits)),
+            AnalysisFieldValues::DeviceRef(_) => false,
+        };
+        let [pressure, velocity, intensity] = fields else {
+            return false;
+        };
+        matches(
+            pressure,
+            &mut self.pressure_pa().iter().flat_map(|p| [p.real, p.imaginary]),
+        ) && matches(
+            velocity,
+            &mut self
+                .velocity_m_per_s()
+                .iter()
+                .flat_map(|v| (0..3).flat_map(move |axis| [v.real[axis], v.imaginary[axis]])),
+        ) && matches(
+            intensity,
+            &mut self.intensity_w_per_m2().iter().flatten().copied(),
+        )
+    }
+}
+
+/// Native pressure and particle-velocity definitions named by an acoustic recovery request.
+pub fn acoustic_native_field_definitions(
+    request: &FieldRecoveryRequest,
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    request.validate()?;
+    if !matches!(request.topology, FieldTopologyIdentity::VolumeMesh { .. }) {
+        return Err(invalid(
+            "acoustic native fields require canonical volume-mesh topology",
+        ));
+    }
+    let [pressure, velocity, intensity] = request.plan.requirements.as_slice() else {
+        return Err(invalid(
+            "acoustic native inventory is nodal pressure, element particle velocity and element \
+             intensity",
+        ));
+    };
+    let expected = native_acoustic_field_plan(
+        usize::try_from(pressure.cost.output_entity_count).map_err(invalid)?,
+        usize::try_from(velocity.cost.output_entity_count).map_err(invalid)?,
+    )?;
+    if request.plan != expected {
+        return Err(invalid(
+            "acoustic recovery plan differs from the canonical native inventory",
+        ));
+    }
+    Ok(vec![
+        native_acoustic_field_definition("acoustic.pressure", pressure)?,
+        native_acoustic_field_definition("acoustic.particle_velocity", velocity)?,
+        native_acoustic_field_definition(ACOUSTIC_INTENSITY_FIELD_ID, intensity)?,
+    ])
 }
 
 /// Shared native publication inventory, also used to validate cold acoustic state payloads.
@@ -185,6 +255,14 @@ pub(in crate::execution) fn native_acoustic_field_plan(
                 ObservationValueShape::Vector3,
                 elements,
             )?,
+            // Element-average active intensity ½Re(p v*), real.
+            native_requirement(
+                ObservationQuantity::AcousticIntensity,
+                FieldLocation::Element,
+                RecoveredFieldEntityDomain::VolumeElements,
+                ObservationValueShape::Vector3,
+                elements,
+            )?,
         ],
     };
     plan.validate()?;
@@ -200,6 +278,7 @@ fn native_requirement(
 ) -> AnalysisExecutionResult<FieldRecoveryRequirement> {
     let count = u64::try_from(count).map_err(invalid)?;
     Ok(FieldRecoveryRequirement {
+        support: Default::default(),
         quantity,
         source_location: location,
         output_location: location,
@@ -241,7 +320,12 @@ pub(in crate::execution) fn native_acoustic_field_definition(
         requirement.output_location,
         requirement.entity_domain,
         requirement.value_shape.clone(),
-        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+        // Intensity is a real time-average; pressure and velocity are complex phasors.
+        if requirement.quantity == ObservationQuantity::AcousticIntensity {
+            RecoveredFieldNumericRepresentation::Real
+        } else {
+            RecoveredFieldNumericRepresentation::ComplexInterleaved
+        },
     )
     .map_err(invalid)
 }

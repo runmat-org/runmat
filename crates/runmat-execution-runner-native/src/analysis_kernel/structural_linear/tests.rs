@@ -11,7 +11,7 @@ use runmat_analysis_fea::{
     solve::{backend::kind::LinearAlgebraBackendKind, preconditioner::SpdPreconditionerKind},
     ComputeBackend, ThermalProcedureControl, ThermalSolveOptions,
 };
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 const REFERENCE: f64 = 293.15;
@@ -130,7 +130,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest,
         digest,
-        ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }
@@ -154,7 +154,6 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::Steady,
                 solver_mesh: Some(mesh.clone()),
                 ..ThermalSolveOptions::default()
@@ -178,7 +177,6 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
                 step_id: model.sequence.steps[1].step_id.clone(),
                 model: model.clone(),
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
                 preconditioner: SpdPreconditionerKind::Jacobi,
                 algebra_backend: LinearAlgebraBackendKind::CpuReference,
                 observation_execution:
@@ -196,6 +194,9 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
             required_capabilities: Default::default(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })
         .unwrap();
         let directory = tempfile::tempdir().unwrap();

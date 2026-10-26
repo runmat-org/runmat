@@ -3,6 +3,14 @@ use std::collections::BTreeMap;
 use super::authoring::*;
 use super::{GeometryDigest, GeometryScalarExpression, GeometrySourceFormat, LengthUnit};
 
+// witness: FEA-AUTHORING-GEOMETRY-002/imported_geometry @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Imported geometry requires exact identity and persistent topology at the model level;
+//   file inspection and unit handling are covered in the language tests.
+// witness: FEA-AUTHORING-GEOMETRY-002/geometry_owned_regions @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Regions belong to an exact geometry asset with identity and revision; role checks on
+//   consumption are other tests.
 #[test]
 fn imported_geometry_requires_exact_identity_and_persistent_topology() {
     let mut definition = GeometryDefinition {
@@ -15,7 +23,7 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
             unit_evidence: Default::default(),
             logical_path: "geometry/bracket.step".into(),
             format: GeometrySourceFormat::Step,
-            unit_fallback: Some(LengthUnit::Millimeter),
+            authored_units: Some(LengthUnit::Millimeter),
             content_digest: GeometryDigest::from_bytes([1; 32]),
             topology_digest: GeometryDigest::from_bytes([2; 32]),
             capabilities: GeometryAuthoringCapabilities {
@@ -24,7 +32,7 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
                 ..GeometryAuthoringCapabilities::default()
             },
             exchange: None,
-        })),
+            shared_interfaces: false,        })),
         regions: vec![GeometryRegionDefinition {
             region_id: "body".into(),
             role: GeometryRegionRole::Solid,
@@ -101,6 +109,10 @@ fn parameterized_feature_graph_retains_declared_input_identity() {
     assert!(definition.validate().is_ok());
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/region_role_rejection @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Feature region selectors must resolve in the authored graph; consumer
+//   reinterpretation of roles is checked in the property-assignment tests.
 #[test]
 fn feature_region_selectors_must_resolve_in_the_authored_graph() {
     let definition = GeometryDefinition {

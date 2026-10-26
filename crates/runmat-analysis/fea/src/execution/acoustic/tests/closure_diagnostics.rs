@@ -31,8 +31,7 @@ fn rejected_acoustic_closure_reports_actual_metrics_without_changing_bounds() {
             "power_relative_tolerance=",
             "mean_input_power_w=",
             "mean_impedance_loss_w=",
-            "iterations=",
-            "maximum_iterations=",
+            "refinement_steps=",
             "mesh=",
             "frequency_hz=",
         ] {

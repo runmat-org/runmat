@@ -41,7 +41,7 @@ pub struct ImportedGeometryDefinition {
     pub named_selections: Option<super::GeometryNamedSelections>,
     pub logical_path: String,
     pub format: GeometrySourceFormat,
-    pub unit_fallback: Option<LengthUnit>,
+    pub authored_units: Option<LengthUnit>,
     #[serde(default)]
     pub unit_evidence: runmat_types::physical::LengthUnitEvidence,
     pub content_digest: GeometryDigest,
@@ -49,6 +49,10 @@ pub struct ImportedGeometryDefinition {
     pub capabilities: GeometryAuthoringCapabilities,
     #[serde(default)]
     pub exchange: Option<Ap242ExchangeInventory>,
+    /// Touching bodies join so each pair of coincident faces becomes one shared interface face
+    /// (`interfaces = shared` in `.fea`); otherwise every part keeps its own faces.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared_interfaces: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

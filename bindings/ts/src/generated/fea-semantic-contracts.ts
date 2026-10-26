@@ -28,8 +28,7 @@ export interface AccuracyCriterion {
 export type AccuracyLimitAction = "refine"
   | "tighten_solver"
   | "extend_sampling"
-  | "fail"
-  | "warn_experimental";
+  | "fail";
 
 export type AccuracyObservationEvent = "criterion_crossing";
 
@@ -973,7 +972,6 @@ export interface AuthoredStudy {
   geometry: AuthoredGeometryInstance;
   mesh: AuthoredMeshRef;
   model: AuthoredModelInstance;
-  formulation_requirement: FormulationRequirement;
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
@@ -1711,9 +1709,6 @@ export interface Force {
   newtons: number;
 }
 
-export type FormulationRequirement = "production"
-  | "experimental";
-
 export interface FoundationModulus {
   newtons_per_cubic_meter: number;
 }
@@ -1924,12 +1919,6 @@ export interface GeometryFeatureRegionSelection {
   cardinality: GeometryRegionCardinality;
 }
 
-export interface GeometryNamedSelections {
-  schema_version: number;
-  source_digest: GeometryDigest;
-  regions: GeometryRegionDefinition[];
-}
-
 export interface GeometryParameterDefinition {
   parameter_id: string;
   parameter_type: GeometryParameterType;
@@ -2112,10 +2101,9 @@ export interface ImportedFunctionIdentity {
 }
 
 export interface ImportedGeometryDefinition {
-  named_selections?: GeometryNamedSelections;
   logical_path: string;
   format: GeometrySourceFormat;
-  unit_fallback: LengthUnit | null;
+  authored_units: LengthUnit | null;
   unit_evidence: LengthUnitEvidence;
   content_digest: GeometryDigest;
   topology_digest: GeometryDigest;
@@ -2612,7 +2600,9 @@ export type PartitionBalance = "nonzeros"
   | "dofs"
   | "elements";
 
-export interface PersistentEntityId {
+export type PersistentEntityId = PersistentEntityIdData;
+
+export interface PersistentEntityIdData {
   kind: PersistentEntityKind;
   source_topology_id: string;
   assembly_path: string[];
@@ -3600,7 +3590,7 @@ export interface TurbulenceIntensity {
 }
 
 export type UnavailableEvidencePolicy = "fail"
-  | "mark_indeterminate_experimental";
+  | "mark_indeterminate";
 
 export interface Unit<K> {
   definition: UnitDefinition;

@@ -37,21 +37,16 @@ fn execution_step(
     workloads: &StructuralStudyWorkloads,
     step: &ProcedureStep,
 ) -> Result<AnalysisExecutionStep, String> {
-    let (backend, requirement, solver_options) = match workloads {
+    let (backend, solver_options) = match workloads {
         StructuralStudyWorkloads::LinearSequence { workloads } => {
             let workload = workload_for_step(workloads, &step.step_id)?;
-            (
-                workload.backend,
-                workload.formulation_requirement,
-                linear_options(workload.preconditioner),
-            )
+            (workload.backend, linear_options(workload.preconditioner))
         }
         StructuralStudyWorkloads::StructuralTransient {
             workload,
             block_plan,
         } if workload.step_id == step.step_id => (
             workload.backend,
-            workload.formulation_requirement,
             transient_options(
                 workload.time_step_policy.interval_count(),
                 workload.residual_target,
@@ -68,7 +63,6 @@ fn execution_step(
             };
             (
                 workload.backend(),
-                workload.formulation_requirement(),
                 frequency_options(AnalysisStructuralFrequencySolver::Direct { policy: *policy }),
             )
         }
@@ -77,7 +71,6 @@ fn execution_step(
         {
             (
                 workload.backend(),
-                workload.formulation_requirement(),
                 modal_options(
                     workload.truncation(),
                     workload.convergence(),
@@ -98,25 +91,16 @@ fn execution_step(
     Ok(AnalysisExecutionStep {
         step_id: step.step_id.clone(),
         backend,
-        requirement,
         solver_options,
     })
 }
 
 fn heterogeneous_options(
     workload: &StructuralStepWorkload,
-) -> Result<
-    (
-        runmat_analysis_fea::ComputeBackend,
-        runmat_analysis_core::FormulationRequirement,
-        AnalysisSolverOptions,
-    ),
-    String,
-> {
+) -> Result<(runmat_analysis_fea::ComputeBackend, AnalysisSolverOptions), String> {
     Ok(match workload {
         StructuralStepWorkload::Thermal { workload } => (
             workload.backend,
-            workload.formulation_requirement,
             AnalysisSolverOptions::ThermalDiffusion(super::super::AnalysisThermalRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -131,14 +115,11 @@ fn heterogeneous_options(
                 solver_mesh_artifact_path: None,
             }),
         ),
-        StructuralStepWorkload::Linear { workload } => (
-            workload.backend,
-            workload.formulation_requirement,
-            linear_options(workload.preconditioner),
-        ),
+        StructuralStepWorkload::Linear { workload } => {
+            (workload.backend, linear_options(workload.preconditioner))
+        }
         StructuralStepWorkload::ModalExtraction { workload } => (
             workload.backend(),
-            workload.formulation_requirement(),
             modal_options(
                 workload.truncation(),
                 workload.convergence(),
@@ -150,7 +131,6 @@ fn heterogeneous_options(
             block_plan,
         } => (
             template.backend,
-            template.formulation_requirement,
             transient_options(
                 template.time_step_policy.interval_count(),
                 template.residual_target,
@@ -159,7 +139,6 @@ fn heterogeneous_options(
         ),
         StructuralStepWorkload::ModalResponseSpectrum { template } => (
             template.backend,
-            template.formulation_requirement,
             AnalysisSolverOptions::StructuralResponseSpectrum(AnalysisResponseSpectrumRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -169,7 +148,6 @@ fn heterogeneous_options(
         ),
         StructuralStepWorkload::RandomResponse { template } => (
             template.backend,
-            template.formulation_requirement,
             AnalysisSolverOptions::StructuralRandomResponse(AnalysisRandomResponseRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -181,7 +159,6 @@ fn heterogeneous_options(
         ),
         StructuralStepWorkload::PrestressedModal { template } => (
             template.backend,
-            template.formulation_requirement,
             modal_options(
                 template.truncation,
                 template.convergence,
@@ -190,7 +167,6 @@ fn heterogeneous_options(
         ),
         StructuralStepWorkload::Buckling { template } => (
             template.backend,
-            template.formulation_requirement,
             AnalysisSolverOptions::StructuralBuckling(AnalysisBucklingRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -208,11 +184,7 @@ fn heterogeneous_options(
                     AnalysisStructuralFrequencySolver::ModalReduced
                 }
             };
-            (
-                template.backend,
-                template.formulation_requirement,
-                frequency_options(solver),
-            )
+            (template.backend, frequency_options(solver))
         }
         StructuralStepWorkload::ModalFrequency { .. } => {
             return Err(
@@ -240,6 +212,8 @@ fn linear_options(preconditioner: SpdPreconditionerKind) -> AnalysisSolverOption
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: match preconditioner {
+            SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => PreconditionerMode::Auto,
+            SpdPreconditionerKind::Amg => PreconditionerMode::Amg,
             SpdPreconditionerKind::Jacobi => PreconditionerMode::Jacobi,
             SpdPreconditionerKind::Ilu0 => PreconditionerMode::Ilu,
         },

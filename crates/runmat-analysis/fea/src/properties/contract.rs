@@ -1,5 +1,7 @@
 #[path = "storage.rs"]
 mod storage;
+#[path = "wire.rs"]
+mod wire;
 use std::{collections::BTreeMap, sync::Arc};
 
 use runmat_analysis_core::{
@@ -59,7 +61,24 @@ pub enum CompiledPropertyAuditOwner {
 pub struct CompiledElementMaterial {
     pub element_id: u64,
     pub element_identity: StableDigest,
-    pub material: MaterialModel,
+    /// Shared with every element of the same material: one table entry, many references.
+    #[serde(with = "shared_material")]
+    pub material: Arc<MaterialModel>,
+}
+
+mod shared_material {
+    use super::*;
+    pub(super) fn serialize<S: serde::Serializer>(
+        material: &Arc<MaterialModel>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        material.as_ref().serialize(serializer)
+    }
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Arc<MaterialModel>, D::Error> {
+        MaterialModel::deserialize(deserializer).map(Arc::new)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,80 +122,27 @@ pub struct CompiledShellProperty {
 
 /// Immutable material ownership after exact geometry-to-element projection.
 /// Clones share original validated element and audit inventories. Sharing is
-/// process-local; the canonical wire contract and cold integrity checks are unchanged.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "CompiledPropertyMapData")]
+/// process-local; the persisted form is the compact table-and-column wire in `wire.rs`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledPropertyMap {
-    #[serde(with = "ordered_map_serde", skip_serializing_if = "BTreeMap::is_empty")]
     cell_materials: Arc<BTreeMap<StableDigest, CompiledElementMaterial>>,
     pub identity: CompiledPropertyMapIdentity,
     pub audit_digest: Digest,
-    #[serde(with = "ordered_map_serde")]
     solid_materials: Arc<BTreeMap<StableDigest, CompiledElementMaterial>>,
-    #[serde(with = "ordered_map_serde")]
     beam_properties: Arc<BTreeMap<StableDigest, CompiledBeamProperty>>,
-    #[serde(with = "ordered_map_serde")]
     shell_properties: Arc<BTreeMap<StableDigest, CompiledShellProperty>>,
-    #[serde(serialize_with = "serialize_shared_audit")]
     audit: Arc<Vec<CompiledPropertyAudit>>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CompiledPropertyMapData {
-    #[serde(default, with = "ordered_map_serde")]
-    cell_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
-    identity: CompiledPropertyMapIdentity,
-    audit_digest: Digest,
-    #[serde(with = "ordered_map_serde")]
-    solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
-    #[serde(with = "ordered_map_serde")]
-    beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
-    #[serde(with = "ordered_map_serde")]
-    shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
-    audit: Vec<CompiledPropertyAudit>,
-}
-
-fn serialize_shared_audit<S: serde::Serializer>(
-    audit: &Arc<Vec<CompiledPropertyAudit>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    audit.as_ref().serialize(serializer)
-}
-
-mod ordered_map_serde {
-    use std::collections::BTreeMap;
-
-    use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S, K, V>(map: &BTreeMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        K: Serialize + Ord,
-        V: Serialize,
-    {
-        let mut sequence = serializer.serialize_seq(Some(map.len()))?;
-        for entry in map {
-            sequence.serialize_element(&entry)?;
-        }
-        sequence.end()
+impl Serialize for CompiledPropertyMap {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        wire::serialize(self, serializer)
     }
+}
 
-    pub fn deserialize<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
-    where
-        D: Deserializer<'de>,
-        K: Deserialize<'de> + Ord,
-        V: Deserialize<'de>,
-    {
-        let entries = Vec::<(K, V)>::deserialize(deserializer)?;
-        let entry_count = entries.len();
-        let map = entries.into_iter().collect::<BTreeMap<_, _>>();
-        if map.len() != entry_count {
-            return Err(serde::de::Error::custom(
-                "compiled property map contains duplicate element identities",
-            ));
-        }
-        Ok(map)
+impl<'de> Deserialize<'de> for CompiledPropertyMap {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        wire::deserialize(deserializer)
     }
 }
 
@@ -287,23 +253,5 @@ impl CompiledPropertyMap {
 
     pub(super) fn shell_entries(&self) -> &BTreeMap<StableDigest, CompiledShellProperty> {
         &self.shell_properties
-    }
-}
-
-impl TryFrom<CompiledPropertyMapData> for CompiledPropertyMap {
-    type Error = String;
-
-    fn try_from(data: CompiledPropertyMapData) -> Result<Self, Self::Error> {
-        let compiled = Self {
-            identity: data.identity,
-            audit_digest: data.audit_digest,
-            solid_materials: Arc::new(data.solid_materials),
-            cell_materials: Arc::new(data.cell_materials),
-            beam_properties: Arc::new(data.beam_properties),
-            shell_properties: Arc::new(data.shell_properties),
-            audit: Arc::new(data.audit),
-        };
-        compiled.validate_integrity()?;
-        Ok(compiled)
     }
 }

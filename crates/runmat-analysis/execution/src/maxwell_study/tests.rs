@@ -31,7 +31,7 @@ fn workload() -> MaxwellHarmonicWorkload {
         persistence: StatePersistence::Canonical,
     }];
     model.sequence = AnalysisSequence::from_steps("maxwell", vec![step]);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -46,15 +46,15 @@ fn workload() -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: format!("pec:{face}"),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(format!("face:{face}")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
                 },
             }));
     }
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("field".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 
@@ -65,7 +65,6 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/maxwell.fea".into(),
         study_id: "maxwell".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -73,11 +72,10 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
         model,
         solver_mesh_digest: mesh.canonical_digest,
     };
-    let policy = MaxwellStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    };
+    let policy = MaxwellStudyPlanningPolicy {};
     let workload = plan_maxwell_study(&compiled, policy).unwrap();
     MaxwellStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product: MaxwellStudyProduct { compiled, workload },
         mesh,

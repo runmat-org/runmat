@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, MaterialModel};
-use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{
     ser::{SerializeSeq, SerializeTuple},
@@ -42,8 +42,8 @@ impl<'a> PreparedProperties<'a> {
         // Check lookup/assignment inventory estimates before constructing those inventories.
         // BTree estimates include key/value slots and conservative spare-node/pointer storage;
         // these are resource estimates, not allocator-exact or native/RSS limits.
+        // Selection inventories open the validation phase; that whole phase is admitted below.
         let selection = selection_scratch(model)?;
-        require_fits(selection, maximum)?;
         let mesh_validation = mesh
             .map(SolverMeshArtifact::validation_resident_bytes_estimate)
             .transpose()
@@ -51,8 +51,10 @@ impl<'a> PreparedProperties<'a> {
             .unwrap_or(0);
         // This phase precedes inventory construction. Reserve it conservatively alongside the
         // compiler's remaining phases so the thermal caller can compose one admission envelope.
-        let selection = add(selection, mesh_validation)?;
-        require_fits(selection, maximum)?;
+        // Mesh validation is its own phase: selection inventories plus the validation scratch.
+        // It is rejected before validation allocates, reporting this governing phase.
+        let validation_phase = add(selection, mesh_validation)?;
+        require_fits(validation_phase, maximum)?;
         validate_mesh(model, mesh)?;
         let explicit = model
             .structural
@@ -117,8 +119,11 @@ impl<'a> PreparedProperties<'a> {
                 Ok(())
             },
         )?;
-        require_fits(add(selection, typed_bytes)?, maximum)?;
-        let metadata = serialized_materialization_resident_bytes_estimate(
+        // The metadata profile below allocates nothing, so the complete compilation phase is
+        // admitted once and a rejection reports that phase, not a partial sum.
+        // Identity and audit encodings write the selected metadata directly into reserved
+        // output, one encoding at a time; their workspace is the direct encoder's profile.
+        let metadata = runmat_canonical_codec::profile_canonical_encoding(
             &Metadata {
                 model,
                 mesh,
@@ -128,12 +133,25 @@ impl<'a> PreparedProperties<'a> {
             // Expanded selected occurrences are not bounded by the authored workload byte cap.
             CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
         )
-        .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?;
-        // Compose two shared-codec metadata estimates with the typed storage terms to cover
-        // owned metadata plus concurrent identity materialization. The resource view is not the
-        // canonical identity contract itself. Semantic/audit encodings and rehashes are sequential,
-        // not four simultaneous buffers. Typed map/audit/ply slots are accounted independently.
-        let estimated_resident_bytes = add(add(selection, typed_bytes)?, add(metadata, metadata)?)?;
+        .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?
+        .resident_workspace_bytes_estimate;
+        // Elements share one owner per material; the table is charged once, not per element.
+        let shared_materials = materials.values().try_fold(0_u64, |total, material| {
+            add(
+                total,
+                add(
+                    (std::mem::size_of::<MaterialModel>() + 2 * std::mem::size_of::<usize>())
+                        as u64,
+                    material.owned_buffer_bytes().ok_or_else(overflow)?,
+                )?,
+            )
+        })?;
+        // The reservation is the larger of the validation phase and the compilation phase.
+        let estimated_resident_bytes = add(
+            add(selection, typed_bytes)?,
+            add(shared_materials, metadata)?,
+        )?
+        .max(validation_phase);
         require_fits(estimated_resident_bytes, maximum)?;
         Ok(Self {
             model,

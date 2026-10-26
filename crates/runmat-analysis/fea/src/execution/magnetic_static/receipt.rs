@@ -128,9 +128,9 @@ impl MagneticNumericalReceiptArtifact {
         let dimension = edges
             .checked_add(r.nodes)
             .ok_or_else(|| invalid("magnetic receipt dimension overflow"))?;
-        let maximum_iterations = crate::physics::magnetic::resources::gmres_policy(dimension, t)
-            .map_err(invalid)?
-            .maximum_iterations;
+        // Direct factorization: one solve plus at most ten refinement steps.
+        let _ = (dimension, t);
+        let maximum_iterations = 16usize;
         let scale = (2.0 * r.magnetic_energy_j.canonical_value())
             .abs()
             .max(r.source_work_j.canonical_value().abs());

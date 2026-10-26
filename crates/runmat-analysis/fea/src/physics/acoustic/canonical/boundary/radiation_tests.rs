@@ -8,7 +8,7 @@ use runmat_analysis_core::PropertyRegionTarget;
 fn assembly() -> AcousticAssembly {
     let mesh = slab_mesh(2);
     let mut model = super::super::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let properties = compile_solid_property_map(&model, &mesh).unwrap();
     AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
@@ -22,7 +22,7 @@ fn assembly() -> AcousticAssembly {
 fn radiation_uses_unique_face_owner_not_first_medium() {
     let mut a = assembly();
     let face = a
-        .faces(&RegionTarget::boundary("slab_right"))
+        .faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")))
         .unwrap()
         .remove(0);
     let [owner] = face.adjacent_element_indices.as_slice() else {
@@ -71,7 +71,7 @@ fn radiation_uses_unique_face_owner_not_first_medium() {
 fn radiation_rejects_missing_multiple_foreign_or_invalid_owners() {
     let mut a = assembly();
     let face = a
-        .faces(&RegionTarget::boundary("slab_right"))
+        .faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")))
         .unwrap()
         .remove(0);
     let owner = face.adjacent_element_indices[0];
@@ -107,5 +107,5 @@ fn radiation_rejects_missing_multiple_foreign_or_invalid_owners() {
         });
         assert!(a.radiation_admittance(&face).is_err());
     }
-    assert!(a.faces(&RegionTarget::boundary("absent")).is_err());
+    assert!(a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("absent"))).is_err());
 }

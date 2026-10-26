@@ -59,11 +59,11 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
     let charge = r
         .charge_sources
         .as_ref()
-        .map_or(0.0, |source| source.integrated_charge_c);
+        .map_or(0.0, |source| source.integrated_source);
     let source_scale = r
         .charge_sources
         .as_ref()
-        .map_or(0.0, |source| source.absolute_charge_c);
+        .map_or(0.0, |source| source.absolute_source);
     let imbalance = (sum - charge).abs() / scale.max(source_scale).max(f64::MIN_POSITIVE);
     if !imbalance.is_finite() || imbalance != r.relative_flux_imbalance {
         return Err(invalid(
@@ -105,7 +105,7 @@ pub(super) fn validate_for(
                 let value = crate::excitation::sample_prescribed_potential(
                     value,
                     &workload.model.signals,
-                    crate::excitation::ExcitationSamplePoint::Static,
+                    workload.sample_point(),
                 )
                 .map_err(invalid)?;
                 if !value.real.is_finite() || value.imaginary != 0.0 {

@@ -276,7 +276,8 @@ fn fea_integer_metadata_declares_host_only_native_contracts() {
         .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().skip(1))
         .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
     {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("{name} must be a canonical catalog builtin"));
         assert!(
             !builtin.integer_capabilities.is_empty(),
             "{name} must declare its integer forms"
@@ -315,7 +316,8 @@ fn fea_integer_metadata_declares_host_only_native_contracts() {
         .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
         .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().take(1))
     {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("{name} must be a canonical catalog builtin"));
         assert!(
             builtin.integer_capabilities.is_empty(),
             "{name} has no numeric role"
@@ -345,9 +347,9 @@ fn typed_signal_excitation_and_case_compose_through_compiled_runmat_code() {
         geom = geometry.load("{}", "Units", "meter");
         loadPad = geometry.region(geom, "name:Default Region");
         forceSignal = fea.ForceSignal.constantNewtons("tip.signal", [0 -1250 0]);
-        tipLoad = fea.StructuralExcitation.force("tip", "service", loadPad, forceSignal);
+        tipLoad = fea.StructuralExcitation.force("tip", loadPad, forceSignal);
         serviceLoads = fea.ExcitationCase.always("service", {{tipLoad}});
-        model = fea.model("bracket", geom, "Template", "linear_static_structural", "Signals", {{forceSignal}}, "Excitations", {{tipLoad}}, "ExcitationCases", {{serviceLoads}});
+        model = fea.model("bracket", geom, "Steps", {{fea.StructuralStep.static("static")}}, "Signals", {{forceSignal}}, "Excitations", {{tipLoad}}, "ExcitationCases", {{serviceLoads}});
         "#,
         path.to_string_lossy()
     );
@@ -401,11 +403,13 @@ fn sampled_signal_initial_state_and_response_spectrum_compose_through_compiled_c
         direction = fea.SpectrumDirection.new(fea.CoordinateFrame.globalFrame(), [1 0 0]);
         modalCombination = fea.ModalCombination.completeQuadratic();
         directionalCombination = fea.DirectionalCombination.srss();
-        truncation = fea.ModalTruncation.new(0.9, true, true, true);
+        correction = fea.ModalTruncationCorrection.missingMass(4.9);
+        truncation = fea.ModalTruncation.new(0.9, correction);
+        rigid = fea.RigidResponse.gupta(8, 33);
         construction = fea.SpectrumConstruction.authoredDesign();
         evidence = fea.SpectrumEvidence.bounded(0.95, 0.01);
-        spectrum = fea.ResponseSpectrum.new("launch", axis, [12 18 9], damping, response, envelope, spectrumInterpolation, spectrumExtrapolation, direction, modalCombination, directionalCombination, truncation, construction, evidence, "sha256:launch-spectrum");
-        model = fea.model("launch-model", geom, "Template", "linear_static_structural", "Signals", {{acceleration, displacement}}, "InitialConditions", {{initial}}, "ResponseSpectra", {{spectrum}});
+        spectrum = fea.ResponseSpectrum.new("launch", axis, [12 18 9], damping, response, envelope, spectrumInterpolation, spectrumExtrapolation, direction, modalCombination, directionalCombination, truncation, rigid, construction, evidence, "sha256:launch-spectrum");
+        model = fea.model("launch-model", geom, "Steps", {{fea.StructuralStep.static("static")}}, "Signals", {{acceleration, displacement}}, "InitialConditions", {{initial}}, "ResponseSpectra", {{spectrum}});
         "#,
         path.to_string_lossy()
     );

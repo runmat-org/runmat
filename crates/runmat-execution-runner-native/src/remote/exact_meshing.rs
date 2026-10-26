@@ -197,6 +197,7 @@ pub(super) async fn execute_geometry_for_composition(
     let result = match execute_exact_meshing_dag_async(
         ExactMeshingDagRun {
             geometry: &geometry,
+            ceilings: crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
             request: meshing_request,
             artifact_access: decoded.artifact_access,
             capability_cohort: Some(platform.capability_cohort.clone()),
@@ -209,6 +210,9 @@ pub(super) async fn execute_geometry_for_composition(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: runmat_meshing_core::NamedRegionEntities::from_resolved_regions(
+                &materialization.regions,
+            ),
         },
         &mut executor,
     )
@@ -333,6 +337,7 @@ pub(super) async fn execute_for_composition(
     let result = match execute_exact_meshing_dag_async(
         ExactMeshingDagRun {
             geometry: &geometry,
+            ceilings: crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
             request: meshing_request,
             artifact_access: decoded.artifact_access,
             capability_cohort: Some(capability_cohort),
@@ -345,6 +350,7 @@ pub(super) async fn execute_for_composition(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )
@@ -509,11 +515,11 @@ mod tests {
     }
 
     fn face(source: &str, occurrence: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: source.into(),
-            assembly_path: vec!["root".into(), occurrence.into()],
-        }
+        PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            source.into(),
+            vec!["root".into(), occurrence.into()],
+        )
     }
 
     #[test]

@@ -8,6 +8,7 @@ fn solve_facts(
 ) -> PreparedFluidSteadyResourceFacts {
     let projection = derive_fluid_steady_resource_projection(w, m).unwrap();
     PreparedFluidSteadyResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: projection.canonical_input_bytes,
             transport_closure_bytes: ByteCount(projection.canonical_input_bytes.0 + 2048),
@@ -62,17 +63,15 @@ fn minimum_numeric_ceiling_cannot_be_bypassed_by_higher_authored_ceiling() {
 }
 
 #[test]
-fn native_recovery_binds_all_five_original_wires_and_actual_cell_face_storage() {
+fn native_recovery_binds_all_four_original_wires_and_actual_cell_face_storage() {
     let (workload, mesh) = crate::execution::fluid_test_workload();
     let result = workload.execute(&mesh).unwrap();
     let request = result.native_field_request(&workload, &mesh).unwrap();
-    let layout = result.native_field_topology(&workload, &mesh).unwrap();
     let bytes = [
         workload.canonical_bytes().unwrap(),
         mesh.canonical_encode().unwrap(),
         result.canonical_bytes().unwrap(),
         request.canonical_bytes().unwrap(),
-        layout.canonical_bytes().unwrap(),
     ];
     let encoded = bytes.iter().map(|b| b.len() as u64).sum();
     let decoded = bytes
@@ -111,7 +110,7 @@ fn native_recovery_binds_all_five_original_wires_and_actual_cell_face_storage() 
         plan
     );
     let mut short = facts.clone();
-    short.inputs.encoded_payload_bytes.0 -= layout.canonical_bytes().unwrap().len() as u64;
+    short.inputs.encoded_payload_bytes.0 -= request.canonical_bytes().unwrap().len() as u64;
     assert!(
         build_fluid_field_recovery_resource_plan(&workload, &mesh, &result, &request, short)
             .is_err()

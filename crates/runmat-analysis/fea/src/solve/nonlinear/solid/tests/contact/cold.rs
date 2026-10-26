@@ -1,4 +1,7 @@
 use super::*;
+// witness: FEA-NONLINEAR-STATE-001/cold_validation @
+//   small_strain_j2_penalty_coulomb_contact/tet10/prepared_controller;
+//   boundary: Combined scope/material/contact history and GENERAL admission substitution reject.
 #[test]
 fn combined_scope_history_and_general_admission_reject_substitution() {
     let f = CoupledFixture::new(ElementOrder::Tet10, true);
@@ -72,18 +75,11 @@ fn zero_load_open_contact_does_not_accept_unanchored_body_tangent() {
         CanonicalNonlinearSolidBasis::prepare(&f.model, &f.surface.mesh, &f.summary).unwrap();
     let mut coupling = CoupledFixture::coupling(&operator);
     let support = basis.contact_pattern().union(operator.pattern()).unwrap();
-    let width = support
-        .row_offsets()
-        .windows(2)
-        .map(|r| r[1] - r[0])
-        .max()
-        .unwrap() as usize;
     // This separate nullspace reference has many more free coordinates than
     // the affine patch. Admit its actual full source inventory explicitly.
     coupling.solve_admission = GeneralSolveEnvelope::for_counts(
         support.rows(),
         support.column_indices().len(),
-        width,
         coupling.solve_policy,
     )
     .unwrap();
@@ -93,7 +89,7 @@ fn zero_load_open_contact_does_not_accept_unanchored_body_tangent() {
     assert!(matches!(
         problem.initial_state(),
         Err(SolidNewtonError::General(
-            crate::solve::general::GeneralSolveError::UniquenessNotEstablished(_)
+            crate::solve::general::GeneralSolveError::NonsingularityNotEstablished(_)
         ))
     ));
 }

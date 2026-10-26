@@ -1,8 +1,8 @@
 //! Exact pre-quadrature plan rederivation; worker allocation remains the shared
-//! runner's responsibility and production qualification remains closed.
+//! runner's responsibility.
 use super::*;
 use crate::planning::resource::{
-    build_magnetostatic_resource_plan, FeaResourceDemand, FeaResourcePlan,
+    build_magnetostatic_resource_plan, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,
     PreparedMagnetostaticResourceFacts,
 };
 impl MagnetostaticWorkload {
@@ -24,6 +24,10 @@ impl MagnetostaticWorkload {
             self,
             mesh,
             PreparedMagnetostaticResourceFacts {
+                local_execution: LocalExecutionPlan::from_cpu_millicores(
+                    plan.request.cpu_millicores,
+                )
+                .map_err(invalid)?,
                 inputs: demand.inputs.clone(),
                 result_output: demand.result_output.clone(),
                 receipt_output: demand.receipt_output.clone(),
@@ -42,20 +46,23 @@ impl MagnetostaticWorkload {
             &self.model,
             mesh,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;
-        let system = crate::physics::magnetic::MagneticSystemPlan::derive(&input.projection)
+        let system = crate::physics::magnetic::MagneticSystemPlan::derive(
+            &input.projection,
+            &input.grounded_faces,
+        )
             .map_err(invalid)?;
         if system.identity().map_err(invalid)? != demand.system_plan_identity {
             return Err(invalid(
                 "magnetic assembly support differs from admitted plan",
             ));
         }
-        let response = crate::physics::magnetic::solve_full_grounded_volume_with_plan(
+        let response = crate::physics::magnetic::solve_grounded_volume_with_plan(
             &input.projection,
             &input.volumes,
+            &input.prescribed_potential,
             self.relative_residual_target,
             &system,
         )

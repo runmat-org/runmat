@@ -28,17 +28,18 @@ impl ObservationPublicationCatalog {
                     )?;
                     match (self.source.source(), value.request.selection.source()) {
                         (
-                            ObservationFieldCatalogSource::FiniteVolumeRecovery { .. },
-                            ObservationFieldSource::FiniteVolumeRecovery { .. },
-                        ) => self
-                            .source
-                            .validate_finite_volume_selection(&value.request.selection)?,
-                        (
                             ObservationFieldCatalogSource::SampledRecovery { .. },
                             ObservationFieldSource::SampledRecovery { .. },
                         ) => self
                             .source
                             .validate_sampled_selection(&value.request.selection)?,
+                        (
+                            ObservationFieldCatalogSource::VolumeMeshRecovery { .. },
+                            ObservationFieldSource::VolumeMeshRecovery { .. },
+                        ) => self.source.validate_volume_mesh_selection_metadata(
+                            &value.request.selection,
+                            value.request.plan.topology_digest,
+                        )?,
                         (
                             ObservationFieldCatalogSource::Structural { .. },
                             ObservationFieldSource::StructuralRecovery { .. },

@@ -67,7 +67,7 @@ pub fn prepare_electrical_study_publication(
             )
         })?;
 
-    {
+    let fields = {
         let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
             crate::analysis::prepared_study_publication::publication_failure(
                 error, &context, invalid,
@@ -81,15 +81,15 @@ pub fn prepare_electrical_study_publication(
             options,
             definition,
         )
-        .map_err(invalid)?;
-    }
+        .map_err(invalid)?
+    };
     let run_id = publication_identity.local_run_id(
         runmat_analysis_core::PhysicsFamily::Electromagnetic,
         definition,
         &completed.workload.step_id,
     );
-    let run =
-        materialization::admit(completed, mesh, options, &run_id, &context).map_err(invalid)?;
+    let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
+        .map_err(invalid)?;
     let object_artifact_paths = source
         .persist(completed, definition, &preparation.staging)
         .map_err(|error| {
@@ -103,7 +103,6 @@ pub fn prepare_electrical_study_publication(
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.workload.formulation_requirement,
         solver_options: super::AnalysisSolverOptions::ElectricalStatic(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(

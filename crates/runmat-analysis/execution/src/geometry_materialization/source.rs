@@ -149,7 +149,15 @@ pub fn prepare_geometry_materialization_request(
 ) -> AnalysisBridgeResult<GeometryMaterializationRequest> {
     match &definition.source {
         GeometryDefinitionSource::Imported(imported) => {
-            preparation.import_options.source_units = imported.unit_fallback;
+            // `units` resolved at check (authored, or the file's own declaration) is authoritative.
+            preparation.import_options.source_units = imported.authored_units;
+            preparation.import_options.source_units_authority =
+                runmat_geometry_io::SourceUnitsAuthority::Authored;
+            preparation
+                .import_options
+                .analysis
+                .healing
+                .shared_interfaces = imported.shared_interfaces;
         }
         GeometryDefinitionSource::Constructed(_) | GeometryDefinitionSource::Derived(_) => {}
         GeometryDefinitionSource::Generated(_) => {}

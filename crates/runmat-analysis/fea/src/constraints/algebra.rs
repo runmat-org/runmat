@@ -534,6 +534,32 @@ impl AffineConstraintReduction {
         operator: &RealSparseMatrix,
         right_hand_side: &[f64],
     ) -> Result<(RealSparseMatrix, Vec<f64>), ConstraintAlgebraError> {
+        let reduced_rhs = self.reduce_rhs(operator, right_hand_side)?;
+        Ok((self.reduce_sparse_operator(operator)?, reduced_rhs))
+    }
+
+    /// Reduces the system into a given reduced pattern (no value cancellation). With the reduced
+    /// pattern resource planning analyzed, the reduced operator has exactly that pattern, so its
+    /// factorization repeats the planned ordering, fill and work. Entries of `T' K T` outside the
+    /// pattern are rejected by the scatter.
+    pub fn reduce_sparse_system_on_support(
+        &self,
+        operator: &RealSparseMatrix,
+        reduced_support: &SparsePattern,
+        right_hand_side: &[f64],
+    ) -> Result<(RealSparseMatrix, Vec<f64>), ConstraintAlgebraError> {
+        let reduced_rhs = self.reduce_rhs(operator, right_hand_side)?;
+        Ok((
+            self.reduce_sparse_operator_planned(operator, reduced_support)?,
+            reduced_rhs,
+        ))
+    }
+
+    fn reduce_rhs(
+        &self,
+        operator: &RealSparseMatrix,
+        right_hand_side: &[f64],
+    ) -> Result<Vec<f64>, ConstraintAlgebraError> {
         self.validate()?;
         if operator.rows() != self.full_dof_count
             || operator.columns() != self.full_dof_count
@@ -548,8 +574,7 @@ impl AffineConstraintReduction {
             .zip(applied_offset)
             .map(|(applied, internal)| applied - internal)
             .collect::<Vec<_>>();
-        let reduced_rhs = self.transpose_apply(&shifted_rhs)?;
-        Ok((self.reduce_sparse_operator(operator)?, reduced_rhs))
+        self.transpose_apply(&shifted_rhs)
     }
 }
 
@@ -629,6 +654,9 @@ mod tests {
         assert!((solution[2] + 5.0 / 3.0).abs() <= 1.0e-12);
     }
 
+    // witness: FEA-SHARED-OPERATORS-001/declared_sparse_operator_properties @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Sparse reduction matches dense lifting and preserves operator properties.
     #[test]
     fn sparse_reduction_matches_dense_lifting_and_preserves_operator_properties() {
         let first = [(0, 1.0), (1, -1.0)];

@@ -52,6 +52,8 @@ pub enum ObservationQuantity {
     MagneticFieldIntensity,
     AcousticPressure,
     AcousticParticleVelocity,
+    /// Mean active acoustic intensity ½Re(p v*), W/m².
+    AcousticIntensity,
     SoundPressureLevel,
     FluidPressure,
     FluidVelocity,
@@ -83,6 +85,7 @@ impl ObservationQuantity {
             | Self::Balance
             | Self::ConstraintViolation => D::DIMENSIONLESS,
             Self::Velocity | Self::AcousticParticleVelocity | Self::FluidVelocity => D::VELOCITY,
+            Self::AcousticIntensity => D::POWER.divide(D::AREA).expect("static dimension"),
             Self::Acceleration => D::ACCELERATION,
             Self::Stress
             | Self::VonMisesStress
@@ -245,6 +248,7 @@ impl ObservationQuantity {
             "magnetic_field_intensity" => Self::MagneticFieldIntensity,
             "acoustic_pressure" => Self::AcousticPressure,
             "acoustic_particle_velocity" => Self::AcousticParticleVelocity,
+            "acoustic_intensity" => Self::AcousticIntensity,
             "sound_pressure_level" => Self::SoundPressureLevel,
             "fluid_pressure" => Self::FluidPressure,
             "fluid_velocity" => Self::FluidVelocity,
@@ -286,6 +290,7 @@ impl ObservationQuantity {
             | Self::MagneticFluxDensity
             | Self::MagneticFieldIntensity
             | Self::AcousticParticleVelocity
+            | Self::AcousticIntensity
             | Self::FluidVelocity
             | Self::Vorticity
             | Self::WallShearStress => ObservationValueShape::Vector3,

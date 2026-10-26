@@ -23,6 +23,13 @@ fn determinant(matrix: [[f64; 5]; 5]) -> f64 {
     sum(&matrix, 0, 0, false)
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Conflict-cavity inclusion and legalization share the exact symbolic in-sphere tie
+//   policy. An independent full lifted determinant on a unit-sphere inventory exercises inclusion
+//   and exclusion without changing physical coordinates. Separate forced on-face traversal,
+//   whole-topology geometric admission, cancellation and original native recovery gates remain
+//   required; this oracle does not establish global constraint preservation or performance.
 #[test]
 fn cavity_ties_match_the_independent_lifted_oracle_and_legalization_policy() {
     let points = [

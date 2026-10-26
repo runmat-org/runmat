@@ -280,11 +280,11 @@ fn random_spectrum_preserves_complex_matrix_order_and_rejects_nonhermitian_outpu
     .unwrap();
     let matrices = materialized.resolved_spectral_density().unwrap();
     assert_eq!(
-        matrices[0].value(2, 0, 1),
+        matrices[0].canonical_coefficient(2, 0, 1),
         ComplexSpectralDensity::new(0.0, 0.5)
     );
     assert_eq!(
-        matrices[0].value(2, 1, 0),
+        matrices[0].canonical_coefficient(2, 1, 0),
         ComplexSpectralDensity::new(0.0, -0.5)
     );
     let bytes = canonical_materialized_random_spectrum_bytes(&materialized).unwrap();

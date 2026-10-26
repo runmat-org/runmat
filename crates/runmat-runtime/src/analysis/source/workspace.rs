@@ -127,7 +127,7 @@ impl FeaWorkspaceCandidate {
             .files
             .values()
             .try_fold((0usize, 0usize), |(source, geometry), file| {
-                let is_source = runmat_geometry_core::is_geometry_selection_metadata_path(file.path.as_str()) || matches!(
+                let is_source = matches!(
                     std::path::Path::new(file.path.as_str())
                         .extension()
                         .and_then(|extension| extension.to_str()),

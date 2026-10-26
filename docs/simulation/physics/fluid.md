@@ -5,15 +5,17 @@ mass flow, moving/no-slip/slip walls, pressure reference, outlet pressure, symme
 initial state. Geometry regions identify the fluid volume and exact boundary faces; inlet/outlet
 meaning is never inferred from face normals or names.
 
-The `.fea` language checks steady, transient, harmonic, and nonlinear fluid procedure contracts.
-The canonical numerical route is an **experimental cell-centered Tet4 finite-volume discretization**
-of incompressible laminar momentum and continuity. The native typed executor connects one fresh,
-independent, direct steady step through geometry, admission, CPU execution, retained fields/state,
-accuracy and publication. Missing mandatory accuracy still blocks production.
+`fea run` executes steady and transient incompressible laminar flow from a `.fea` study. The
+canonical numerical route is a cell-centred finite-volume discretization on tetrahedral cells:
+conservative face fluxes, Rhie–Chow pressure–velocity coupling with nonorthogonal correction,
+linear-upwind convection and the full Newtonian stress. Transient flow advances with backward
+Euler over the authored time grid, every interval converged to the same physical acceptance as a
+steady solve. Every run checks momentum and continuity cell by cell and publishes velocity,
+pressure, vorticity, face flux, the shear stress on every face (the wall shear stress on walls),
+and the mass and momentum balance of every authored boundary.
 
-Canonical transient flow uses backward Euler with immutable original-history checkpoints and scheduled
-native load blocks. Authored transient whole-study roots, remote/distributed and GPU execution remain
-unsupported. Symmetry, slip and periodic declarations remain typed contracts without canonical realization.
+The same flow solver drives the coupled [conjugate heat transfer](./conjugate-heat-transfer) and
+[fluid–structure interaction](./fluid-structure-interaction) analyses.
 
 ## What fluid equations does the contract target?
 
@@ -31,11 +33,16 @@ constitutive model applies. A full discretization must satisfy momentum and cont
 mass-balance evidence.
 
 The canonical operator uses owner-oriented face incidence, Newtonian viscous stresses and conservative
-advective fluxes. Shared GMRES correction solves with fixed-support ILU(0) act on current velocity and pressure fluctuations;
+advective fluxes. Velocity and pressure are solved together: each Picard step linearizes
+convection and viscosity at the current state and solves the whole momentum–continuity system
+with flexible GMRES from the shared sparse layer, preconditioned by a SIMPLE block sweep
+(momentum solves with ILU(0), the Rhie–Chow pressure Laplacian with smoothed-aggregation algebraic
+multigrid). The number of Picard steps stays nearly constant as the mesh is refined. The solve
+acts on current velocity and pressure fluctuations;
 the pressure reference is retained separately, avoiding an absolute-pressure round trip. Acceptance
 checks momentum, continuity, constitutive flux and local/global physical balance.
 
-Reduced channel/correlation operators still used by experimental coupled paths are separate from this
+Reduced channel/correlation operators still used by coupled paths are separate from this
 canonical route. They do not establish 3D CFD, CHT or FSI qualification. Arbitrary turbulence,
 separation and boundary-layer accuracy require their own independent evidence and supported operators.
 
@@ -43,14 +50,15 @@ separation and boundary-layer accuracy require their own independent evidence an
 
 | Procedure | Required domain/state | Current numerical status |
 | --- | --- | --- |
-| `fluid steady` | Static velocity/pressure state | Canonical Tet4 finite volume; experimental serial native study |
-| `fluid transient` | Time samples and compatible initial state | Canonical backward Euler; experimental native checkpoint/block API |
+| `fluid steady` | Static velocity/pressure state | Canonical Tet4 finite volume; runs from `fea run` |
+| `fluid transient` | Time samples and compatible initial state | Canonical backward Euler; runs from `fea run` |
 | `fluid harmonic` | Frequency samples and complex state | Typed contract only; no realization |
 | `fluid nonlinear` | Load-factor domain | Typed contract only; no realization |
 
 The canonical route admits Tet4 cell geometry, exact resolved boundary authority and compatible
-cell-owned fluid properties. It rejects uncovered boundaries, unsupported constraints and invalid
-sources; it does not infer an implicit channel or certify a Tet10 fluid operator.
+cell-owned fluid properties. It rejects uncovered boundaries, periodic pairs and invalid sources;
+it does not infer an implicit channel. Slip walls and symmetry planes are impermeable and
+shear-free: no flux crosses them and only the normal viscous stress acts on them.
 
 ## How do I describe a steady incompressible flow study?
 
@@ -79,12 +87,11 @@ study steady_channel {
     geometry = geometry.channel
     mesh = mesh.channel
     model = model.channel_flow
-    formulation = experimental
     analysis flow { fluid steady {} }
 }
 ```
 
-This is an experimental steady authoring example; execution also requires admissible geometry,
+This is a steady authoring example; execution also requires admissible geometry,
 resolved boundaries, resources and the step's accuracy evidence.
 The material region must provide density and viscosity appropriate to the intended formulation.
 
@@ -145,10 +152,30 @@ analysis startup {
 }
 ```
 
-The time grid must resolve boundary-signal breakpoints and the relevant convective/viscous scales.
-Initial velocity and pressure are typed initial conditions. The canonical checkpoint/block route declares backward Euler and validates original sampled sources,
-physical convergence and conservation. An authored transient whole-study graph is not yet admitted;
-turbulence and spatial-accuracy evidence must not be inferred from the generic procedure name.
+The time grid must resolve boundary-signal breakpoints and the relevant convective/viscous scales;
+signal breakpoints are added to the authored grid. Initial velocity and pressure are typed initial
+conditions; without them the flow starts from rest. Each backward-Euler interval is solved to the
+study's physical tolerance. Every interval keeps its solve evidence; fields are kept where outputs
+sample them, so memory follows the samples you ask for, not the number of time steps. Each kept
+state recovers cold from its predecessor without solving again.
+
+Field and scalar outputs report the final state. To follow a quantity through the transient,
+sample it over time; histories publish at each sample and can be reduced over time:
+
+```fea
+output peak_pressure_history {
+    value = sample(
+        max(output.pressure, over = geometry.channel.region.fluid),
+        over = time,
+        at = [1 s, 2 s, 3 s, 4 s, 5 s],
+    )
+    retention = explicit_samples
+    maximum_samples = 5
+}
+```
+
+Sample times join the time grid. A sampled state's fields also publish beside the final ones as
+`<field>.time.<n>`, counting samples from 1 in increasing time.
 
 ## Why is my pressure drop or mass balance wrong?
 

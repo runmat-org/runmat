@@ -27,19 +27,15 @@ pub(super) fn projection(
     let profile = super::super::numeric_profile::numeric_inventory_profile(
         u64::try_from(count).map_err(|_| overflow())?,
     )?;
-    // Point histories contain typed identity maps rather than pure numeric arrays.
-    // Keep their conservative wire/materialization allowance, plus fixed source
-    // keys and solver metadata. This does not profile diagnostics/public UI fields.
+    // Point histories carry typed identity maps rather than pure numeric arrays. Their wire
+    // allowance is four in-memory copies plus fixed keys; decoding them materializes the same
+    // typed records (`point_history_bytes` measures their in-memory size), so construction holds
+    // the wire buffer and one typed copy per wire copy, not a generic per-byte value tree.
     let metadata_wire = point_history_bytes
         .checked_mul(4)
         .and_then(|n| n.checked_add(65_536))
         .ok_or_else(overflow)?;
-    let metadata_resident =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            metadata_wire,
-            1,
-        )
-        .ok_or_else(overflow)?;
+    let metadata_resident = metadata_wire.checked_mul(2).ok_or_else(overflow)?;
     Ok((
         profile
             .encoded_bytes_upper_bound
@@ -63,7 +59,6 @@ mod tests {
         topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
         ComputeBackend,
     };
-    use runmat_analysis_core::FormulationRequirement;
     use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 
     #[test]
@@ -71,7 +66,6 @@ mod tests {
         for quadratic in [false, true] {
             let (model, mesh, summary) = fixture::prepare(1, quadratic);
             let options = NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 increment_count: 4,
                 max_accepted_increments: 8,
@@ -106,7 +100,17 @@ mod tests {
             )
             .unwrap();
             assert!(wire >= actual.encoded_bytes_upper_bound);
-            assert!(resident >= actual.materialization_resident_bytes_estimate);
+            // Results are encoded directly into reserved output; no value tree is built.
+            let encoding = runmat_canonical_codec::profile_canonical_encoding(
+                &result,
+                CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32),
+            )
+            .unwrap();
+            assert!(
+                resident >= encoding.resident_workspace_bytes_estimate,
+                "{resident} < {}",
+                encoding.resident_workspace_bytes_estimate
+            );
             let larger =
                 projection(dofs, plan.elements().len(), 16, storage.point_history_bytes).unwrap();
             assert!(larger.0 > wire && larger.1 > resident);

@@ -9,6 +9,12 @@ use std::collections::BTreeSet;
 fn quadratic(m: MetricTensor3, [x, y, z]: [f64; 3]) -> f64 {
     m.xx * x * x + m.yy * y * y + m.zz * z * z + 2. * (m.xy * x * y + m.xz * x * z + m.yz * y * z)
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Nine,33 and4097 noncommuting constraints share a source-count-independent
+//   positive-subspace envelope; independent directional inequalities check each input and the
+//   common normal. Dominating original tensors remain exact. This is numerical sizing construction
+//   evidence, not an interval certificate, spatial localization or native CAD acceptance.
 #[test]
 fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_common_normal() {
     let base = MetricTensor3::isotropic_length_m(1.).unwrap();
@@ -18,11 +24,11 @@ fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_commo
         for index in 0..count {
             let a = std::f64::consts::TAU * index as f64 / count as f64;
             let [x, y] = [a.cos(), a.sin()];
-            let id = PersistentEntityId {
-                kind: PersistentEntityKind::Edge,
-                source_topology_id: format!("source-{index:05}"),
-                assembly_path: vec![],
-            };
+            let id = PersistentEntityId::new(
+                PersistentEntityKind::Edge,
+                format!("source-{index:05}"),
+                vec![],
+            );
             incident.insert(id.clone());
             contributions.push(MetricContribution {
                 source: MetricSourceKind::Curve,
@@ -38,10 +44,12 @@ fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_commo
             });
         }
         let request = MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: base,
             maximum_grading_ratio: 1.3,
             contributions,
+            cells_across_gap: None,
         };
         let resolved = ResolvedMetricField::new(&request)
             .unwrap()

@@ -227,8 +227,14 @@ pub(super) fn validate_resolved_observation(
             face_indices,
             face_identities,
         } => {
-            if materialized_field_location(&observation.spec) != FieldLocation::Node
-                || observation.source_entity_domain != RecoveredFieldEntityDomain::Nodes
+            // Nodal fields reduce over boundary faces at the face nodes; volume-element fields
+            // are read in each face's owner element (their surface trace).
+            let nodal = materialized_field_location(&observation.spec) == FieldLocation::Node
+                && observation.source_entity_domain == RecoveredFieldEntityDomain::Nodes;
+            let element_trace = materialized_field_location(&observation.spec)
+                == FieldLocation::Element
+                && observation.source_entity_domain == RecoveredFieldEntityDomain::VolumeElements;
+            if !(nodal || element_trace)
                 || observation.spec.reduction.is_none()
                 || face_indices.is_empty()
                 || !strictly_increasing(face_indices)
@@ -279,6 +285,20 @@ pub(in crate::results::observation) fn validate_output_numeric_contract(
         return Err(ObservationError::Invalid(
             "observation precision does not match its requested real or complex representation"
                 .into(),
+        ));
+    }
+    if spec.complex_representation == ComplexRepresentation::SoundPressureLevel
+        && (spec.quantity != runmat_analysis_core::ObservationQuantity::AcousticPressure
+            || spec.value_shape != runmat_analysis_core::ObservationValueShape::Scalar
+            || spec.reduction.as_ref().is_some_and(|reduction| {
+                !matches!(
+                    reduction.spatial,
+                    SpatialReduction::Minimum | SpatialReduction::Maximum
+                )
+            }))
+    {
+        return Err(ObservationError::Unsupported(
+            "sound pressure level applies to scalar acoustic pressure, unreduced or as a spatial extremum",
         ));
     }
     if spec.complex_representation == ComplexRepresentation::PhaseRadians

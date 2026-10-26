@@ -30,7 +30,21 @@ fn task(
     mesh: SolverMeshArtifact,
     chunk: usize,
 ) -> crate::PreparedFluidSteadyTask {
+    task_with_threads(
+        workload,
+        mesh,
+        chunk,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+    )
+}
+fn task_with_threads(
+    workload: FluidSteadyWorkload,
+    mesh: SolverMeshArtifact,
+    chunk: usize,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+) -> crate::PreparedFluidSteadyTask {
     crate::prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+        local_execution,
         authored_study_digest: Digest::sha256("authored-fluid"),
         frozen_project_digest: None,
         program_revision: revision(),
@@ -108,7 +122,13 @@ fn source_decode_authenticates_chunks_before_join_and_rejects_tiny_ceiling() {
         .accuracy
         .resources
         .maximum_resident_bytes = 1;
-    assert!(prepare_fluid_steady_inputs(&w, &m, task.output_policy).is_err());
+    assert!(prepare_fluid_steady_inputs(
+        &w,
+        &m,
+        task.output_policy,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
+    )
+    .is_err());
 }
 
 #[test]
@@ -181,7 +201,8 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
         output_policy: task.output_policy,
     })
     .unwrap();
-    assert_eq!(recovered.inputs.len(), 6);
+    // Workload, mesh, source resource plan, source result and the recovery resource plan.
+    assert_eq!(recovered.inputs.len(), 5);
     assert_eq!(
         recovered.host.workload.outputs,
         [AnalysisNumericalObjectKind::Field]
@@ -204,12 +225,12 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
     let mut foreign = recovered.inputs.clone();
     let layout = foreign
         .iter_mut()
-        .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::FieldSourceBinding)
+        .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::SolverResult)
         .unwrap();
     *layout = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::FieldSourceBinding,
+        AnalysisNumericalObjectKind::SolverResult,
         layout.manifest.logical_identity,
-        b"foreign layout",
+        b"foreign result",
         1024,
         ObjectNamespace::InputValue,
         recovered.output_policy.inventory_limits(),
@@ -224,7 +245,8 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
     let native = original
         .recover_native_fields(&w, &m, &recovered.request)
         .unwrap();
-    assert_eq!(native.fields().len(), 3);
+    // Velocity, pressure, face flux, vorticity and wall shear stress.
+    assert_eq!(native.fields().len(), 5);
 }
 
 fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
@@ -251,11 +273,13 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     model.sequence = AnalysisSequence::from_steps(
         "retained-fluid",
@@ -266,7 +290,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "stationary".into(),
             kind: FluidConstraintKind::NoSlipWall {
-                target: RegionTarget::boundary("slab_insulated"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
             },
         }));
     model
@@ -274,13 +298,13 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant([Velocity::new(0.0); 3]),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(0.0)),
         },
@@ -319,8 +343,8 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,
@@ -335,12 +359,102 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
             maximum_authority_items: 100,
         },
         geometry_policy: FiniteVolumeProjectionPolicy {
-            max_cells: 100,
-            max_face_incidences: 400,
-            max_boundary_faces: 400,
-            max_scratch_bytes: 10_000_000,
-            max_traversal_operations: 1_000_000,
+            max_cells: Some(100),
+            max_face_incidences: Some(400),
+            max_boundary_faces: Some(400),
+            max_scratch_bytes: Some(10_000_000),
+            max_traversal_operations: Some(1_000_000),
         },
     };
     (workload, mesh)
+}
+
+#[test]
+fn fluid_plan_carries_admitted_threads_and_worker_rederivation_converges() {
+    let (w, m) = authored();
+    let threads =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(2_000)
+            .unwrap();
+    let task = task_with_threads(w.clone(), m.clone(), 1024, threads);
+    assert_eq!(task.resource_plan.request.cpu_millicores, 2_000);
+    assert_eq!(
+        rederive_fluid_steady_resource_plan(&w, &m, &task.inputs, task.output_policy).unwrap(),
+        task.resource_plan
+    );
+    assert_eq!(
+        w.execute_with_resource_plan(&m, &task.resource_plan)
+            .unwrap(),
+        w.execute(&m).unwrap()
+    );
+}
+
+// witness: FEA-FLUID-ACCURACY-001/acceptance @
+//   incompressible_laminar_steady/canonical_tetrahedra/public_study; coverage: partial;
+//   boundary: The fluid accuracy source context accepts the original workload, mesh and result
+//   under the authored accuracy plan and rejects the same receipt under a re-identified plan or a
+//   loosened criterion; the context check only, on one steady fixture, not a full study run.
+#[test]
+fn fluid_accuracy_context_binds_the_authored_accuracy_plan() {
+    let (w, m) = authored();
+    let task = task(w.clone(), m.clone(), 1024);
+    let original = w
+        .execute_with_resource_plan(&m, &task.resource_plan)
+        .unwrap();
+    let receipt =
+        runmat_analysis_fea::execution::FluidNumericalReceiptArtifact::new(&w, &original, &m)
+            .unwrap();
+    let object = |kind, identity, bytes: Vec<u8>| {
+        prepare_analysis_objects(
+            kind,
+            identity,
+            &bytes,
+            1024,
+            if kind == AnalysisNumericalObjectKind::SolverResult {
+                ObjectNamespace::ResultValue
+            } else {
+                ObjectNamespace::InputValue
+            },
+            task.output_policy.inventory_limits(),
+        )
+        .unwrap()
+    };
+    let inputs = [
+        object(
+            AnalysisNumericalObjectKind::FluidSteadyWorkload,
+            w.identity().unwrap().digest(),
+            w.canonical_bytes().unwrap(),
+        ),
+        object(
+            AnalysisNumericalObjectKind::Mesh,
+            Digest::from_bytes(*m.canonical_digest.bytes()),
+            runmat_meshing_core::CanonicalMeshingContract::canonical_encode(&m).unwrap(),
+        ),
+        object(
+            AnalysisNumericalObjectKind::SolverResult,
+            original.identity().unwrap().digest(),
+            original.canonical_bytes().unwrap(),
+        ),
+    ];
+    let refs = inputs.iter().collect::<Vec<_>>();
+    let plan = w.model.sequence.steps[0].accuracy.clone();
+    let request = |plan| {
+        runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
+            w.producer_identity().unwrap(),
+            runmat_analysis_fea::execution::AccuracySourceKind::FluidSteady,
+            receipt.source_result(),
+            None,
+            plan,
+        )
+        .unwrap()
+    };
+    let source = runmat_analysis_fea::execution::AccuracySourceReceipt::FluidSteady(receipt.clone());
+    crate::validate_accuracy_source_context(&request(plan.clone()), &source, None, &refs).unwrap();
+    let mut retagged = plan.clone();
+    retagged.accuracy_plan_id = AccuracyPlanId("foreign-accuracy".into());
+    assert!(crate::validate_accuracy_source_context(&request(retagged), &source, None, &refs).is_err());
+    let mut loosened = plan;
+    if let AccuracyTolerance::Relative(value) = &mut loosened.criteria[0].tolerance {
+        *value *= 10.0;
+    }
+    assert!(crate::validate_accuracy_source_context(&request(loosened), &source, None, &refs).is_err());
 }

@@ -70,7 +70,6 @@ fn workload(thermal: bool) -> StructuralLinearWorkload {
         step_id: model.sequence.steps[1].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),
@@ -112,6 +111,8 @@ fn bound_transition(
                 reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
                 sample_time_s: runmat_types::physical::Time::new(0.0),
                 maximum_relative_linear_residual: 0.0,
+                interface_node_ids: Vec::new(),
+                interface_temperature: None,
             }),
         }
     } else {

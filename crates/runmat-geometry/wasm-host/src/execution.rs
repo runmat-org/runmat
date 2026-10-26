@@ -58,11 +58,12 @@ pub(super) fn execute(json: &str) -> Result<String, runmat_analysis_execution::S
             settings,
         } => {
             settings.validate().map_err(|e| e.to_string())?;
-            if settings.resources.maximum_memory_bytes > MAX_GEOMETRY_MEMORY_BYTES {
-                return Err(
-                    "This mesh requires a larger execution budget. Use the desktop app.".into(),
-                );
-            }
+            // The browser host admits at most MAX_GEOMETRY_MEMORY_BYTES; a mesh that needs more
+            // stops at this ceiling with a typed meshing resource failure.
+            let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
+                MAX_GEOMETRY_MEMORY_BYTES,
+                &settings.limits,
+            );
             // Validate the complete transferred inventory before retaining copies.
             runmat_execution_artifact::object::validate_inventory(&objects, INVENTORY)
                 .map_err(|e| e.to_string())?;
@@ -83,6 +84,7 @@ pub(super) fn execute(json: &str) -> Result<String, runmat_analysis_execution::S
                 &program,
                 &mut store,
                 settings,
+                ceilings,
                 platform,
                 INVENTORY,
                 &Cancellation,

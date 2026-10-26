@@ -29,7 +29,7 @@ impl CanonicalMagnetostaticStatePayload {
             || self.result.source_result_identity()? != source_result
             || expected_request.topology.discretization_digest() != topology_digest
             || self.recovery_request != expected_request
-            || self.fields.fields().len() != 4
+            || self.fields.fields().len() != expected_request.plan.requirements.len()
             || self.fields.source != FieldRecoverySource::SolverResult(source_result)
             || self.fields.topology_digest != topology_digest
             || self.fields.recovery_request != expected_request.identity()
@@ -104,7 +104,7 @@ mod tests {
     use crate::execution::{MagnetostaticWorkload, SemanticStatePublicationProfileSource};
     use crate::physics::magnetic::test_support::authored_model;
     use crate::topology::test_meshes::slab_mesh;
-    use runmat_analysis_core::{FormulationRequirement, ProcedureStepId, StateId};
+    use runmat_analysis_core::{ProcedureStepId, StateId};
 
     fn result() -> MagnetostaticSolverResult {
         let mut model = authored_model(2.0);
@@ -120,7 +120,6 @@ mod tests {
         MagnetostaticWorkload {
             model,
             step_id: ProcedureStepId("potential".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             relative_residual_target: 1e-10,
         }
         .execute(&slab_mesh(2))

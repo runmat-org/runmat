@@ -1,6 +1,12 @@
 use super::*;
 use crate::cdt::mutation::TopologyMutation;
 
+// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A local facet flip matches the independently rebuilt canonical operator with zero, 64
+//   and 2,048 unrelated cells, under a fixed 128-step local search budget. This checks owned
+//   mutation equivalence and query locality; it does not establish parallel throughput, allocator
+//   demand, arbitrary cavity/refinement providers or whole-study scaling.
 #[test]
 fn local_flip_matches_full_operator_and_is_independent_of_unrelated_cells() {
     for unrelated in [0, 64, 2048] {

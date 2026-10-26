@@ -22,7 +22,8 @@ thread_local! {
 
 #[cfg(feature = "plot-core")]
 pub fn import_geometry_scene_payload(bytes: &[u8]) -> crate::BuiltinResult<Option<u32>> {
-    let scene = crate::replay::import_figure_scene_payload(bytes)?;
+    let scene =
+        crate::replay::scene::decode_figure_scene_payload_with_limits(bytes, geometry_scene_limits())?;
     let hash = geometry_scene_payload_hash(bytes);
     let scene_id = format!("geometry-scene-payload:{hash:016x}");
     let scene = scene.into_geometry_scene(scene_id, hash).map_err(|err| {
@@ -86,7 +87,29 @@ pub fn export_geometry_scene(handle: u32) -> crate::BuiltinResult<Option<Vec<u8>
         return Ok(None);
     };
     let scene = runmat_plot::event::FigureScene::from_geometry_scene(&scene);
-    crate::replay::export_figure_scene_payload(&scene).map(Some)
+    encode_geometry_figure_scene(&scene).map(Some)
+}
+
+/// Encodes a geometry figure scene under the configured scene-export budget (never below the
+/// replay default), so a large solver mesh scene is limited by the same budget as every other
+/// figure export rather than a fixed constant.
+#[cfg(feature = "plot-core")]
+pub fn encode_geometry_figure_scene(
+    scene: &runmat_plot::event::FigureScene,
+) -> crate::BuiltinResult<Vec<u8>> {
+    crate::replay::export_figure_scene_payload_with_limits(scene, geometry_scene_limits())
+}
+
+/// Geometry scene payload limits: the configured scene budget, never below the replay default.
+#[cfg(feature = "plot-core")]
+fn geometry_scene_limits() -> crate::replay::limits::ReplayLimits {
+    let defaults = crate::replay::limits::ReplayLimits::default();
+    crate::replay::limits::ReplayLimits {
+        max_scene_payload_bytes: defaults
+            .max_scene_payload_bytes
+            .max(super::perf::scene_export_budget_bytes()),
+        ..defaults
+    }
 }
 
 #[cfg(feature = "plot-core")]

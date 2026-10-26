@@ -15,6 +15,7 @@ pub(super) fn measure(
         .ok_or_else(|| inconsistent(format!("missing measure #{entity_id}")))?;
     let component = entity
         .component("MEASURE_WITH_UNIT")
+        .or_else(|| entity.component("LENGTH_MEASURE_WITH_UNIT"))
         .or_else(|| entity.component("MEASURE_REPRESENTATION_ITEM"))
         .ok_or_else(|| unsupported(entity_id, "not a measure"))?;
     let offset = usize::from(component.name == "MEASURE_REPRESENTATION_ITEM");
@@ -211,6 +212,12 @@ fn dimension(value: &str) -> Option<QuantityKind> {
 }
 fn metric_prefix(value: &str) -> Option<(f64, &'static str)> {
     Some(match value {
+        "EXA" => (1e18, "E"),
+        "PETA" => (1e15, "P"),
+        "TERA" => (1e12, "T"),
+        "PICO" => (1e-12, "p"),
+        "FEMTO" => (1e-15, "f"),
+        "ATTO" => (1e-18, "a"),
         "MILLI" => (1e-3, "m"),
         "CENTI" => (1e-2, "c"),
         "DECI" => (1e-1, "d"),
@@ -355,8 +362,15 @@ fn length_definition(
             .arguments
             .get(1)
             .and_then(P21Value::as_reference)
-            .and_then(|id| file.entities.get(&id))
-            .ok_or_else(|| unsupported(id, "conversion unit has no factor"))?;
+            .and_then(|id| file.entities.get(&id));
+        // The declared factor governs; a standard unit name defines a unit whose factor
+        // entity is absent.
+        let Some(factor) = factor else {
+            let unit = LengthUnit::from_conversion_name(symbol)
+                .ok_or_else(|| unsupported(id, "conversion unit has no factor"))?;
+            stack.pop();
+            return Ok((unit, symbol.to_string()));
+        };
         let measure = factor
             .component("LENGTH_MEASURE_WITH_UNIT")
             .or_else(|| factor.component("MEASURE_WITH_UNIT"))
@@ -430,6 +444,33 @@ mod declared_length_unit_tests {
             Some(LengthUnit::Centimeter)
         );
         assert_eq!(declared_length_unit("not a step file"), None);
+    }
+
+    #[test]
+    fn conversion_based_units_use_the_declared_factor() {
+        let foot = step(
+            "CONVERSION_BASED_UNIT('FOOT',#4) LENGTH_UNIT() NAMED_UNIT(#6));\n\
+             #4=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(304.8),#5);\n\
+             #5=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));\n\
+             #6=DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.",
+        );
+        let meters = declared_length_unit(&foot).map(runmat_geometry_core::LengthUnit::meters_per_unit);
+        assert!((meters.unwrap() - 0.3048).abs() < 1.0e-15, "{meters:?}");
+        // A named unit without a readable factor falls back to its definition.
+        let mil = step("CONVERSION_BASED_UNIT('MIL',#9) LENGTH_UNIT() NAMED_UNIT(*)");
+        let meters = declared_length_unit(&mil).map(runmat_geometry_core::LengthUnit::meters_per_unit);
+        assert!((meters.unwrap() - 2.54e-5).abs() < 1.0e-18, "{meters:?}");
+        // An unknown conversion-based unit without a factor is unresolvable.
+        let cubit = step("CONVERSION_BASED_UNIT('CUBIT',#9) LENGTH_UNIT() NAMED_UNIT(*)");
+        assert_eq!(declared_length_unit(&cubit), None);
+        // Every SI prefix on the metre resolves.
+        for (prefix, meters) in [("MICRO", 1.0e-6), ("KILO", 1.0e3), ("PICO", 1.0e-12)] {
+            let unit = step(&format!(
+                "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.{prefix}.,.METRE.)"
+            ));
+            let resolved = declared_length_unit(&unit).map(runmat_geometry_core::LengthUnit::meters_per_unit);
+            assert_eq!(resolved, Some(meters), "{prefix}");
+        }
     }
 }
 

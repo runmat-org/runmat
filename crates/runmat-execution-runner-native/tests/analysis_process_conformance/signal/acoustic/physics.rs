@@ -101,6 +101,7 @@ fn execute(
     for entry in sweep.plan().entries().unwrap().into_iter().rev() {
         let workload = sweep.entry(entry).unwrap();
         let task = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest,
             frozen_project_digest: None,
             program_revision: fixture.revision.clone(),
@@ -172,7 +173,7 @@ fn workload(drive: Drive, signal: PhysicalSignal) -> AcousticHarmonicWorkload {
     model.constraints.clear();
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "matched-outlet".into(),
-        target: RegionTarget::boundary("face:3"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -183,13 +184,13 @@ fn workload(drive: Drive, signal: PhysicalSignal) -> AcousticHarmonicWorkload {
         speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
         damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic-spectrum");
     step.independent_domain = IndependentDomain::FrequencyHertz(FREQUENCIES.to_vec());
     model.sequence.steps = vec![step];
     let action = AnalysisExcitation {
         excitation_id: ExcitationId("drive".into()),
-        target: ExcitationTarget::Region(RegionTarget::boundary("face:0")),
+        target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
         frame: CoordinateFrame::BoundaryNormalTangent,
         direction: None,
         distribution: ExcitationDistribution::UniformKinematic,
@@ -217,7 +218,6 @@ fn workload(drive: Drive, signal: PhysicalSignal) -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic-spectrum".into()),
         frequency: Frequency::new(FREQUENCIES[0]),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }

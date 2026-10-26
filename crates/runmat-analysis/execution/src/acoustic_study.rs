@@ -46,6 +46,7 @@ pub struct CompletedAcousticStudy {
 }
 
 pub struct AcousticStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: AcousticStudyPlanningPolicy,
     pub product: AcousticStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -165,11 +166,18 @@ impl AcousticStudyCoordinator {
                     .clone()
             })
             .collect();
+        let request = runmat_analysis_fea::execution::AcousticFrequencyAssemblyRequest::new(
+            self.entries
+                .iter()
+                .map(|entry| entry.observations().map(|value| value.manifest.clone()))
+                .collect(),
+        )?;
         let task =
             prepare_acoustic_frequency_assembly_task(AcousticFrequencyAssemblyPreparation {
                 workload: self.workload.clone(),
                 mesh: self.preparation.mesh.clone(),
                 entries: inputs,
+                request,
                 artifact_access: self.preparation.artifact_access.clone(),
                 program_revision: self.preparation.program_revision.clone(),
                 output_policy: self.preparation.output_policy,
@@ -252,6 +260,7 @@ impl AcousticStudyCoordinator {
             .map_err(|_| invalid("acoustic preparation still has lifecycle owners"))?;
         Ok(CompletedAcousticStudy {
             replay: completion::AcousticStudyReplayContext {
+                local_execution: preparation.local_execution,
                 policy: preparation.policy,
                 mesh: preparation.mesh,
                 frozen_project_digest: preparation.frozen_project_digest,

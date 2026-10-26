@@ -91,6 +91,8 @@ pub enum AuthoredFieldProjection {
     Real,
     Imaginary,
     Phase,
+    /// Sound pressure level of a complex acoustic pressure, dB re 20 uPa (RMS).
+    Level,
     Principal(AuthoredPrincipalSelection),
     VonMises,
 }
@@ -121,6 +123,8 @@ pub enum AuthoredSpatialReduction {
     Maximum,
     Resultant,
     Moment { about: Position },
+    /// ∫ v·n dA of a vector field through a face region.
+    NormalFlux,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

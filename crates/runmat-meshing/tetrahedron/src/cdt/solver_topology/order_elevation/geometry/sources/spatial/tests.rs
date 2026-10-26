@@ -24,6 +24,11 @@ impl GeometryEvaluationControl for Control {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Face/chart-local broad-phase queries preserve exhaustive barycentric locations on
+//   boundaries and near them across scale and translation. Original narrow-phase and
+//   parameter-image admission remain authoritative; this is finite component equivalence evidence.
 #[test]
 fn local_candidates_preserve_exhaustive_boundary_and_near_boundary_locations() {
     let (_, original) = crate::cdt::constraints::tests::tetrahedron();
@@ -85,6 +90,11 @@ fn local_candidates_preserve_exhaustive_boundary_and_near_boundary_locations() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A separated spatial inventory checks bounded local query work instead of
+//   complete-surface scans and observes cancellation inside tree traversal. Synthetic spatial
+//   copies are not accepted CAD, native throughput, or whole-mesh qualification.
 #[test]
 fn localized_queries_do_not_scan_the_complete_surface_inventory_and_cancel() {
     let (_, original) = crate::cdt::constraints::tests::tetrahedron();

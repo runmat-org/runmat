@@ -279,7 +279,7 @@ describe("initRunMat wiring", () => {
       geometry: { definition: { module_path: "models/bracket.fea", geometry_id: "part" }, arguments: [] },
       mesh: { module_path: "models/bracket.fea", mesh_id: "part" },
       model: { model: { module_path: "models/bracket.fea", model_id: "structure" }, arguments: [] },
-      formulation_requirement: "production", inputs: [], outputs: [], assessments: [],
+      inputs: [], outputs: [], assessments: [],
       sequence: { sequence_id: "response", steps: [], dependencies: [], transitions: [], branches: [] },
     };
     const current = { ...checkResult, program: { ...checkResult.program, studies: [study] } };

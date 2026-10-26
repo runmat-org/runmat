@@ -79,11 +79,8 @@ impl<'a> Storage<'a> {
         self,
         value: &PersistentEntityId,
     ) -> Result<PersistentEntityId, DelaunaySolverTopologyError> {
-        self.slots::<u8>(value.source_topology_id.len())?;
-        self.slots::<String>(value.assembly_path.len())?;
-        for segment in &value.assembly_path {
-            self.slots::<u8>(segment.len())?;
-        }
+        // A clone is a handle to the shared identity allocation; its slot is charged
+        // with the owning record.
         Ok(value.clone())
     }
     pub fn entities<'b>(

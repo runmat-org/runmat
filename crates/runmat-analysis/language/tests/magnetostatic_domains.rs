@@ -22,7 +22,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.part
     model = model.magnetic
-    formulation = experimental
     analysis potential { electromagnetic static {} }
 }
 "#;

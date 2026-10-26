@@ -5,8 +5,10 @@ mod test_support;
 
 mod accelerator_placement;
 mod machine_capacity;
+pub use machine_capacity::publication_staging_bytes;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
+mod analysis_acoustic_response;
 mod analysis_electrical;
 mod analysis_fluid;
 pub use analysis_fluid::{execute_fluid_study_locally, FluidStudyExecutionPolicy};
@@ -41,11 +43,13 @@ mod analysis_prestressed_modal_frequency;
 mod analysis_progress;
 mod analysis_random_response;
 mod analysis_response_spectrum;
+mod analysis_statistical_observations;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;
 mod bounded_object_read;
 pub use analysis_acoustic::source::acoustic_study_completion_from_source;
+pub use analysis_acoustic_response::source::acoustic_response_study_completion_from_source;
 mod analysis_thermal;
 mod analysis_thermal_prestress;
 mod analysis_transient;
@@ -88,6 +92,11 @@ mod remote_exact_meshing_executor;
 mod runtime_meshing_provider;
 mod service;
 mod structural_study_root;
+mod study_family;
+pub mod cooperative;
+mod family_study_publication;
+pub use family_study_publication::import_family_study_result;
+pub use study_family::{CompletedFamilyStudy, StudyFamilyKind};
 pub mod supervisor;
 mod task_outcome;
 pub use task_outcome::NativeTaskQuiescence;
@@ -204,13 +213,13 @@ pub use exact_structural_study_root::{
 pub use exact_structural_sweep_root::{
     decode_exact_structural_sweep_root, import_exact_structural_sweep_result,
     import_exact_structural_sweep_result_catalog, import_structural_sweep_result,
-    prepare_exact_structural_sweep_root, prepare_structural_sweep_root,
+    import_study_sweep_entries, prepare_exact_structural_sweep_root, prepare_structural_sweep_root,
     DecodedExactStructuralSweepRoot, ExactStructuralSweepEntryResult,
     ExactStructuralSweepEntryStatus, ExactStructuralSweepResult, ExactStructuralSweepResultCatalog,
     ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
     ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot, PreparedStructuralSweepRoot,
-    StructuralSweepResultExpectation, StructuralSweepRootPreparation,
-    EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
+    StructuralSweepResultExpectation, StructuralSweepRootPreparation, StudySweepEntry,
+    StudySweepTerminal, EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
 };
 pub use geometry_materialization::{
     execute_geometry_materialization_program_request, native_geometry_provider_profile,
@@ -224,8 +233,11 @@ pub use geometry_meshing_root::{
 };
 pub use local_structural_study::{
     execute_prepared_structural_study_locally,
-    execute_prepared_structural_study_locally_with_observers, LocalStructuralStudyObservers,
+    execute_prepared_structural_study_locally_with_observers,
+    execute_prepared_study_locally_with_observers, LocalStructuralStudyObservers,
+    LocalStudyCompletion,
 };
+pub use meshing_platform::native_meshing_capability_cohort;
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
@@ -236,6 +248,7 @@ pub use program_session::{
     NativeProgramCompletion, NativeProgramFailure, NativeProgramSession, NativeProgramTask,
 };
 pub use protocol::{ProgramProgress, WorkerProcessMessage, WorkerResponse};
+pub use remote::structural_study::{execute_study_root_on_pool, RemoteStudyRootOutcome};
 pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
     run_remote_worker_quic, run_remote_worker_quic_ready_v1, run_remote_worker_relay,
@@ -259,7 +272,8 @@ pub use structural_study_root::{
     STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use structural_study_root::{
-    StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
+    NonlinearSolidStudyPlanning, StructuralStudyMaterialExpectation,
+    StructuralStudyResultExpectation, StudyRootPlanning,
 };
 pub use test_workload::{
     execute_host_graph_request_with_graphics, execute_host_program_request,
@@ -269,17 +283,15 @@ pub use typed_fea::{
     checked_fea_artifact_access, complete_frozen_fea_assessments, complete_local_fea_assessments,
     complete_remote_fea_assessments, freeze_fea_assessment_functions,
     materialize_checked_fea_study_geometry, prepare_checked_fea_study, reassess_saved_fea_locally,
-    MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
-    PreparedAuthoredNonlinearSolidStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
-    PreparedFeaStudyRoot,
+    MaterializedFeaGeometry, PreparedFeaStudy,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, execute_checked_fea_locally_with_timing, execute_prepared_fea_study_locally,
-    CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
+    execute_checked_fea_locally, execute_checked_fea_locally_with_timing, execute_prepared_fea_study_locally, imported_family_result,
+    prepare_study_publication, CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
     CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
     CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
+    LocalSweepCase,
     LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

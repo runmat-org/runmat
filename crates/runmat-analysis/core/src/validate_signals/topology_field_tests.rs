@@ -215,6 +215,9 @@ fn complex_topology_tables_preserve_precision_and_component_consistency() {
     assert!(validate_signal(&signal, None).is_err());
 }
 
+// witness: FEA-SHARED-EXCITATION-001/dimensioned_signal_contract @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Field validation preserves frames, precision and approximation evidence.
 #[test]
 fn field_validation_preserves_frames_precision_and_approximation_evidence() {
     let mut signal = field(3, SignalRepresentation::Constant(body(2, 3)), 1);

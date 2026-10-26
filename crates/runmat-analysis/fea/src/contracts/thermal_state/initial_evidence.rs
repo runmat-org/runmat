@@ -1,7 +1,7 @@
 //! One borrowed wire schema for realized and projected initial-state evidence.
 use super::ThermalInitialStateEvidence;
 use runmat_canonical_codec::{
-    profile_serialized, CanonicalCodecError, CanonicalLimits, SerializedCanonicalProfile,
+    profile_serialized_shape, CanonicalCodecError, CanonicalLimits, SerializedCanonicalProfile,
 };
 use serde::{Serialize, Serializer};
 
@@ -53,7 +53,8 @@ impl ThermalInitialStateEvidence {
         applied_initial_condition_ids: &I,
         limits: CanonicalLimits,
     ) -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
-        profile_serialized(
+        // Stand-in counts bound every future count, so integers reserve their full range.
+        profile_serialized_shape(
             &EvidenceWire {
                 procedure_step_id,
                 reference_temperature_k: runmat_types::physical::Temperature::new(1.0),

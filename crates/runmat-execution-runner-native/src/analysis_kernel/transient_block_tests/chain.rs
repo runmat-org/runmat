@@ -33,6 +33,7 @@ pub(super) fn assert_two_block_chain(
         prepare_structural_transient_block_request_objects(&first_request, 256, namespace, limits)
             .unwrap();
     let first = prepare_structural_transient_block_task(StructuralTransientBlockPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         request: first_request_objects,
@@ -75,6 +76,7 @@ pub(super) fn assert_two_block_chain(
     )
     .unwrap();
     let second = prepare_structural_transient_block_task(StructuralTransientBlockPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         request: second_request_objects,
@@ -255,6 +257,7 @@ pub(super) fn assert_two_block_chain(
         prepare_structural_transient_block_request_objects(&one_request, 256, namespace, limits)
             .unwrap();
     let one_block = prepare_structural_transient_block_task(StructuralTransientBlockPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects,
         mesh: mesh_objects,
         request: one_request_objects,

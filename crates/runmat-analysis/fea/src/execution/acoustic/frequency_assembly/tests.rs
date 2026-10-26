@@ -2,6 +2,10 @@ use super::*;
 use crate::topology::test_meshes::slab_mesh;
 use runmat_analysis_core::IndependentDomain;
 
+fn none(count: usize) -> AcousticFrequencyAssemblyRequest {
+    AcousticFrequencyAssemblyRequest::new(vec![None; count]).unwrap()
+}
+
 #[test]
 fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
     let mesh = slab_mesh(3);
@@ -17,10 +21,10 @@ fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
         .map(|entry| workload.entry(entry).unwrap().execute(&mesh).unwrap())
         .collect::<Vec<_>>();
     let ordered =
-        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone()).unwrap();
+        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone(), &none(3)).unwrap();
     entries.reverse();
     let reversed =
-        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone()).unwrap();
+        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone(), &none(3)).unwrap();
     assert_eq!(ordered.result, reversed.result);
     assert_eq!(ordered.publication, reversed.publication);
     assert_eq!(ordered.fields, reversed.fields);
@@ -50,11 +54,11 @@ fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
     cold.validate_for(&ordered.result.publication_authority().unwrap())
         .unwrap();
     assert!(
-        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries[..2].to_vec()).is_err()
+        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries[..2].to_vec(), &none(3)).is_err()
     );
     let mut duplicate = entries.clone();
     duplicate[1] = duplicate[0].clone();
-    assert!(assemble_acoustic_frequency_result(workload.clone(), &mesh, duplicate).is_err());
+    assert!(assemble_acoustic_frequency_result(workload.clone(), &mesh, duplicate, &none(3)).is_err());
     let mut other = workload
         .entry(workload.plan().entries().unwrap()[0])
         .unwrap();
@@ -64,5 +68,5 @@ fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
         .unwrap()
         .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(3.0);
     entries[0] = other.execute(&mesh).unwrap();
-    assert!(assemble_acoustic_frequency_result(workload, &mesh, entries).is_err());
+    assert!(assemble_acoustic_frequency_result(workload, &mesh, entries, &none(3)).is_err());
 }

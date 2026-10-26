@@ -6,9 +6,7 @@ mod construction_storage;
 
 enum StructuralCouplingInput<'a> {
     Authored {
-        solved_nodal_temperature_k: Option<
-            runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &'a [f64]>,
-        >,
+        solved_nodal_temperature_k: Option<&'a crate::execution::SolvedTemperatureField>,
         solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
     },
     ElasticPerturbation,
@@ -79,6 +77,7 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
         Some(constraint_plan),
         crate::planning::resource::LocalExecutionPlan::serial(),
         None,
+        None,
     )
 }
 
@@ -89,9 +88,8 @@ pub(crate) fn assemble_structural_system_with_execution(
     requirement: StructuralFormulationRequirement,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
-    solved_nodal_temperature_k: Option<
-        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &[f64]>,
-    >,
+    solved_nodal_temperature_k: Option<&crate::execution::SolvedTemperatureField>,
+    solid_energy: Option<&mut solver_solid::SolidEnergyPreparation>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_with_mesh(
         model,
@@ -102,7 +100,7 @@ pub(crate) fn assemble_structural_system_with_execution(
         local_execution,
         StructuralCouplingInput::Authored {
             solved_nodal_temperature_k,
-            solid_energy: None,
+            solid_energy,
         },
     )
 }
@@ -196,7 +194,7 @@ pub(crate) fn assemble_structural_modal_system(
         model,
         excitations,
         solver_mesh,
-        Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator),
+        Some(StructuralFormulationRequirement::SyntheticOperator),
         None,
         crate::planning::resource::LocalExecutionPlan::serial(),
         StructuralCouplingInput::Authored {
@@ -210,9 +208,7 @@ pub(crate) struct AssemblyExecution<'a> {
     pub(super) structural_requirement: Option<StructuralFormulationRequirement>,
     pub(super) supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
     pub(super) local_execution: crate::planning::resource::LocalExecutionPlan,
-    pub(super) solved_nodal_temperature_k: Option<
-        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &'a [f64]>,
-    >,
+    pub(super) solved_nodal_temperature_k: Option<&'a crate::execution::SolvedTemperatureField>,
     pub(super) solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
 }
 

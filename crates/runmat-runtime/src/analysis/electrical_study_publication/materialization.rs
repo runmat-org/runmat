@@ -1,8 +1,10 @@
-//! Copy accepted native potential/E/D/J/densities to shared cold-query fields; no operator evaluation.
+//! Copy accepted native potential/E/D/J/densities and authored observations to shared
+//! cold-query results; no operator evaluation.
 use super::*;
 use crate::analysis::*;
 use runmat_analysis_fea::{
     contracts::{ExecutionBackend, SolverMethod, SolverPreconditioner},
+    results::field::RecoveredFieldArtifact,
     planning::resource::FeaResourcePhase,
     solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend, FeaRunResult,
@@ -12,6 +14,7 @@ pub(super) fn admit(
     completed: &ElectricalStudyCompletion,
     mesh: &SolverMeshArtifact,
     options: &AnalysisElectricalRunOptions,
+    fields: RecoveredFieldArtifact,
     run_id: &str,
     context: &OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, String> {
@@ -28,17 +31,10 @@ pub(super) fn admit(
         &completed.publication,
     )?;
     let accuracy = accuracy_owner(&completed.accuracy);
-    let request = completed
-        .result
-        .native_field_request(&completed.workload, mesh)
-        .map_err(|e| e.to_string())?;
-    let fields = completed
-        .result
-        .recover_native_fields(&completed.workload, mesh, &request)
-        .map_err(|e| e.to_string())?
+    let fields = fields
         .into_fields()
         .into_iter()
-        .map(|f| f.into_storage())
+        .map(|field| field.into_storage())
         .collect();
     let run = FeaRunResult {
         identity: completed.result.formulation().clone(),
@@ -56,13 +52,11 @@ pub(super) fn admit(
         structural_static_balance: None,
         structural_constraint_result: None,
         structural_connector_result: None,
-        observations: Vec::new(),
+        observations: completed.observation_results.clone(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
         fields,
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, accuracy.numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
         execution_backend: run.execution_backend,
@@ -75,6 +69,7 @@ pub(super) fn admit(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),
@@ -91,9 +86,7 @@ pub(super) fn admit(
         result_quality: accuracy.result_quality,
         run_status: accuracy.run_status,
         numerically_acceptable: accuracy.numerically_acceptable,
-        production_publishable,
         quality_reasons: accuracy.quality_reasons,
-        production_publication_reasons,
         provenance,
     };
     Ok(OperationEnvelope::new(

@@ -63,7 +63,8 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &BTreeSet::new(),
         &mut control,
     )
-    .unwrap());
+    .unwrap()
+    .is_ok());
     assert_eq!(triangles.len(), delaunay.triangles.len());
     assert!(triangle_edges(&triangles).contains(&target));
     super::planarity::validate_planar_edges(
@@ -85,7 +86,8 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &BTreeSet::new(),
         &mut repeated_control,
     )
-    .unwrap());
+    .unwrap()
+    .is_ok());
     assert_eq!(repeated, triangles);
 
     let mut second_attempt = delaunay.triangles.clone();
@@ -219,11 +221,7 @@ fn sorted(mut edge: [u32; 2]) -> [u32; 2] {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 #[test]

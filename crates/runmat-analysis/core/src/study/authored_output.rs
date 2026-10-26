@@ -6,7 +6,9 @@ use crate::{
 };
 use runmat_types::PhysicalDimension;
 
+mod partition;
 mod types;
+pub use partition::{authored_output_root, retain_authored_outputs};
 
 pub use types::*;
 
@@ -76,7 +78,7 @@ impl AuthoredOutputExpression {
                 Ok(AuthoredOutputType::Field {
                     value: AuthoredOutputValue::Physical(*quantity),
                     shape: quantity.canonical_value_shape(),
-                    domain: field_domain(step.procedure),
+                    domain: field_domain(step.procedure, *quantity),
                     location: *location,
                 })
             }
@@ -161,6 +163,26 @@ impl AuthoredOutputExpression {
                         })
                     }
                     AuthoredFieldProjection::Phase => {
+                        Err(AuthoredOutputError::ComplexProjectionRequiresComplex)
+                    }
+                    AuthoredFieldProjection::Level
+                        if domain == AuthoredFieldDomain::Complex
+                            && shape == ObservationValueShape::Scalar
+                            && value
+                                == AuthoredOutputValue::Physical(
+                                    ObservationQuantity::AcousticPressure,
+                                ) =>
+                    {
+                        Ok(AuthoredOutputType::Field {
+                            value: AuthoredOutputValue::Physical(
+                                ObservationQuantity::SoundPressureLevel,
+                            ),
+                            shape,
+                            domain: AuthoredFieldDomain::Real,
+                            location,
+                        })
+                    }
+                    AuthoredFieldProjection::Level => {
                         Err(AuthoredOutputError::ComplexProjectionRequiresComplex)
                     }
                     AuthoredFieldProjection::Principal(_)
@@ -263,6 +285,19 @@ impl AuthoredOutputExpression {
                         value,
                         shape: ObservationValueShape::Scalar,
                     }),
+                    AuthoredSpatialReduction::NormalFlux => {
+                        if shape != ObservationValueShape::Vector3 {
+                            return Err(AuthoredOutputError::ResultantRequiresVectorOrTraction);
+                        }
+                        Ok(AuthoredOutputType::Reduced {
+                            value: AuthoredOutputValue::Derived(
+                                output_dimension(value)?
+                                    .multiply(region_measure(target)?.into())
+                                    .ok_or(AuthoredOutputError::DimensionOverflow)?,
+                            ),
+                            shape: ObservationValueShape::Scalar,
+                        })
+                    }
                     AuthoredSpatialReduction::Integral => Ok(AuthoredOutputType::Reduced {
                         value: AuthoredOutputValue::Derived(
                             output_dimension(value)?
@@ -484,8 +519,23 @@ fn region_measure(target: &AuthoredRegionSource) -> Result<PhysicalDimension, Au
     })
 }
 
-pub(super) fn field_domain(procedure: crate::AnalysisProcedure) -> AuthoredFieldDomain {
+pub(super) fn field_domain(
+    procedure: crate::AnalysisProcedure,
+    quantity: crate::ObservationQuantity,
+) -> AuthoredFieldDomain {
     match procedure {
+        // Cycle averages (loss density, active intensity) are real quantities of a harmonic
+        // analysis.
+        crate::AnalysisProcedure::HarmonicResponse
+        | crate::AnalysisProcedure::PrestressedHarmonicResponse
+            if matches!(
+                quantity,
+                crate::ObservationQuantity::JoulePowerDensity
+                    | crate::ObservationQuantity::AcousticIntensity
+            ) =>
+        {
+            AuthoredFieldDomain::Real
+        }
         crate::AnalysisProcedure::HarmonicResponse
         | crate::AnalysisProcedure::PrestressedHarmonicResponse => AuthoredFieldDomain::Complex,
         crate::AnalysisProcedure::RandomResponse

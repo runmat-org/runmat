@@ -1,5 +1,10 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cleared conductivity-response storage retains its allocated capacity and remains
+//   charged by the material owner. Typed component demand only; no allocator, complete-study peak
+//   or physics claim.
 #[test]
 fn retained_material_buffers_include_unused_electrical_capacity() {
     let mut material = super::super::tests::density_only_material();
@@ -28,6 +33,11 @@ fn retained_material_buffers_include_unused_electrical_capacity() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Imported CAD collection capacity and persistent-target strings are owned separately;
+//   clearing entries releases strings while retaining collection storage. Typed component demand,
+//   not measured peak memory or complete-study scalability qualification.
 #[test]
 fn retained_material_buffers_include_cad_collection_capacity_and_target_strings() {
     let mut material = super::super::tests::density_only_material();

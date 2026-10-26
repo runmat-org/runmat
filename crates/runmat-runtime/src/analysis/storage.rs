@@ -61,6 +61,9 @@ struct PersistedRunArtifact {
     created_at: String,
     op_version: String,
     run_digest: Digest,
+    /// Untyped run content of records written before the typed metadata became the single copy;
+    /// absent (null) for current records, whose content is `metadata` plus `observation_payload`.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     run: serde_json::Value,
     metadata: AnalysisRunResult,
     field_inventory: Vec<AnalysisField>,
@@ -71,6 +74,36 @@ struct PersistedRunArtifact {
     observation_histories: Vec<PersistedObservationHistory>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     original_fields: Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
+    /// Transient dynamic-balance vectors (applied, inertia, damping, elastic, residual per
+    /// accepted state), stored as one chunked numerical object instead of inline JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dynamic_balance: Option<PersistedDynamicBalance>,
+    /// The run's materialized observations and series reductions, chunked out of the metadata so
+    /// the typed metadata is the record's only copy of the run content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    observation_payload: Option<AnalysisObjectManifest>,
+}
+
+impl PersistedRunArtifact {
+    /// The authenticated run content as JSON: the legacy untyped copy when present, otherwise
+    /// the typed metadata (the single copy of current records).
+    fn run_projection(&self) -> Result<std::borrow::Cow<'_, serde_json::Value>, String> {
+        if self.run.is_null() {
+            serde_json::to_value(&self.metadata)
+                .map(std::borrow::Cow::Owned)
+                .map_err(|error| format!("failed to project analysis run metadata: {error}"))
+        } else {
+            Ok(std::borrow::Cow::Borrowed(&self.run))
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedDynamicBalance {
+    /// Degrees of freedom of each snapshot; each snapshot stores five vectors of that length.
+    dof_counts: Vec<u64>,
+    manifest: AnalysisObjectManifest,
 }
 
 /// Histories own sample-local field identities; they cannot be flattened into the
@@ -140,6 +173,9 @@ pub struct InMemoryAnalysisArtifactStore {
     observations: RwLock<HashMap<String, observations::ObservationAttachment>>,
     runs: RwLock<HashMap<String, PersistedAnalysisArtifact>>,
     chunks: RwLock<HashMap<Digest, Arc<[u8]>>>,
+    /// Staging only: field chunks streamed to the publication spill area. Records may
+    /// reference them although their bytes are not resident here.
+    streamed: RwLock<std::collections::HashSet<Digest>>,
 }
 
 impl Default for InMemoryAnalysisArtifactStore {
@@ -230,7 +266,7 @@ fn decode_persisted_artifact(
 mod field_reader;
 use field_reader::{field_page_from_artifact, materialize_run, persisted_field_inventory};
 mod preparation;
-use preparation::prepare_run_artifact;
+use preparation::{prepare_run_artifact, prepare_run_artifact_with_admission};
 
 fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtifact) -> bool {
     left.schema_version == right.schema_version
@@ -346,13 +382,16 @@ fn validate_persisted_run(
             persisted.schema_version
         ));
     }
+    let run_value = persisted.run_projection()?;
     if persisted_run_digest(
-        &persisted.run,
+        &run_value,
         &persisted.field_inventory,
         &persisted.materialized_field_ids,
         persisted.render_tiles.as_ref(),
         &persisted.observation_histories,
         persisted.original_fields.as_ref(),
+        persisted.dynamic_balance.as_ref(),
+        persisted.observation_payload.as_ref(),
     )? != persisted.run_digest
     {
         return Err("analysis run metadata differs from its content digest".into());
@@ -385,18 +424,33 @@ fn validate_persisted_run(
             );
         }
     }
-    let authenticated_scalars: Vec<
-        runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
-    > = match persisted.run.get("observation_scalars") {
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|error| format!("invalid scalar observation inventory: {error}"))?,
-        None => Vec::new(),
-    };
-    if authenticated_scalars != persisted.metadata.observation_scalars {
-        return Err("scalar observation inventory differs from authenticated run content".into());
+    if let Some(manifest) = &persisted.observation_payload {
+        manifest.validate().map_err(|error| error.to_string())?;
+        if manifest.kind != AnalysisNumericalObjectKind::History {
+            return Err("observation payload manifest has the wrong numerical object kind".into());
+        }
     }
-    if compact_run_metadata(&persisted.run)? != persisted.metadata {
-        return Err("compact analysis metadata differs from authenticated run content".into());
+    // A legacy record carries a second, untyped copy that must agree with the typed metadata.
+    if !persisted.run.is_null() {
+        let authenticated_scalars: Vec<
+            runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
+        > = match persisted.run.get("observation_scalars") {
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid scalar observation inventory: {error}"))?,
+            None => Vec::new(),
+        };
+        if authenticated_scalars != persisted.metadata.observation_scalars {
+            return Err(
+                "scalar observation inventory differs from authenticated run content".into(),
+            );
+        }
+        if compact_run_metadata(&persisted.run)? != persisted.metadata {
+            return Err("compact analysis metadata differs from authenticated run content".into());
+        }
+    } else if !persisted.metadata.run.observations.is_empty()
+        || !persisted.metadata.run.series_reductions.is_empty()
+    {
+        return Err("analysis metadata must not carry inline observation payloads".into());
     }
     validate_run_identity(&persisted.metadata)?;
     if persisted.metadata.render_topology.is_some() {
@@ -406,7 +460,7 @@ fn validate_persisted_run(
         index.validate()?;
     }
     let mut expected_fields = BTreeMap::new();
-    collect_persisted_field_shells(&persisted.run, &mut expected_fields)?;
+    collect_persisted_field_shells(&run_value, &mut expected_fields)?;
     let mut inventory_fields = BTreeMap::new();
     for field in &persisted.field_inventory {
         validate_field_id(&field.field_id)?;
@@ -423,9 +477,24 @@ fn validate_persisted_run(
             ));
         }
     }
-    if inventory_fields != expected_fields {
+    // Current records chunk their observations (and the field shells inside them) out of the
+    // metadata, so the authenticated inventory covers the metadata shells and those of the
+    // observation payload; legacy records list exactly the shells of their untyped copy.
+    let inventory_matches = if persisted.run.is_null() {
+        expected_fields
+            .iter()
+            .all(|(field_id, shape)| inventory_fields.get(field_id) == Some(shape))
+    } else {
+        inventory_fields == expected_fields
+    };
+    if !inventory_matches {
         return Err("analysis run field inventory differs from its metadata shells".into());
     }
+    let expected_fields = if persisted.run.is_null() {
+        inventory_fields
+    } else {
+        expected_fields
+    };
     let mut stored_fields = BTreeMap::new();
     for field in &persisted.fields {
         validate_field_id(&field.field_id)?;
@@ -582,19 +651,6 @@ fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
     let identity = &run.run.identity;
     super::run_operation_for_identity(identity)
         .ok_or_else(|| "analysis run identity has no registered runtime operation".to_string())?;
-    let (expected_publishable, expected_publication_reasons) =
-        super::result_policy::evaluate_production_publication(&run.run, run.numerically_acceptable);
-    if run.production_publishable != expected_publishable {
-        return Err(
-            "production publication must require both numerical acceptance and a production-qualified formulation"
-                .to_string(),
-        );
-    }
-    if run.production_publication_reasons != expected_publication_reasons {
-        return Err(
-            "production publication reasons do not match the failed publication gates".to_string(),
-        );
-    }
     let expected_status =
         super::result_policy::classify_run_status(run.result_quality, run.numerically_acceptable);
     if run.run_status != expected_status {
@@ -602,12 +658,6 @@ fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
             "analysis run status {:?} does not match numerical outcome {:?}",
             run.run_status, expected_status
         ));
-    }
-    if !run.provenance.fallback_events.is_empty() && !identity.permits_fallback() {
-        return Err(
-            "analysis run identity forbids the execution fallbacks recorded by provenance"
-                .to_string(),
-        );
     }
     Ok(())
 }
@@ -708,7 +758,7 @@ pub use async_access::with_artifact_access;
 pub(in crate::analysis) use async_access::scoped_artifact_provider;
 pub use source_access::{
     load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
-    load_structural_frequency_result,
+    load_structural_frequency_result, resolve_run_attempt, run_attempts,
 };
 
 pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {

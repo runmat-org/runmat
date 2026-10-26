@@ -46,9 +46,6 @@ pub fn plan_nonlinear_solid_study_product(
     controls: NonlinearSolveOptions,
 ) -> Result<NonlinearSolidStudyProduct, NonlinearSolidStudyPlanningError> {
     compiled.validate_against(mesh)?;
-    if controls.formulation_requirement != compiled.formulation_requirement {
-        return Err(NonlinearSolidStudyPlanningError::RequirementMismatch);
-    }
     // Validate before min(): an authored target must not erase a NaN caller control.
     controls
         .validate_controls()
@@ -88,8 +85,6 @@ pub fn plan_nonlinear_solid_study_product(
 pub enum NonlinearSolidStudyPlanningError {
     #[error(transparent)]
     Compilation(#[from] AnalysisStudyCompilationError),
-    #[error("J2 controls differ from the compiled formulation requirement")]
-    RequirementMismatch,
     #[error("J2 relative nonlinear accuracy target must lie strictly between zero and one")]
     InvalidTarget,
     #[error("unsupported authored J2 intent: {0}")]

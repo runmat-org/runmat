@@ -74,6 +74,10 @@ fn submission(source: &[u8], key: Option<&str>) -> BatchSubmission {
     }
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/durable; coverage: partial;
+//   boundary: A detached job survives supervisor reopen and idempotent resubmission; meshing stages
+//   are not the workload here.
 #[tokio::test]
 async fn detached_job_survives_supervisor_reopen_and_submission_is_idempotent() {
     let temp = tempfile::tempdir().unwrap();
@@ -133,6 +137,9 @@ async fn wait_for_helper(marker: &std::path::Path) -> bool {
     .is_ok()
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/durable; coverage: partial;
+//   boundary: Cancellation is durable and corrupt metadata recovers as indeterminate.
 #[tokio::test]
 async fn cancellation_is_durable_and_corrupt_metadata_recovers_indeterminate() {
     let temp = tempfile::tempdir().unwrap();

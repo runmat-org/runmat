@@ -10,6 +10,9 @@ fn assert_relative(actual: f64, expected: f64, relative_tolerance: f64) {
     );
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/connectors @ linear_structural/beam/numerical_kernel;
+//   coverage: partial;
+//   boundary: An explicit axial connector matches the parallel-spring reference.
 #[test]
 fn explicit_axial_connector_matches_the_parallel_spring_reference() {
     const APPLIED_FORCE_N: f64 = 1_000.0;
@@ -39,7 +42,7 @@ fn explicit_axial_connector_matches_the_parallel_spring_reference() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("parallel beam and connector reference must solve");
     let expected_displacement = APPLIED_FORCE_N
@@ -77,11 +80,13 @@ fn mixed_solid_beam_ground_spring_recovers_from_the_shared_tip_dof() {
 
     let mut mesh = single_tetrahedron_solver_mesh();
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     add_face_region(&mut mesh, 1, "solid_load");
     reseal_solver_mesh(&mut mesh);
@@ -92,7 +97,7 @@ fn mixed_solid_beam_ground_spring_recovers_from_the_shared_tip_dof() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("mixed-connector-reference.rmmesh".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("mixed solid-beam connector reference must solve");
@@ -134,7 +139,7 @@ fn solid_face_foundation_matches_an_independent_quadrature_sum() {
     model.connectors = vec![runmat_analysis_core::AnalysisConnector {
         connector_id: "tip_foundation".into(),
         kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-            target: runmat_analysis_core::RegionTarget::boundary("tip"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
             modulus: runmat_analysis_core::FoundationModulus::new(FOUNDATION_MODULUS_N_PER_M3),
         },
     }];
@@ -145,7 +150,7 @@ fn solid_face_foundation_matches_an_independent_quadrature_sum() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("solid-foundation-reference.rmmesh".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("solid face foundation reference must solve");

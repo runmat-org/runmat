@@ -17,3 +17,44 @@ pub(super) fn load_stl_fixture(path: &std::path::Path, x: f64) -> Value {
     ))
     .expect("geometry should load")
 }
+
+/// A closure whose bound function has a published portable origin, so FEA
+/// generator constructors can freeze it through the portable value codec.
+/// Keep the returned guard alive while the closure is used.
+pub(crate) fn portable_closure_fixture(
+    name: &str,
+    function: usize,
+    captures: Vec<Value>,
+) -> (Value, crate::user_functions::SourceFunctionCatalogGuard) {
+    let binding = crate::user_functions::test_support::exact_portable_binding(
+        function,
+        "fea.callable.fixture",
+    );
+    let origin = binding
+        .authority
+        .portable_origin()
+        .expect("exact_portable_binding returns a portable origin");
+    let guard =
+        crate::user_functions::install_source_function_catalog(Some(std::sync::Arc::new(vec![
+            crate::user_functions::SourceFunctionInfo {
+                source_id: runmat_types::SourceId(function),
+                name: name.to_string(),
+                function,
+                role: runmat_types::FunctionSourceRole::Anonymous,
+                binding_origin: Some(origin),
+                source_file: None,
+                // No local definition owner: the origin resolves to a portable binding.
+                definition_owners: None,
+            },
+        ])))
+        .expect("portable closure catalog");
+    let closure = Value::Closure(runmat_value::Closure::new(
+        name.to_string(),
+        Some(binding),
+        runmat_types::FunctionSourceRole::Anonymous,
+        None,
+        captures,
+        None,
+    ));
+    (closure, guard)
+}

@@ -16,12 +16,13 @@ pub(super) fn model_and_mesh(
     *model.material_assignments[0]
         .target
         .selected_region_id_mut()
-        .expect("fixture uses selected material region") = "region".into();
+        .expect("fixture uses selected material region") =
+        runmat_meshing_core::fixtures::fixture_region("region");
     model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
         constraint_id: "fixed-face".into(),
         frame: runmat_analysis_core::CoordinateFrame::Global,
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("face:0"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
             translations: [
                 runmat_analysis_core::StructuralTranslationDof::Ux,
                 runmat_analysis_core::StructuralTranslationDof::Uy,
@@ -39,7 +40,7 @@ pub(super) fn model_and_mesh(
         }),
     })];
     model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("face:3"));
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")));
     (
         model,
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order),

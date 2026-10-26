@@ -96,6 +96,7 @@ fn evidence() -> MeshingEvidence {
     });
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        ceilings: crate::serial_tests::ceilings(),
         geometry: GeometryRevisionRef {
             source_unit_evidence:
                 runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(

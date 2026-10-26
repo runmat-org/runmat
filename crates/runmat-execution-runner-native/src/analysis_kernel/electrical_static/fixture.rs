@@ -33,7 +33,7 @@ pub(crate) fn electrical_fixture(
         "conductor",
         vec![ProcedureStep::electromagnetic_static("potential")],
     );
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(300.0),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -48,7 +48,7 @@ pub(crate) fn electrical_fixture(
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: face.into(),
                 kind: ElectricalConstraintKind::PrescribedPotential {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(face)),
                     value: PrescribedValue::Constant(ElectricPotential::new(volts)),
                 },
             }));
@@ -56,8 +56,9 @@ pub(crate) fn electrical_fixture(
     let electrical = ElectricalStaticWorkload {
         model: model.clone(),
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     };
     (electrical, mesh)
 }

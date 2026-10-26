@@ -42,13 +42,7 @@ impl ThermalWorkload {
         policy: ThermalStudyPlanningPolicy,
         mixed_context: bool,
     ) -> Result<(), ThermalStudyPlanningError> {
-        if policy.formulation_requirement != study.formulation_requirement {
-            return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
-        }
-        if self.model != study.model
-            || self.backend != policy.backend
-            || self.formulation_requirement != policy.formulation_requirement
-        {
+        if self.model != study.model || self.backend != policy.backend {
             return Err(ThermalStudyPlanningError::WorkloadMismatch);
         }
         let (_, procedure, target) = authored_controls(&self.model, self.step_id.as_str())?;

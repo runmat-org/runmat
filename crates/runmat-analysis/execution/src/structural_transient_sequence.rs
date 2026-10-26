@@ -34,6 +34,8 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructuralTransientSequencePreparation {
+    /// Admitted local execution, read from the scope task's declared resource plan.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
     pub modal_state: Option<PreparedAnalysisObjects>,
@@ -49,6 +51,7 @@ pub struct StructuralTransientSequencePreparation {
 }
 
 pub struct StructuralTransientSequencePreparationInput<'a> {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: &'a StructuralTransientWorkload,
     pub mesh: &'a SolverMeshArtifact,
     pub modal_state: Option<&'a CanonicalSemanticState>,
@@ -62,6 +65,7 @@ pub struct StructuralTransientSequencePreparationInput<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructuralTransientSequencePlan {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: StructuralTransientWorkload,
     pub mesh: SolverMeshArtifact,
     pub modal_state: Option<CanonicalSemanticState>,
@@ -95,6 +99,7 @@ pub fn prepare_structural_transient_sequence(
         ));
     }
     Ok(StructuralTransientSequencePlan {
+        local_execution: input.local_execution,
         workload: input.workload.clone(),
         mesh: input.mesh.clone(),
         modal_state: input.modal_state.cloned(),
@@ -187,7 +192,18 @@ pub fn complete_structural_transient_sequence_preparation(
     }
     let mut initial_dependencies = plan.initial_dependencies;
     initial_dependencies.push(scope_task_identity);
+    let local_execution =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+            prepared_scope.resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if local_execution != plan.local_execution {
+        return Err(AnalysisBridgeError::Identity(
+            "transient scope task admitted another local execution plan",
+        ));
+    }
     let preparation = StructuralTransientSequencePreparation {
+        local_execution,
         workload,
         mesh,
         modal_state,
@@ -272,6 +288,7 @@ impl StructuralTransientSequenceCoordinator {
             .transpose()?;
         let prepared =
             prepare_structural_transient_block_task(StructuralTransientBlockPreparation {
+                local_execution: self.preparation.local_execution,
                 workload: self.preparation.workload.clone(),
                 mesh: self.preparation.mesh.clone(),
                 request: request_objects,

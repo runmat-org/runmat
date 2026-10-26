@@ -82,7 +82,6 @@ study bracket_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
 
     analysis static { structural static {} }
 
@@ -92,13 +91,13 @@ study bracket_static {
 ```
 
 The checked-in copy is
-[`structural-static-experimental.fea`](../examples/structural-static-experimental.fea). From the
+[`structural-static.fea`](../examples/structural-static.fea). From the
 repository root:
 
 ```sh
-runmat fea check docs/simulation/examples/structural-static-experimental.fea
-runmat fea plan docs/simulation/examples/structural-static-experimental.fea
-runmat fea run docs/simulation/examples/structural-static-experimental.fea
+runmat fea check docs/simulation/examples/structural-static.fea
+runmat fea plan docs/simulation/examples/structural-static.fea
+runmat fea run docs/simulation/examples/structural-static.fea
 ```
 
 `check` resolves imports and performs source and semantic checking. `plan` selects a study or sweep

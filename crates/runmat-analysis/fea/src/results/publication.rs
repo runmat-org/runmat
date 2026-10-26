@@ -1,4 +1,3 @@
-use runmat_analysis_core::FormulationRequirement;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +46,6 @@ pub struct PublishedAnalysisResult {
     pub source_accuracy: AccuracyArtifactIdentity,
     pub source_resource_plan: FeaResourcePlanIdentity,
     pub source_resource_usage: ResourceUsageEvidenceIdentity,
-    pub formulation_requirement: FormulationRequirement,
     pub accuracy_status: AccuracyStatus,
     pub gate: AccuracyPublicationGate,
 }
@@ -65,7 +63,6 @@ struct PublishedAnalysisResultWire {
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
     source_resource_usage: ResourceUsageEvidenceIdentity,
-    formulation_requirement: FormulationRequirement,
     accuracy_status: AccuracyStatus,
     gate: AccuracyPublicationGate,
 }
@@ -85,7 +82,6 @@ impl TryFrom<PublishedAnalysisResultWire> for PublishedAnalysisResult {
             source_accuracy: wire.source_accuracy,
             source_resource_plan: wire.source_resource_plan,
             source_resource_usage: wire.source_resource_usage,
-            formulation_requirement: wire.formulation_requirement,
             accuracy_status: wire.accuracy_status,
             gate: wire.gate,
         };
@@ -122,7 +118,6 @@ impl PublishedAnalysisResult {
             source_accuracy: request.source_accuracy,
             source_resource_plan: request.source_resource_plan,
             source_resource_usage: request.source_resource_usage,
-            formulation_requirement: accuracy.formulation_requirement,
             accuracy_status: accuracy.evaluation().report().status,
             gate: accuracy.gate().clone(),
         };
@@ -148,8 +143,6 @@ impl PublishedAnalysisResult {
             || self.identity != expected
             || self.gate.decision != PublicationDecision::Allow
             || self.gate.status != self.accuracy_status
-            || (self.formulation_requirement == FormulationRequirement::Production
-                && self.accuracy_status != AccuracyStatus::Satisfied)
         {
             return Err(AnalysisExecutionError::Invalid(
                 "published result lacks a convergent identity or an allowing accuracy gate".into(),
@@ -176,7 +169,6 @@ impl PublishedAnalysisResult {
             .primary_plan()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         if self.producer != accuracy.producer
-            || self.formulation_requirement != accuracy.formulation_requirement
             || self.accuracy_status != accuracy.evaluation().report().status
             || &self.gate != accuracy.gate()
             || self.source_result != accuracy.source_result

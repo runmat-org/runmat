@@ -81,6 +81,6 @@ mod tests {
         let range = ExactCurveEvaluator::parameter_range(evaluator.as_ref(), curve_id).unwrap();
         let point = ExactCurveEvaluator::point(evaluator.as_ref(), curve_id, range.start, &control)
             .unwrap();
-        assert!(point.into_iter().all(f64::is_finite));
+        assert!(point.canonical_values().iter().all(|value| value.is_finite()));
     }
 }

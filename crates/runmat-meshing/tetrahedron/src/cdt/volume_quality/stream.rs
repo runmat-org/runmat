@@ -8,7 +8,7 @@ pub(super) fn visit_from_metric_contexts(
     options: DelaunayVolumeQualityOptions,
     metric_contexts: MetricContexts<'_>,
     boundary_nodes: &BTreeSet<StableDigest>,
-    protected_facets: &BTreeSet<[StableDigest; 3]>,
+    protected_facets: &ProtectedFacets,
     cancellation: &dyn MeshingCancellationSignal,
     mut visit: impl FnMut(usize, DelaunayTetrahedronQuality) -> Result<(), DelaunayVolumeQualityError>,
 ) -> Result<(), DelaunayVolumeQualityError> {
@@ -49,6 +49,10 @@ pub(super) fn visit_from_metric_contexts(
                     .filter(|identity| boundary_nodes.contains(identity))
                     .count() as u8,
                 protected_facet_count: protected_facet_count(
+                    context.tetrahedron_node_identities,
+                    protected_facets,
+                ),
+                protected_edges: super::protected_edge_mask(
                     context.tetrahedron_node_identities,
                     protected_facets,
                 ),

@@ -348,17 +348,27 @@ fn lift_loop<Evaluator: ExactSurfaceEvaluator + ?Sized>(
                 "nonperiodic face chart loop does not close",
             ));
         };
+        // The loop is already identity-closed: its last node is its first. What remains is
+        // the topological winding, an integer, and the gap between the two pcurve images of that
+        // one node (vertex tolerance, chained pcurve evaluations), which can exceed roundoff.
+        // Any residual within a small fraction of a period of an integer winding is that gap.
         let periods = (residual / period).round();
+        let winding_tolerance = tolerance.max(PERIODIC_WINDING_GAP_FRACTION * period);
         if !periods.is_finite()
             || periods.abs() > lift_context.options.maximum_period_shifts as f64
-            || (residual - periods * period).abs() > tolerance
+            || (residual - periods * period).abs() > winding_tolerance
         {
             return Err(ExactFaceChartError::new(
                 ExactFaceChartErrorKind::InvalidInput,
                 &lift_context.source.source_face_id,
-                "periodic loop residual is not an integral bounded winding",
+                format!(
+                    "periodic loop residual {residual} on axis {axis} (period {period}, tolerance {tolerance}) is not an integral bounded winding; loop starts at {first_uv:?} and ends at {previous_uv:?}"
+                ),
             )
             .with_witness(&loop_boundary.source_wire_id, axis, residual));
+        }
+        if periods == 0.0 {
+            loop_boundary.segments.last_mut().unwrap().node_uv[1][axis] = first_uv[axis];
         }
         winding[axis] = periods as i32;
     }
@@ -493,6 +503,10 @@ fn validate_options(
     }
     Ok(())
 }
+
+/// Largest pcurve gap at a loop's closing node, as a fraction of the period, read as an integer
+/// winding. A vertex gap is many orders smaller; a lifting error is a large fraction of a period.
+const PERIODIC_WINDING_GAP_FRACTION: f64 = 1.0e-6;
 
 fn scaled_tolerance(left: f64, right: f64, options: ExactFaceChartOptions) -> f64 {
     options.maximum_periodic_residual * left.abs().max(right.abs()).max(1.0)

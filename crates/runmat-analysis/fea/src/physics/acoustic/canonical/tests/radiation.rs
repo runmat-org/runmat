@@ -39,7 +39,7 @@ fn fixture(
             .unwrap()
             .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(4.0);
     }
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![frequency]);
     model.signals.push(PhysicalSignal::Pressure(complex_signal(
         Pressure::new(amplitude[0]),
@@ -50,13 +50,13 @@ fn fixture(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "outgoing".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticRadiation,
     });
     (model, mesh)
@@ -76,11 +76,8 @@ fn solve(
         "acoustic",
         Frequency::new(frequency),
         AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
-            restart: 128,
-            maximum_iterations: 8192,
+            ..Default::default()
         },
         1e-8,
     )
@@ -97,7 +94,7 @@ fn outward_recovered_power(result: &CanonicalAcousticResponse, target: &str) -> 
     let mut power = 0.0;
     for face in result
         .projection
-        .boundary_faces_for_target(&RegionTarget::boundary(target))
+        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
     {
         let velocity =
             &result.element_velocity_m_per_s.canonical_values()[face.adjacent_element_indices[0]];
@@ -146,6 +143,9 @@ fn mean_wave(xs: [f64; 4], k: f64) -> [f64; 2] {
     mean
 }
 
+// witness: FEA-ACOUSTIC-BOUNDARY-001/radiation @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Local radiation reference and original spatial gates; witness linkage is not a
+//   passing verdict or nonlocal exterior-wave qualification.
 #[test]
 fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
     let mut failures = Vec::<String>::new();
@@ -305,7 +305,7 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                                 let mut total = [0.0; 3];
                                 for face in result
                                     .projection
-                                    .boundary_faces_for_target(&RegionTarget::boundary(target))
+                                    .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
                                 {
                                     for (value, component) in
                                         total.iter_mut().zip(face.oriented_area_vector_m2)

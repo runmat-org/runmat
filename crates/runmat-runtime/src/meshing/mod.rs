@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use runmat_geometry_core::{LengthUnit, PersistentEntityId};
 use runmat_meshing_core::{MeshingEvidence, MeshingRequestSettings, SolverMeshArtifact};
 
-pub use persistence::write_canonical_artifact_pair;
+pub use persistence::{write_canonical_artifact_pair, write_canonical_artifacts};
 #[cfg(feature = "plot-core")]
 pub use visualization::{solver_mesh_figure, SolverMeshFigureOptions};
 

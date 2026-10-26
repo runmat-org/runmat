@@ -1,6 +1,5 @@
 use super::*;
 use crate::solve::nonlinear::{solid::continuum_qualification::fixture, NonlinearSolveOptions};
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn block_admission_binds_inputs_output_and_cumulative_history() {
@@ -9,7 +8,6 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         let workload = NonlinearSolidWorkload {
             model,
             controls: NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 increment_count: 2,
                 max_accepted_increments: 8,
                 tolerance: 1e-9,
@@ -28,6 +26,7 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         let bytes =
             nonlinear_solid_block_payload_bytes_upper_bound(&workload, &mesh, &request).unwrap();
         let facts = PreparedNonlinearSolidBlockResourceFacts {
+            local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
             inputs: PreparedInputResourceFacts {
                 encoded_payload_bytes: ByteCount(100_000),
                 transport_closure_bytes: ByteCount(110_000),
@@ -53,6 +52,27 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         assert_eq!(
             plan.breakdown.input_decoded_resident_bytes,
             facts.inputs.decoded_resident_bytes_admission_budget
+        );
+        let threads =
+            crate::planning::resource::LocalExecutionPlan::from_cpu_millicores(3_000).unwrap();
+        let threaded = build_nonlinear_solid_block_resource_plan(
+            &workload,
+            &mesh,
+            &request,
+            None,
+            PreparedNonlinearSolidBlockResourceFacts {
+                local_execution: threads,
+                ..facts.clone()
+            },
+        )
+        .unwrap();
+        assert_eq!(threaded.request.cpu_millicores, 3_000);
+        assert_eq!(
+            crate::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                threaded.request.cpu_millicores
+            )
+            .unwrap(),
+            threads
         );
         assert!(plan.input.demand.governs_prepared_outputs());
         let FeaResourceDemand::StructuralNonlinearPipeline(demand) = &plan.input.demand else {
@@ -91,9 +111,20 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         )
         .unwrap();
         assert!(bytes >= actual.encoded_bytes_upper_bound);
+        // Blocks are encoded directly into reserved output; no value tree is built.
+        let encoding = runmat_canonical_codec::profile_canonical_encoding(
+            &block,
+            runmat_canonical_codec::CanonicalLimits::new(
+                1024 * 1024 * 1024,
+                100_000_000,
+                65_536,
+                64,
+            ),
+        )
+        .unwrap();
         assert!(
             facts.output.construction_resident_bytes_admission_budget.0
-                >= actual.materialization_resident_bytes_estimate
+                >= encoding.resident_workspace_bytes_estimate
         );
         for altered in 0..3 {
             let mut insufficient = facts.clone();

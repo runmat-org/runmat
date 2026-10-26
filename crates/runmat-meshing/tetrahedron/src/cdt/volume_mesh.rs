@@ -72,8 +72,37 @@ pub struct DelaunayVolumeMesh {
     pub provenance: DelaunayVolumeProvenance,
     pub quality: DelaunayVolumeQuality,
     pub facet_recovery_insertions: Vec<DelaunayFacetSteinerInsertion>,
-    pub refinement_insertions: Vec<DelaunayVolumeNode>,
-    pub sliver_mutations: Vec<DelaunayVolumeSliverMutation>,
+    /// Refinement insertions and optimization mutations in the order they were applied.
+    /// Coupled convergence interleaves them, and identity replay depends on that order.
+    pub quality_mutations: Vec<DelaunayVolumeQualityMutation>,
+}
+
+/// One applied step of volume quality convergence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "mutation",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum DelaunayVolumeQualityMutation {
+    Refined(DelaunayVolumeNode),
+    Optimized(DelaunayVolumeSliverMutation),
+}
+
+impl DelaunayVolumeMesh {
+    pub fn refinement_insertions(&self) -> impl Iterator<Item = &DelaunayVolumeNode> {
+        self.quality_mutations.iter().filter_map(|mutation| match mutation {
+            DelaunayVolumeQualityMutation::Refined(node) => Some(node),
+            DelaunayVolumeQualityMutation::Optimized(_) => None,
+        })
+    }
+    pub fn optimization_mutations(&self) -> impl Iterator<Item = &DelaunayVolumeSliverMutation> {
+        self.quality_mutations.iter().filter_map(|mutation| match mutation {
+            DelaunayVolumeQualityMutation::Refined(_) => None,
+            DelaunayVolumeQualityMutation::Optimized(mutation) => Some(mutation),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,7 +151,8 @@ impl std::fmt::Display for DelaunayVolumeMeshError {
 impl std::error::Error for DelaunayVolumeMeshError {}
 
 fn construct_component_mesh(
-    component_region: &runmat_geometry_core::PersistentEntityId,
+    // The one region of a single-region component; joined regions have no constraint star.
+    component_region: Option<&runmat_geometry_core::PersistentEntityId>,
     owned_constraints: super::DelaunayConstraints,
     metric_request: &MetricFieldRequest,
     frame: &frame::CanonicalVolumeFrame,
@@ -138,12 +168,16 @@ fn construct_component_mesh(
     let _component_guard = component_span.enter();
     let point_set_options = point_set_options(options);
     let (initial, point_set_barriers) = traced_substage("point_set", || {
-        if let Some(star) = constraint_star::try_build_constraint_star(
-            component_region,
-            constraints,
-            options.refinement.step.insertion,
-            cancellation,
-        )? {
+        let star = match component_region {
+            Some(region) => constraint_star::try_build_constraint_star(
+                region,
+                constraints,
+                options.refinement.step.insertion,
+                cancellation,
+            )?,
+            None => None,
+        };
+        if let Some(star) = star {
             let mut barriers = constraints
                 .facets
                 .iter()
@@ -309,8 +343,7 @@ fn construct_component_mesh(
         provenance: optimized.provenance,
         quality: optimized.quality,
         facet_recovery_insertions,
-        refinement_insertions: optimized.refinement_insertions,
-        sliver_mutations: optimized.optimization_mutations,
+        quality_mutations: optimized.quality_mutations,
     })
 }
 

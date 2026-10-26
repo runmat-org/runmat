@@ -48,15 +48,24 @@ pub(super) fn retained(
     observations: &HashMap<String, observations::ObservationAttachment>,
     maximum: u64,
 ) -> Result<u64, AnalysisPublicationError> {
+    // Staged records and attachments are owned typed values; they are priced as such, not as
+    // a materialized value tree (only the commit projection builds one, see `commit_work`).
+    let _ = maximum;
     let mut total = 0;
     for record in runs.values() {
-        total = add(total, resident(&RecordView(record), maximum)?)?;
+        total = add(
+            total,
+            runmat_canonical_codec::typed_resident_bytes_estimate(&RecordView(record))?,
+        )?;
     }
     for bytes in chunks.values() {
         total = add(total, bytes.len() as u64)?;
     }
     for attachment in observations.values() {
-        total = add(total, resident(attachment, maximum)?)?;
+        total = add(
+            total,
+            runmat_canonical_codec::typed_resident_bytes_estimate(attachment)?,
+        )?;
     }
     Ok(total)
 }
@@ -69,7 +78,7 @@ pub(super) fn commit_work(
     runs: &HashMap<String, PersistedAnalysisArtifact>,
     observations: &HashMap<String, observations::ObservationAttachment>,
     maximum: u64,
-) -> Result<u64, AnalysisPublicationError> {
+) -> Result<CommitWork, AnalysisPublicationError> {
     let descriptor = DescriptorShape {
         schema_version: 1,
         definition,
@@ -78,13 +87,45 @@ pub(super) fn commit_work(
         observations: DigestKeys(observations),
     };
     let mut record_work = 0;
+    let mut largest_record_parts = String::new();
     for record in runs.values() {
         let view = RecordView(record);
-        // Record projection for stable identity and its bounded JSON transport coexist.
-        record_work = record_work.max(add(
-            resident(&view, maximum)?,
+        // The record's identity is its direct canonical encoding and its transport is JSON
+        // written from the typed record: neither builds a value tree. Both buffers coexist.
+        let encoding = runmat_canonical_codec::profile_canonical_encoding(
+            &view,
+            runmat_canonical_codec::CanonicalLimits::new(
+                usize::try_from(maximum).unwrap_or(usize::MAX),
+                usize::MAX,
+                65_536,
+                64,
+            ),
+        )
+        .map_err(AnalysisPublicationError::from)?;
+        let work = add(
+            add(
+                encoding.encoded_bytes_upper_bound,
+                encoding.resident_workspace_bytes_estimate,
+            )?,
             profile_json_bytes(&view, maximum).map_err(AnalysisPublicationError::from)?,
-        )?);
+        )?;
+        if work > record_work {
+            record_work = work;
+            // Which parts of the record carry its size, for the rejection facts.
+            if let PersistedAnalysisArtifact::Standard(r) = record {
+                let json = |value: &dyn erased_json::Json| value.bytes(maximum);
+                largest_record_parts = format!(
+                    "run={} metadata={} field_inventory={} fields={} render_tiles={} histories={} original_fields={}",
+                    json(&r.run),
+                    json(&r.metadata),
+                    json(&r.field_inventory),
+                    json(&r.fields),
+                    json(&r.render_tiles),
+                    json(&r.observation_histories),
+                    json(&r.original_fields),
+                );
+            }
+        }
     }
     for attachment in observations.values() {
         record_work = record_work.max(add(
@@ -96,10 +137,29 @@ pub(super) fn commit_work(
     let descriptor_work = resident(&descriptor, maximum)?;
     let memory_transport = profile_json_bytes(&(&descriptor, manifest), maximum)
         .map_err(AnalysisPublicationError::from)?;
-    add(
+    let total = add(
         add(add(manifest_work, descriptor_work)?, record_work)?,
         memory_transport,
-    )
+    )?;
+    let mut largest_manifest_entries = Vec::new();
+    if let Some(entries) = manifest.as_object() {
+        for (key, value) in entries {
+            largest_manifest_entries.push((resident(value, maximum)?, key.as_str()));
+        }
+    }
+    largest_manifest_entries.sort_unstable_by(|left, right| right.cmp(left));
+    largest_manifest_entries.truncate(3);
+    Ok(CommitWork {
+        total,
+        facts: format!(
+            "commit work: manifest={manifest_work} (largest entries {largest_manifest_entries:?}), descriptor={descriptor_work}, largest_record={record_work} ({largest_record_parts}), transport={memory_transport}"
+        ),
+    })
+}
+
+pub(super) struct CommitWork {
+    pub total: u64,
+    pub facts: String,
 }
 
 pub(in crate::analysis::storage) fn admission_bytes(
@@ -120,7 +180,8 @@ pub(in crate::analysis::storage) fn admission_bytes(
                 &prepared.runs,
                 &prepared.observations,
                 prepared.maximum_bytes,
-            )?,
+            )?
+            .total,
         )?,
     )
 }
@@ -192,7 +253,8 @@ impl AnalysisPublicationBuilder {
         &mut self,
         input: &impl Serialize,
     ) -> Result<PreparationReservation, AnalysisPublicationError> {
-        let bytes = resident(input, self.maximum_bytes)?;
+        // The original and its copy are owned typed values, priced as such (no value tree).
+        let bytes = typed_resident(input, self.maximum_bytes)?;
         let required =
             bytes
                 .checked_mul(2)
@@ -307,7 +369,21 @@ impl AnalysisPublicationBuilder {
             .strip_prefix("sha256:")
             .ok_or("study fingerprint is not a SHA-256 identity")?;
         let maximum = self.source_workspace_limit()?;
-        let resident = resident(state, maximum)?;
+        // The state is encoded directly from its typed value; only the encoder's buffers are new.
+        let profile = runmat_canonical_codec::profile_canonical_encoding(
+            state,
+            CanonicalLimits::new(
+                usize::try_from(maximum).unwrap_or(usize::MAX),
+                usize::MAX,
+                65_536,
+                64,
+            ),
+        )
+        .map_err(AnalysisPublicationError::from)?;
+        let resident = add(
+            profile.encoded_bytes_upper_bound,
+            profile.resident_workspace_bytes_estimate,
+        )?;
         let available = maximum
             .checked_sub(resident)
             .filter(|bytes| *bytes > 0)
@@ -327,7 +403,8 @@ impl AnalysisPublicationBuilder {
             .persist_bytes(&relative, &bytes, available)
     }
 
-    /// Admit source and projected copies before family-manifest cloning/materialization.
+    /// Admit the typed clone of the public run placed into the family manifest.
+    /// Its JSON projection is admitted separately by `serialize_retained_manifest`.
     pub(in crate::analysis) fn admit_manifest_copy(
         &self,
         value: &impl Serialize,
@@ -336,13 +413,10 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(
-            resident(value, self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        self.admit(runmat_canonical_codec::typed_resident_bytes_estimate(
+            value,
+        )?)
+        .map_err(|error| error.context("family manifest typed public-run copy"))?;
         *guard = true;
         Ok(())
     }
@@ -354,13 +428,9 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(
-            resident(value, self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        // One JSON tree is built from the borrowed value.
+        self.admit(json_projection(value, self.maximum_bytes)?)
+            .map_err(|error| error.context("manifest JSON projection"))?;
         *guard = true;
         serde_json::to_value(value).map_err(AnalysisPublicationError::from)
     }
@@ -376,18 +446,33 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(
-            resident(&(manifest as &serde_json::Value, run), self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        // The retained manifest is already charged; only the run's JSON tree is new.
+        self.admit(json_projection(run, self.maximum_bytes)?)
+            .map_err(|error| error.context("manifest public-run JSON projection"))?;
         *guard = true;
         manifest["public_run"] =
             serde_json::to_value(run).map_err(AnalysisPublicationError::from)?;
         Ok(())
     }
+}
+
+/// Requested workspace for projecting a borrowed value into one JSON tree.
+fn json_projection(value: &impl Serialize, maximum: u64) -> Result<u64, AnalysisPublicationError> {
+    runmat_canonical_codec::profile_serialized(
+        value,
+        CanonicalLimits::new(
+            usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
+                message: "publication budget exceeds address space".into(),
+            })?,
+            100_000_000,
+            65_536,
+            64,
+        ),
+    )?
+    .json_projection_resident_bytes_estimate()
+    .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
+        message: "invalid JSON projection workspace".into(),
+    })
 }
 
 pub(super) fn source_workspace(
@@ -408,4 +493,16 @@ pub(super) fn source_workspace(
             message: "publication source workspace overflow".into(),
         })?;
     add(encoded, decoded)
+}
+
+mod erased_json {
+    /// JSON byte bound of one record part, for diagnostics.
+    pub(super) trait Json {
+        fn bytes(&self, maximum: u64) -> u64;
+    }
+    impl<T: serde::Serialize> Json for T {
+        fn bytes(&self, maximum: u64) -> u64 {
+            runmat_canonical_codec::profile_json_bytes(self, maximum).unwrap_or(u64::MAX)
+        }
+    }
 }

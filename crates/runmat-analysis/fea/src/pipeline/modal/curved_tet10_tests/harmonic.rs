@@ -15,8 +15,8 @@ use runmat_analysis_core::{
 use super::{
     canonical_tetrahedron_solver_mesh, constrain_everything_except_corner_x,
     curved_corner_x_stiffness_reference, fixture_model, replace_fixture_excitations,
-    ComputeBackend, ElementOrder, FixtureId, FormulationRequirement, ModalSolveOptions,
-    ModalTruncationPolicy, ProcedureStep, SolverMeshArtifact, StableDigest,
+    ComputeBackend, ElementOrder, FixtureId, ModalSolveOptions, ModalTruncationPolicy,
+    ProcedureStep, SolverMeshArtifact, StableDigest,
 };
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
@@ -78,6 +78,13 @@ impl SolidCase {
     }
 }
 
+// witness: FEA-DYNAMICS-RESPONSE-001/references @
+//   linear_structural_dynamics/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Direct and modal harmonic match independent phase and power references on a curved
+//   solid; oscillators, impulse and base-motion references are not covered.
+// witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @
+//   linear_structural_dynamics/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Direct and modal harmonic procedures agree on a curved solid.
 #[test]
 fn physical_solid_direct_and_modal_harmonic_match_independent_phase_and_power_references() {
     for case in [
@@ -117,7 +124,6 @@ fn qualify(case: SolidCase, damped: bool) {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(1),
             solver_mesh: Some(mesh.clone()),
             ..ModalSolveOptions::default()

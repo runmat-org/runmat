@@ -4,16 +4,15 @@
     {
       "id": "cantilever-static",
       "title": "Bend a steel cantilever",
-      "description": "Import a one-metre steel beam, clamp one end, and apply a downward load to the free end. Explore displacement and stress from the saved solve.",
+      "description": "Import a one-meter steel beam, clamp one end, and apply a downward load to the free end. Explore displacement and stress from the saved solve.",
       "entry": "cantilever-static.fea",
       "files": [
         "cantilever-static.fea",
         "cantilever-load.svg",
-        "geometry/cantilever.step",
-        "geometry/.runmat/geometry/cantilever.step.json"
+        "geometry/cantilever.step"
       ],
       "expected_outputs": [
-        "Node displacement, in metres",
+        "Node displacement, in meters",
         "Element von Mises stress, in pascals"
       ],
       "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
@@ -49,7 +48,7 @@
       ],
       "model_illustration": {
         "path": "cantilever-load.svg",
-        "alt": "One-metre cantilever: fixed at x = 0, with 100 kPa downward traction on the x = 1 m end face, giving a total load of 1,000 N.",
+        "alt": "One-meter cantilever: fixed at x = 0, with 100 kPa downward traction on the x = 1 m end face, giving a total load of 1,000 N.",
         "caption": "Loading schematic \u00b7 the arrow shows the resultant of the distributed end-face traction.",
         "width": 760,
         "height": 220
@@ -59,14 +58,13 @@
       "id": "two-body-static",
       "title": "Load a two-body assembly",
       "description": "Import two STEP solids, assign steel to both, fix their support faces and apply traction to one body.",
-      "entry": "structural-static-experimental.fea",
+      "entry": "structural-static.fea",
       "files": [
-        "structural-static-experimental.fea",
-        "geometry/two-box-assembly.step",
-        "geometry/.runmat/geometry/two-box-assembly.step.json"
+        "structural-static.fea",
+        "geometry/two-box-assembly.step"
       ],
       "expected_outputs": [
-        "Node displacement, in metres",
+        "Node displacement, in meters",
         "Element von Mises stress, in pascals"
       ],
       "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
@@ -82,19 +80,18 @@
     {
       "id": "heatsink-steady",
       "title": "Cool a finned electronics heat sink",
-      "description": "Apply heater power to an aluminium heat sink and inspect conduction into its air-cooled fins.",
+      "description": "Apply heater power to an aluminum heat sink and inspect conduction into its air-cooled fins.",
       "entry": "heatsink-steady.fea",
       "files": [
         "heatsink-steady.fea",
         "heatsink-setup.svg",
         "geometry/electronics-heatsink.step",
         "geometry/KICAD-LICENSE.md",
-        "geometry/electronics-heatsink-provenance.md",
-        "geometry/.runmat/geometry/electronics-heatsink.step.json"
+        "geometry/electronics-heatsink-provenance.md"
       ],
       "expected_outputs": [
         "Node temperature, in kelvin",
-        "Element heat flux, in watts per square metre"
+        "Element heat flux, in watts per square meter"
       ],
       "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
       "actions": [
@@ -109,11 +106,11 @@
         {
           "title": "Import the heat sink and choose the mesh",
           "start": "geometry heatsink {",
-          "end": "\nmaterial aluminium"
+          "end": "\nmaterial aluminum"
         },
         {
           "title": "Choose thermal properties",
-          "start": "material aluminium {",
+          "start": "material aluminum {",
           "end": "\nmodel cooled_heatsink"
         },
         {
@@ -129,7 +126,7 @@
       ],
       "model_illustration": {
         "path": "heatsink-setup.svg",
-        "alt": "Heat enters the flat mounting face of a finned aluminium heat sink; convection exchanges heat with 25 degree Celsius air on its outer surface.",
+        "alt": "Heat enters the flat mounting face of a finned aluminum heat sink; convection exchanges heat with 25 degree Celsius air on its outer surface.",
         "caption": "Thermal model \u00b7 distributed heater input at the mounting face and prescribed convection to ambient air.",
         "width": 760,
         "height": 260
@@ -144,8 +141,7 @@
         "tuning-fork-modal.fea",
         "tuning-fork-setup.svg",
         "geometry/tuning-fork.step",
-        "geometry/generate-tuning-fork.cc",
-        "geometry/.runmat/geometry/tuning-fork.step.json"
+        "geometry/generate-tuning-fork.cc"
       ],
       "expected_outputs": [
         "Natural frequencies, in hertz",
@@ -184,7 +180,7 @@
       ],
       "model_illustration": {
         "path": "tuning-fork-setup.svg",
-        "alt": "A 100 millimetre steel tuning fork has two free tines joined by a bridge and a fixed 8 by 6 millimetre stem end; there is no applied vibration force.",
+        "alt": "A 100 millimeter steel tuning fork has two free tines joined by a bridge and a fixed 8 by 6 millimeter stem end; there is no applied vibration force.",
         "caption": "Modal model \u00b7 clamp the bottom of the stem; leave the tines free. No forcing or damping is applied.",
         "width": 760,
         "height": 280
@@ -197,11 +193,10 @@
       "entry": "cantilever-coarse.fea",
       "files": [
         "cantilever-coarse.fea",
-        "geometry/cantilever.step",
-        "geometry/.runmat/geometry/cantilever.step.json"
+        "geometry/cantilever.step"
       ],
       "expected_outputs": [
-        "Node displacement, in metres",
+        "Node displacement, in meters",
         "Element von Mises stress, in pascals"
       ],
       "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
@@ -243,11 +238,10 @@
       "entry": "cantilever-medium.fea",
       "files": [
         "cantilever-medium.fea",
-        "geometry/cantilever.step",
-        "geometry/.runmat/geometry/cantilever.step.json"
+        "geometry/cantilever.step"
       ],
       "expected_outputs": [
-        "Node displacement, in metres",
+        "Node displacement, in meters",
         "Element von Mises stress, in pascals"
       ],
       "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",

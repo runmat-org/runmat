@@ -224,11 +224,11 @@ geometry part {
         expect exactly_one
     }
     region inlet : face {
-        select persistent_id "FIRST_FACE_ID"
+        select id "FIRST_FACE_ID"
         expect exactly_one
     }
     region outlet : face {
-        select persistent_id "SECOND_FACE_ID"
+        select id "SECOND_FACE_ID"
         expect exactly_one
     }
 }
@@ -271,7 +271,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.duct
-    formulation = experimental
     analysis sound {
         acoustic harmonic {
             frequencies = [0.2 Hz]

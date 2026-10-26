@@ -5,24 +5,21 @@ use std::time::Instant;
 
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
-    AnalysisModel, AnalysisProcedure, BoundaryOperator, ContactFriction, CoordinateFrame,
+    AnalysisModel, AnalysisProcedure, BoundaryOperator, CoordinateFrame,
     CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId, StateKind, StateOutput,
-    ThermalInterfaceTransfer,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
     SequenceIdentity, SolverResultIdentity, StepIdentity, StructuralLinearWorkload, StudyIdentity,
 };
+#[cfg(test)]
 use runmat_analysis_fea::physics::cfd::CfdDomainTopology;
-use runmat_analysis_fea::physics::cht::{couple_thermal_flow, ChtCouplingOptions};
-use runmat_analysis_fea::physics::fsi::{couple_fluid_structure, FsiCouplingOptions};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    run_modal_with_options, run_nonlinear_with_options, run_thermal_with_options,
-    run_transient_with_options, AnalysisRunIdentity, ComputeBackend, ExecutionBackend,
-    FeaBucklingRunResult, FeaProgressHandler, FeaRunResult, ModalSolveOptions, SolverMethod,
-    SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
+    run_modal_with_options, run_nonlinear_with_options, run_transient_with_options,
+    AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaBucklingRunResult,
+    FeaProgressHandler, FeaRunResult, ModalSolveOptions,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -56,7 +53,6 @@ mod render_topology;
 use modal_run_admission::analysis_admit_modal_run_with_id;
 use render_topology::render_topology_from_solver_mesh;
 pub mod assessment;
-mod fsi_result;
 mod nonlinear_result;
 pub use artifact_root::{
     AdmittedFrequencySamplePublication, AnalysisArtifactRoot, FrequencySampleArtifactRootInventory,
@@ -114,9 +110,9 @@ pub mod value_admission;
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
-use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
+use formulation_admission::RuntimeProxyFormulation;
 use linear_static_execution::analysis_run_linear_static_with_executor;
-use result_policy::{classify_run_status, evaluate_production_publication};
+use result_policy::classify_run_status;
 pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
@@ -131,6 +127,7 @@ use structural_study::{
 #[cfg(test)]
 use structural_study::{persist_immutable_study_evidence, run_evidence_stage};
 pub use study_completion_identity::AnalysisStudyCompletionIdentity;
+pub use study_completion_identity::split_attempt_run_id;
 pub use study_contract::analysis_study_content_digest;
 use study_contract::{
     sanitize_study_sweep_id, study_fingerprint, study_fingerprint_from_digest, study_issue_message,
@@ -189,6 +186,9 @@ pub struct StructuralStudyStepNumericalResult {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructuralStudySequenceNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
+    /// The effective memory ceiling the local placement admitted, min(authored, machine);
+    /// `None` for imported or remote completions. Provenance only, never identity.
+    pub effective_memory_ceiling_bytes: Option<u64>,
     pub steps: Vec<StructuralStudyStepNumericalResult>,
     pub states: Vec<runmat_analysis_fea::execution::CanonicalSemanticState>,
 }
@@ -328,12 +328,12 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 
 pub use contracts::{
     analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
-    analysis_procedure_ids, AcousticFrequencyResultsData, AnalysisAcousticRunOptions,
-    AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult, AnalysisDocumentKind,
-    AnalysisDocumentRunResult, AnalysisExecutionDuration, AnalysisExecutionCandidate, AnalysisExecutionCapability,
-    AnalysisExecutionChoices, AnalysisExecutionMode, AnalysisExecutionPlan,
-    AnalysisExecutionReadiness, AnalysisExecutionStep, AnalysisFieldBinding,
+    analysis_procedure_ids, AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData,
+    AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
+    AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionDuration, AnalysisExecutionCandidate, AnalysisExecutionCapability,
+    AnalysisExecutionChoices, AnalysisExecutionMode,
+    AnalysisExecutionPlan, AnalysisExecutionReadiness, AnalysisExecutionStep, AnalysisFieldBinding,
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
@@ -357,16 +357,16 @@ pub use contracts::{
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions, FallbackEvent,
     FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
-    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
-    QualityReason, QualityReasonCode, RunProvenance, RunStatus, StructuralFrequencyResultsData,
-    StructuralRandomResponseResultsData, StructuralResponseSpectrumResultsData, ThermalResultsData,
-    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
-    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND,
-    ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
-    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
-    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
+    StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
+    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
+    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
+    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
@@ -390,7 +390,6 @@ pub use operations::{
     analysis_trends_op,
 };
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
-pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use runmat_analysis_language::{
     operation_pattern_from_value_fact, remote_execution_profile_facts, ExecutionProfileFacts,
@@ -903,7 +902,6 @@ pub fn analysis_prepare_structural_study_op(
                     &study.model,
                     &preload_step.procedure_step.step_id,
                     preload_step.authored_execution.backend,
-                    preload_step.authored_execution.requirement,
                     preload_options,
                     study.context.clone(),
                 )?;
@@ -990,7 +988,6 @@ pub fn analysis_prepare_structural_study_op(
                     &study.model,
                     &preload_step.procedure_step.step_id,
                     preload_step.authored_execution.backend,
-                    preload_step.authored_execution.requirement,
                     preload_options,
                     study.context.clone(),
                 )?;
@@ -1064,7 +1061,6 @@ pub fn analysis_prepare_structural_study_op(
                     &study.model,
                     &preload_step.procedure_step.step_id,
                     preload_step.authored_execution.backend,
-                    preload_step.authored_execution.requirement,
                     preload_options,
                     study.context.clone(),
                 )?;
@@ -1135,7 +1131,6 @@ pub fn analysis_prepare_structural_study_op(
                 &study.model,
                 &preload_step.procedure_step.step_id,
                 preload_step.authored_execution.backend,
-                preload_step.authored_execution.requirement,
                 preload_options,
                 study.context.clone(),
             )?;
@@ -1305,7 +1300,6 @@ pub fn analysis_prepare_structural_study_op(
             &study.model,
             &step.procedure_step.step_id,
             step.authored_execution.backend,
-            step.authored_execution.requirement,
             options,
             study.context.clone(),
         )?;
@@ -1917,13 +1911,7 @@ pub fn analysis_run_linear_static_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_linear_static_with_options(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisRunOptions::default(),
-        context,
-    )
+    analysis_run_linear_static_with_options(model, backend, AnalysisRunOptions::default(), context)
 }
 
 pub fn analysis_run_modal_op(
@@ -1931,13 +1919,7 @@ pub fn analysis_run_modal_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_modal_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisModalRunOptions::default(),
-        context,
-    )
+    analysis_run_modal_with_options_op(model, backend, AnalysisModalRunOptions::default(), context)
 }
 
 pub fn analysis_run_acoustic_op(
@@ -1948,7 +1930,6 @@ pub fn analysis_run_acoustic_op(
     analysis_run_acoustic_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisAcousticRunOptions::default(),
         context,
     )
@@ -1957,7 +1938,6 @@ pub fn analysis_run_acoustic_op(
 fn execute_modal_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisModalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2016,7 +1996,6 @@ fn execute_modal_with_options(
         model,
         backend,
         ModalSolveOptions {
-            formulation_requirement,
             truncation: options.truncation,
             convergence: options.convergence,
             residual_vector_directions: options.residual_vector_directions.clone(),
@@ -2074,8 +2053,6 @@ fn analysis_admit_buckling_run_with_id(
         });
     }
     let numerically_acceptable = result_quality == QualityGate::Pass;
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
@@ -2089,6 +2066,7 @@ fn analysis_admit_buckling_run_with_id(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),
@@ -2111,9 +2089,7 @@ fn analysis_admit_buckling_run_with_id(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance,
     };
 
@@ -2128,7 +2104,6 @@ fn analysis_admit_buckling_run_with_id(
 fn execute_acoustic_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisAcousticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2248,6 +2223,7 @@ fn execute_acoustic_with_options(
             &boundary.operator,
             BoundaryOperator::AcousticRigidWall
                 | BoundaryOperator::AcousticRadiation
+                | BoundaryOperator::AcousticSphericalRadiation { .. }
                 | BoundaryOperator::AcousticImpedance { .. }
         )
     }) {
@@ -2277,7 +2253,6 @@ fn execute_acoustic_with_options(
     let identity = admit_runtime_proxy_for_operation(
         PhysicsFamily::Acoustic,
         AnalysisProcedure::HarmonicResponse,
-        formulation_requirement,
         RuntimeProxyFormulation::AcousticHashedTargetGraphProjection,
         AnalysisOperation::Acoustic,
         model,
@@ -2381,8 +2356,6 @@ fn execute_acoustic_with_options(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
@@ -2406,9 +2379,7 @@ fn execute_acoustic_with_options(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -2421,6 +2392,7 @@ fn execute_acoustic_with_options(
             preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: None,
         },
     };
 
@@ -2440,7 +2412,6 @@ pub fn analysis_run_transient_op(
     analysis_run_transient_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisTransientRunOptions::default(),
         context,
     )
@@ -2451,19 +2422,12 @@ pub fn analysis_run_cfd_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cfd_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisCfdRunOptions::default(),
-        context,
-    )
+    analysis_run_cfd_with_options_op(model, backend, AnalysisCfdRunOptions::default(), context)
 }
 
 pub fn analysis_run_cfd_with_options_op(
     model: &AnalysisModel,
     _backend: ComputeBackend,
-    _formulation_requirement: FormulationRequirement,
     _options: AnalysisCfdRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2490,7 +2454,6 @@ pub fn analysis_run_thermal_op(
     analysis_run_thermal_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisThermalRunOptions::default(),
         context,
     )
@@ -2501,462 +2464,27 @@ pub fn analysis_run_cht_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cht_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisChtRunOptions::default(),
-        context,
-    )
+    analysis_run_cht_with_options_op(model, backend, AnalysisChtRunOptions::default(), context)
 }
 
 fn execute_cht_with_options(
     model: &AnalysisModel,
-    backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
-    options: AnalysisChtRunOptions,
+    _backend: ComputeBackend,
+    _options: AnalysisChtRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    let _solver_context = install_fea_solver_context();
-    let cht_steps = model
-        .sequence
-        .steps
-        .iter()
-        .filter(|step| {
-            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
-                && matches!(
-                    step.procedure,
-                    AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
-                )
-        })
-        .collect::<Vec<_>>();
-    let [cht_step] = cht_steps.as_slice() else {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "FEA model must include exactly one supported conjugate-heat-transfer procedure for fea.run_cht",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ));
-    };
-    let cht_procedure = cht_step.procedure;
-    let Some(cfd_domain) = model.cfd.as_ref() else {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires model.cfd to be configured",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    };
-    if !cfd_domain.density.canonical_value().is_finite()
-        || cfd_domain.density.canonical_value() <= 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires finite positive reference_density_kg_per_m3",
-            BTreeMap::from([(
-                "reference_density_kg_per_m3".to_string(),
-                cfd_domain.density.canonical_value().to_string(),
-            )]),
-        ));
-    }
-    if !cfd_domain.dynamic_viscosity.canonical_value().is_finite()
-        || cfd_domain.dynamic_viscosity.canonical_value() <= 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires finite positive dynamic_viscosity_pa_s",
-            BTreeMap::from([(
-                "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity.canonical_value().to_string(),
-            )]),
-        ));
-    }
-    if !cfd_domain
-        .turbulence_intensity
-        .canonical_value()
-        .is_finite()
-        || cfd_domain.turbulence_intensity.canonical_value() < 0.0
-        || cfd_domain.turbulence_intensity.canonical_value() > 1.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires turbulence_intensity in [0, 1]",
-            BTreeMap::from([(
-                "turbulence_intensity".to_string(),
-                cfd_domain
-                    .turbulence_intensity
-                    .canonical_value()
-                    .to_string(),
-            )]),
-        ));
-    }
-    reject_moment_loads_for_run_family(
-        model,
-        AnalysisOperation::Cht.name(),
-        AnalysisOperation::Cht.version(),
-        "RM.FEA.RUN_CHT.INVALID_LOAD",
-        "CHT",
-        &context,
-    )?;
-    if options.sample_count < 2 || options.max_linear_iters == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht options require at least two time samples and max_linear_iters greater than zero",
-            BTreeMap::new(),
-        ));
-    }
-    if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht options require finite positive tolerance",
-            BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
-        ));
-    }
-    if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht options require finite positive residual_warn_threshold",
-            BTreeMap::from([(
-                "residual_warn_threshold".to_string(),
-                options.residual_warn_threshold.to_string(),
-            )]),
-        ));
-    }
-
-    if model.thermo_mechanical.is_none() {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires model.thermo_mechanical to be configured",
-            BTreeMap::new(),
-        ));
-    };
-    if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "CHT") {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            detail,
-            metadata,
-        ));
-    }
-    let solve_start = Instant::now();
-    let solver_mesh = resolve_solver_mesh_artifact(
-        model,
-        options.solver_mesh_artifact_path.as_deref(),
-        AnalysisOperation::Cht.name(),
-        AnalysisOperation::Cht.version(),
-        "RM.FEA.RUN_CHT.SOLVER_MESH_INVALID",
-        &context,
-    )?;
-    let Some(solver_mesh) = solver_mesh else {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.SOLVER_MESH_REQUIRED",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires a canonical solver mesh",
-            BTreeMap::new(),
-        ));
-    };
-    let identity = admit_runtime_proxy_for_operation(
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
-        cht_procedure,
-        formulation_requirement,
-        RuntimeProxyFormulation::Domain {
-            topology: RuntimeDomainTopology::from_solver_mesh(Some(&solver_mesh)),
-            source: RuntimeDomainSource::OrdinalProfile,
-        },
-        AnalysisOperation::Cht,
-        model,
-        &context,
-    )?;
-    let thermal_run = run_thermal_with_options(
-        model,
-        backend,
-        ThermalSolveOptions {
-            formulation_requirement,
-            procedure: ThermalProcedureControl::BackwardEuler {
-                snapshot_count: options.sample_count,
-            },
-            residual_target: options.residual_warn_threshold,
-            solver_mesh: Some(solver_mesh.clone()),
-            initial_fields: Vec::new(),
-        },
-    )
-    .map_err(|err| map_fea_run_error(AnalysisOperation::Cht, model, &context, err))?;
-
-    let topology = CfdDomainTopology::from_model(model, Some(&solver_mesh));
-    let coupling = couple_thermal_flow(
-        model,
-        cfd_domain,
-        &topology,
-        &thermal_run,
-        ChtCouplingOptions {
-            sample_count: options.sample_count,
-            procedure: cht_procedure,
-            residual_warn_threshold: options.residual_warn_threshold,
-        },
-    )
-    .map_err(|detail| {
-        operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.COUPLING_FAILED",
-                error_type: OperationErrorType::Backend,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            detail,
-            BTreeMap::new(),
-        )
-    })?;
-    let max_cfd_momentum_residual = coupling.max_cfd_momentum_residual;
-    let max_cfd_continuity_residual = coupling.max_cfd_continuity_residual;
-    let max_cht_transport_residual = coupling.max_transport_residual;
-    let mut run = thermal_run.run.clone();
-    run.identity = identity;
-    run.solver_method = SolverMethod::ChtConjugateProjection;
-    run.preconditioner = SolverPreconditioner::ThermalCfdProjection;
-    run.fields.extend(coupling.fields);
-    run.diagnostics.extend(coupling.diagnostics);
-    let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
-    run.diagnostics
-        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
-            code: "FEA_CHT_COST".to_string(),
-            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
-            message: format!(
-                "solve_ms={} sample_count={} max_linear_iters={} tolerance={}",
-                solve_ms, options.sample_count, options.max_linear_iters, options.tolerance,
-            ),
-        });
-
-    let mut fallback_events = Vec::new();
-    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
-        fallback_events.push(FallbackEvent::solver_backend());
-    }
-
-    let solver_convergence = if max_cfd_momentum_residual <= options.residual_warn_threshold
-        && max_cfd_continuity_residual <= options.residual_warn_threshold
-        && max_cht_transport_residual <= options.residual_warn_threshold
-    {
-        QualityGate::Pass
-    } else {
-        QualityGate::Warn
-    };
-    let result_quality = if run.fields_are_empty()
-        || thermal_run.temperature_snapshots.is_empty()
-        || thermal_run.time_points_s.is_empty()
-        || thermal_run.residual_norms.iter().any(|r| !r.is_finite())
-        || !max_cfd_momentum_residual.is_finite()
-        || !max_cfd_continuity_residual.is_finite()
-        || !max_cht_transport_residual.is_finite()
-    {
-        QualityGate::Fail
-    } else if max_cfd_momentum_residual > options.residual_warn_threshold
-        || max_cfd_continuity_residual > options.residual_warn_threshold
-        || max_cht_transport_residual > options.residual_warn_threshold
-    {
-        QualityGate::Warn
-    } else {
-        QualityGate::Pass
-    };
-
-    let mut quality_reasons = Vec::new();
-    if solver_convergence == QualityGate::Warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: "cht solver convergence gate is warning".to_string(),
-        });
-    }
-    if max_cfd_momentum_residual > options.residual_warn_threshold
-        || max_cfd_continuity_residual > options.residual_warn_threshold
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: format!(
-                "cht cfd residual exceeds threshold {}",
-                options.residual_warn_threshold,
-            ),
-        });
-    }
-    if max_cht_transport_residual > options.residual_warn_threshold {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: format!(
-                "cht interface transport residual exceeds threshold {}",
-                options.residual_warn_threshold
-            ),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_solver_backend_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
-        });
-    }
-
-    let numerically_acceptable = match options.quality_policy {
-        QualityPolicy::Strict => {
-            solver_convergence == QualityGate::Pass
-                && result_quality == QualityGate::Pass
-                && quality_reasons.is_empty()
-        }
-        QualityPolicy::Balanced => {
-            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
-        }
-        QualityPolicy::Exploratory => {
-            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
-        }
-    };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
-    let run_status = classify_run_status(result_quality, numerically_acceptable);
-    let solver_backend = run.solver_backend;
-    let execution_backend = run.execution_backend;
-    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
-    let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method;
-    let selected_preconditioner = run.preconditioner;
-
-    let result = AnalysisRunResult {
-        observation_scalars: Vec::new(),
-        run_id: storage::next_run_id(),
-        run,
-        render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
-        modal_results: None,
-        buckling_results: None,
-        thermal_results: Some(ThermalResultsData {
-            thermal_payload_version: "thermal_results/v1".to_string(),
-            time_points_s: thermal_run.time_points_s,
-            temperature_snapshots: thermal_run.temperature_snapshots,
-            temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
-            heat_flux_snapshots: thermal_run.heat_flux_snapshots,
-            energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
-            residual_norms: thermal_run.residual_norms,
-            reference_temperature_k: runmat_types::physical::Temperature::new(
-                thermal_run.reference_temperature_k.canonical_value(),
-            ),
-            initial_state: thermal_run.initial_state,
-        }),
-        transient_results: None,
-        nonlinear_results: None,
-        model_validity: QualityGate::Pass,
-        solver_convergence,
-        result_quality,
-        run_status,
-        numerically_acceptable,
-        production_publishable,
-        quality_reasons,
-        production_publication_reasons,
-        provenance: RunProvenance {
-            requested_backend: backend,
-            execution_backend,
-            solver_backend,
-            solver_device_apply_k_ratio,
-            solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(options.precision_mode),
-            deterministic_mode: options.deterministic_mode,
-            solver_method,
-            preconditioner: selected_preconditioner,
-            quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events,
-        },
-    };
-
-    Ok(OperationEnvelope::new(
+    Err(operation_error(
         AnalysisOperation::Cht.name(),
         AnalysisOperation::Cht.version(),
         &context,
-        result,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED",
+            error_type: OperationErrorType::Validation,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        "coupled flow execution requires an authored study with real geometry, meshing and governed task publication; the reduced partitioned realization has been removed",
+        BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
     ))
 }
 
@@ -2965,376 +2493,27 @@ pub fn analysis_run_fsi_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_fsi_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisFsiRunOptions::default(),
-        context,
-    )
+    analysis_run_fsi_with_options_op(model, backend, AnalysisFsiRunOptions::default(), context)
 }
 
 fn execute_fsi_with_options(
     model: &AnalysisModel,
-    backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
-    options: AnalysisFsiRunOptions,
+    _backend: ComputeBackend,
+    _options: AnalysisFsiRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    let _solver_context = install_fea_solver_context();
-    let fsi_steps = model
-        .sequence
-        .steps
-        .iter()
-        .filter(|step| {
-            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
-                && step.procedure == AnalysisProcedure::TransientResponse
-        })
-        .collect::<Vec<_>>();
-    if !matches!(fsi_steps.as_slice(), [_]) {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "FEA model must include exactly one transient fluid-structure-interaction procedure for fea.run_fsi",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ));
-    }
-    let Some(cfd_domain) = model.cfd.as_ref() else {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi requires model.cfd to be configured",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    };
-    if !cfd_domain.density.canonical_value().is_finite()
-        || cfd_domain.density.canonical_value() <= 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi requires finite positive reference_density_kg_per_m3",
-            BTreeMap::from([(
-                "reference_density_kg_per_m3".to_string(),
-                cfd_domain.density.canonical_value().to_string(),
-            )]),
-        ));
-    }
-    if !cfd_domain.dynamic_viscosity.canonical_value().is_finite()
-        || cfd_domain.dynamic_viscosity.canonical_value() <= 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi requires finite positive dynamic_viscosity_pa_s",
-            BTreeMap::from([(
-                "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity.canonical_value().to_string(),
-            )]),
-        ));
-    }
-    if !cfd_domain
-        .turbulence_intensity
-        .canonical_value()
-        .is_finite()
-        || cfd_domain.turbulence_intensity.canonical_value() < 0.0
-        || cfd_domain.turbulence_intensity.canonical_value() > 1.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi requires turbulence_intensity in [0, 1]",
-            BTreeMap::from([(
-                "turbulence_intensity".to_string(),
-                cfd_domain
-                    .turbulence_intensity
-                    .canonical_value()
-                    .to_string(),
-            )]),
-        ));
-    }
-    reject_moment_loads_for_run_family(
-        model,
-        AnalysisOperation::Fsi.name(),
-        AnalysisOperation::Fsi.version(),
-        "RM.FEA.RUN_FSI.INVALID_LOAD",
-        "FSI",
-        &context,
-    )?;
-    if options.sample_count < 2 || options.max_linear_iters == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi options require at least two time samples and max_linear_iters greater than zero",
-            BTreeMap::new(),
-        ));
-    }
-    if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi options require finite positive tolerance",
-            BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
-        ));
-    }
-    if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi options require finite positive residual_warn_threshold",
-            BTreeMap::from([(
-                "residual_warn_threshold".to_string(),
-                options.residual_warn_threshold.to_string(),
-            )]),
-        ));
-    }
-    if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "FSI") {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            detail,
-            metadata,
-        ));
-    }
-
-    let solver_mesh = resolve_solver_mesh_artifact(
-        model,
-        options.solver_mesh_artifact_path.as_deref(),
-        AnalysisOperation::Fsi.name(),
-        AnalysisOperation::Fsi.version(),
-        "RM.FEA.RUN_FSI.SOLVER_MESH_INVALID",
-        &context,
-    )?;
-    let identity = admit_runtime_proxy_for_operation(
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-        AnalysisProcedure::TransientResponse,
-        formulation_requirement,
-        RuntimeProxyFormulation::Domain {
-            topology: RuntimeDomainTopology::from_solver_mesh(solver_mesh.as_ref()),
-            source: RuntimeDomainSource::OrdinalProfile,
-        },
-        AnalysisOperation::Fsi,
-        model,
-        &context,
-    )?;
-    let solve_start = Instant::now();
-    let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
-    let coupling = couple_fluid_structure(
-        model,
-        cfd_domain,
-        &topology,
-        FsiCouplingOptions {
-            sample_count: options.sample_count,
-            max_linear_iters: options.max_linear_iters,
-            tolerance: options.tolerance,
-            residual_warn_threshold: options.residual_warn_threshold,
-        },
-    )
-    .map_err(|detail| {
-        operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.COUPLING_FAILED",
-                error_type: OperationErrorType::Backend,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            detail,
-            BTreeMap::new(),
-        )
-    })?;
-    let max_cfd_momentum_residual = coupling.max_cfd_momentum_residual;
-    let max_cfd_continuity_residual = coupling.max_cfd_continuity_residual;
-    let max_interface_residual = coupling.max_interface_residual;
-    let mut run = fsi_result::materialize(identity, backend, coupling);
-    let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
-    run.diagnostics
-        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
-            code: "FEA_FSI_COST".to_string(),
-            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
-            message: format!(
-                "solve_ms={} sample_count={} max_linear_iters={} tolerance={}",
-                solve_ms, options.sample_count, options.max_linear_iters, options.tolerance,
-            ),
-        });
-
-    let mut fallback_events = Vec::new();
-    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
-        fallback_events.push(FallbackEvent::solver_backend());
-    }
-
-    let solver_convergence = if max_interface_residual <= options.residual_warn_threshold {
-        QualityGate::Pass
-    } else {
-        QualityGate::Warn
-    };
-    let result_quality = if run.fields_are_empty()
-        || !max_cfd_momentum_residual.is_finite()
-        || !max_cfd_continuity_residual.is_finite()
-        || !max_interface_residual.is_finite()
-    {
-        QualityGate::Fail
-    } else if max_interface_residual > options.residual_warn_threshold {
-        QualityGate::Warn
-    } else {
-        QualityGate::Pass
-    };
-
-    let mut quality_reasons = Vec::new();
-    if solver_convergence == QualityGate::Warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: "fsi solver convergence gate is warning".to_string(),
-        });
-    }
-    if max_interface_residual > options.residual_warn_threshold {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: format!(
-                "fsi interface residual exceeds threshold {}",
-                options.residual_warn_threshold
-            ),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_solver_backend_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
-        });
-    }
-
-    let numerically_acceptable = match options.quality_policy {
-        QualityPolicy::Strict => {
-            solver_convergence == QualityGate::Pass
-                && result_quality == QualityGate::Pass
-                && quality_reasons.is_empty()
-        }
-        QualityPolicy::Balanced => {
-            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
-        }
-        QualityPolicy::Exploratory => {
-            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
-        }
-    };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
-    let run_status = classify_run_status(result_quality, numerically_acceptable);
-    let solver_backend = run.solver_backend;
-    let execution_backend = run.execution_backend;
-    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
-    let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method;
-    let selected_preconditioner = run.preconditioner;
-
-    let result = AnalysisRunResult {
-        observation_scalars: Vec::new(),
-        run_id: storage::next_run_id(),
-        run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
-        modal_results: None,
-        buckling_results: None,
-        thermal_results: None,
-        transient_results: None,
-        nonlinear_results: None,
-        model_validity: QualityGate::Pass,
-        solver_convergence,
-        result_quality,
-        run_status,
-        numerically_acceptable,
-        production_publishable,
-        quality_reasons,
-        production_publication_reasons,
-        provenance: RunProvenance {
-            requested_backend: backend,
-            execution_backend,
-            solver_backend,
-            solver_device_apply_k_ratio,
-            solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(options.precision_mode),
-            deterministic_mode: options.deterministic_mode,
-            solver_method,
-            preconditioner: selected_preconditioner,
-            quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events,
-        },
-    };
-
-    Ok(OperationEnvelope::new(
+    Err(operation_error(
         AnalysisOperation::Fsi.name(),
         AnalysisOperation::Fsi.version(),
         &context,
-        result,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED",
+            error_type: OperationErrorType::Validation,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        "coupled flow execution requires an authored study with real geometry, meshing and governed task publication; the reduced partitioned realization has been removed",
+        BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
     ))
 }
 
@@ -3344,13 +2523,10 @@ fn validate_thermal_run_model(
 ) -> Result<(), OperationErrorEnvelope> {
     if let Some((material, thermal)) = model.materials.iter().find_map(|material| {
         let thermal = material.thermal.as_ref()?;
-        (!thermal.conductivity_w_per_mk.canonical_value().is_finite()
-            || thermal.conductivity_w_per_mk.canonical_value() <= 0.0
-            || !thermal
-                .specific_heat_j_per_kgk
-                .canonical_value()
-                .is_finite()
-            || thermal.specific_heat_j_per_kgk.canonical_value() <= 0.0)
+        (!thermal.conductivity_w_per_mk.is_finite()
+            || thermal.conductivity_w_per_mk <= runmat_types::physical::Quantity::new(0.0)
+            || !thermal.specific_heat_j_per_kgk.is_finite()
+            || thermal.specific_heat_j_per_kgk <= runmat_types::physical::Quantity::new(0.0))
             .then_some((material, thermal))
     }) {
         return Err(operation_error(
@@ -3373,10 +2549,7 @@ fn validate_thermal_run_model(
                 ),
                 (
                     "specific_heat_j_per_kgk".to_string(),
-                    thermal
-                        .specific_heat_j_per_kgk
-                        .canonical_value()
-                        .to_string(),
+                    thermal.specific_heat_j_per_kgk.canonical_value().to_string(),
                 ),
             ]),
         ));
@@ -3402,9 +2575,7 @@ fn validate_thermal_run_model(
         };
         (!value
             .study_constant(&model.signals)
-            .is_some_and(|temperature| {
-                temperature.is_finite() && temperature.canonical_value() > 0.0
-            }))
+            .is_some_and(|temperature| temperature.is_finite() && temperature.canonical_value() > 0.0))
         .then_some(constraint.constraint_id.as_str())
     });
     let invalid_boundary = model.boundaries.iter().find_map(|boundary| {
@@ -3418,9 +2589,7 @@ fn validate_thermal_run_model(
             } => {
                 !ambient_temperature
                     .study_constant(&model.signals)
-                    .is_some_and(|temperature| {
-                        temperature.is_finite() && temperature.canonical_value() > 0.0
-                    })
+                    .is_some_and(|temperature| temperature.is_finite() && temperature.canonical_value() > 0.0)
                     || !coefficient.is_finite()
                     || coefficient.canonical_value() < 0.0
             }
@@ -3453,7 +2622,6 @@ fn validate_thermal_run_model(
 fn execute_transient_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisTransientRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -3493,7 +2661,6 @@ fn execute_transient_with_options(
         model,
         backend,
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
-            formulation_requirement,
             time_step_policy: match options.time_step_policy {
                 contracts::AnalysisStructuralTimeStepPolicy::Fixed { interval_count } => {
                     runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
@@ -3719,8 +2886,6 @@ fn analysis_admit_transient_run_with_id(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
@@ -3779,9 +2944,7 @@ fn analysis_admit_transient_run_with_id(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -3794,6 +2957,7 @@ fn analysis_admit_transient_run_with_id(
             preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: None,
         },
     };
 
@@ -3813,7 +2977,6 @@ pub fn analysis_run_nonlinear_op(
     analysis_run_nonlinear_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisNonlinearRunOptions::default(),
         context,
     )
@@ -3822,7 +2985,6 @@ pub fn analysis_run_nonlinear_op(
 fn execute_nonlinear_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisNonlinearRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -3981,9 +3143,11 @@ fn execute_nonlinear_with_options(
         ));
     }
 
-    let contact_options =
-        model_contact_interface_options(model, options.contact_enforcement.as_ref());
-    if options.contact_enforcement.is_some() && contact_options.is_none() {
+    let has_contact = model
+        .interfaces
+        .iter()
+        .any(|interface| matches!(interface.kind, AnalysisInterfaceKind::Contact(_)));
+    if options.contact_enforcement.is_some() && !has_contact {
         return Err(operation_error(
             AnalysisOperation::Nonlinear.name(),
             AnalysisOperation::Nonlinear.version(),
@@ -3998,6 +3162,8 @@ fn execute_nonlinear_with_options(
             BTreeMap::new(),
         ));
     }
+    let contact_options =
+        has_contact.then(|| contact_enforcement(options.contact_enforcement.as_ref()));
     if let Some(contact_options) = contact_options.as_ref() {
         if let Err((detail, metadata)) = validate_contact_interface_options(contact_options) {
             return Err(operation_error(
@@ -4028,7 +3194,6 @@ fn execute_nonlinear_with_options(
         model,
         backend,
         runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
-            formulation_requirement,
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
             tolerance: options.tolerance,
@@ -4040,7 +3205,7 @@ fn execute_nonlinear_with_options(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             solver_mesh: solver_mesh.clone(),
-            contact_context: to_fea_contact_interface_context(contact_options),
+            contact_enforcement: contact_options,
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Nonlinear, model, &context, err))?;
@@ -4279,8 +3444,6 @@ fn execute_nonlinear_with_options(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
@@ -4305,9 +3468,7 @@ fn execute_nonlinear_with_options(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -4320,6 +3481,7 @@ fn execute_nonlinear_with_options(
             preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
+            effective_memory_ceiling_bytes: None,
         },
     };
 
@@ -4334,24 +3496,15 @@ fn execute_nonlinear_with_options(
 pub fn analysis_run_linear_static_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_linear_static_with_executor(
-        model,
-        backend,
-        formulation_requirement,
-        options,
-        context,
-        None,
-    )
+    analysis_run_linear_static_with_executor(model, backend, options, context, None)
 }
 
 pub fn analysis_prepare_linear_static_run_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<PreparedStructuralLinearRun, OperationErrorEnvelope> {
@@ -4376,32 +3529,18 @@ pub fn analysis_prepare_linear_static_run_op(
         })?
         .step_id
         .clone();
-    prepare_linear_static_step_run(
-        model,
-        &step_id,
-        backend,
-        formulation_requirement,
-        options,
-        context,
-    )
+    prepare_linear_static_step_run(model, &step_id, backend, options, context)
 }
 
 fn prepare_linear_static_step_run(
     model: &AnalysisModel,
     step_id: &ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<PreparedStructuralLinearRun, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let workload = prepare_linear_static_workload_template(
-        model,
-        step_id,
-        backend,
-        formulation_requirement,
-        &options,
-    )?;
+    let workload = prepare_linear_static_workload_template(model, step_id, backend, &options)?;
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
@@ -4422,13 +3561,13 @@ fn prepare_linear_static_workload_template(
     model: &AnalysisModel,
     step_id: &ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: &AnalysisRunOptions,
 ) -> Result<StructuralLinearWorkload, OperationErrorEnvelope> {
     let requested_preconditioner = match options.preconditioner_mode {
-        PreconditionerMode::Auto | PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Auto => SpdPreconditionerKind::Auto,
+        PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
-        PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Amg => SpdPreconditionerKind::Amg,
     };
     let accelerator_available = runmat_accelerate_api::provider().is_some();
     let requested_solver_backend = match backend {
@@ -4446,7 +3585,6 @@ fn prepare_linear_static_workload_template(
         model: model.clone(),
         step_id: step_id.clone(),
         backend,
-        formulation_requirement,
         preconditioner: requested_preconditioner,
         algebra_backend: requested_solver_backend,
         observation_execution:
@@ -4469,7 +3607,7 @@ fn analysis_complete_linear_static_run_with_id(
     assigned_run_id: Option<&str>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let context = prepared.context.clone();
-    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id)?;
+    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id, None)?;
     persist_linear_static_run(&context, &envelope.data)?;
     Ok(envelope)
 }
@@ -4478,15 +3616,16 @@ fn analysis_admit_linear_static_run_with_id(
     prepared: PreparedStructuralLinearRun,
     run: FeaRunResult,
     assigned_run_id: Option<&str>,
+    effective_memory_ceiling_bytes: Option<u64>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let result = linear_static_result::admit_linear_static_result(
         linear_static_result::LinearStaticResultInput {
             model: &prepared.workload.model,
             solver_mesh: prepared.solver_mesh.as_ref(),
             requested_backend: prepared.workload.backend,
-            formulation_requirement: prepared.workload.formulation_requirement,
             options: &prepared.options,
             assigned_run_id,
+            effective_memory_ceiling_bytes,
         },
         run,
     )
@@ -4587,54 +3726,22 @@ fn resolve_solver_mesh_artifact(
     Ok(Some(mesh))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ResolvedContactOptions {
-    penalty_stiffness_scale: f64,
-    max_penetration_ratio: f64,
-    friction_coefficient: f64,
-}
-
-fn model_contact_interface_options(
-    model: &AnalysisModel,
+/// Penalty enforcement controls applied to every authored contact interface. Interfaces and
+/// their friction law are read by the solver from the analysis model itself.
+fn contact_enforcement(
     enforcement: Option<&ContactEnforcementOptions>,
-) -> Option<ResolvedContactOptions> {
-    let penalty_stiffness_scale = enforcement
-        .map(|value| value.penalty_stiffness_scale)
-        .unwrap_or(1.0);
-    let max_penetration_ratio = enforcement
-        .map(|value| value.max_penetration_ratio)
-        .unwrap_or(0.01);
-    model
-        .interfaces
-        .iter()
-        .filter_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::Contact(contact) => Some(ResolvedContactOptions {
-                penalty_stiffness_scale,
-                max_penetration_ratio,
-                friction_coefficient: match contact.friction {
-                    ContactFriction::Frictionless => 0.0,
-                    ContactFriction::Coulomb { coefficient } => coefficient.canonical_value(),
-                },
-            }),
-            AnalysisInterfaceKind::FluidStructure(_)
-            | AnalysisInterfaceKind::ConjugateHeatTransfer(_) => None,
-        })
-        .next()
-}
-
-fn to_fea_contact_interface_context(
-    options: Option<ResolvedContactOptions>,
-) -> Option<runmat_analysis_fea::FeaContactInterfaceContext> {
-    options.map(|contact| runmat_analysis_fea::FeaContactInterfaceContext {
-        enabled: true,
-        penalty_stiffness_scale: contact.penalty_stiffness_scale,
-        max_penetration_ratio: contact.max_penetration_ratio,
-        friction_coefficient: contact.friction_coefficient,
-    })
+) -> runmat_analysis_fea::FeaContactEnforcement {
+    let defaults = runmat_analysis_fea::FeaContactEnforcement::default();
+    runmat_analysis_fea::FeaContactEnforcement {
+        penalty_stiffness_scale: enforcement
+            .map_or(defaults.penalty_stiffness_scale, |value| value.penalty_stiffness_scale),
+        max_penetration_ratio: enforcement
+            .map_or(defaults.max_penetration_ratio, |value| value.max_penetration_ratio),
+    }
 }
 
 fn validate_contact_interface_options(
-    options: &ResolvedContactOptions,
+    options: &runmat_analysis_fea::FeaContactEnforcement,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
     if !options.penalty_stiffness_scale.is_finite() || options.penalty_stiffness_scale <= 0.0 {
         return Err((
@@ -4654,108 +3761,6 @@ fn validate_contact_interface_options(
                 options.max_penetration_ratio.to_string(),
             )]),
         ));
-    }
-    if !options.friction_coefficient.is_finite() || options.friction_coefficient < 0.0 {
-        return Err((
-            "contact interface model requires finite non-negative friction_coefficient".to_string(),
-            BTreeMap::from([(
-                "friction_coefficient".to_string(),
-                options.friction_coefficient.to_string(),
-            )]),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_coupled_flow_interfaces(
-    model: &AnalysisModel,
-    family: &str,
-) -> Result<(), (String, BTreeMap<String, String>)> {
-    for interface in &model.interfaces {
-        match &interface.kind {
-            AnalysisInterfaceKind::Contact(_) => {
-                return Err((
-                    format!(
-                        "{family} coupling does not accept structural contact interfaces as fluid/thermal interface mappings"
-                    ),
-                    BTreeMap::from([
-                        ("interface_id".to_string(), interface.interface_id.clone()),
-                        (
-                            "primary_region_id".to_string(),
-                            interface.primary.region_id.clone(),
-                        ),
-                        (
-                            "secondary_region_id".to_string(),
-                            interface.secondary.region_id.clone(),
-                        ),
-                        ("interface_kind".to_string(), "contact".to_string()),
-                    ]),
-                ));
-            }
-            AnalysisInterfaceKind::FluidStructure(_) => {
-                if family != "FSI" {
-                    return Err((
-                        format!(
-                            "{family} coupling does not accept fluid-structure interfaces as fluid/thermal interface mappings"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "primary_region_id".to_string(),
-                                interface.primary.region_id.clone(),
-                            ),
-                            (
-                                "secondary_region_id".to_string(),
-                                interface.secondary.region_id.clone(),
-                            ),
-                            ("interface_kind".to_string(), "fluid_structure".to_string()),
-                        ]),
-                    ));
-                }
-            }
-            AnalysisInterfaceKind::ConjugateHeatTransfer(cht_interface) => {
-                if family != "CHT" {
-                    return Err((
-                        format!(
-                            "{family} coupling does not accept conjugate heat-transfer interfaces as fluid/structure interface mappings"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "primary_region_id".to_string(),
-                                interface.primary.region_id.clone(),
-                            ),
-                            (
-                                "secondary_region_id".to_string(),
-                                interface.secondary.region_id.clone(),
-                            ),
-                            (
-                                "interface_kind".to_string(),
-                                "conjugate_heat_transfer".to_string(),
-                            ),
-                        ]),
-                    ));
-                }
-                let invalid_transfer = match cht_interface.transfer {
-                    ThermalInterfaceTransfer::Perfect => false,
-                    ThermalInterfaceTransfer::Conductance(conductance) => {
-                        !conductance.is_finite() || conductance.canonical_value() <= 0.0
-                    }
-                    ThermalInterfaceTransfer::Resistance(resistance) => {
-                        !resistance.is_finite() || resistance.canonical_value() <= 0.0
-                    }
-                };
-                if invalid_transfer {
-                    return Err((
-                        format!("{family} conjugate heat-transfer interface has an invalid transfer law"),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            ("transfer_law".to_string(), format!("{:?}", cht_interface.transfer)),
-                        ]),
-                    ));
-                }
-            }
-        }
     }
     Ok(())
 }

@@ -21,7 +21,6 @@ impl CompiledAnalysisStudy {
         let Self {
             module_path,
             study_id,
-            formulation_requirement,
             study_inputs,
             outputs,
             assessments,
@@ -33,7 +32,6 @@ impl CompiledAnalysisStudy {
             &(
                 module_path,
                 study_id,
-                formulation_requirement,
                 study_inputs,
                 outputs,
                 assessments,

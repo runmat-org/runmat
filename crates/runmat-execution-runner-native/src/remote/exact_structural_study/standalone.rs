@@ -109,6 +109,9 @@ pub(super) async fn linear(
             required_capabilities: Default::default(),
             accelerator_requests: decoded.analysis_accelerator_requests.clone(),
             local_execution: decoded.local_execution,
+            solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         },
         policy,
     )
@@ -173,6 +176,7 @@ pub(super) async fn transient(
         .transpose()?;
     let preparation = runmat_analysis_execution::prepare_structural_transient_sequence(
         StructuralTransientSequencePreparationInput {
+            local_execution: decoded.local_execution,
             workload: &workload,
             mesh: &completed.result.artifact,
             modal_state: None,
@@ -251,6 +255,7 @@ pub(super) async fn frequency(
     let completion = match crate::execute_structural_frequency_remotely(
         Arc::clone(&pool),
         crate::StructuralFrequencyExecutionPreparation {
+            local_execution: decoded.local_execution,
             workload: *workload,
             mesh: completed.result.artifact.clone(),
             prestress_state: None,

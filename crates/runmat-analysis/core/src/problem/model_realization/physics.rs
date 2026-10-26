@@ -32,7 +32,7 @@ pub(super) fn extend_model_physics(
                 Ok(AnalysisBoundary {
                     boundary_id: value.boundary_id.clone(),
                     target: targets.region_target(&value.target, TargetCardinality::OneOrMore)?,
-                    operator: boundary_operator(&value.kind),
+                    operator: boundary_operator(&value.boundary_id, &value.kind)?,
                 })
             })
             .collect::<Result<Vec<_>, AnalysisModelRealizationError>>()?,
@@ -114,7 +114,7 @@ pub(super) fn extend_model_physics(
         source
             .excitations
             .iter()
-            .map(|value| realize_excitation(value, targets))
+            .map(|value| realize_excitation(value, &source.constraints, targets))
             .collect::<Result<Vec<_>, _>>()?,
     );
     target.initial_conditions.extend(
@@ -127,8 +127,12 @@ pub(super) fn extend_model_physics(
     Ok(())
 }
 
-fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
-    match value {
+fn boundary_operator(
+    boundary_id: &str,
+    value: &AuthoredBoundaryKind,
+) -> Result<BoundaryOperator, AnalysisModelRealizationError> {
+    let unbound = || AnalysisModelRealizationError::UnboundModel(boundary_id.to_string());
+    Ok(match value {
         AuthoredBoundaryKind::StructuralPressure { value } => {
             BoundaryOperator::StructuralPressure {
                 value: value.clone(),
@@ -142,29 +146,37 @@ fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
             coefficient,
         } => BoundaryOperator::ThermalConvection {
             ambient_temperature: ambient_temperature.clone(),
-            coefficient: *coefficient,
+            coefficient: coefficient.constant().ok_or_else(unbound)?,
         },
         AuthoredBoundaryKind::ThermalRadiation {
             ambient_temperature,
             emissivity,
         } => BoundaryOperator::ThermalRadiation {
             ambient_temperature: ambient_temperature.clone(),
-            emissivity: *emissivity,
+            emissivity: emissivity.constant().ok_or_else(unbound)?,
         },
         AuthoredBoundaryKind::MagneticInsulation => BoundaryOperator::MagneticInsulation,
         AuthoredBoundaryKind::AcousticRigidWall => BoundaryOperator::AcousticRigidWall,
         AuthoredBoundaryKind::AcousticRadiation => BoundaryOperator::AcousticRadiation,
+        AuthoredBoundaryKind::AcousticSphericalRadiation { center_m } => {
+            BoundaryOperator::AcousticSphericalRadiation {
+                center_m: *center_m,
+            }
+        }
         AuthoredBoundaryKind::AcousticImpedance { impedance } => {
             BoundaryOperator::AcousticImpedance {
                 impedance: *impedance,
             }
+        }
+        AuthoredBoundaryKind::AcousticImpedanceLaw { law } => {
+            BoundaryOperator::AcousticImpedanceLaw { law: law.clone() }
         }
         AuthoredBoundaryKind::FluidOutletPressure { value } => {
             BoundaryOperator::FluidOutletPressure {
                 value: value.clone(),
             }
         }
-    }
+    })
 }
 
 fn interface_kind(value: &AuthoredInterfaceKind) -> AnalysisInterfaceKind {
@@ -206,6 +218,7 @@ fn interface_kind(value: &AuthoredInterfaceKind) -> AnalysisInterfaceKind {
 
 fn realize_excitation(
     value: &AuthoredExcitation,
+    constraints: &[crate::AuthoredConstraint],
     targets: &TargetResolver<'_>,
 ) -> Result<ExcitationAction, AnalysisModelRealizationError> {
     let target = match &value.target {
@@ -213,6 +226,25 @@ fn realize_excitation(
             ExcitationTarget::Region(targets.region_target(source, TargetCardinality::OneOrMore)?)
         }
         AuthoredExcitationTarget::WholeModel => ExcitationTarget::WholeModel,
+        AuthoredExcitationTarget::ReferencePoint { constraint_id } => {
+            let point = constraints
+                .iter()
+                .find(|constraint| &constraint.constraint_id == constraint_id)
+                .and_then(|constraint| match &constraint.kind {
+                    crate::AuthoredConstraintKind::StructuralRigidCoupling(coupling)
+                    | crate::AuthoredConstraintKind::StructuralDistributingCoupling(coupling) => {
+                        Some(coupling.reference_point.clone())
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    AnalysisModelRealizationError::InvalidModel(format!(
+                        "excitation `{}` targets the reference point of `{constraint_id}`, which is not a rigid or distributing coupling of this model",
+                        value.excitation_id
+                    ))
+                })?;
+            ExcitationTarget::ReferencePoint(point)
+        }
     };
     let excitation = AnalysisExcitation {
         excitation_id: ExcitationId(value.excitation_id.clone()),

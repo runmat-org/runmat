@@ -19,6 +19,7 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             projection("real"),
             projection("imag"),
             projection("phase"),
+            projection("level"),
             magnitude(),
             component(),
             principal(),
@@ -31,6 +32,8 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             extremum("min"),
             extremum("max"),
             spatial_reduction("resultant"),
+            flux(),
+            sound_power(),
             moment(),
             sample(),
             interpolate(),
@@ -48,6 +51,7 @@ pub(crate) enum OutputOperation {
     Real,
     Imaginary,
     Phase,
+    Level,
     Magnitude,
     Component,
     Principal,
@@ -61,6 +65,8 @@ pub(crate) enum OutputOperation {
     Maximum,
     Resultant,
     Moment,
+    NormalFlux,
+    SoundPower,
     SpatialSample,
     InterpolatePoint,
     InterpolatePath,
@@ -84,6 +90,7 @@ impl OutputOperation {
             "fea.output.real" => Some(Self::Real),
             "fea.output.imag" => Some(Self::Imaginary),
             "fea.output.phase" => Some(Self::Phase),
+            "fea.output.level" => Some(Self::Level),
             "fea.output.magnitude" => Some(Self::Magnitude),
             "fea.output.component" => Some(Self::Component),
             "fea.output.principal" => Some(Self::Principal),
@@ -97,6 +104,8 @@ impl OutputOperation {
             "fea.output.max" => Some(Self::Maximum),
             "fea.output.resultant" => Some(Self::Resultant),
             "fea.output.moment" => Some(Self::Moment),
+            "fea.output.flux" => Some(Self::NormalFlux),
+            "fea.output.sound_power" => Some(Self::SoundPower),
             "fea.output.spatial.sample" => Some(Self::SpatialSample),
             "fea.output.interpolate.point" => Some(Self::InterpolatePoint),
             "fea.output.interpolate.path" => Some(Self::InterpolatePath),
@@ -223,6 +232,36 @@ fn spatial_reduction(name: &str) -> OperationFacts {
         OperationDistribution::DeterministicReduction,
         TopologyApplicability::Region,
         &format!("fea.output.{name}"),
+    )
+}
+
+fn flux() -> OperationFacts {
+    operation(
+        "flux",
+        "Integrate the outward normal component of a vector field through a face region.",
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter("through", region(), OperationParameterArity::Required),
+        ],
+        OperationTypePattern::Any,
+        OperationDistribution::DeterministicReduction,
+        TopologyApplicability::Region,
+        "fea.output.flux",
+    )
+}
+
+fn sound_power() -> OperationFacts {
+    operation(
+        "sound_power",
+        "Mean acoustic power of a harmonic analysis through a face region (outward positive).",
+        vec![
+            parameter("analysis", OperationTypePattern::Any, OperationParameterArity::Required),
+            parameter("through", region(), OperationParameterArity::Required),
+        ],
+        OperationTypePattern::Any,
+        OperationDistribution::DeterministicReduction,
+        TopologyApplicability::Region,
+        "fea.output.sound_power",
     )
 }
 
@@ -536,10 +575,13 @@ operation_id!(OperationLoweringId);
 mod tests {
     use super::*;
 
+    // witness: FEA-AUTHORING-OUTPUT-002/shared_query_catalog @
+    //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+    //   boundary: Output operations are one shared public identity with FEA overloads.
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 23);
+        assert_eq!(extension.operations.len(), 26);
         for expected in ["recover", "min", "max"] {
             assert!(extension
                 .operations

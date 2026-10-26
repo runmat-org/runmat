@@ -126,12 +126,22 @@ pub(crate) fn realize(
 
     let mut assigned = vec![None; projection.nodes.len()];
     let mut applied_condition_ids = Vec::new();
+    // Authored fields hold one value per mesh node. The second-side node of a conductance
+    // interface (appended after the mesh nodes, with its mesh node's id) takes its node's value.
+    let mesh_node = |node: usize| {
+        projection
+            .node_index(projection.nodes[node].node_id)
+            .unwrap_or(node)
+    };
+    let mesh_node_count = (0..projection.nodes.len())
+        .filter(|&node| mesh_node(node) == node)
+        .count();
     for condition in selected_conditions(model, step) {
         let field = fields::values(
             model,
             condition,
             runmat_execution::Digest::from_bytes(*projection.mesh_digest.bytes()),
-            projection.nodes.len(),
+            mesh_node_count,
             fields,
         )
         .map_err(|error| ThermalInitialStateError::FieldAdmission {
@@ -150,7 +160,7 @@ pub(crate) fn realize(
         let nodes = target_nodes(projection, condition)?;
         for node in nodes {
             let value = match (field, uniform) {
-                (Some(values), _) => values[node],
+                (Some(values), _) => values[mesh_node(node)],
                 (_, Some(value)) => value,
                 _ => unreachable!("admitted initial condition has a field or uniform value"),
             };
@@ -165,10 +175,17 @@ pub(crate) fn realize(
         applied_condition_ids.push(condition.initial_condition_id.clone());
     }
 
-    let authored_node_count = assigned.iter().filter(|value| value.is_some()).count();
+    // Evidence counts mesh nodes; a second-side interface node is part of its mesh node.
+    let is_mesh_node = |node: usize| mesh_node(node) == node;
+    let authored_node_count = assigned
+        .iter()
+        .enumerate()
+        .filter(|(node, value)| is_mesh_node(*node) && value.is_some())
+        .count();
     let prescribed_node_count = prescribed_temperature_k
         .iter()
-        .filter(|value| value.is_some())
+        .enumerate()
+        .filter(|(node, value)| is_mesh_node(*node) && value.is_some())
         .count();
     let mut authored_and_prescribed_node_count = 0;
     let mut reference_node_count = 0;
@@ -187,13 +204,13 @@ pub(crate) fn realize(
                 });
             }
             (Some(initial), Some(_)) => {
-                authored_and_prescribed_node_count += 1;
+                authored_and_prescribed_node_count += usize::from(is_mesh_node(node_index));
                 temperature_k.push(initial);
             }
             (Some(initial), None) => temperature_k.push(initial),
             (None, Some(boundary)) => temperature_k.push(boundary),
             (None, None) => {
-                reference_node_count += 1;
+                reference_node_count += usize::from(is_mesh_node(node_index));
                 temperature_k.push(reference_temperature_k);
             }
         }

@@ -252,11 +252,11 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -404,11 +404,11 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
         });
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -1045,7 +1045,7 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
     let mut boundary = spec(
         "boundary_average",
         ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(face_selector),
+            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector))),
         )),
     );
     boundary.reduction = volume.reduction.clone();
@@ -1811,11 +1811,9 @@ fn typed_event_histories_preserve_source_attribution_and_ordering() {
         ObservationEvent::Series(SeriesObservationEvent::PeakResponse)
     );
     series_attribution.validate().unwrap();
-    let accuracy = crate::results::accuracy::evaluate_accuracy(
-        &AccuracyPlan::experimental_baseline("event-accuracy"),
-        &[],
-    )
-    .unwrap();
+    let accuracy =
+        crate::results::accuracy::evaluate_accuracy(&AccuracyPlan::baseline("event-accuracy"), &[])
+            .unwrap();
     let accuracy_attribution = ObservationEventAttribution::Accuracy(AccuracyEventAttribution {
         event: AccuracyObservationEvent::CriterionCrossing,
         sample,
@@ -2383,6 +2381,9 @@ fn history_bounds_and_coordinates_fail_closed_before_publication() {
     );
 }
 
+// witness: FEA-SHARED-OBSERVATIONS-001/bounded_partitioned_evaluation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Invalid and unbounded requests fail before field evaluation.
 #[test]
 fn invalid_and_unbounded_requests_fail_before_field_evaluation() {
     let projection = projection(ElementOrder::Tet4);
@@ -2449,7 +2450,6 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),
@@ -2673,6 +2673,9 @@ fn result_identity(
     AnalysisResultIdentity::new(workload, vec![Digest::sha256("output")]).unwrap()
 }
 
+// witness: FEA-SHARED-IDENTITY-001/distinct_identity_layers @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Output and accuracy changes do not invalidate solver identity layers.
 #[test]
 fn output_and_accuracy_changes_do_not_invalidate_solver_layers() {
     let mut baseline = fixture_model(FixtureId::CantileverLinearStatic);
@@ -2910,4 +2913,298 @@ fn evaluation_rejects_plan_targets_rebound_to_another_topology_entity() {
 
     let error = evaluate_observations(&plan, &projection, &fields).unwrap_err();
     assert!(error.to_string().contains("differs from the topology"));
+}
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A point sample of an element field returns the native value of the element that
+//   contains the point (not a centroid match), with that element as its entity, on a
+//   three-element Tet4 mesh. Tet10 and path samples of element fields are not exercised.
+#[test]
+fn element_field_point_sample_reads_the_containing_element() {
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    assert_eq!(projection.elements.len(), 3);
+    let definition = RecoveredFieldDefinition::new(
+        "stress.recovered",
+        ObservationQuantity::Stress,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![3, 6],
+        vec![
+            100.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            200.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            300.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ],
+    );
+    for (index, element) in projection.elements.iter().enumerate() {
+        // A point strictly inside the element, away from its centroid.
+        let corner = projection.nodes[element.node_indices[0]].coordinates_m;
+        let position = std::array::from_fn(|axis| {
+            0.7 * element.centroid_m[axis] + 0.3 * corner.canonical_value()[axis]
+        });
+        let mut request = spec("sample", ObservationTarget::Point {
+            position: Position::new(position),
+        });
+        request.quantity = ObservationQuantity::Stress;
+        request.value_shape = ObservationValueShape::SymmetricTensor3;
+        request.source_location = FieldLocation::Element;
+        request.output_location = FieldLocation::Element;
+        request.component = ObservationComponent::VonMises;
+        request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+        let mut step = ProcedureStep::structural_static("static");
+        step.observations = vec![ObservationRequest::Probe(request)];
+        let plan = resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+        assert_eq!(
+            result[0].field.as_host_f64().unwrap(),
+            &[100.0 * (index + 1) as f64]
+        );
+        assert_eq!(
+            result[0].entities,
+            vec![ObservationEntity::Element(element.stable_identity)]
+        );
+    }
+}
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: an element field over a boundary-face region reads each face's owning element;
+//   its area-weighted average and its maximum match the owners' values on a three-element Tet4
+//   mesh. Tet10 faces and faces shared by two elements (interfaces) are not exercised.
+#[test]
+fn element_field_over_a_boundary_region_reads_the_face_owners() {
+    use runmat_analysis_core::{
+        EntityDimension, ExcitationTarget, ExpectedTopology, RegionTarget, TargetCardinality,
+    };
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "stress.recovered",
+        ObservationQuantity::Stress,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let element_values = [100.0, 200.0, 300.0];
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![3, 6],
+        element_values
+            .iter()
+            .flat_map(|value| [*value, 0.0, 0.0, 0.0, 0.0, 0.0])
+            .collect(),
+    );
+    let entity = projection.boundary_faces[0].provenance[0].clone();
+    let mut region = RegionTarget::new(
+        "faces",
+        EntityDimension::Face,
+        ExpectedTopology::BoundaryFace,
+        TargetCardinality::OneOrMore,
+    );
+    region.bind_resolved_entities(vec![entity.clone()]).unwrap();
+    // Expected trace of the element field: owner values weighted by face area.
+    let (mut weighted, mut area, mut peak) = (0.0, 0.0, f64::NEG_INFINITY);
+    let mut owners = std::collections::BTreeSet::new();
+    for face in projection
+        .boundary_faces
+        .iter()
+        .filter(|face| face.provenance.contains(&entity))
+    {
+        let [a, b, c] = [0, 1, 2].map(|k| projection.nodes[face.node_indices[k]].coordinates_m);
+        let (u, v) = (
+            [b.canonical_value()[0] - a.canonical_value()[0], b.canonical_value()[1] - a.canonical_value()[1], b.canonical_value()[2] - a.canonical_value()[2]],
+            [c.canonical_value()[0] - a.canonical_value()[0], c.canonical_value()[1] - a.canonical_value()[1], c.canonical_value()[2] - a.canonical_value()[2]],
+        );
+        let cross = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let face_area = 0.5 * cross.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let owner = face.adjacent_element_indices[0];
+        owners.insert(owner);
+        weighted += element_values[owner] * face_area;
+        area += face_area;
+        peak = peak.max(element_values[owner]);
+    }
+    assert!(owners.len() >= 1 && area > 0.0);
+    for (id, operation, output_location, expected) in [
+        ("mean", SpatialReduction::Average, FieldLocation::Global, weighted / area),
+        ("peak", SpatialReduction::Maximum, FieldLocation::Element, peak),
+    ] {
+        let mut request = spec(id, ObservationTarget::Spatial(ExcitationTarget::Region(region.clone())));
+        request.quantity = ObservationQuantity::Stress;
+        request.value_shape = ObservationValueShape::SymmetricTensor3;
+        request.source_location = FieldLocation::Element;
+        request.output_location = output_location;
+        request.recovery = RecoveryPolicy::Native;
+        request.component = ObservationComponent::VonMises;
+        request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+        request.reduction = Some(ReductionPolicy {
+            spatial: operation,
+            series: SeriesReduction::None,
+            extrema_ties: ExtremaTiePolicy::FirstCanonical,
+        });
+        let mut step = ProcedureStep::structural_static("static");
+        step.observations = vec![ObservationRequest::Reduction(request)];
+        let plan = resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+        let value = result[0].field.as_host_f64().unwrap()[0];
+        assert!(
+            (value - expected).abs() <= 1e-12 * expected,
+            "{id}: {value} vs {expected}"
+        );
+    }
+}
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a nodal von Mises field, which the solver provides only as the volume-weighted
+//   transfer of element values, binds by its node location and is sampled at a point by shape
+//   function interpolation (exact for a nodal field linear in x) on a three-element Tet4 mesh.
+//   The transfer itself is witnessed by the recovery tests, not here.
+#[test]
+fn node_located_von_mises_binds_its_declared_transfer_and_interpolates() {
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new_derived(
+        "structural.nodal_von_mises",
+        ObservationQuantity::VonMisesStress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+        RecoveredFieldDerivation::LocationTransfer {
+            source_location: FieldLocation::Element,
+            recovery: RecoveryPolicy::VolumeWeightedAverage,
+        },
+    )
+    .unwrap();
+    let values = projection
+        .nodes
+        .iter()
+        .map(|node| 1.0e6 * node.coordinates_m.canonical_value()[0] + 3.0e6)
+        .collect::<Vec<_>>();
+    let fields = catalog(&projection, &definition, vec![values.len()], values);
+    let element = &projection.elements[1];
+    let corner = projection.nodes[element.node_indices[0]].coordinates_m;
+    let position =
+        std::array::from_fn(|axis| 0.6 * element.centroid_m[axis] + 0.4 * corner.canonical_value()[axis]);
+    let mut request = spec(
+        "surface_sample",
+        ObservationTarget::Point {
+            position: Position::new(position),
+        },
+    );
+    request.quantity = ObservationQuantity::VonMisesStress;
+    request.value_shape = ObservationValueShape::Scalar;
+    request.source_location = FieldLocation::Node;
+    request.output_location = FieldLocation::Point;
+    request.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Probe(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+    let value = result[0].field.as_host_f64().unwrap()[0];
+    let expected = 1.0e6 * position[0] + 3.0e6;
+    assert!((value - expected).abs() <= 1e-9 * expected, "{value} vs {expected}");
+}
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a reaction-force resultant over a boundary face region is the discrete sum of the
+//   nodal reactions at the nodes of that region's faces, each node counted once, on a
+//   three-element Tet4 mesh. Constraint-group targets are witnessed separately.
+#[test]
+fn reaction_resultant_over_a_face_region_sums_its_nodes_once() {
+    use runmat_analysis_core::{
+        EntityDimension, ExcitationTarget, ExpectedTopology, RegionTarget, TargetCardinality,
+    };
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "structural.reaction_force",
+        ObservationQuantity::ReactionForce,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let values = (0..projection.nodes.len())
+        .flat_map(|node| [node as f64 + 1.0, 2.0 * node as f64, -1.0])
+        .collect::<Vec<_>>();
+    let fields = catalog(&projection, &definition, vec![projection.nodes.len(), 3], values.clone());
+    let entity = projection.boundary_faces[0].provenance[0].clone();
+    let mut region = RegionTarget::new(
+        "supports",
+        EntityDimension::Face,
+        ExpectedTopology::BoundaryFace,
+        TargetCardinality::OneOrMore,
+    );
+    region.bind_resolved_entities(vec![entity.clone()]).unwrap();
+    let nodes = projection
+        .boundary_faces
+        .iter()
+        .filter(|face| face.provenance.contains(&entity))
+        .flat_map(|face| face.node_indices.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected: [f64; 3] = std::array::from_fn(|axis| {
+        nodes.iter().map(|node| values[node * 3 + axis]).sum()
+    });
+    let mut request = spec("support_reaction", ObservationTarget::Spatial(ExcitationTarget::Region(region)));
+    request.quantity = ObservationQuantity::ReactionForce;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.source_location = FieldLocation::Node;
+    request.output_location = FieldLocation::Global;
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    request.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Reduction(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+    let value = result[0].field.as_host_f64().unwrap();
+    for axis in 0..3 {
+        assert!((value[axis] - expected[axis]).abs() < 1e-12, "{value:?} vs {expected:?}");
+    }
 }

@@ -89,7 +89,6 @@ study static {
     geometry = geometry.bracket
     mesh = mesh.volume
     model = model.loaded
-    formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
     output peak = max(magnitude(output.displacement), over = geometry.bracket.region.pad)
@@ -230,7 +229,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve {
         structural static {}
     }
@@ -518,6 +516,7 @@ fn filesystem_host_retains_normalized_ap242_exchange_facts() {
             logical_path: LogicalSourcePath::new("part.step").unwrap(),
             source_units: Some(runmat_geometry_core::LengthUnit::Meter),
             expected_content_digest: None,
+            shared_interfaces: false,
         })
         .unwrap()
         .exchange
@@ -603,7 +602,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
 }
@@ -625,33 +623,33 @@ study static {
             "body".into(),
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Solid,
-                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Solid,
-                    source_topology_id: "body".into(),
-                    assembly_path: vec!["root".into()],
-                }],
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                    runmat_geometry_core::PersistentEntityKind::Solid,
+                    "body".into(),
+                    vec!["root".into()],
+                )],
             },
         ),
         (
             "support".into(),
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Face,
-                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Face,
-                    source_topology_id: "support".into(),
-                    assembly_path: vec!["root".into()],
-                }],
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                    runmat_geometry_core::PersistentEntityKind::Face,
+                    "support".into(),
+                    vec!["root".into()],
+                )],
             },
         ),
         (
             "rail".into(),
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Edge,
-                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Edge,
-                    source_topology_id: "rail-edge".into(),
-                    assembly_path: vec!["root".into()],
-                }],
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                    runmat_geometry_core::PersistentEntityKind::Edge,
+                    "rail-edge".into(),
+                    vec!["root".into()],
+                )],
             },
         ),
     ]);
@@ -815,7 +813,6 @@ study static {
 
     let planning_policy = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
     };
     let product = runmat_analysis_fea::study::build_structural_study_product(

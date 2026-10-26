@@ -17,9 +17,7 @@ pub(crate) fn build(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     thermal_context: Option<&FeaThermoMechanicalContext>,
-    solved_nodal_temperature_k: Option<
-        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &[f64]>,
-    >,
+    solved_nodal_temperature_k: Option<&crate::execution::SolvedTemperatureField>,
 ) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
     if thermal_context.is_some() && solved_nodal_temperature_k.is_some() {
         return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
@@ -27,11 +25,8 @@ pub(crate) fn build(
         ));
     }
     if let Some(temperature) = solved_nodal_temperature_k {
-        let temperature = temperature.canonical_value();
-        if temperature.len() != mesh.topology.nodes.len()
-            || temperature
-                .iter()
-                .any(|value| !value.is_finite() || *value <= 0.0)
+        if temperature.node_count() != mesh.topology.nodes.len()
+            || !temperature.all_positive_finite()
         {
             return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
                 "solved thermal field does not cover every solver node".into(),
@@ -46,15 +41,16 @@ pub(crate) fn build(
         .map(|(index, node)| (node.node_id, index))
         .collect::<BTreeMap<_, _>>();
 
-    mesh.topology
-        .volume_elements
-        .iter()
-        .map(|element| {
+    let elements = &mesh.topology.volume_elements;
+    // Independent per-element summaries on the admitted pool, collected in element order.
+    crate::algebra::element_assembly::ordered_map_range(elements.len(), |index| {
+            let element = &elements[index];
             let material = resolve_element_material(element, properties)?;
             let prescribed_temperature_k = thermal_context
                 .map(|context| {
                     thermoelastic_load::element_temperature_k(
-                        &element.region_id.source_topology_id,
+                        &element.region_id,
+                        &element.provenance,
                         context,
                     )
                     .map_err(|error| {
@@ -74,7 +70,8 @@ pub(crate) fn build(
                         })?;
                     thermoelastic_load::element_thermal_eigenstrain(
                         owner,
-                        &element.region_id.source_topology_id,
+                        &element.region_id,
+                        &element.provenance,
                         context,
                     )
                     .map_err(|error| {
@@ -117,14 +114,15 @@ pub(crate) fn build(
             let solved_thermal_quadrature = solved_nodal_temperature_k
                 .map(|temperatures| {
                     solved_thermal_quadrature(
+                        index,
                         element,
                         &node_indices,
                         properties,
-                        temperatures.canonical_value(),
+                        temperatures,
                     )
                 })
                 .transpose()?;
-            Ok(SolidRecoveryElementSummary {
+            Ok::<_, SolverSolidAssemblyError>(SolidRecoveryElementSummary {
                 element_id: element.element_id.to_string(),
                 region_id: element.region_id.source_topology_id.clone(),
                 material: SolidMaterial {
@@ -143,14 +141,16 @@ pub(crate) fn build(
                 geometry,
             })
         })
+        .into_iter()
         .collect()
 }
 
 fn solved_thermal_quadrature(
+    element_index: usize,
     element: &runmat_meshing_core::SolverVolumeElement,
     node_indices: &BTreeMap<u64, usize>,
     properties: &CompiledPropertyMap,
-    nodal_temperature_k: &[f64],
+    temperature: &crate::execution::SolvedTemperatureField,
 ) -> Result<SolvedThermalRecoveryQuadrature, SolverSolidAssemblyError> {
     let owner = properties
         .solid_material(element.stable_identity)
@@ -177,7 +177,7 @@ fn solved_thermal_quadrature(
                         element_id: element.element_id,
                         node_id,
                     })?;
-            value += shape[local] * nodal_temperature_k[*index];
+            value += shape[local] * temperature.at(element_index, *index);
         }
         let strain = thermal.expansion_coefficient_per_k.canonical_value()
             * (value - thermal.reference_temperature_k.canonical_value());
@@ -195,7 +195,7 @@ fn solved_thermal_quadrature(
             element
                 .node_ids
                 .iter()
-                .map(|node_id| nodal_temperature_k[node_indices[node_id]])
+                .map(|node_id| temperature.at(element_index, node_indices[node_id]))
                 .collect::<Vec<_>>(),
         ),
         expansion_coefficient_per_k: thermal.expansion_coefficient_per_k,

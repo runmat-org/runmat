@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
-    FormulationRequirement, PhysicalSignal, PhysicsFamily, ProcedureStep, ProcedureStepId,
-    SolutionSpace, StateCompleteness, StateId, StateKind, StatePersistence,
+    PhysicalSignal, PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace,
+    StateCompleteness, StateId, StateKind, StatePersistence,
 };
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, StateIdentity};
@@ -14,11 +14,16 @@ use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+#[path = "acoustic_response_run_options.rs"]
+mod acoustic_response_run_options;
+pub use acoustic_response_run_options::AnalysisAcousticResponseRunOptions;
 #[path = "electrical_run_options.rs"]
 mod electrical_run_options;
 pub use electrical_run_options::AnalysisElectricalRunOptions;
 mod frequency_results;
-pub use frequency_results::{AcousticFrequencyResultsData, StructuralFrequencyResultsData};
+pub use frequency_results::{
+    AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData, StructuralFrequencyResultsData,
+};
 mod nonlinear_run_options;
 pub use nonlinear_run_options::AnalysisNonlinearRunOptions;
 mod field_units;
@@ -132,19 +137,6 @@ pub enum QualityReasonCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityReason {
     pub code: QualityReasonCode,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProductionPublicationReasonCode {
-    NumericalAcceptanceFailed,
-    FormulationNotProductionQualified,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProductionPublicationReason {
-    pub code: ProductionPublicationReasonCode,
     pub detail: String,
 }
 
@@ -624,6 +616,10 @@ pub struct RunProvenance {
     pub preconditioner: runmat_analysis_fea::SolverPreconditioner,
     pub quality_policy: String,
     pub fallback_events: Vec<FallbackEvent>,
+    /// The effective memory ceiling that selected the solve path, min(authored ceiling, the
+    /// memory this host admitted), when known. Provenance only: it never enters an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_memory_ceiling_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -694,9 +690,7 @@ pub struct AnalysisRunResult {
     pub result_quality: QualityGate,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
 }
 
@@ -965,12 +959,16 @@ pub struct AnalysisFieldRequestOptions {
 ///
 /// `field_id` names the produced quantity. `sample` selects its independent-domain coordinate;
 /// omitting it is valid only when the field has one unambiguous published sample.
+/// `transient_sample_index` names a retained transient state by its zero-based position in time
+/// order instead of by its time; the selected page reports that state's `TimeSeconds` sample.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnalysisFieldSelection {
     pub field_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transient_sample_index: Option<usize>,
 }
 
 impl AnalysisFieldSelection {
@@ -981,6 +979,16 @@ impl AnalysisFieldSelection {
         Self {
             field_id: field_id.into(),
             sample,
+            transient_sample_index: None,
+        }
+    }
+
+    /// Selects the retained transient state at zero-based position `index` in time order.
+    pub fn transient_index(field_id: impl Into<String>, index: usize) -> Self {
+        Self {
+            field_id: field_id.into(),
+            sample: None,
+            transient_sample_index: Some(index),
         }
     }
 }
@@ -1806,9 +1814,7 @@ pub struct AnalysisResultsData {
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub summary: AnalysisResultsSummary,
 }
@@ -1824,7 +1830,6 @@ pub struct AnalysisResultsCompareData {
     pub baseline_run_id: String,
     pub candidate_run_id: String,
     pub numerically_acceptable_changed: bool,
-    pub production_publishable_changed: bool,
     pub run_status_changed: bool,
     pub quality_reason_count_delta: i64,
     pub failed_increment_delta: Option<i64>,
@@ -1858,6 +1863,7 @@ pub enum AnalysisSolverOptions {
     StructuralRandomResponse(AnalysisRandomResponseRunOptions),
     StructuralBuckling(AnalysisBucklingRunOptions),
     AcousticHelmholtz(AnalysisAcousticRunOptions),
+    AcousticResponse(super::AnalysisAcousticResponseRunOptions),
     ThermalDiffusion(AnalysisThermalRunOptions),
     StructuralTransient(AnalysisTransientRunOptions),
     IncompressibleFlow(AnalysisCfdRunOptions),
@@ -1874,8 +1880,6 @@ mod solver_options;
 pub struct AnalysisExecutionStep {
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    #[serde(default = "default_formulation_requirement")]
-    pub requirement: FormulationRequirement,
     pub solver_options: AnalysisSolverOptions,
 }
 
@@ -1890,14 +1894,6 @@ impl AnalysisExecutionPlan {
         sequence: &runmat_analysis_core::AnalysisSequence,
         backend: ComputeBackend,
     ) -> Result<Self, String> {
-        Self::for_sequence_with_requirement(sequence, backend, FormulationRequirement::Production)
-    }
-
-    pub fn for_sequence_with_requirement(
-        sequence: &runmat_analysis_core::AnalysisSequence,
-        backend: ComputeBackend,
-        requirement: FormulationRequirement,
-    ) -> Result<Self, String> {
         let steps = sequence
             .steps
             .iter()
@@ -1905,7 +1901,6 @@ impl AnalysisExecutionPlan {
                 Ok(AnalysisExecutionStep {
                     step_id: step.step_id.clone(),
                     backend,
-                    requirement,
                     solver_options: AnalysisSolverOptions::defaults_for(step)?,
                 })
             })
@@ -2178,12 +2173,10 @@ pub struct AnalysisStudyStepRunData {
     pub run_id: String,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     #[serde(default)]
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub numerical_result: AnalysisStudyStepNumericalResultData,
     pub evidence_artifact_path: String,
@@ -2199,22 +2192,24 @@ pub enum AnalysisStudyStepNumericalResultData {
     StructuralRandomResponse(Box<StructuralRandomResponseResultsData>),
 }
 
+/// Published response-spectrum run record. Recovered response values are persisted once as
+/// the run's original fields and the envelope state; this record names their solver result
+/// through its receipt and carries scalar evidence only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralResponseSpectrumResultsData {
-    pub result: runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult,
     pub numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
-    pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
     pub publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
 }
 
+/// Published random-response run record. Variance and RMS values are persisted once as the
+/// run's original fields and the statistics state; this record carries scalar evidence only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralRandomResponseResultsData {
-    pub result: runmat_analysis_fea::execution::StructuralRandomResponseSolverResult,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
@@ -2252,7 +2247,6 @@ pub struct AnalysisStudyRunData {
     pub operation_sequence: Vec<String>,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     pub evidence_artifact_path: String,
@@ -2358,10 +2352,6 @@ fn default_study_sweep_fail_fast() -> bool {
     true
 }
 
-const fn default_formulation_requirement() -> FormulationRequirement {
-    FormulationRequirement::Production
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisTrendKindSummary {
     pub identity: AnalysisRunIdentity,
@@ -2369,7 +2359,6 @@ pub struct AnalysisTrendKindSummary {
     pub median_solve_ms: Option<f64>,
     pub p95_solve_ms: Option<f64>,
     pub numerically_acceptable_rate: f64,
-    pub production_publishable_rate: f64,
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
@@ -2468,6 +2457,12 @@ pub struct ThermalResultsData {
     pub heat_flux_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
+    /// Mesh nodes of finite-conductance thermal interfaces; `temperature_snapshots` holds the
+    /// first side's temperature there and `interface_temperature_snapshots` the second side's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_node_ids: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_temperature_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub reference_temperature_k: runmat_types::physical::Temperature,
@@ -2799,10 +2794,6 @@ mod tests {
         let plan = AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
             .expect("supported sequence should produce a typed execution plan");
         assert_eq!(plan.steps.len(), 2);
-        assert!(plan
-            .steps
-            .iter()
-            .all(|step| step.requirement == FormulationRequirement::Production));
         assert!(plan.validate_against(&sequence).is_ok());
 
         let mut duplicate = plan.clone();

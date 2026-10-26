@@ -1,7 +1,7 @@
 //! Complete each original image job once, preserving first-occurrence order.
 use super::*;
 use crate::cdt::solver_topology::storage::Storage;
-use runmat_geometry_core::GeometryAllocationScope;
+use runmat_geometry_core::{ExactSurfaceEvaluator, GeometryAllocationScope};
 pub(super) fn complete_boundary_surface_parameters(
     input: &ProjectionInput<'_>,
     topology: &mut SolverMeshTopology,
@@ -137,6 +137,12 @@ fn derive_surface_parameters(
         query_control,
     } = scratch;
     let source_nodes = &evaluation.sources.nodes;
+    let face = evaluation.sources.face(surface_use.source_face_id)?;
+    let periods = ExactSurfaceEvaluator::periodicity(evaluation.evaluator, &face.surface_evaluator_id)
+        .map_err(error::geometry)?;
+    let bounds =
+        ExactSurfaceEvaluator::parameter_bounds(evaluation.evaluator, &face.surface_evaluator_id)
+            .map_err(error::geometry)?;
     if source_nodes
         .get(&node.stable_identity)
         .is_some_and(|source| source.point_m == node.coordinates_m.canonical_value())
@@ -209,13 +215,25 @@ fn derive_surface_parameters(
         for first_use in first.uses.iter().filter(matching) {
             for second_use in second.uses.iter().filter(matching) {
                 for third_use in third.uses.iter().filter(matching) {
+                    // A source triangle on a periodic seam carries images on both sides of
+                    // it; interpolate one consistent set (each vertex on the first vertex's
+                    // side), never a mixture that lands across the surface.
+                    let first_uv = first_use.evaluator_uv;
+                    let second_uv =
+                        evaluation::nearest_translate(first_uv, second_use.evaluator_uv, periods);
+                    let third_uv =
+                        evaluation::nearest_translate(first_uv, third_use.evaluator_uv, periods);
                     parameter_storage.push(
                         &mut parameters,
-                        std::array::from_fn(|axis| {
-                            weights[0] * first_use.evaluator_uv[axis]
-                                + weights[1] * second_use.evaluator_uv[axis]
-                                + weights[2] * third_use.evaluator_uv[axis]
-                        }),
+                        evaluation::wrap_into_period(
+                            std::array::from_fn(|axis| {
+                                weights[0] * first_uv[axis]
+                                    + weights[1] * second_uv[axis]
+                                    + weights[2] * third_uv[axis]
+                            }),
+                            periods,
+                            bounds,
+                        ),
                     )?;
                 }
             }

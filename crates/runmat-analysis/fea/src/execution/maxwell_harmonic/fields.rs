@@ -14,7 +14,7 @@ use crate::{
 };
 use runmat_analysis_core::{AnalysisField, FieldLocation, ObservationQuantity, RecoveryPolicy};
 
-pub const MAXWELL_NATIVE_FIELD_COUNT: usize = 6;
+pub const MAXWELL_NATIVE_FIELD_COUNT: usize = 11;
 
 #[derive(Clone, Copy)]
 pub(in crate::execution) enum NativeMaxwellValues<'a> {
@@ -24,9 +24,68 @@ pub(in crate::execution) enum NativeMaxwellValues<'a> {
     Intensity(&'a [MaxwellFieldSample]),
     Displacement(&'a [MaxwellFieldSample]),
     Current(&'a [MaxwellFieldSample]),
+    /// Cycle-averaged Joule loss density (1/2) Re(E . conj(J)), real.
+    Loss(&'a [MaxwellFieldSample]),
+    /// Element averages (1/V)∫ of a sampled quantity over each element's Keast15 samples.
+    ElementElectric(&'a [MaxwellFieldSample]),
+    ElementFlux(&'a [MaxwellFieldSample]),
+    ElementCurrent(&'a [MaxwellFieldSample]),
+    ElementLoss(&'a [MaxwellFieldSample]),
+}
+
+fn sample_loss(sample: &MaxwellFieldSample) -> f64 {
+    0.5 * (0..3)
+        .map(|axis| {
+            let e = sample.electric_field_v_per_m.canonical_value()[axis];
+            let j = sample.conduction_current_density_a_per_m2.canonical_value()[axis];
+            e.real * j.real + e.imaginary * j.imaginary
+        })
+        .sum::<f64>()
+}
+
+fn element_average<'a>(
+    samples: &'a [MaxwellFieldSample],
+    value: impl Fn(&MaxwellFieldSample) -> [ComplexPhasor; 3] + 'a,
+) -> impl Iterator<Item = f64> + 'a {
+    samples.chunks(15).flat_map(move |element| {
+        let volume: f64 = element.iter().map(|s| s.volume_weight_m3).sum();
+        let mut average = [ComplexPhasor::ZERO; 3];
+        for sample in element {
+            let v = value(sample);
+            for axis in 0..3 {
+                average[axis] += v[axis] * (sample.volume_weight_m3 / volume);
+            }
+        }
+        average.into_iter().flat_map(|v| [v.real, v.imaginary])
+    })
 }
 impl<'a> NativeMaxwellValues<'a> {
-    pub(in crate::execution) fn values(self) -> impl Iterator<Item = f64> + 'a {
+    pub(in crate::execution) fn values(self) -> Box<dyn Iterator<Item = f64> + 'a> {
+        match self {
+            Self::Loss(samples) => return Box::new(samples.iter().map(sample_loss)),
+            Self::ElementElectric(samples) => {
+                return Box::new(element_average(samples, |s| s.electric_field_v_per_m.canonical_value()))
+            }
+            Self::ElementFlux(samples) => {
+                return Box::new(element_average(samples, |s| s.flux_density_t.canonical_value()))
+            }
+            Self::ElementCurrent(samples) => {
+                return Box::new(element_average(samples, |s| {
+                    s.conduction_current_density_a_per_m2.canonical_value()
+                }))
+            }
+            Self::ElementLoss(samples) => {
+                return Box::new(samples.chunks(15).map(|element| {
+                    let volume: f64 = element.iter().map(|s| s.volume_weight_m3).sum();
+                    element
+                        .iter()
+                        .map(|s| sample_loss(s) * s.volume_weight_m3)
+                        .sum::<f64>()
+                        / volume
+                }))
+            }
+            _ => {}
+        }
         let entities = match self {
             Self::Circulation(v) => v.len(),
             Self::Electric(v)
@@ -34,25 +93,33 @@ impl<'a> NativeMaxwellValues<'a> {
             | Self::Intensity(v)
             | Self::Displacement(v)
             | Self::Current(v) => v.len(),
+            Self::Loss(_)
+            | Self::ElementElectric(_)
+            | Self::ElementFlux(_)
+            | Self::ElementCurrent(_)
+            | Self::ElementLoss(_) => unreachable!("handled above"),
         };
         let components = if matches!(self, Self::Circulation(_)) {
             1
         } else {
             3
         };
-        (0..entities)
-            .flat_map(move |i| {
-                let values = match self {
-                    Self::Circulation(v) => [v[i], ComplexPhasor::ZERO, ComplexPhasor::ZERO],
-                    Self::Electric(v) => v[i].electric_field_v_per_m.canonical_value(),
-                    Self::Flux(v) => v[i].flux_density_t.canonical_value(),
-                    Self::Intensity(v) => v[i].magnetic_field_a_per_m.canonical_value(),
-                    Self::Displacement(v) => v[i].electric_displacement_c_per_m2.canonical_value(),
-                    Self::Current(v) => v[i].conduction_current_density_a_per_m2.canonical_value(),
-                };
-                values.into_iter().take(components)
-            })
-            .flat_map(|value| [value.real, value.imaginary])
+        Box::new(
+            (0..entities)
+                .flat_map(move |i| {
+                    let values = match self {
+                        Self::Circulation(v) => [v[i], ComplexPhasor::ZERO, ComplexPhasor::ZERO],
+                        Self::Electric(v) => v[i].electric_field_v_per_m.canonical_value(),
+                        Self::Flux(v) => v[i].flux_density_t.canonical_value(),
+                        Self::Intensity(v) => v[i].magnetic_field_a_per_m.canonical_value(),
+                        Self::Displacement(v) => v[i].electric_displacement_c_per_m2.canonical_value(),
+                        Self::Current(v) => v[i].conduction_current_density_a_per_m2.canonical_value(),
+                        _ => unreachable!("handled above"),
+                    };
+                    values.into_iter().take(components)
+                })
+                .flat_map(|value| [value.real, value.imaginary]),
+        )
     }
 }
 impl Serialize for NativeMaxwellValues<'_> {
@@ -100,6 +167,31 @@ pub(in crate::execution) fn native_maxwell_fields(
             field_id: "maxwell.conduction_current_density",
             values: NativeMaxwellValues::Current(samples),
             shape: vec![samples.len(), 3, 2],
+        },
+        NativeMaxwellField {
+            field_id: "maxwell.joule_power_density",
+            values: NativeMaxwellValues::Loss(samples),
+            shape: vec![samples.len()],
+        },
+        NativeMaxwellField {
+            field_id: "maxwell.element_electric_field",
+            values: NativeMaxwellValues::ElementElectric(samples),
+            shape: vec![samples.len() / 15, 3, 2],
+        },
+        NativeMaxwellField {
+            field_id: "maxwell.element_flux_density",
+            values: NativeMaxwellValues::ElementFlux(samples),
+            shape: vec![samples.len() / 15, 3, 2],
+        },
+        NativeMaxwellField {
+            field_id: "maxwell.element_conduction_current_density",
+            values: NativeMaxwellValues::ElementCurrent(samples),
+            shape: vec![samples.len() / 15, 3, 2],
+        },
+        NativeMaxwellField {
+            field_id: "maxwell.element_joule_power_density",
+            values: NativeMaxwellValues::ElementLoss(samples),
+            shape: vec![samples.len() / 15],
         },
     ]
 }
@@ -193,6 +285,7 @@ fn native_maxwell_field_plan(
                 RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
                     result.response().samples.len()
                 }
+                RecoveredFieldEntityDomain::VolumeElements => result.response().samples.len() / 15,
                 _ => return Err(invalid("non-native Maxwell entity domain")),
             };
             let count = u64::try_from(count).map_err(invalid)?;
@@ -202,6 +295,7 @@ fn native_maxwell_field_plan(
                 .ok_or_else(|| invalid("Maxwell component count"))?
                 as u64;
             Ok(FieldRecoveryRequirement {
+                support: Default::default(),
                 quantity: definition.quantity(),
                 source_location: definition.location(),
                 output_location: definition.location(),
@@ -265,6 +359,36 @@ pub fn maxwell_native_field_definition_inventory(
             FieldLocation::IntegrationPoint,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
         ),
+        (
+            ObservationQuantity::JoulePowerDensity,
+            "maxwell.joule_power_density",
+            FieldLocation::IntegrationPoint,
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints,
+        ),
+        (
+            ObservationQuantity::ElectricField,
+            "maxwell.element_electric_field",
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ),
+        (
+            ObservationQuantity::MagneticFluxDensity,
+            "maxwell.element_flux_density",
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ),
+        (
+            ObservationQuantity::ElectricCurrentDensity,
+            "maxwell.element_conduction_current_density",
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ),
+        (
+            ObservationQuantity::JoulePowerDensity,
+            "maxwell.element_joule_power_density",
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ),
     ]
     .into_iter()
     .map(|(quantity, id, location, domain)| {
@@ -274,7 +398,11 @@ pub fn maxwell_native_field_definition_inventory(
             location,
             domain,
             quantity.canonical_value_shape(),
-            RecoveredFieldNumericRepresentation::ComplexInterleaved,
+            if quantity == ObservationQuantity::JoulePowerDensity {
+                RecoveredFieldNumericRepresentation::Real
+            } else {
+                RecoveredFieldNumericRepresentation::ComplexInterleaved
+            },
         )
         .map_err(invalid)
     })
@@ -298,7 +426,7 @@ pub fn maxwell_native_field_definitions(
     let definitions = maxwell_native_field_definition_inventory()?;
     if request.plan.requirements.len() != MAXWELL_NATIVE_FIELD_COUNT {
         return Err(invalid(
-            "Maxwell native inventory must retain all six original complex fields",
+            "Maxwell native inventory must retain all original sampled and element fields",
         ));
     }
     let samples = request.plan.requirements[1].cost.output_entity_count;
@@ -309,9 +437,14 @@ pub fn maxwell_native_field_definitions(
         || !samples.is_multiple_of(15)
         || request.plan.requirements[0].cost.output_entity_count == 0
         || request.plan.requirements[0].cost.output_entity_count > edge_upper
-        || request.plan.requirements[1..]
-            .iter()
-            .any(|r| r.cost.output_entity_count != samples)
+        || request.plan.requirements[1..].iter().any(|r| {
+            r.cost.output_entity_count
+                != if r.entity_domain == RecoveredFieldEntityDomain::VolumeElements {
+                    samples / 15
+                } else {
+                    samples
+                }
+        })
     {
         return Err(invalid(
             "Maxwell native inventory requires complete Keast15 samples and original edges",

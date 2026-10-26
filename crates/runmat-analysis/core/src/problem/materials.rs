@@ -13,6 +13,38 @@ pub enum MaterialFluidModel {
     IncompressibleNewtonian {
         dynamic_viscosity: crate::DynamicViscosity,
     },
+    /// Inelastic non-Newtonian fluid: viscosity a function of the local shear rate.
+    GeneralizedNewtonian {
+        law: super::rheology::GeneralizedNewtonianLaw,
+    },
+    /// A porous zone the surrounding fluid flows through (filter media, packed bed): its
+    /// resistance, not a second fluid.
+    PorousMedium {
+        law: PorousMediumLaw,
+    },
+}
+
+/// Darcy–Forchheimer resistance of a porous zone, superficial-velocity form: the momentum
+/// sink −(μ/K) u − ½ ρ C₂ |u| u (Darcy when C₂ = 0; with the Navier–Stokes viscous term this is
+/// the Brinkman–Forchheimer extended model).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PorousMediumLaw {
+    pub permeability_m2: f64,
+    pub inertial_coefficient_per_m: f64,
+    pub porosity: f64,
+}
+
+impl PorousMediumLaw {
+    pub fn is_valid(&self) -> bool {
+        self.permeability_m2.is_finite()
+            && self.permeability_m2 > 0.0
+            && self.inertial_coefficient_per_m.is_finite()
+            && self.inertial_coefficient_per_m >= 0.0
+            && self.porosity.is_finite()
+            && self.porosity > 0.0
+            && self.porosity <= 1.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -20,6 +52,16 @@ pub enum MaterialFluidModel {
 pub struct IncompressibleNewtonianMaterial {
     pub density: crate::MassDensity,
     pub dynamic_viscosity: crate::DynamicViscosity,
+}
+
+/// An incompressible fluid's coefficients: density, reference (low-shear) viscosity and, for a
+/// generalized-Newtonian fluid, its viscosity law.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncompressibleFluidMaterial {
+    pub density: crate::MassDensity,
+    pub dynamic_viscosity: crate::DynamicViscosity,
+    pub rheology: Option<super::rheology::GeneralizedNewtonianLaw>,
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -320,8 +362,9 @@ impl MaterialModel {
             MaterialCapability::MechanicalDamping => self.damping.is_some(),
             MaterialCapability::Thermal => self.thermal.is_some(),
             MaterialCapability::Acoustic => self.acoustic.is_some(),
+            // The incompressible-fluid capability: Newtonian or generalized-Newtonian.
             MaterialCapability::IncompressibleNewtonianFluid => {
-                self.require_incompressible_newtonian().is_ok()
+                self.require_incompressible_fluid().is_ok()
             }
             MaterialCapability::Electrical => self.electrical.is_some(),
             MaterialCapability::Plasticity => self.plastic.is_some(),
@@ -385,12 +428,57 @@ impl MaterialModel {
 
     /// Typed physical coefficients from their sole shared material authorities.
     /// This checks positivity even when called before whole-model validation.
+    /// Any incompressible fluid law: Newtonian, or generalized-Newtonian with its law and
+    /// low-shear reference viscosity.
+    pub fn require_incompressible_fluid(
+        &self,
+    ) -> Result<IncompressibleFluidMaterial, FluidMaterialError> {
+        let fluid = self
+            .fluid
+            .ok_or_else(|| self.missing(MaterialCapability::IncompressibleNewtonianFluid))?;
+        if let MaterialFluidModel::PorousMedium { .. } = fluid {
+            return Err(FluidMaterialError::Invalid {
+                material_id: self.material_id.clone(),
+                property: "fluid law (a porous zone is not a flowing fluid)",
+            });
+        }
+        if let MaterialFluidModel::GeneralizedNewtonian { law } = fluid {
+            let density = self.require_mass_density()?;
+            let reference = law.low_shear_viscosity();
+            if !law.is_valid()
+                || !density.is_finite()
+                || density.canonical_value() <= 0.0
+                || !reference.is_finite()
+                || reference <= 0.0
+            {
+                return Err(FluidMaterialError::Invalid {
+                    material_id: self.material_id.clone(),
+                    property: "viscosity law",
+                });
+            }
+            return Ok(IncompressibleFluidMaterial {
+                density,
+                dynamic_viscosity: crate::DynamicViscosity::new(reference),
+                rheology: Some(law),
+            });
+        }
+        let newtonian = self.require_incompressible_newtonian()?;
+        Ok(IncompressibleFluidMaterial {
+            density: newtonian.density,
+            dynamic_viscosity: newtonian.dynamic_viscosity,
+            rheology: None,
+        })
+    }
+
     pub fn require_incompressible_newtonian(
         &self,
     ) -> Result<IncompressibleNewtonianMaterial, FluidMaterialError> {
-        let MaterialFluidModel::IncompressibleNewtonian { dynamic_viscosity } = self
-            .fluid
-            .ok_or_else(|| self.missing(MaterialCapability::IncompressibleNewtonianFluid))?;
+        let Some(MaterialFluidModel::IncompressibleNewtonian { dynamic_viscosity }) = self.fluid
+        else {
+            return Err(self
+                .missing(MaterialCapability::IncompressibleNewtonianFluid)
+                .into());
+        };
         let density = self.require_mass_density()?;
         for (property, value) in [
             ("density", density.canonical_value()),

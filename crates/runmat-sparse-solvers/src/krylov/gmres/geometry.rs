@@ -34,6 +34,11 @@ impl GmresGeometry {
             && work.coefficients.len() >= self.restart
             && work.history.len() >= self.history_elements
     }
+    /// Entries of the flexible direction basis `Z = M⁻¹ V` (flexible side only).
+    pub fn flexible_elements(&self) -> usize {
+        // `checked` already bounded (restart + 9) · n.
+        self.restart * self.n
+    }
     pub fn checked(n: usize, restart: usize, max_outer: usize) -> Option<Self> {
         if n == 0 || restart == 0 || max_outer == 0 {
             return None;

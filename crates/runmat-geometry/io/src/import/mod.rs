@@ -154,6 +154,10 @@ pub enum GeometryImportError {
     },
     #[error("GEOMETRY_IMPORT_OPTIONS_INVALID: {0}")]
     InvalidOptions(String),
+    /// Authored units cannot be applied because the file does not declare a single length unit
+    /// (none, or several different ones).
+    #[error("GEOMETRY_UNITS_UNRESOLVED: {0}")]
+    UnresolvedUnits(String),
     #[error("GEOMETRY_IMPORT_CANCELLED: geometry import cancelled")]
     Cancelled,
 }

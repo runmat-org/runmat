@@ -50,7 +50,7 @@ fn full_and_progressive_cad_preview_publish_exact_occurrence_ids() {
                 named_selections: None,
                 logical_path: "assembly.step".into(),
                 format: runmat_geometry_core::GeometrySourceFormat::Step,
-                unit_fallback: None,
+                authored_units: None,
                 unit_evidence: exact.source_unit_evidence.clone(),
                 content_digest: exact.source_digest,
                 topology_digest: exact.build_closure().unwrap().manifest.topology.digest,
@@ -60,6 +60,7 @@ fn full_and_progressive_cad_preview_publish_exact_occurrence_ids() {
                     ..Default::default()
                 },
                 exchange: None,
+                shared_interfaces: false,
             },
         )),
         regions: full

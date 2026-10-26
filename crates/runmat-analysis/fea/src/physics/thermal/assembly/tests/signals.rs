@@ -62,6 +62,9 @@ fn heat_flux_signal(signal_id: &str, values: [f64; 2]) -> PhysicalSignal {
     })
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_transient/tet4/numerical_kernel;
+//   boundary: Tet4 assembly samples prescribed temperature, flux and ambient-time signals; no
+//   generated/field-artifact equivalence credit.
 #[test]
 fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     let (mut model, mesh, _, base_region) = thermal_reference_model();
@@ -84,13 +87,13 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "time_prescribed_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(base_region),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(base_region))),
                 value: PrescribedValue::Signal(SignalId("prescribed_temperature".into())),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "time_heat_flux".into(),
-        target: RegionTarget::boundary(flux_region.clone()),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(flux_region.clone()))),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Signal(SignalId("boundary_flux".into())),
         },
@@ -99,7 +102,7 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     let at_start = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -109,7 +112,7 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     let at_end = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -138,7 +141,7 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "time_convection".into(),
-        target: RegionTarget::boundary(flux_region),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(flux_region))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Signal(SignalId("ambient_temperature".into())),
             coefficient: HeatTransferCoefficient::new(5.0),
@@ -147,7 +150,7 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     let cold = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -157,7 +160,7 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     let hot = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -209,7 +212,7 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
     model.signals.push(signal);
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "jump_convection".into(),
-        target: RegionTarget::boundary(selector),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Signal(SignalId("jump_ambient".into())),
             coefficient: HeatTransferCoefficient::new(5.0),
@@ -227,7 +230,7 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
         let assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),

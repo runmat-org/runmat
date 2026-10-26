@@ -8,10 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
-use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory};
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
@@ -26,7 +25,7 @@ use runmat_meshing_core::{
     ElementOrder, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
     MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
     MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind,
-    MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule,
     MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
     VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
@@ -78,6 +77,7 @@ impl MeshingStageKernel for AdmissionKernel {
             ..MeshingStageCheckpoint::default()
         };
         invocation.control.checkpoint(checkpoint.clone())?;
+        charge_returned_records(&invocation, 2 * 700);
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(90),
             streams: vec![MeshingChunkStream {
@@ -88,6 +88,17 @@ impl MeshingStageKernel for AdmissionKernel {
             final_checkpoint: checkpoint,
         })
     }
+}
+
+/// Kernels own the byte capacity of the records they return; the stage
+/// rejects records whose capacity was never charged to its allocation budget.
+fn charge_returned_records(invocation: &MeshingStageInvocation<'_, '_>, bytes: u64) {
+    use runmat_geometry_core::GeometryEvaluationControl as _;
+    invocation
+        .control
+        .geometry_evaluation_control()
+        .consume_allocation_bytes(bytes)
+        .expect("conformance kernel records fit the stage allocation budget");
 }
 
 struct SearchBudgetKernel;
@@ -131,6 +142,7 @@ impl ExactInputKernel {
             ..MeshingStageCheckpoint::default()
         };
         invocation.control.checkpoint(checkpoint.clone())?;
+        charge_returned_records(&invocation, 2 * 700);
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(92),
             streams: vec![MeshingChunkStream {
@@ -231,6 +243,11 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
     }
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
+//   boundary: The whole harness-less meshing process-conformance target (worker child processes,
+//   progress, cancellation, remote conformance and remote recovery) exits successfully; it is one
+//   witness, so the individual claims are not separated.
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     if let Some(mode) = arguments.get(1).and_then(|mode| mode.to_str()) {
@@ -660,7 +677,11 @@ async fn remote_conformance() {
         let mut full_executor = RemoteExactMeshingExecutor::new(
             Arc::clone(&pool),
             full_dag.2.clone(),
-            MeshingExecutionPolicy::default(),
+            // The remote worker advertises one core; the pool rejects larger requests.
+            MeshingExecutionPolicy {
+                cpu_millicores: worker_inventory().cpu_millicores,
+                ..MeshingExecutionPolicy::default()
+            },
             limits().inventory.max_object_bytes,
         )
         .unwrap();
@@ -669,8 +690,13 @@ async fn remote_conformance() {
             execute_exact_meshing_dag_async(
                 ExactMeshingDagRun {
                     geometry: &full_dag.0,
+                    ceilings: runmat_meshing_core::MeshingExecutionCeilings {
+                        maximum_wall_time_ms: 120_000,
+                        ..dag_ceilings()
+                    },
                     request: full_dag.1.clone(),
                     artifact_access: full_dag.2.clone(),
+                    named_regions: Default::default(),
                     capability_cohort: Some("native-cohort-v1".into()),
                     program_revision: request.recipe.program_revision.clone(),
                     preferred_edges_per_partition: 3,
@@ -697,7 +723,8 @@ async fn remote_conformance() {
             .evidence
             .validate(&full_result.artifact)
             .unwrap();
-        assert_eq!(full_result.artifact.topology.volume_elements.len(), 4);
+        let elements = full_result.artifact.topology.volume_elements.len() as u64;
+        assert!(elements > 4 && elements <= full_dag.1.limits.maximum_elements);
         assert!(!full_executor.drain_progress().is_empty());
 
         let mut exact_serial_store = TestStore::default();
@@ -826,11 +853,8 @@ fn full_dag_fixture(
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
     request.quality.volume.minimum_scaled_jacobian = 0.01;
-    request.resources.maximum_nodes = 10_000;
-    request.resources.maximum_elements = 10_000;
-    request.resources.maximum_search_work = 1_000_000;
-    request.resources.maximum_iterations = 1_000_000;
-    request.resources.maximum_wall_time_ms = 120_000;
+    request.limits.maximum_nodes = 10_000;
+    request.limits.maximum_elements = 10_000;
     (geometry, request, access)
 }
 
@@ -909,6 +933,19 @@ impl CacheImport for TestStore {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        match self.0.get(&digest) {
+            Some(bytes) if bytes.len() as u64 > maximum_bytes => Err(
+                runmat_execution_artifact::ArtifactError::Limit("object exceeds its read bound".into()),
+            ),
+            bytes => Ok(bytes.cloned()),
+        }
+    }
 }
 
 impl CacheExport for TestStore {
@@ -955,7 +992,7 @@ fn register_host_invocation(
 fn worker_inventory() -> ResourceInventory {
     ResourceInventory {
         cpu_millicores: 1_000,
-        memory_bytes: 4_000_000,
+        memory_bytes: 64_000_000,
         scratch_bytes: 4_000_000,
         accelerators: Vec::new(),
         capabilities: worker_capabilities(),
@@ -996,21 +1033,14 @@ fn submission_for(
 ) -> runmat_execution_runner::TaskSubmission {
     build_task_submission(
         host,
-        &request.arguments,
+        &request,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
             pool_id,
-            program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
-            host: request
-                .artifact
-                .execution_host_requirement(
-                    &request.recipe,
-                    BTreeSet::from([
-                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
-                    ]),
-                )
-                .unwrap(),
+            permitted_trust_tiers: BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
             artifact_access: host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,
@@ -1112,7 +1142,7 @@ fn fixture_for(
             },
         ],
     };
-    let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
+    let host = MeshingHostWorkload::new(workload, identity, request, fixture_ceilings(), access, None).unwrap();
     let program = host
         .prepare_program_request(revision, &[])
         .unwrap()
@@ -1124,6 +1154,7 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 7,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -1141,11 +1172,12 @@ fn request() -> MeshingRequest {
             requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
             maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
-        metric: MetricFieldRequest {
+        metric: MetricFieldRequest { entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -1167,21 +1199,16 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 4_000_000,
-            maximum_scratch_bytes: 4_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 100,
             maximum_recursion_depth: 32,
-            maximum_iterations: 100,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 1000,
             maximum_work_units_between_checks: 1000,
         },
+        size_controls: Vec::new(),
     }
 }
 
@@ -1189,14 +1216,8 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"native-meshing-graph"),
         Digest::sha256(b"native-meshing-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"native-meshing-runtime"),
-            Digest::sha256(b"native-meshing-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        // Native workers advertise this runtime; the program must require the same.
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }
@@ -1219,4 +1240,26 @@ fn limits() -> NativeMeshingHostLimits {
 
 fn stable(seed: u8) -> StableDigest {
     StableDigest::from_bytes([seed; 32])
+}
+
+/// Execution ceilings of the small conformance fixture.
+fn fixture_ceilings() -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 4_000_000,
+        maximum_scratch_bytes: 4_000_000,
+        maximum_wall_time_ms: 10_000,
+        maximum_artifact_bytes: 1_000_000,
+        maximum_search_work: 100,
+        maximum_iterations: 100,
+    }
+}
+
+/// Execution ceilings for the complete exact-meshing DAG fixtures.
+fn dag_ceilings() -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 64_000_000,
+        maximum_search_work: 1_000_000,
+        maximum_iterations: 1_000_000,
+        ..fixture_ceilings()
+    }
 }

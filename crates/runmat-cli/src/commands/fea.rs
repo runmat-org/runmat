@@ -91,6 +91,68 @@ impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
             analysis_execute_structural_sweep_with_placement(&sweep, context, &placement).await
         })
     }
+    fn execute_document(
+        &self,
+        path: PathBuf,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<
+        Result<AnalysisStudyRunData, runmat_runtime::RuntimeError>,
+    > {
+        Box::pin(async move { run_document_through_cli(&path) })
+    }
+}
+
+/// Runs a `.fea` document with this executable's public `fea run` command, then reads the
+/// authenticated publication it wrote. The study runs exactly as it does from a shell.
+fn run_document_through_cli(path: &std::path::Path) -> Result<AnalysisStudyRunData, runmat_runtime::RuntimeError> {
+    let failure = |message: String| {
+        runmat_runtime::build_runtime_error(message)
+            .with_identifier("RunMat:fea:OperationFailed")
+            .build()
+    };
+    let executable = std::env::current_exe()
+        .map_err(|error| failure(format!("cannot locate the RunMat executable: {error}")))?;
+    let output = std::process::Command::new(executable)
+        .arg("fea")
+        .arg("run")
+        .arg(path)
+        .arg("--json")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| failure(format!("cannot start `runmat fea run`: {error}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reason = stderr
+            .lines()
+            .rev()
+            .find(|line| line.trim_start().starts_with("Error"))
+            .or_else(|| stderr.lines().rev().find(|line| !line.trim().is_empty()))
+            .unwrap_or("no diagnostic was printed");
+        return Err(failure(format!(
+            "`runmat fea run {}` failed: {reason}",
+            path.display()
+        )));
+    }
+    #[derive(serde::Deserialize)]
+    struct PrintedStudy {
+        study_definition_digest: String,
+        result_manifest_artifact_path: String,
+    }
+    let printed: PrintedStudy = serde_json::from_slice(&output.stdout).map_err(|error| {
+        failure(format!(
+            "`runmat fea run {}` did not print one study result: {error}",
+            path.display()
+        ))
+    })?;
+    let definition: runmat_execution::Digest = printed
+        .study_definition_digest
+        .parse()
+        .map_err(|error| failure(format!("invalid study definition digest: {error}")))?;
+    runmat_runtime::analysis::study_result_manifest::read_saved_study_publication(
+        definition,
+        std::path::Path::new(&printed.result_manifest_artifact_path),
+        16 * 1024 * 1024,
+    )
+    .map_err(failure)
 }
 
 fn host_placement_error(
@@ -148,11 +210,6 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
         data.numerically_acceptable
     );
     println!(
-        "  {} {}",
-        styles.label("production publishable:"),
-        data.production_publishable
-    );
-    println!(
         "  {} {:?}",
         styles.label("solver:"),
         data.solver_convergence
@@ -179,9 +236,6 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
         );
         for reason in &step.quality_reasons {
             println!("    quality {:?}: {}", reason.code, reason.detail);
-        }
-        for reason in &step.production_publication_reasons {
-            println!("    publication {:?}: {}", reason.code, reason.detail);
         }
     }
     if verbose {
@@ -213,12 +267,11 @@ pub(crate) fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
         println!("  runs:");
         for entry in &data.run_entries {
             println!(
-                "    {}  {} steps  {:?}  numerically acceptable: {}  production publishable: {}",
+                "    {}  {} steps  {:?}  numerically acceptable: {}",
                 entry.study_id,
                 entry.result.steps.len(),
                 entry.result.run_status,
-                entry.result.numerically_acceptable,
-                entry.result.production_publishable
+                entry.result.numerically_acceptable
             );
         }
     }

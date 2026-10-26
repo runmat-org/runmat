@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn assert_unit_tetrahedron(topology: &SolverMeshTopology, request: &MeshingRequest) {
     assert!(!topology.volume_elements.is_empty());
-    assert!(topology.nodes.len() as u64 <= request.resources.maximum_nodes);
-    assert!(topology.volume_elements.len() as u64 <= request.resources.maximum_elements);
+    assert!(topology.nodes.len() as u64 <= request.limits.maximum_nodes);
+    assert!(topology.volume_elements.len() as u64 <= request.limits.maximum_elements);
     let nodes = topology
         .nodes
         .iter()

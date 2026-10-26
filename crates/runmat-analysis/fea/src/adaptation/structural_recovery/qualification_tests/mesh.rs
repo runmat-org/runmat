@@ -10,7 +10,7 @@ use runmat_meshing_core::{
 use std::collections::BTreeMap;
 const TETRAHEDRON_FACES: [[usize; 3]; 4] = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]];
 
-pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
+pub(crate) fn structured_cantilever(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
     assert!(divisions > 0);
     let mut artifact = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
     let solid = entity(PersistentEntityKind::Solid, "cantilever");
@@ -232,8 +232,8 @@ pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> So
         field("faces", FieldTopologyLocation::BoundaryFace, face_ids),
         field("edges", FieldTopologyLocation::BoundaryEdge, Vec::new()),
     ];
-    artifact.resolved_request.resources.maximum_nodes = artifact.topology.nodes.len() as u64;
-    artifact.resolved_request.resources.maximum_elements =
+    artifact.resolved_request.limits.maximum_nodes = artifact.topology.nodes.len() as u64;
+    artifact.resolved_request.limits.maximum_elements =
         artifact.topology.volume_elements.len() as u64;
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -255,11 +255,7 @@ fn digest(domain: &str, ordinal: u64) -> StableDigest {
 }
 
 pub(super) fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, source.into(), vec!["root".into()])
 }
 
 fn field(

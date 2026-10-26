@@ -25,7 +25,7 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(0.001),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence =
         AnalysisSequence::from_steps("flow", vec![ProcedureStep::fluid_static("steady")]);
     model
@@ -33,13 +33,13 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "signed-inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant([1.0, -0.25, 0.125].map(Velocity::new)),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "physical-outlet".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::FluidOutletPressure {
             value: PrescribedValue::Constant(Pressure::new(25.0)),
         },
@@ -50,7 +50,6 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
             assessments: Vec::new(),
             module_path: "tests/fluid.fea".into(),
             study_id: "flow".into(),
-            formulation_requirement: FormulationRequirement::Experimental,
             study_inputs: vec![],
             outputs: vec![],
             model,
@@ -63,8 +62,8 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
 
 fn policy() -> FluidStudyPlanningPolicy {
     FluidStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
         numerical: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
@@ -79,11 +78,11 @@ fn policy() -> FluidStudyPlanningPolicy {
             maximum_authority_items: 100,
         },
         geometry: FiniteVolumeProjectionPolicy {
-            max_cells: 100,
-            max_face_incidences: 400,
-            max_boundary_faces: 400,
-            max_scratch_bytes: 10_000_000,
-            max_traversal_operations: 1_000_000,
+            max_cells: Some(100),
+            max_face_incidences: Some(400),
+            max_boundary_faces: Some(400),
+            max_scratch_bytes: Some(10_000_000),
+            max_traversal_operations: Some(1_000_000),
         },
     }
 }
@@ -105,14 +104,8 @@ fn preserves_signed_authority_and_consumes_only_relative_algebraic_criterion() {
 }
 
 #[test]
-fn rejects_mismatched_requirement_missing_criterion_and_nan_controls() {
+fn rejects_missing_criterion_and_nan_controls() {
     let (mut study, _) = study();
-    let mut wrong = policy();
-    wrong.formulation_requirement = FormulationRequirement::Production;
-    assert!(matches!(
-        plan_fluid_study(&study, wrong),
-        Err(FluidStudyPlanningError::FormulationRequirementMismatch)
-    ));
     let mut invalid = policy();
     invalid.numerical.linear_relative_tolerance = f64::NAN;
     assert!(plan_fluid_study(&study, invalid).is_err());

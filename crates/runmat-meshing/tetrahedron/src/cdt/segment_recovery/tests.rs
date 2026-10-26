@@ -15,11 +15,7 @@ use crate::cdt::{
 };
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, value.to_owned(), Vec::new())
 }
 
 pub(super) fn octahedron_constraints() -> DelaunayConstraints {
@@ -474,11 +470,11 @@ fn recovery_rejects_mismatched_constraints_and_assigned_regions() {
         DelaunaySegmentRecoveryErrorKind::InvalidTopology
     );
 
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "region:assigned".to_owned(),
-        assembly_path: Vec::new(),
-    };
+    let region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "region:assigned".to_owned(),
+        Vec::new(),
+    );
     let tetrahedron_count = topology.tetrahedra.len();
     let assigned = assign_delaunay_volume_regions(
         topology,

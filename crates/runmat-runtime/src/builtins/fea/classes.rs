@@ -1,50 +1,84 @@
-pub(super) const FEA_STUDY_CLASS: &str = "fea.Study";
-pub(super) const FEA_SWEEP_CLASS: &str = "fea.Sweep";
-pub(super) const FEA_VALIDATION_CLASS: &str = "fea.Validation";
-pub(super) const FEA_SWEEP_VALIDATION_CLASS: &str = "fea.SweepValidation";
-pub(super) const FEA_PLAN_CLASS: &str = "fea.Plan";
-pub(super) const FEA_SWEEP_PLAN_CLASS: &str = "fea.SweepPlan";
-pub(super) const FEA_RUN_RESULT_CLASS: &str = "fea.RunResult";
-pub(super) const FEA_STEP_RUN_RESULT_CLASS: &str = "fea.StepRunResult";
-pub(super) const FEA_SWEEP_RUN_RESULT_CLASS: &str = "fea.SweepRunResult";
-pub(super) const FEA_MODEL_CLASS: &str = "fea.Model";
-pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
-pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
-pub(super) const FEA_PROPERTY_REGION_TARGET_CLASS: &str = "fea.PropertyRegionTarget";
-pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str = "fea.StructuralConstraint";
-pub(super) const FEA_THERMAL_CONSTRAINT_CLASS: &str = "fea.ThermalConstraint";
-pub(super) const FEA_ELECTRICAL_CONSTRAINT_CLASS: &str = "fea.ElectricalConstraint";
-pub(super) const FEA_MAGNETIC_CONSTRAINT_CLASS: &str = "fea.MagneticConstraint";
-pub(super) const FEA_ACOUSTIC_CONSTRAINT_CLASS: &str = "fea.AcousticConstraint";
-pub(super) const FEA_FLUID_CONSTRAINT_CLASS: &str = "fea.FluidConstraint";
-pub(super) const FEA_STRUCTURAL_BOUNDARY_CLASS: &str = "fea.StructuralBoundary";
-pub(super) const FEA_THERMAL_BOUNDARY_CLASS: &str = "fea.ThermalBoundary";
-pub(super) const FEA_MAGNETIC_BOUNDARY_CLASS: &str = "fea.MagneticBoundary";
-pub(super) const FEA_ACOUSTIC_BOUNDARY_CLASS: &str = "fea.AcousticBoundary";
-pub(super) const FEA_FLUID_BOUNDARY_CLASS: &str = "fea.FluidBoundary";
-pub(super) const FEA_STRUCTURAL_STEP_CLASS: &str = "fea.StructuralStep";
-pub(super) const FEA_THERMAL_STEP_CLASS: &str = "fea.ThermalStep";
-pub(super) const FEA_ELECTROMAGNETIC_STEP_CLASS: &str = "fea.ElectromagneticStep";
-pub(super) const FEA_ACOUSTIC_STEP_CLASS: &str = "fea.AcousticStep";
-pub(super) const FEA_FLUID_STEP_CLASS: &str = "fea.FluidStep";
-pub(super) const FEA_THERMOMECHANICAL_STEP_CLASS: &str = "fea.ThermoMechanicalStep";
-pub(super) const FEA_ELECTROTHERMAL_STEP_CLASS: &str = "fea.ElectroThermalStep";
-pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS: &str = "fea.ConjugateHeatTransferStep";
-pub(super) const FEA_FLUID_STRUCTURE_STEP_CLASS: &str = "fea.FluidStructureStep";
-pub(super) const FEA_THERMOMECHANICAL_DOMAIN_CLASS: &str = "fea.ThermoMechanicalDomain";
-pub(super) const FEA_THERMAL_DOMAIN_CLASS: &str = "fea.ThermalDomain";
-pub(super) const FEA_ELECTROTHERMAL_DOMAIN_CLASS: &str = "fea.ElectroThermalDomain";
-pub(super) const FEA_ELECTROMAGNETIC_DOMAIN_CLASS: &str = "fea.ElectromagneticDomain";
-pub(super) const FEA_FLUID_DOMAIN_CLASS: &str = "fea.FluidDomain";
-pub(super) const FEA_CONTACT_INTERFACE_CLASS: &str = "fea.ContactInterface";
-pub(super) const FEA_FLUID_STRUCTURE_INTERFACE_CLASS: &str = "fea.FluidStructureInterface";
+use runmat_builtins::fea_contract::identities;
+use runmat_builtins::fea_contract::model_types::classes as model_classes;
+
+pub(super) const FEA_STUDY_CLASS: &str = identities::FEA_STUDY_CLASS.display_name();
+pub(super) const FEA_SWEEP_CLASS: &str = identities::FEA_SWEEP_CLASS.display_name();
+pub(super) const FEA_VALIDATION_CLASS: &str = identities::FEA_VALIDATION_CLASS.display_name();
+pub(super) const FEA_SWEEP_VALIDATION_CLASS: &str =
+    identities::FEA_SWEEP_VALIDATION_CLASS.display_name();
+pub(super) const FEA_PLAN_CLASS: &str = identities::FEA_PLAN_CLASS.display_name();
+pub(super) const FEA_SWEEP_PLAN_CLASS: &str = identities::FEA_SWEEP_PLAN_CLASS.display_name();
+pub(super) const FEA_RUN_RESULT_CLASS: &str = identities::FEA_RUN_RESULT_CLASS.display_name();
+pub(super) const FEA_STEP_RUN_RESULT_CLASS: &str =
+    identities::FEA_STEP_RUN_RESULT_CLASS.display_name();
+pub(super) const FEA_SWEEP_RUN_RESULT_CLASS: &str =
+    identities::FEA_SWEEP_RUN_RESULT_CLASS.display_name();
+pub(super) const FEA_MODEL_CLASS: &str = identities::FEA_MODEL_CLASS.display_name();
+pub(super) const FEA_MATERIAL_CLASS: &str = identities::FEA_MATERIAL_CLASS.display_name();
+pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str =
+    identities::FEA_MATERIAL_ASSIGNMENT_CLASS.display_name();
+pub(super) const FEA_PROPERTY_REGION_TARGET_CLASS: &str =
+    identities::FEA_PROPERTY_REGION_TARGET_CLASS.display_name();
+pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str =
+    model_classes::FEA_STRUCTURAL_CONSTRAINT_CLASS.display_name();
+pub(super) const FEA_THERMAL_CONSTRAINT_CLASS: &str =
+    model_classes::FEA_THERMAL_CONSTRAINT_CLASS.display_name();
+pub(super) const FEA_ELECTRICAL_CONSTRAINT_CLASS: &str =
+    model_classes::FEA_ELECTRICAL_CONSTRAINT_CLASS.display_name();
+pub(super) const FEA_MAGNETIC_CONSTRAINT_CLASS: &str =
+    model_classes::FEA_MAGNETIC_CONSTRAINT_CLASS.display_name();
+pub(super) const FEA_ACOUSTIC_CONSTRAINT_CLASS: &str =
+    model_classes::FEA_ACOUSTIC_CONSTRAINT_CLASS.display_name();
+pub(super) const FEA_FLUID_CONSTRAINT_CLASS: &str =
+    model_classes::FEA_FLUID_CONSTRAINT_CLASS.display_name();
+pub(super) const FEA_STRUCTURAL_BOUNDARY_CLASS: &str =
+    model_classes::FEA_STRUCTURAL_BOUNDARY_CLASS.display_name();
+pub(super) const FEA_THERMAL_BOUNDARY_CLASS: &str =
+    model_classes::FEA_THERMAL_BOUNDARY_CLASS.display_name();
+pub(super) const FEA_MAGNETIC_BOUNDARY_CLASS: &str =
+    model_classes::FEA_MAGNETIC_BOUNDARY_CLASS.display_name();
+pub(super) const FEA_ACOUSTIC_BOUNDARY_CLASS: &str =
+    model_classes::FEA_ACOUSTIC_BOUNDARY_CLASS.display_name();
+pub(super) const FEA_FLUID_BOUNDARY_CLASS: &str =
+    model_classes::FEA_FLUID_BOUNDARY_CLASS.display_name();
+pub(super) const FEA_STRUCTURAL_STEP_CLASS: &str =
+    model_classes::FEA_STRUCTURAL_STEP_CLASS.display_name();
+pub(super) const FEA_THERMAL_STEP_CLASS: &str =
+    model_classes::FEA_THERMAL_STEP_CLASS.display_name();
+pub(super) const FEA_ELECTROMAGNETIC_STEP_CLASS: &str =
+    model_classes::FEA_ELECTROMAGNETIC_STEP_CLASS.display_name();
+pub(super) const FEA_ACOUSTIC_STEP_CLASS: &str =
+    model_classes::FEA_ACOUSTIC_STEP_CLASS.display_name();
+pub(super) const FEA_FLUID_STEP_CLASS: &str = model_classes::FEA_FLUID_STEP_CLASS.display_name();
+pub(super) const FEA_THERMOMECHANICAL_STEP_CLASS: &str =
+    model_classes::FEA_THERMO_MECHANICAL_STEP_CLASS.display_name();
+pub(super) const FEA_ELECTROTHERMAL_STEP_CLASS: &str =
+    model_classes::FEA_ELECTRO_THERMAL_STEP_CLASS.display_name();
+pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS: &str =
+    model_classes::FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS.display_name();
+pub(super) const FEA_FLUID_STRUCTURE_STEP_CLASS: &str =
+    model_classes::FEA_FLUID_STRUCTURE_STEP_CLASS.display_name();
+pub(super) const FEA_THERMOMECHANICAL_DOMAIN_CLASS: &str =
+    model_classes::FEA_THERMO_MECHANICAL_DOMAIN_CLASS.display_name();
+pub(super) const FEA_THERMAL_DOMAIN_CLASS: &str =
+    model_classes::FEA_THERMAL_DOMAIN_CLASS.display_name();
+pub(super) const FEA_ELECTROTHERMAL_DOMAIN_CLASS: &str =
+    model_classes::FEA_ELECTRO_THERMAL_DOMAIN_CLASS.display_name();
+pub(super) const FEA_ELECTROMAGNETIC_DOMAIN_CLASS: &str =
+    model_classes::FEA_ELECTROMAGNETIC_DOMAIN_CLASS.display_name();
+pub(super) const FEA_FLUID_DOMAIN_CLASS: &str =
+    model_classes::FEA_FLUID_DOMAIN_CLASS.display_name();
+pub(super) const FEA_CONTACT_INTERFACE_CLASS: &str =
+    model_classes::FEA_CONTACT_INTERFACE_CLASS.display_name();
+pub(super) const FEA_FLUID_STRUCTURE_INTERFACE_CLASS: &str =
+    model_classes::FEA_FLUID_STRUCTURE_INTERFACE_CLASS.display_name();
 pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS: &str =
-    "fea.ConjugateHeatTransferInterface";
-pub(super) const FEA_RESULTS_CLASS: &str = "fea.Results";
-pub(super) const FEA_FIELD_CLASS: &str = "fea.Field";
-pub(super) const FEA_FIELD_PAGE_CLASS: &str = "fea.FieldPage";
-pub(super) const FEA_COMPARE_CLASS: &str = "fea.Compare";
-pub(super) const FEA_TRENDS_CLASS: &str = "fea.Trends";
+    model_classes::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS.display_name();
+pub(super) const FEA_RESULTS_CLASS: &str = identities::FEA_RESULTS_CLASS.display_name();
+pub(super) const FEA_FIELD_CLASS: &str = identities::FEA_FIELD_CLASS.display_name();
+pub(super) const FEA_FIELD_PAGE_CLASS: &str = identities::FEA_FIELD_PAGE_CLASS.display_name();
+pub(super) const FEA_COMPARE_CLASS: &str = identities::FEA_COMPARE_CLASS.display_name();
+pub(super) const FEA_TRENDS_CLASS: &str = identities::FEA_TRENDS_CLASS.display_name();
 pub(super) const FEA_STUDY_CONTEXT_PROPERTY: &str = "study";
 
 pub(super) static FEA_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
@@ -76,14 +110,13 @@ pub(super) const SWEEP_VALIDATION_FIELDS: &[&str] = &[
     "study_entries",
     "evidence_artifact_path",
 ];
+/// Mirrors `AnalysisStudyPlanData`; every field is always serialized.
 pub(super) const PLAN_FIELDS: &[&str] = &[
     "study_id",
     "model_id",
-    "procedure_step",
-    "execution",
+    "sequence_id",
+    "steps",
     "operation_sequence",
-    "run_operation",
-    "run_op_version",
     "study_fingerprint",
     "evidence_artifact_path",
 ];
@@ -108,7 +141,6 @@ pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
     "operation_sequence",
     "run_status",
     "numerically_acceptable",
-    "production_publishable",
     "solver_convergence",
     "result_quality",
     "evidence_artifact_path",
@@ -125,11 +157,9 @@ pub(super) const STEP_RUN_RESULT_FIELDS: &[&str] = &[
     "run_id",
     "run_status",
     "numerically_acceptable",
-    "production_publishable",
     "solver_convergence",
     "result_quality",
     "quality_reasons",
-    "production_publication_reasons",
     "provenance",
     "evidence_artifact_path",
     FEA_STUDY_CONTEXT_PROPERTY,
@@ -170,15 +200,22 @@ pub(super) const MODEL_FIELDS: &[&str] = &[
     "sequence",
     super::signals::bindings::FROZEN_GENERATORS_PROPERTY,
 ];
+/// Mirrors `MaterialModel`. Absent optional capabilities are omitted when the
+/// object is built, so only the identity and provenance fields are required.
 pub(super) const MATERIAL_FIELDS: &[&str] = &[
     "material_id",
     "name",
-    "mechanical",
+    "provenance",
+    "mass_density_kg_per_m3",
+    "elasticity",
+    "damping",
     "thermal",
     "acoustic",
+    "fluid",
     "electrical",
     "plastic",
 ];
+pub(super) const MATERIAL_REQUIRED_FIELDS: &[&str] = &["material_id", "name", "provenance"];
 pub(super) const MATERIAL_ASSIGNMENT_FIELDS: &[&str] = &[
     "geometry_id",
     "geometry_revision",
@@ -198,6 +235,7 @@ pub(super) const STEP_FIELDS: &[&str] = &[
     "procedure",
     "solution_space",
     "settings",
+    "excitation_case_selection",
     "independent_domain",
     "activations",
     "state_inputs",
@@ -223,9 +261,7 @@ pub(super) const RESULTS_FIELDS: &[&str] = &[
     "diagnostics",
     "run_status",
     "numerically_acceptable",
-    "production_publishable",
     "quality_reasons",
-    "production_publication_reasons",
     "provenance",
     "summary",
     "run_id",
@@ -270,7 +306,6 @@ pub(super) const COMPARE_FIELDS: &[&str] = &[
     "baseline_run_id",
     "candidate_run_id",
     "numerically_acceptable_changed",
-    "production_publishable_changed",
     "run_status_changed",
     "quality_reason_count_delta",
     "failed_increment_delta",
@@ -939,7 +974,7 @@ fn fea_class_schemas() -> [FeaClassSchema; 50] {
             FEA_MATERIAL_CLASS,
             "runmat.fea.material",
             MATERIAL_FIELDS,
-            &["material_id", "name", "mechanical", "thermal"],
+            MATERIAL_REQUIRED_FIELDS,
             validate_fea_object,
         ),
         (
@@ -1162,9 +1197,7 @@ fn fea_class_schemas() -> [FeaClassSchema; 50] {
                 "fields",
                 "run_status",
                 "numerically_acceptable",
-                "production_publishable",
                 "quality_reasons",
-                "production_publication_reasons",
                 "provenance",
                 "summary",
                 "run_id",
@@ -1237,7 +1270,6 @@ fn fea_class_schemas() -> [FeaClassSchema; 50] {
                 "baseline_run_id",
                 "candidate_run_id",
                 "numerically_acceptable_changed",
-                "production_publishable_changed",
                 "run_status_changed",
                 "quality_reason_count_delta",
             ],

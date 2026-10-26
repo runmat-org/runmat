@@ -3,6 +3,10 @@ mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-LANGUAGE-002/typed_expressions @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Constructed geometry source with local/default quantity typing and one
+//   node-displacement output; source checking only.
 #[test]
 fn compiler_checks_inputs_defaults_locals_and_outputs_as_one_program() {
     let source = r#"
@@ -82,6 +86,9 @@ study load_study {
     );
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/typed_expressions @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts.
 #[test]
 fn compiler_rejects_wrong_input_defaults_and_duplicate_outputs() {
     let source = r#"
@@ -135,6 +142,10 @@ fn model_header_region_parameters_are_required_and_strongly_typed() {
     assert!(declaration.inputs.values().all(|input| input.required));
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/type_and_unit_pass @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Declaration calls must bind every typed model input with the right type;
+//   dimensioned-literal and operation-overload checks are covered by other tests.
 #[test]
 fn declaration_calls_require_every_typed_model_input() {
     let valid = r#"
@@ -230,6 +241,10 @@ material steel {
     assert_eq!(mechanical.poisson_ratio.canonical_value(), 0.3);
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/physical_lowering @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Material lowering rejects unknown members instead of dropping them; loads,
+//   constraints, interfaces and signals lowering are not covered here.
 #[test]
 fn material_lowering_rejects_unknown_members_instead_of_dropping_them() {
     let source = r#"
@@ -256,6 +271,10 @@ material steel {
     assert!(program.materials.is_empty());
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/mesh_source_alternatives @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A mesh request binds geometry and lowers its units into canonical settings; the
+//   reference-an-existing-mesh alternative is not asserted.
 #[test]
 fn mesh_request_binds_geometry_and_lowers_units_into_canonical_settings() {
     let source = r#"
@@ -339,7 +358,9 @@ mesh incomplete on geometry.part {
             && diagnostic.message.contains("requires `maximum_deviation`")
     }));
     assert!(program.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("length quantity")
+        diagnostic.code == "fea.semantic.mesh"
+            && diagnostic.message == "target size must be length, found s"
+            && diagnostic.label.as_deref() == Some("expected m")
     }));
 }
 
@@ -363,10 +384,11 @@ material invalid {
         },
     });
     assert!(!program.is_valid());
-    assert!(program
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "fea.semantic.material"));
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.material"
+            && diagnostic.message == "youngs modulus must be force per area, found m"
+            && diagnostic.label.as_deref() == Some("expected Pa")
+    }));
     assert!(program.materials.is_empty());
 }
 
@@ -387,7 +409,11 @@ geometry part {
 }
 
 "#;
-    let host = TestHost::default().with_geometry("project/geometry/part.step", 8);
+    let host = TestHost::default().with_named_geometry(
+        "project/geometry/part.step",
+        8,
+        &[("solid", "Part body")],
+    );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
@@ -418,6 +444,75 @@ geometry part {
     );
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/inspected_selector_semantics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Name selectors must match names the inspected source carries; tag and id selector
+//   forms are covered elsewhere.
+// witness: FEA-AUTHORING-GEOMETRY-002/selector_inspection @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Selection by name resolves only against imported metadata; the interactive view
+//   exposure is not covered.
+#[test]
+fn name_selectors_must_match_names_the_source_carries() {
+    let source = r#"
+geometry part {
+    file = "./geometry/part.step"
+    units = mm
+    interfaces = shared
+    region body : solid { select name "Part body"; expect exactly_one }
+    region fixed : face { select name "Fixed edn"; expect exactly_one }
+}
+"#;
+    let host = TestHost::default().with_named_geometry(
+        "project/geometry/part.step",
+        8,
+        &[("solid", "Part body"), ("face", "Fixed end"), ("face", "Loaded end")],
+    );
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    let messages = program
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 1, "{messages:#?}");
+    assert!(messages[0].contains("\"Fixed edn\""), "{}", messages[0]);
+    assert!(messages[0].contains("\"Fixed end\", \"Loaded end\""), "{}", messages[0]);
+}
+
+#[test]
+fn shared_interfaces_reach_the_imported_geometry_definition() {
+    let source = r#"
+geometry cell {
+    file = "./geometry/cell.step"
+    units = mm
+    interfaces = shared
+    region air : solid { select name "Air"; expect one_or_more }
+}
+"#;
+    let host =
+        TestHost::default().with_named_geometry("project/geometry/cell.step", 8, &[("solid", "Air")]);
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let geometry = program.geometries.values().next().unwrap();
+    let runmat_geometry_core::GeometryDefinitionSource::Imported(imported) = &geometry.source else {
+        panic!("expected imported geometry");
+    };
+    assert!(imported.shared_interfaces);
+}
+
+// witness: FEA-AUTHORING-COMPILER-002/geometry_lowering @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Constructed and derived geometry lower parameterized feature graphs.
 #[test]
 fn constructed_and_derived_geometry_lower_parameterized_feature_graphs() {
     let source = r#"
@@ -489,6 +584,13 @@ geometry relieved from geometry.bracket {
     assert_eq!(derived.graph.result.0, "result");
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/geometry_lowering @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Generated geometry freezes imported-function provenance and typed arguments;
+//   constructed, derived and file-import lowering are other cases.
+// witness: FEA-AUTHORING-GEOMETRY-002/generated_geometry @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Generated geometry freezes imported-function provenance and typed arguments at check.
 #[test]
 fn generated_geometry_freezes_function_provenance_and_typed_arguments() {
     let source = r#"

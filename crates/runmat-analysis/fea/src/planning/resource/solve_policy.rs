@@ -17,6 +17,29 @@ pub enum PreconditionerStorage {
     },
 }
 
+/// How an SPD static solve proves coercivity and solves; recorded in the plan so every
+/// re-derivation and the numerical kernel follow the planned path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StaticSolvePath {
+    /// The sparse Cholesky factor proves coercivity and solves.
+    ProvingFactorization,
+    /// Element rigidity, face gluing and anchors prove the elastic operator positive definite
+    /// (no global factor); AMG-preconditioned CG solves, accepted by its true residual.
+    ElasticRigidityMultigrid,
+}
+
+/// Selects the static solve path while planning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StaticSolveSelection {
+    /// Choose the factorization when its plan fits the effective memory ceiling,
+    /// min(authored ceiling, this machine's admitted memory when known), and otherwise the
+    /// elastic rigidity path when the model admits it.
+    WithinCeiling { machine_memory_bytes: Option<u64> },
+    /// Reproduce the path an admitted plan recorded.
+    Recorded(StaticSolvePath),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NumericalScalar {
@@ -58,6 +81,7 @@ pub enum SolveResourcePolicy {
         admission: SolverAdmissionResourcePolicy,
         /// Peak retained index plus construction cursors for scoped affine Tᵀ application.
         transpose_index_bytes_upper_bound: ByteCount,
+        path: StaticSolvePath,
     },
     DirectFactorization {
         vector_count: Count,
@@ -105,6 +129,14 @@ pub enum SolveResourcePolicy {
 }
 
 impl SolveResourcePolicy {
+    /// The recorded static solve path (`None` for policies without one).
+    pub fn static_solve_path(&self) -> Option<StaticSolvePath> {
+        match self {
+            Self::Iterative { path, .. } => Some(*path),
+            _ => None,
+        }
+    }
+
     pub(crate) fn transpose_index_bytes_upper_bound(&self) -> ByteCount {
         match self {
             Self::Iterative {

@@ -9,7 +9,7 @@ pub(super) fn verify(
     let epsilon = 4.0 * 8.854_187_818_8e-12;
     let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh).unwrap();
     let response = completion.result.response();
-    assert_eq!(fields[0], response.potential_v);
+    assert_eq!(&fields[0], response.potential_v.canonical_values());
     for (actual, node) in fields[0].iter().zip(&projection.nodes) {
         let x = node.coordinates_m.canonical_value()[0];
         near(*actual, gauge + sign * x * (1.0 - x), 1.0);
@@ -30,16 +30,16 @@ pub(super) fn verify(
     else {
         panic!("charged electrostatic constitutive response")
     };
-    assert_eq!(&fields[3], energy_density_j_per_m3);
-    near(*total_energy_j, epsilon / 6.0, epsilon);
+    assert_eq!(&fields[3], energy_density_j_per_m3.canonical_values());
+    near(total_energy_j.canonical_value(), epsilon / 6.0, epsilon);
     let source = response.charge_sources.as_ref().unwrap();
-    near(source.integrated_charge_c, sign * 2.0 * epsilon, epsilon);
+    near(source.integrated_source, sign * 2.0 * epsilon, epsilon);
     assert!(source.projection_evidence.iter().all(|e| e.accepted));
     for terminal in &response.terminals {
-        near(terminal.outward_flux, sign * epsilon, epsilon);
+        near(terminal.outward_flux.canonical_value(), sign * epsilon, epsilon);
     }
-    near(response.volume_source_work, epsilon / 3.0, epsilon);
-    near(response.terminal_work, 0.0, epsilon);
+    near(response.volume_source_work.canonical_value(), epsilon / 3.0, epsilon);
+    near(response.terminal_work.canonical_value(), 0.0, epsilon);
     assert!(response.linear_relative_residual <= 1e-8);
     assert!(response.relative_flux_imbalance <= 1e-8);
     assert!(response.relative_energy_identity_error <= 1e-8);

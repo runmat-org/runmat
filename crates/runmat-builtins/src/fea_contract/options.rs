@@ -1,5 +1,6 @@
 //! Canonical FEA option identities shared by runtime admission and inference.
 
+/// The runtime's option-key normalization: ASCII alphanumerics only, lowercased.
 pub fn normalize_option_key(name: &str) -> String {
     name.chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
@@ -129,12 +130,11 @@ impl FeaTrendsOption {
     }
 }
 
-/// Plot historically lowercases ASCII but does not erase punctuation except
-/// for the explicitly admitted `field_id` alias.
+/// `plot(field, ...)` options. The runtime lowercases ASCII but does not
+/// erase punctuation, so `"Edges"` matches and `"show-edges"` does not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeaPlotOption {
-    Field,
-    Mesh,
+    Edges,
     Overlay,
     Deformed,
 }
@@ -142,10 +142,26 @@ pub enum FeaPlotOption {
 impl FeaPlotOption {
     pub fn decode(name: &str) -> Option<Self> {
         Some(match name.to_ascii_lowercase().as_str() {
-            "field" | "fieldid" | "field_id" => Self::Field,
-            "mesh" => Self::Mesh,
+            "edges" => Self::Edges,
             "overlay" => Self::Overlay,
             "deformed" => Self::Deformed,
+            _ => return None,
+        })
+    }
+}
+
+/// `mesh(runOrResultsOrField, ...)` options, decoded with the shared normalization.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeaMeshOption {
+    Source,
+    Edges,
+}
+
+impl FeaMeshOption {
+    pub fn decode(name: &str) -> Option<Self> {
+        Some(match normalize_option_key(name).as_str() {
+            "source" => Self::Source,
+            "edges" => Self::Edges,
             _ => return None,
         })
     }
@@ -170,17 +186,20 @@ mod tests {
             FeaModelOption::decode("S_te-ps"),
             Some(FeaModelOption::Steps)
         );
+        assert_eq!(
+            FeaModelOption::decode("Material_Assignments"),
+            Some(FeaModelOption::MaterialAssignments)
+        );
         assert_eq!(FeaModelOption::decode("Assignments"), None);
         assert_eq!(FeaModelOption::decode("Cases"), None);
         assert_eq!(FeaStudyOption::decode("P_rofile"), None);
+        assert_eq!(FeaStudyOption::decode("Mesh"), Some(FeaStudyOption::Mesh));
         assert_eq!(
             FeaMaterialAssignmentOption::decode("Expected_Material-Id"),
             Some(FeaMaterialAssignmentOption::ExpectedMaterial)
         );
-        assert_eq!(
-            FeaPlotOption::decode("FIELD_ID"),
-            Some(FeaPlotOption::Field)
-        );
-        assert_eq!(FeaPlotOption::decode("field-id"), None);
+        assert_eq!(FeaPlotOption::decode("EDGES"), Some(FeaPlotOption::Edges));
+        assert_eq!(FeaPlotOption::decode("show-edges"), None);
+        assert_eq!(FeaMeshOption::decode("Source"), Some(FeaMeshOption::Source));
     }
 }

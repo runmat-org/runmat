@@ -142,7 +142,7 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
             &encoded.matrices,
             encoded.selections,
             operands,
-            native::ffi_exact_import_options(&self.options, cancel_token.id(), 1.0),
+            native::ffi_exact_import_options(&self.options, cancel_token.id(), 1.0, 1.0),
         )
         .map_err(|error| OcctExactFeatureError::Kernel(error.to_string()))?;
 

@@ -17,6 +17,10 @@ pub(super) fn solve(
         || p.numerical.operator_work_upper_bound == 0
         || p.phase_resident_bytes_upper_bound < ByteCount(p.numerical.resident_bytes_upper_bound)
         || p.phase_resident_bytes_upper_bound < p.source_preparation_resident_bytes
+        || p.numerical.verification_resident_bytes_upper_bound
+            > p.numerical.resident_bytes_upper_bound
+        || p.verification_phase_resident_bytes_upper_bound > p.phase_resident_bytes_upper_bound
+        || p.verification_phase_resident_bytes_upper_bound < p.source_preparation_resident_bytes
         || demand.inputs.encoded_payload_bytes != p.canonical_input_bytes
         || demand.inputs.decoded_resident_bytes_admission_budget < p.actual_decode_resident_bytes
         || demand.result_output.encoded_payload_bytes_upper_bound

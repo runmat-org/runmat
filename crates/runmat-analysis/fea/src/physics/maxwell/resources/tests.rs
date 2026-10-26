@@ -1,6 +1,5 @@
 use super::*;
 use crate::fixtures::{fixture_model, FixtureId};
-use runmat_analysis_core::FormulationRequirement;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 #[test]
@@ -11,7 +10,8 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
         let reservation = require_canonical_ceiling(&model, &mesh, u64::MAX).unwrap();
         assert_eq!(reservation.edge_count_upper_bound, 6);
         assert_eq!(reservation.real_block_dimension_upper_bound, 12);
-        assert_eq!(reservation.support_entries_upper_bound, 144);
+        // One complex entry per edge pair of each element.
+        assert_eq!(reservation.support_entries_upper_bound, 36);
         assert_eq!(reservation.quadrature_sample_count, 15);
         assert_eq!(
             require_canonical_ceiling(&model, &mesh, reservation.total_bytes).unwrap(),
@@ -43,8 +43,8 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
             &denied,
             &mesh,
             step_id,
-            FormulationRequirement::Experimental,
             1e-8,
+            1.0,
         )
         .unwrap_err();
         assert!(error
@@ -61,10 +61,12 @@ fn checked_counts_and_actual_shared_krylov_counter_fail_closed() {
         (1, 1, 1, u64::MAX, 0, 0),
         (1, 1, 1, 0, u64::MAX, 0),
         (1, 1, 1, 0, 0, u64::MAX),
-        (1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0),
     ] {
         assert!(from_counts(values.0, values.1, values.2, values.3, values.4, values.5).is_err());
     }
+    // The sparse LU reservation scales with the element count, with no iteration-counter cap.
+    let huge = from_counts(1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0).unwrap();
+    assert!(huge.assembly_and_solver_bytes > 16 * (1u64 << 30));
     let small = from_counts(10, 1, 4, 100, 100, 100).unwrap();
     let large = from_counts(27, 8, 24, 101, 101, 101).unwrap();
     assert!(large.total_bytes > small.total_bytes);
@@ -92,6 +94,14 @@ fn replicated_property_metadata_and_selected_policy_are_not_ignored() {
         .accuracy
         .resources
         .maximum_resident_bytes = grown.total_bytes;
+    // The authored ceiling is part of the serialized model, so re-measure with it set.
+    let exact = require_canonical_ceiling(&big, &mesh, u64::MAX)
+        .unwrap()
+        .total_bytes;
+    big.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = exact;
     assert!(require_selected_ceiling(&big, &mesh, id.as_str()).is_ok());
     big.sequence.steps[0]
         .accuracy

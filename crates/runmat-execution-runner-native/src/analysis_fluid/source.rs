@@ -200,38 +200,41 @@ fn completion(
         result: completed.result.result.clone(),
         numerical_receipt: completed.result.numerical_receipt.clone(),
         fields: completed.fields.manifest.clone(),
-        layout: completed
-            .result
-            .result
-            .native_field_topology(&completed.workload, &preparation.mesh)
-            .map_err(|error| error.to_string())?,
-        observation_catalog: completed.observation_catalog.clone(),
-        observation_results: match &completed.observations {
-            Some(observations) => completed
-                .workload
-                .model
-                .sequence
-                .steps
-                .iter()
-                .find(|step| step.step_id == completed.workload.step_id)
-                .ok_or("fluid completion omits its selected authored step")?
-                .observations
-                .iter()
-                .map(|request| {
-                    let spec = request.spec().ok_or(
-                        "fluid publication has a non-field observation without a result spec",
-                    )?;
+        observation_catalog: completed.observations.catalog.clone(),
+        observation_results: completed
+            .observations
+            .samples
+            .iter()
+            .flat_map(|sample| {
+                sample.manifest.results.iter().map(move |entry| {
                     runmat_analysis_execution::import_observation_result(
                         source,
-                        observations,
-                        &spec.observation_id,
+                        sample,
+                        &entry.observation_id,
                         preparation.output_policy.inventory_limits(),
                     )
                     .map_err(|error| error.to_string())
                 })
-                .collect::<Result<Vec<_>, _>>()?,
-            None => Vec::new(),
-        },
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        observation_histories: completed
+            .observations
+            .histories
+            .iter()
+            .map(|finalized| {
+                history(
+                    source,
+                    &finalized.history,
+                    preparation.output_policy.inventory_limits(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        series_reductions: completed
+            .observations
+            .histories
+            .iter()
+            .filter_map(|finalized| finalized.series_reduction.clone())
+            .collect(),
         accuracy: completed.accuracy.artifact.clone(),
         states: completed
             .states
@@ -288,4 +291,37 @@ pub fn fluid_study_completion_from_source(
     let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, FluidStudyObjectSource::new(source)))
+}
+
+/// The complete published history: whole histories as imported, partitioned ones sample by
+/// sample from their retained chunks.
+fn history(
+    source: &impl CacheImport,
+    imported: &runmat_analysis_execution::ImportedObservationHistory,
+    limits: runmat_execution_artifact::object::ObjectInventoryLimits,
+) -> Result<runmat_analysis_fea::results::observation::ObservationHistory, String> {
+    if let runmat_analysis_execution::ImportedObservationHistoryStorage::Whole { history, .. } =
+        &imported.storage
+    {
+        return Ok((**history).clone());
+    }
+    let samples = imported
+        .manifest
+        .samples
+        .iter()
+        .map(|entry| {
+            runmat_analysis_execution::import_observation_history_sample(
+                source,
+                imported,
+                entry.coordinate,
+                limits,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    runmat_analysis_fea::results::observation::ObservationHistory::from_manifest_and_samples(
+        imported.manifest.clone(),
+        samples,
+    )
+    .map_err(|error| error.to_string())
 }

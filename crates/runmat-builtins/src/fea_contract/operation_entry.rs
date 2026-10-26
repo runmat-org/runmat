@@ -12,10 +12,20 @@ pub enum OperationEffectProfile {
     EvidenceWrite,
     /// Queries existing run artifacts without changing them.
     ArtifactRead,
-    /// May persist a supplied typed mesh to the configured artifact store.
-    ArtifactWrite,
     /// Figure creation reads run artifacts and changes graphics state.
     Figure,
+    /// As `EvidenceWrite`, but the operation completes without suspending.
+    SynchronousEvidenceWrite,
+    /// As `ArtifactRead`, but the query completes without suspending.
+    SynchronousArtifactRead,
+    /// As `Figure`, but figure generation completes without suspending.
+    SynchronousFigure,
+}
+
+impl OperationEffectProfile {
+    const fn suspends(self) -> bool {
+        matches!(self, Self::EvidenceWrite | Self::ArtifactRead | Self::Figure)
+    }
 }
 
 pub struct OperationEntryDefinition {
@@ -38,6 +48,40 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
         &'static [EffectKind],
         &'static [CapabilityRequirement],
     ) = match definition.effects {
+        OperationEffectProfile::SynchronousEvidenceWrite => (
+            BuiltinPurity::Impure,
+            BuiltinSemanticKind::Filesystem,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemRead,
+                EffectKind::FilesystemWrite,
+                EffectKind::MayThrow,
+            ] as &'static [EffectKind],
+            // Evidence persists to the configured artifact store, which may
+            // be in memory; filesystem access is not a universal prerequisite.
+            &[] as &'static [CapabilityRequirement],
+        ),
+        OperationEffectProfile::SynchronousArtifactRead => (
+            BuiltinPurity::DeterministicReadOnly,
+            BuiltinSemanticKind::Filesystem,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemRead,
+                EffectKind::MayThrow,
+            ],
+            &[],
+        ),
+        OperationEffectProfile::SynchronousFigure => (
+            BuiltinPurity::Impure,
+            BuiltinSemanticKind::Plotting,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemRead,
+                EffectKind::UserInterface,
+                EffectKind::MayThrow,
+            ],
+            &[CapabilityRequirement::UserInterface],
+        ),
         OperationEffectProfile::EvidenceWrite => (
             BuiltinPurity::Impure,
             BuiltinSemanticKind::Filesystem,
@@ -62,18 +106,6 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
             // The configured artifact store may be in memory. FilesystemRead
             // records the default backend's possible effect, not a universal
             // capability prerequisite for this identity.
-            &[],
-        ),
-        OperationEffectProfile::ArtifactWrite => (
-            BuiltinPurity::Impure,
-            BuiltinSemanticKind::Filesystem,
-            &[
-                EffectKind::EnvironmentRead,
-                EffectKind::FilesystemWrite,
-                EffectKind::MaySuspend,
-                EffectKind::MayThrow,
-            ],
-            // Like artifact reads, persistence may use an in-memory store.
             &[],
         ),
         OperationEffectProfile::Figure => (
@@ -104,7 +136,11 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
                 definition.inference,
             )),
             compatibility: BuiltinCompatibility::RunMat,
-            async_behavior: BuiltinAsyncBehavior::MaySuspend,
+            async_behavior: if definition.effects.suspends() {
+                BuiltinAsyncBehavior::MaySuspend
+            } else {
+                BuiltinAsyncBehavior::NeverSuspends
+            },
             purity,
             semantic_kind,
             workspace_effect: None,

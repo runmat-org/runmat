@@ -37,11 +37,11 @@ fn borrowed_coordinate_gather_preserves_sparse_ids_connectivity_order_and_errors
         stable_identity: StableDigest::from_bytes([99; 32]),
         order: ElementOrder::Tet10,
         node_ids: order.map(|index| (index as u64 + 1) * 17).into(),
-        region_id: runmat_geometry_core::PersistentEntityId {
-            kind: runmat_geometry_core::PersistentEntityKind::Region,
-            source_topology_id: "region".into(),
-            assembly_path: Vec::new(),
-        },
+        region_id: runmat_geometry_core::PersistentEntityId::new(
+            runmat_geometry_core::PersistentEntityKind::Region,
+            "region".into(),
+            Vec::new(),
+        ),
         provenance: Vec::new(),
     };
     assert_eq!(
@@ -85,6 +85,10 @@ fn exact_jacobian(coordinates: [[f64; 3]; 10], barycentric: [f64; 4]) -> [[Exact
     exact_jacobian_at(coordinates, barycentric, 10_000, &NeverCancelled, &mut work).unwrap()
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/tet10_elevation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: The Jacobian interval certificate accepts a linear mapping and rejects a curved
+//   inversion.
 #[test]
 fn interval_certificate_accepts_linear_mapping_and_rejects_curved_inversion() {
     let mut work = 0;
@@ -156,8 +160,22 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
     )
     .unwrap());
 
+    // The exact fallback proves the Jacobian positive everywhere ...
     let mut work = 0;
-    certify_element(
+    certify_element_within(
+        coordinates,
+        10_000,
+        0,
+        &NeverCancelled,
+        &Storage(None),
+        &mut work,
+        1,
+    )
+    .unwrap();
+    // ... but a corner determinant of order 1e-16 has no scale-relative margin, so the shared
+    // Tet10 element rule, and with it the mesher's certification, rejects the element.
+    let mut work = 0;
+    let failure = certify_element(
         coordinates,
         10_000,
         0,
@@ -168,7 +186,8 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
             storage: Storage(None),
         },
     )
-    .unwrap();
+    .unwrap_err();
+    assert!(failure.reason.contains("InsufficientJacobianMargin"), "{failure:?}");
 }
 
 #[test]
@@ -259,7 +278,7 @@ fn exact_jacobian_construction_observes_cancellation_between_terms() {
 }
 
 #[test]
-fn interval_certificate_enforces_work_and_cancellation() {
+fn interval_certificate_bounds_each_element_and_honors_cancellation() {
     let mut work = 0;
     assert_eq!(
         certify_element(
@@ -275,8 +294,10 @@ fn interval_certificate_enforces_work_and_cancellation() {
         )
         .unwrap_err()
         .kind,
-        DelaunaySolverTopologyErrorKind::ResourceLimit
+        // An element that cannot be certified within its own work share is not admitted.
+        DelaunaySolverTopologyErrorKind::InvalidMesh
     );
+    assert!(work > 3, "the element's actual work is charged to the shared counter");
 
     struct Cancelled;
     impl MeshingCancellationSignal for Cancelled {

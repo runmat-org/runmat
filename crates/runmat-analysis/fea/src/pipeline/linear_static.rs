@@ -94,16 +94,8 @@ fn run_linear_static_with_constraint_plan(
     thermal_source: Option<thermal_state::ThermalStateSelection<'_>>,
 ) -> Result<LinearStaticComputation, FeaRunError> {
     let execution_step = match thermal_source.as_ref() {
-        Some(selection) => thermal_state::require_selected_step(
-            model,
-            selection.consumer_step_id,
-            options.formulation_requirement,
-        )?,
-        None => super::admission::require_structural(
-            model,
-            AnalysisProcedure::Static,
-            options.formulation_requirement,
-        )?,
+        Some(selection) => thermal_state::require_selected_step(model, selection.consumer_step_id)?,
+        None => super::admission::require_structural(model, AnalysisProcedure::Static)?,
     };
     if thermal_source.is_none()
         && execution_step
@@ -136,6 +128,7 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
+    let phase_clock = crate::progress::phase_timer("structural_static.preflight");
     let preassembly = preflight::prepare_static_preassembly(
         model,
         execution_step,
@@ -168,6 +161,14 @@ fn run_linear_static_with_constraint_plan(
         Some(1),
         Some(5),
     );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.assembly");
+    let elastic_path = preassembly.solve_path
+        == Some(crate::planning::resource::StaticSolvePath::ElasticRigidityMultigrid);
+    // The elastic rigidity path checks every element block as it is assembled; no global
+    // factor is ever formed.
+    let mut elastic_capture =
+        elastic_path.then(crate::assembly::solver_solid::SolidEnergyPreparation::elastic);
     let summary = assemble_structural_system_with_execution(
         model,
         &excitations,
@@ -176,13 +177,14 @@ fn run_linear_static_with_constraint_plan(
         {
             StructuralFormulationRequirement::PhysicalDiscretization
         } else {
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator
+            StructuralFormulationRequirement::SyntheticOperator
         },
         assembly_constraint_plan,
         options.local_execution,
         thermal_transfer
             .as_ref()
-            .map(|transfer| transfer.nodal_temperature_k.as_quantity_slice()),
+            .map(|transfer| &transfer.temperature),
+        elastic_capture.as_mut(),
     )
     .map_err(|err| match err {
         LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
@@ -194,18 +196,14 @@ fn run_linear_static_with_constraint_plan(
     // Element recovery now owns the temperatures it needs. Release the aligned global
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
-    preflight::verify_executed_preassembly(
+    let planned_reduced_support = preflight::verify_executed_preassembly(
         model,
         &options,
         assembly_constraint_plan,
         &preassembly,
         &summary,
     )?;
-    let identity = super::admission::admit_structural(
-        &summary,
-        execution_step,
-        options.formulation_requirement,
-    )?;
+    let identity = super::admission::admit_structural(&summary, execution_step)?;
     super::validate_rotational_dof_targets(model, &summary)?;
     if options.require_solver_mesh_for_solid
         && options.solver_mesh.is_none()
@@ -244,8 +242,36 @@ fn run_linear_static_with_constraint_plan(
         Some(2),
         Some(5),
     );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.solve");
+    let mut elastic_reuse = elastic_capture
+        .map(|capture| {
+            capture
+                .into_elastic_reuse()
+                .map_err(|error| FeaRunError::Solve(format!("FEA_ELASTIC_RIGIDITY_REFUSED: {error}")))
+        })
+        .transpose()?;
     let solve_result =
-        solve::solve_static_system(&summary, &options, preassembly.solver_admission.as_ref())?;
+        solve::solve_static_system(
+            &summary,
+            &options,
+            preassembly.solver_admission.as_ref(),
+            planned_reduced_support.as_ref(),
+            elastic_reuse.as_mut(),
+        )?;
+    let operator_proof = match elastic_reuse.as_ref().and_then(|reuse| reuse.certificate()) {
+        Some(certificate) if certificate.proved_by_elastic_rigidity() => {
+            crate::contracts::StaticOperatorProof::ElasticRigidity
+        }
+        Some(_) => {
+            return Err(FeaRunError::Solve(
+                "elastic rigidity path completed without its elastic proof".into(),
+            ))
+        }
+        None => crate::contracts::StaticOperatorProof::SparseCholesky,
+    };
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.balance_and_reactions");
     let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;
     let structural_constraint_result =
         CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
@@ -306,6 +332,8 @@ fn run_linear_static_with_constraint_plan(
         Some(3),
         Some(5),
     );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.field_recovery");
     let mut fields = recover_result_fields(&summary, &solve_result, options.local_execution)
         .map_err(|error| match error {
             crate::post::StructuralFieldRecoveryError::Cancelled => FeaRunError::Cancelled,
@@ -331,6 +359,8 @@ fn run_linear_static_with_constraint_plan(
     fields.extend(electro_thermal_fields.static_fields);
     fields.extend(electro_thermal_fields.temperature_snapshots);
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.observations");
     let observations = if execution_step.observations.is_empty() {
         Vec::new()
     } else {
@@ -381,6 +411,7 @@ fn run_linear_static_with_constraint_plan(
         );
         observations
     };
+    drop(phase_clock);
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Postprocess,
@@ -525,7 +556,7 @@ fn run_linear_static_with_constraint_plan(
     diagnostics.extend(thermo_mechanical_diagnostics);
     diagnostics.extend(electro_thermal_diagnostics);
     let structural_static_convergence =
-        crate::contracts::StructuralStaticConvergence::from_solve(&solve_result);
+        crate::contracts::StructuralStaticConvergence::from_solve(&solve_result, operator_proof);
     diagnostics.extend(solve_result.diagnostics);
 
     emit_phase(

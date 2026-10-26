@@ -25,11 +25,16 @@ fn independent_bodies_use_exact_yield_hardening_and_elasticity_owners_both_order
             });
         }
         for assignment in &mut model.material_assignments {
-            let id = match assignment.selected_region_id().unwrap() {
-                "tip_steel" => "mat_steel",
-                "mid_aluminum" => "mat_aluminum",
-                "polymer_segment" => "mat_polymer",
-                other => panic!("unexpected region {other}"),
+            let region = assignment.selected_region_id().unwrap();
+            let fixture = runmat_meshing_core::fixtures::fixture_region;
+            let id = if region == fixture("tip_steel") {
+                "mat_steel"
+            } else if region == fixture("mid_aluminum") {
+                "mat_aluminum"
+            } else if region == fixture("polymer_segment") {
+                "mat_polymer"
+            } else {
+                panic!("unexpected region {region}")
             };
             assignment.assigned_material_id = id.into();
         }

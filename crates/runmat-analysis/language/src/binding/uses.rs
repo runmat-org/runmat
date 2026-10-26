@@ -208,6 +208,7 @@ fn symbol_kind(namespace: &str) -> Option<FeaSymbolKind> {
         FeaSymbolKind::Study,
         FeaSymbolKind::Sweep,
         FeaSymbolKind::Execution,
+        FeaSymbolKind::Table,
         FeaSymbolKind::Function,
     ]
     .into_iter()

@@ -3,105 +3,9 @@ use crate::class_registry::declaration::{
     immutable_properties, register_value_class, static_methods,
 };
 
-pub(super) const SIGNAL_KNOT_CLASS: &str = "fea.SignalKnot";
+pub(super) const SIGNAL_KNOT_CLASS: &str =
+    runmat_builtins::fea_contract::policy_types::classes::SIGNAL_KNOT.display_name();
 const SIGNAL_KNOT_FIELDS: &[&str] = &["knot"];
-const KNOT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "abscissa",
-        BuiltinParamType::NumericScalar,
-        "Finite time in seconds.",
-    ),
-    required(
-        "value",
-        BuiltinParamType::NumericArray,
-        "Finite scalar or three-component SI ordinate.",
-    ),
-];
-const JUMP_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "abscissa",
-        BuiltinParamType::NumericScalar,
-        "Finite time in seconds.",
-    ),
-    required(
-        "leftLimit",
-        BuiltinParamType::NumericArray,
-        "Finite left-hand SI ordinate.",
-    ),
-    required(
-        "rightLimit",
-        BuiltinParamType::NumericArray,
-        "Finite right-hand SI ordinate.",
-    ),
-    required(
-        "continuity",
-        BuiltinParamType::Any,
-        "Typed fea.SignalPointContinuity value.",
-    ),
-];
-const TIME_KNOT_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable signal identifier.",
-    ),
-    required(
-        "knots",
-        BuiltinParamType::Any,
-        "Ordered row or column cell array of typed fea.SignalKnot values.",
-    ),
-    required(
-        "interpolation",
-        BuiltinParamType::Any,
-        "Typed fea.SignalInterpolation policy.",
-    ),
-    required(
-        "extrapolation",
-        BuiltinParamType::Any,
-        "Typed fea.SignalExtrapolation policy.",
-    ),
-];
-const TIME_KNOT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "The constructor consumes portable typed knot and policy objects; it has no direct numeric input.",
-};
-const CONTINUOUS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    integer_input("abscissa", "The exact integer is converted once to canonical binary64 seconds."),
-    integer_input("value", "The exact scalar or vector components are converted once to canonical binary64 SI storage."),
-];
-const JUMP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    integer_input("abscissa", "The exact integer is converted once to canonical binary64 seconds."),
-    integer_input("leftLimit", "The exact scalar or vector components are converted once to canonical binary64 SI storage."),
-    integer_input("rightLimit", "The exact scalar or vector components are converted once to canonical binary64 SI storage."),
-];
-const fn integer_input(name: &'static str, notes: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes,
-    }
-}
-const CONTINUOUS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [knot_integer_capability(&CONTINUOUS_INTEGER_INPUTS)];
-const JUMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [knot_integer_capability(&JUMP_INTEGER_INPUTS)];
-const fn knot_integer_capability(
-    inputs: &'static [BuiltinIntegerInputCapability],
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form: "typed signal knot",
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Numeric knot data is validated before explicit conversion to canonical binary64 storage.",
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,25 +56,9 @@ fn knot_object(builtin: &'static str, knot: RuntimeSignalKnot) -> BuiltinResult<
     )
 }
 
-const CONTINUOUS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "knot = fea.SignalKnot.continuous(abscissa, value)",
-    inputs: &KNOT_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const CONTINUOUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONTINUOUS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.SignalKnot.continuous",
-    category = "fea",
-    summary = "Create a continuous time-signal knot.",
-    keywords = "fea,signal,knot,continuous,time,typed",
-    descriptor(CONTINUOUS_DESCRIPTOR),
-    integer_capabilities(CONTINUOUS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::signals::knots"
 )]
 pub async fn continuous(abscissa: Value, value: Value) -> BuiltinResult<Value> {
@@ -185,25 +73,9 @@ pub async fn continuous(abscissa: Value, value: Value) -> BuiltinResult<Value> {
     )
 }
 
-const JUMP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "knot = fea.SignalKnot.jump(abscissa, leftLimit, rightLimit, continuity)",
-    inputs: &JUMP_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const JUMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &JUMP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.SignalKnot.jump",
-    category = "fea",
-    summary = "Create a time-signal jump with explicit one-sided limits and point continuity.",
-    keywords = "fea,signal,knot,jump,discontinuity,time,typed",
-    descriptor(JUMP_DESCRIPTOR),
-    integer_capabilities(JUMP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::signals::knots"
 )]
 pub async fn jump(
@@ -431,20 +303,16 @@ fn time_knot_signal<Q>(
 }
 
 macro_rules! time_knots_builtin {
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path, scalar) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor { label: concat!("signal = ", $builtin, "(id, knots, interpolation, extrapolation)"), inputs: &TIME_KNOT_INPUTS, outputs: &OUT_ANY }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor { signatures: &$signatures, output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::Public, errors: &ERRORS };
-        #[runtime_builtin(name = $builtin, category = "fea", summary = "Create a typed time history from continuous and jump knots.", keywords = "fea,signal,time,knot,jump,typed,si", descriptor($descriptor), integer_audit(TIME_KNOT_INTEGER_AUDIT), builtin_path = "crate::builtins::fea::signals::knots")]
+    ($function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path, scalar) => {
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::signals::knots")]
         pub async fn $function(id: String, knots: Value, interpolation: Value, extrapolation: Value) -> BuiltinResult<Value> {
             let knots = typed_knots($builtin, &knots, 1, |value| SignalOrdinate::Real(SignalValue::Scalar(<$quantity>::new(value[0]))))?;
             let (interpolation, extrapolation) = super::time_samples::policies($builtin, &interpolation, &extrapolation)?;
             signal_object($builtin, $class, time_knot_signal(id, SignalShape::Scalar, knots, interpolation, extrapolation, $variant))
         }
     };
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path, vector) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor { label: concat!("signal = ", $builtin, "(id, knots, interpolation, extrapolation)"), inputs: &TIME_KNOT_INPUTS, outputs: &OUT_ANY }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor { signatures: &$signatures, output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::Public, errors: &ERRORS };
-        #[runtime_builtin(name = $builtin, category = "fea", summary = "Create a typed time history from continuous and jump knots.", keywords = "fea,signal,time,knot,jump,vector,typed,si", descriptor($descriptor), integer_audit(TIME_KNOT_INTEGER_AUDIT), builtin_path = "crate::builtins::fea::signals::knots")]
+    ($function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path, vector) => {
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::signals::knots")]
         pub async fn $function(id: String, knots: Value, interpolation: Value, extrapolation: Value) -> BuiltinResult<Value> {
             let knots = typed_knots($builtin, &knots, 3, |value| SignalOrdinate::Real(SignalValue::Vector3([<$quantity>::new(value[0]), <$quantity>::new(value[1]), <$quantity>::new(value[2])])))?;
             let (interpolation, extrapolation) = super::time_samples::policies($builtin, &interpolation, &extrapolation)?;
@@ -455,8 +323,6 @@ macro_rules! time_knots_builtin {
 
 time_knots_builtin!(
     displacement,
-    DISPLACEMENT_DESCRIPTOR,
-    DISPLACEMENT_SIGNATURES,
     "fea.DisplacementSignal.fromTimeKnots",
     DISPLACEMENT_SIGNAL_CLASS,
     Displacement,
@@ -465,8 +331,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     rotation,
-    ROTATION_DESCRIPTOR,
-    ROTATION_SIGNATURES,
     "fea.RotationSignal.fromTimeKnots",
     ROTATION_SIGNAL_CLASS,
     Rotation,
@@ -475,8 +339,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     velocity,
-    VELOCITY_DESCRIPTOR,
-    VELOCITY_SIGNATURES,
     "fea.VelocitySignal.fromTimeKnots",
     VELOCITY_SIGNAL_CLASS,
     Velocity,
@@ -485,8 +347,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     acceleration,
-    ACCELERATION_DESCRIPTOR,
-    ACCELERATION_SIGNATURES,
     "fea.AccelerationSignal.fromTimeKnots",
     ACCELERATION_SIGNAL_CLASS,
     Acceleration,
@@ -495,8 +355,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     angular_velocity,
-    ANGULAR_VELOCITY_DESCRIPTOR,
-    ANGULAR_VELOCITY_SIGNATURES,
     "fea.AngularVelocitySignal.fromTimeKnots",
     ANGULAR_VELOCITY_SIGNAL_CLASS,
     AngularVelocity,
@@ -505,8 +363,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     angular_acceleration,
-    ANGULAR_ACCELERATION_DESCRIPTOR,
-    ANGULAR_ACCELERATION_SIGNATURES,
     "fea.AngularAccelerationSignal.fromTimeKnots",
     ANGULAR_ACCELERATION_SIGNAL_CLASS,
     AngularAcceleration,
@@ -515,8 +371,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     force,
-    FORCE_DESCRIPTOR,
-    FORCE_SIGNATURES,
     "fea.ForceSignal.fromTimeKnots",
     FORCE_SIGNAL_CLASS,
     Force,
@@ -525,8 +379,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     moment,
-    MOMENT_DESCRIPTOR,
-    MOMENT_SIGNATURES,
     "fea.MomentSignal.fromTimeKnots",
     MOMENT_SIGNAL_CLASS,
     Moment,
@@ -535,8 +387,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     traction,
-    TRACTION_DESCRIPTOR,
-    TRACTION_SIGNATURES,
     "fea.TractionSignal.fromTimeKnots",
     TRACTION_SIGNAL_CLASS,
     Traction,
@@ -545,8 +395,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     pressure,
-    PRESSURE_DESCRIPTOR,
-    PRESSURE_SIGNATURES,
     "fea.PressureSignal.fromTimeKnots",
     PRESSURE_SIGNAL_CLASS,
     Pressure,
@@ -555,8 +403,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     body_force,
-    BODY_FORCE_DESCRIPTOR,
-    BODY_FORCE_SIGNATURES,
     "fea.BodyForceSignal.fromTimeKnots",
     BODY_FORCE_SIGNAL_CLASS,
     BodyForceDensity,
@@ -565,8 +411,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     temperature,
-    TEMPERATURE_DESCRIPTOR,
-    TEMPERATURE_SIGNATURES,
     "fea.TemperatureSignal.fromTimeKnots",
     TEMPERATURE_SIGNAL_CLASS,
     Temperature,
@@ -575,8 +419,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     temperature_difference,
-    TEMPERATURE_DIFFERENCE_DESCRIPTOR,
-    TEMPERATURE_DIFFERENCE_SIGNATURES,
     "fea.TemperatureDifferenceSignal.fromTimeKnots",
     TEMPERATURE_DIFFERENCE_SIGNAL_CLASS,
     TemperatureDifference,
@@ -585,8 +427,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     heat_flux,
-    HEAT_FLUX_DESCRIPTOR,
-    HEAT_FLUX_SIGNATURES,
     "fea.HeatFluxSignal.fromTimeKnots",
     HEAT_FLUX_SIGNAL_CLASS,
     HeatFlux,
@@ -595,8 +435,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     heat_generation,
-    HEAT_GENERATION_DESCRIPTOR,
-    HEAT_GENERATION_SIGNATURES,
     "fea.HeatGenerationSignal.fromTimeKnots",
     HEAT_GENERATION_SIGNAL_CLASS,
     HeatGenerationDensity,
@@ -605,8 +443,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     electric_potential,
-    ELECTRIC_POTENTIAL_DESCRIPTOR,
-    ELECTRIC_POTENTIAL_SIGNATURES,
     "fea.ElectricPotentialSignal.fromTimeKnots",
     ELECTRIC_POTENTIAL_SIGNAL_CLASS,
     ElectricPotential,
@@ -615,8 +451,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     electric_current,
-    ELECTRIC_CURRENT_DESCRIPTOR,
-    ELECTRIC_CURRENT_SIGNATURES,
     "fea.ElectricCurrentSignal.fromTimeKnots",
     ELECTRIC_CURRENT_SIGNAL_CLASS,
     ElectricCurrent,
@@ -625,8 +459,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     electric_charge,
-    ELECTRIC_CHARGE_DESCRIPTOR,
-    ELECTRIC_CHARGE_SIGNATURES,
     "fea.ElectricChargeSignal.fromTimeKnots",
     ELECTRIC_CHARGE_SIGNAL_CLASS,
     ElectricCharge,
@@ -635,8 +467,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     current_density,
-    CURRENT_DENSITY_DESCRIPTOR,
-    CURRENT_DENSITY_SIGNATURES,
     "fea.CurrentDensitySignal.fromTimeKnots",
     CURRENT_DENSITY_SIGNAL_CLASS,
     ElectricCurrentDensity,
@@ -645,8 +475,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     charge_density,
-    CHARGE_DENSITY_DESCRIPTOR,
-    CHARGE_DENSITY_SIGNATURES,
     "fea.ChargeDensitySignal.fromTimeKnots",
     CHARGE_DENSITY_SIGNAL_CLASS,
     ElectricChargeDensity,
@@ -655,8 +483,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     magnetic_vector_potential,
-    MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR,
-    MAGNETIC_VECTOR_POTENTIAL_SIGNATURES,
     "fea.MagneticVectorPotentialSignal.fromTimeKnots",
     MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS,
     MagneticVectorPotential,
@@ -665,8 +491,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     mass_flow,
-    MASS_FLOW_DESCRIPTOR,
-    MASS_FLOW_SIGNATURES,
     "fea.MassFlowSignal.fromTimeKnots",
     MASS_FLOW_SIGNAL_CLASS,
     MassFlowRate,
@@ -675,8 +499,6 @@ time_knots_builtin!(
 );
 time_knots_builtin!(
     volume_flow,
-    VOLUME_FLOW_DESCRIPTOR,
-    VOLUME_FLOW_SIGNATURES,
     "fea.VolumeFlowSignal.fromTimeKnots",
     VOLUME_FLOW_SIGNAL_CLASS,
     VolumeFlowRate,

@@ -1260,6 +1260,27 @@ impl AccelProvider for WgpuProvider {
         self.sparse.free_preconditioner(self, preconditioner)
     }
 
+    fn prepare_sparse_multigrid(
+        &self,
+        request: &runmat_accelerate_api::SparseMultigridRequest<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::SparseMultigridHandle> {
+        sparse::prepare_multigrid(self, request)
+    }
+
+    fn sparse_multigrid_solve<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseMultigridSolveRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparseMultigridSolveResult> {
+        sparse::solve_multigrid(self, request)
+    }
+
+    fn free_sparse_multigrid(
+        &self,
+        hierarchy: &runmat_accelerate_api::SparseMultigridHandle,
+    ) -> anyhow::Result<()> {
+        sparse::free_multigrid(self, hierarchy)
+    }
+
     fn sparse_krylov_solve<'a>(
         &'a self,
         request: &'a runmat_accelerate_api::SparseKrylovRequest<'a>,

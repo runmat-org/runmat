@@ -8,7 +8,7 @@ use runmat_analysis_execution::{
 };
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
@@ -91,6 +91,7 @@ fn derived_geometry_sweep_reuses_its_source_and_invalidates_every_downstream_ide
                 program,
                 BTreeSet::new(),
                 GeometryExecutionContext {
+                    host: crate::test_support::host_requirement(),
                     scope_id,
                     pool_id,
                     program_artifact_id: ArtifactId::derive(&[program
@@ -158,11 +159,11 @@ fn derived_geometry_sweep_reuses_its_source_and_invalidates_every_downstream_ide
         resolve_meshing_request(wide.document.tolerance, MeshingRequestSettings::default())
             .unwrap();
     let narrow_plan =
-        ExactMeshingDagPlanner::new(&narrow_geometry, narrow_mesh, access.clone(), None)
+        ExactMeshingDagPlanner::new(&narrow_geometry, narrow_mesh, runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT, access.clone(), None)
             .unwrap()
             .initial_curve_pass(&narrow_geometry.geometry_objects().topology, 64)
             .unwrap();
-    let wide_plan = ExactMeshingDagPlanner::new(&wide_geometry, wide_mesh, access, None)
+    let wide_plan = ExactMeshingDagPlanner::new(&wide_geometry, wide_mesh, runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT, access, None)
         .unwrap()
         .initial_curve_pass(&wide_geometry.geometry_objects().topology, 64)
         .unwrap();
@@ -337,14 +338,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"geometry-sweep-graph"),
         Digest::sha256(b"geometry-sweep-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"runtime"),
-            Digest::sha256(b"catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

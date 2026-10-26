@@ -2,7 +2,7 @@
 use super::*;
 
 impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
-    pub(super) async fn complete_best<C: Control>(
+    pub(super) async fn complete_best<C: PcgOperations<T>>(
         &mut self,
         flag: u8,
         iteration: Iteration,
@@ -24,7 +24,7 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
         Ok(())
     }
 
-    pub(super) async fn complete_preconditioner_failure<C: Control>(
+    pub(super) async fn complete_preconditioner_failure<C: PcgOperations<T>>(
         &mut self,
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
@@ -55,7 +55,7 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
             .await
     }
 
-    pub(super) async fn true_residual<C: Control>(
+    pub(super) async fn true_residual<C: PcgOperations<T>>(
         &mut self,
         product: &[T],
         checkpoint: &mut C,
@@ -76,7 +76,7 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
             .ok_or_else(|| invalid("PCG true residual norm is invalid"))
     }
 
-    pub(super) async fn after_candidate_product<C: Control>(
+    pub(super) async fn after_candidate_product<C: PcgOperations<T>>(
         &mut self,
         mut iteration: Iteration,
         progressed: bool,
@@ -121,6 +121,7 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
         } else if self.second_preconditioner {
             Phase::SecondPreconditioner(stage, SecondInput::Residual)
         } else {
+            self.restart_coefficients();
             copy(&mut *self.work.direction, &*self.work.residual, checkpoint).await?;
             Phase::DirectionProduct(Iteration {
                 rho: actual,

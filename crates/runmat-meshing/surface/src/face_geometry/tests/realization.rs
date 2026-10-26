@@ -4,6 +4,12 @@ use crate::{
     ExactFaceRefinedTopology, ExactFaceRefinementContext,
 };
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Original shared curve coordinates define realized boundary nodes while exact surface
+//   samples remain unchanged. Independent admission measures their discrepancy against the original
+//   chordal envelope; fixed coordinates outside that envelope fail before futile interior
+//   insertion. This kernel witness does not establish native CAD or whole-study qualification.
 #[test]
 fn boundary_realization_preserves_original_surface_samples_and_geometric_acceptance() {
     for transform in [
@@ -131,6 +137,11 @@ fn boundary_realization_preserves_original_surface_samples_and_geometric_accepta
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Conflicting coordinates for one original shared identity, cancelled preparation and
+//   denied allocation reject. Borrowed coordinate authority does not clone curve inventories; this
+//   is component admission evidence, not measured whole-worker memory.
 #[test]
 fn boundary_coordinate_index_rejects_conflicting_shared_identities_and_denied_preparation() {
     let fixture = fixture(None);
@@ -177,6 +188,11 @@ fn boundary_coordinate_index_rejects_conflicting_shared_identities_and_denied_pr
     ));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A multi-run borrowed boundary index preserves every original point, charges pointer
+//   inventory and bounded cooperative sorting, and rejects denied search work. This finite fixture
+//   does not prove arbitrary native model throughput.
 #[test]
 fn large_borrowed_boundary_index_preserves_every_point_and_bounds_sort_preparation() {
     use std::sync::atomic::{AtomicU64, Ordering};

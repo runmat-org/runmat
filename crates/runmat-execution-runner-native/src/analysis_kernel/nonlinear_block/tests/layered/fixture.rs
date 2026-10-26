@@ -73,7 +73,11 @@ pub(super) fn prepare(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
             isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(30.0),
         });
         model.material_assignments.push(MaterialAssignment {
-            target: PropertyRegionTarget::solid(format!("layer_{layer}")),
+            target: PropertyRegionTarget::solid({
+                let mut region = original_region.clone();
+                region.source_topology_id = format!("layer_{layer}");
+                region.analysis_selection_id().unwrap()
+            }),
             expected_material_id: material.material_id.clone(),
             assigned_material_id: material.material_id.clone(),
             confidence: EvidenceConfidence::Verified,

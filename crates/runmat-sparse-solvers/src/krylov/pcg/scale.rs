@@ -53,6 +53,14 @@ impl ScaledPositive {
         value.is_finite().then_some(value)
     }
 
+    /// The represented value as a plain number (may overflow to infinity).
+    pub(super) fn value(self) -> f64 {
+        if self.is_zero() {
+            return 0.0;
+        }
+        libm::ldexp(self.fraction, self.exponent)
+    }
+
     pub(super) fn norm(self) -> f64 {
         if self.is_zero() {
             return 0.0;

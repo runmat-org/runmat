@@ -94,10 +94,16 @@ pub(super) fn boundary_summary(
     for boundary in &model.boundaries {
         match &boundary.operator {
             BoundaryOperator::AcousticRigidWall => rigid_wall_count += 1,
-            BoundaryOperator::AcousticRadiation => radiation_boundary_count += 1,
+            BoundaryOperator::AcousticRadiation
+            | BoundaryOperator::AcousticSphericalRadiation { .. } => radiation_boundary_count += 1,
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance_boundary_count += 1;
                 impedance_sum += impedance.canonical_value().max(1.0);
+            }
+            // A law has no single value; it is counted at the medium's characteristic impedance.
+            BoundaryOperator::AcousticImpedanceLaw { .. } => {
+                impedance_boundary_count += 1;
+                impedance_sum += characteristic_impedance_pa_s_per_m.max(1.0);
             }
             _ => {}
         }

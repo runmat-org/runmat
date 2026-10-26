@@ -1,8 +1,11 @@
 use super::*;
+mod acoustic;
+mod electrical;
 mod fluid;
 mod magnetic;
 mod maxwell;
 mod nonlinear;
+mod statistical;
 mod structural;
 
 pub(super) fn execute_field_recovery(
@@ -32,9 +35,26 @@ pub(super) fn execute_field_recovery(
     if invocation
         .inputs
         .iter()
+        .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::AcousticHarmonicWorkload)
+    {
+        return acoustic::execute(invocation);
+    }
+    if invocation
+        .inputs
+        .iter()
         .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::MagnetostaticWorkload)
     {
         return magnetic::execute(invocation);
+    }
+    if invocation
+        .inputs
+        .iter()
+        .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::ElectricalStaticWorkload)
+    {
+        return electrical::execute(invocation);
+    }
+    if statistical::is_statistical(&invocation) {
+        return statistical::execute(invocation);
     }
     if invocation.inputs.iter().any(|input| {
         input.manifest.kind == AnalysisNumericalObjectKind::StructuralFrequencyWorkload
@@ -50,32 +70,36 @@ pub(super) fn recovered_field_output(
     let manifest = artifact
         .manifest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let storage_partition_count = artifact
-        .fields()
-        .iter()
-        .try_fold(0usize, |count, field| {
-            canonical_field_partitions(field)
-                .map(|partitions| count.saturating_add(partitions.len()))
-        })
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mut partitions = Vec::with_capacity(storage_partition_count + 1);
+    // Each field's storage partitions are materialized and encoded once, independently per
+    // field (on the admitted pool when installed), and published in canonical field order.
+    let encoded = runmat_cpu_execution::ordered_map(artifact.fields(), |field| {
+        canonical_field_partitions(field)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+            .into_iter()
+            .map(|partition| {
+                Ok(AnalysisKernelOutputPartition {
+                    logical_identity: partition.identity.digest(),
+                    payload: partition
+                        .canonical_bytes()
+                        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+                })
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()
+    });
+    let mut partitions = Vec::with_capacity(
+        1 + encoded
+            .iter()
+            .map(|field| field.as_ref().map_or(0, Vec::len))
+            .sum::<usize>(),
+    );
     partitions.push(AnalysisKernelOutputPartition {
         logical_identity: artifact.identity().digest(),
         payload: manifest
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     });
-    for field in artifact.fields() {
-        for partition in canonical_field_partitions(field)
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
-        {
-            partitions.push(AnalysisKernelOutputPartition {
-                logical_identity: partition.identity.digest(),
-                payload: partition
-                    .canonical_bytes()
-                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-            });
-        }
+    for field in encoded {
+        partitions.extend(field?);
     }
     Ok(vec![AnalysisKernelOutput::partitioned(
         AnalysisNumericalObjectKind::Field,
@@ -192,6 +216,10 @@ fn execute_structural_frequency_field_recovery(
                 )?,
                 output_set: projected_output_set_resource_facts(),
             },
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan.identity.digest() != resource_plan_identity
@@ -202,20 +230,22 @@ fn execute_structural_frequency_field_recovery(
         ));
     }
     drop(compiled);
-    let artifact = match prestress_state {
-        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::recover_prestressed_structural_frequency_entry_fields(
-            &workload,
-            &mesh,
-            &request,
-            &result,
-            state,
-        )?,
-        None => runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
-            &workload,
-            &mesh,
-            &request,
-            &result,
-        )?,
-    };
+    let artifact = super::with_admitted_cpu_pool(&resource_plan, || {
+        Ok(match prestress_state {
+            Some(state) => runmat_analysis_fea::pipeline::structural_frequency::recover_prestressed_structural_frequency_entry_fields(
+                &workload,
+                &mesh,
+                &request,
+                &result,
+                state,
+            )?,
+            None => runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
+                &workload,
+                &mesh,
+                &request,
+                &result,
+            )?,
+        })
+    })?;
     recovered_field_output(&artifact)
 }

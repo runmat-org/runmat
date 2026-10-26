@@ -23,7 +23,6 @@ const REPRESENTATIVE_STUDY_CONTRACTS: &[&str] = &[
     "fea.ProcedureStep.configure",
     "fea.AnalysisSequence.new",
     "fea.ComputeBackend.cpu",
-    "fea.FormulationRequirement.production",
     "fea.SolverOptions.defaults",
     "fea.ExecutionStep.new",
     "fea.ExecutionPlan.new",
@@ -55,11 +54,11 @@ fn typed_study_contracts_are_public_and_documented() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in REPRESENTATIVE_STUDY_CONTRACTS {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
-            .unwrap_or_else(|| panic!("registered builtin {name}"));
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("descriptor for {name}"));
+        // Typed study contracts are catalog-backed: the catalog entry owns the
+        // public descriptor that completion and signature help read.
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("catalog entry for {name}"));
+        let descriptor = entry.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             BuiltinCompletionPolicy::Public,

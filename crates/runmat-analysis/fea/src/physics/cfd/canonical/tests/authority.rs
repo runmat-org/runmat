@@ -8,7 +8,7 @@ fn body_force_requires_every_original_volume_and_volume_kind() {
     let valid = fixture.source.elements[0].region_id.clone();
     let mut missing = valid.clone();
     missing.source_topology_id = "missing-original-fluid-volume".into();
-    let mut target = RegionTarget::volume("exact-volume-selection");
+    let mut target = RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("exact-volume-selection"));
     target
         .bind_resolved_entities(vec![valid.clone(), missing])
         .unwrap();
@@ -23,7 +23,7 @@ fn body_force_requires_every_original_volume_and_volume_kind() {
         ))
     ));
 
-    let mut target = RegionTarget::volume("exact-volume-selection");
+    let mut target = RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("exact-volume-selection"));
     target.bind_resolved_entities(vec![valid]).unwrap();
     target.entity_dimension = EntityDimension::Face;
     let ExcitationAction::BodyForce(action) = &mut fixture.actions[0] else {
@@ -93,7 +93,7 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
         .boundary_source
         .unwrap()
         .projection_boundary_index];
-    let mut target = runmat_analysis_core::RegionTarget::boundary("original-gauge-inventory");
+    let mut target = runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("original-gauge-inventory"));
     target
         .bind_resolved_entities(original.provenance.clone())
         .unwrap();
@@ -136,6 +136,17 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
     let large =
         CanonicalFluidReservation::for_counts(&geometry(count * 2), count * 8, policy()).unwrap();
     assert!(large.operator_work_upper_bound <= small.operator_work_upper_bound * 2);
+    // Verification of a retained result excludes the solver-only workspace: at least the
+    // coupled momentum block (9 x 41 three-word entries per cell) and the GMRES/ILU peaks.
+    for reservation in [small, large] {
+        let cells = reservation.cells;
+        assert!(reservation.verification_resident_bytes_upper_bound > 0);
+        assert!(
+            reservation.verification_resident_bytes_upper_bound
+                + cells * 9 * 41 * 24
+                <= reservation.resident_bytes_upper_bound
+        );
+    }
 }
 
 #[test]

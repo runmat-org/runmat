@@ -48,6 +48,10 @@ fn observation() -> ObservationRequest {
     })
 }
 
+// witness: FEA-FLUID-EXECUTION-001/publication @
+//   incompressible_laminar_steady/canonical_tetrahedra/durable;
+//   boundary: Native durable complete-state/observation chain rejects missing mandatory spatial
+//   evidence; not a qualified convergence certificate.
 #[test]
 fn original_native_fluid_observation_complete_state_and_accuracy_cold_chain() {
     for (workload, mesh, original) in [
@@ -96,6 +100,7 @@ fn verify_original_publication(
     })
     .collect();
     let task = prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: original.host.workload.study.digest(),
         frozen_project_digest: None,
         program_revision: original.program.request.recipe.program_revision.clone(),
@@ -136,26 +141,15 @@ fn verify_original_publication(
     drop(store);
     let mut store = FilesystemObjectStore::open(&path, limits.max_object_bytes).unwrap();
     let fields = import_fluid_recovered_fields(&store, response, &recovery, limits).unwrap();
-    let layout = imported
-        .result
-        .native_field_topology(&workload, &mesh)
-        .unwrap();
     let fanout = prepare_observation_fanout(
         &store,
         ObservationPreparation {
             source_host: recovery.host.clone(),
-            source: ObservationPublishedSource::FiniteVolumeRecovery {
+            source: ObservationPublishedSource::VolumeMeshRecovery {
                 recovery_request: recovery.request.clone(),
                 fields: fields.clone(),
-                layout: layout.clone(),
-                resource_plan: recovery
-                    .inputs
-                    .iter()
-                    .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
-                    .unwrap()
-                    .clone(),
             },
-            source_workload: ObservationWorkloadSource::FluidSteady(input(
+            source_workload: ObservationWorkloadSource::VolumeMesh(input(
                 AnalysisNumericalObjectKind::FluidSteadyWorkload,
             )),
             mesh: Some(input(AnalysisNumericalObjectKind::Mesh)),
@@ -194,15 +188,25 @@ fn verify_original_publication(
     let observed = import_reduced_observation(&cold, response, &reduction, limits)
         .unwrap()
         .result;
+    // The observation reports cells in mesh element order; the solver stores them in
+    // finite-volume cell order.
+    let topology = runmat_analysis_fea::topology::FiniteVolumeTopology::derive(
+        &runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap(),
+        workload.geometry_policy,
+    )
+    .unwrap();
+    let mut by_element = topology
+        .cells
+        .iter()
+        .zip(imported.result.original().velocity_m_per_s.canonical_values())
+        .map(|(cell, velocity)| (cell.source_element_index, *velocity))
+        .collect::<Vec<_>>();
+    by_element.sort_by_key(|(element, _)| *element);
     assert_eq!(
         observed.field.as_host_f64().unwrap(),
-        imported
-            .result
-            .original()
-            .velocity_m_per_s
-            .iter()
-            .flatten()
-            .copied()
+        by_element
+            .into_iter()
+            .flat_map(|(_, velocity)| velocity)
             .collect::<Vec<_>>()
     );
     let evaluation = &fanout.source_request;
@@ -211,7 +215,9 @@ fn verify_original_publication(
         producer: evaluation.producer,
         source_selection: evaluation.selection.identity(),
         source: evaluation.selection.source(),
-        topology_digest: layout.identity().discretization_digest(),
+        topology_digest: runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh)
+            .unwrap()
+            .projection_digest,
         plan_identity: evaluation.plan.identity,
         results: vec![observed],
     })
@@ -219,20 +225,18 @@ fn verify_original_publication(
     let catalog = ObservationPublicationCatalog::new(
         imported.result.producer_identity(),
         evaluation.plan.clone(),
-        ObservationFieldCatalog::finite_volume_recovery(
+        ObservationFieldCatalog::volume_mesh_recovery(
             recovery.request.clone(),
             fields.manifest.clone(),
-            layout,
+            SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
+            workload.model.sequence.steps[0].clone(),
         )
         .unwrap(),
         &workload.model.sequence.steps[0],
         vec![ObservationPublicationEntry::Sample(Box::new(
             ObservationSamplePublication::new(evaluation.clone(), &artifact).unwrap(),
         ))],
-        ObservationHistorySourceContext::FluidSteady {
-            workload: &workload,
-            mesh: &mesh,
-        },
+        ObservationHistorySourceContext::VolumeMesh { mesh: &mesh },
     )
     .unwrap();
     for declaration in &workload.model.sequence.steps[0].state_outputs {
@@ -358,7 +362,6 @@ fn verify_original_publication(
         ],
         sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
         step: workload.model.sequence.steps[0].clone(),
-        formulation_requirement: workload.formulation_requirement,
         program_revision: task.program.request.recipe.program_revision.clone(),
         chunk_bytes: policy.chunk_bytes(),
         inventory_limits: limits,

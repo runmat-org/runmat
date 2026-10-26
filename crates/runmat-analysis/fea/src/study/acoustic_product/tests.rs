@@ -4,9 +4,9 @@ use runmat_analysis_core::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConstraint, AuthoredConstraintKind,
     AuthoredConstraintTarget, AuthoredMaterialAssignment, AuthoredMaterialRef,
     AuthoredMaterialSource, AuthoredMeshRef, AuthoredModel, AuthoredPropertyTarget,
-    AuthoredRegionSource, AuthoredTargetCardinality, FormulationRequirement, IndependentDomain,
-    MaterialAcousticModel, MaterialModel, MaterialProvenance, PrescribedValue, Pressure,
-    ProcedureStep, RealizedGeometryInstance, RealizedStudy, SpecificAcousticImpedance,
+    AuthoredRegionSource, AuthoredTargetCardinality, IndependentDomain, MaterialAcousticModel,
+    MaterialModel, MaterialProvenance, PrescribedValue, Pressure, ProcedureStep,
+    RealizedGeometryInstance, RealizedStudy, SpecificAcousticImpedance,
 };
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
@@ -37,7 +37,7 @@ fn authored_tetrahedron_compiles_plans_and_executes_for_supported_orders() {
             regions: &fixture.regions,
             materials: &fixture.materials,
             mesh: &fixture.mesh,
-            planning: AcousticStudyPlanningPolicy::experimental(),
+            planning: AcousticStudyPlanningPolicy::standard(),
         })
         .unwrap();
 
@@ -45,7 +45,7 @@ fn authored_tetrahedron_compiles_plans_and_executes_for_supported_orders() {
             plan_acoustic_study_product(
                 product.compiled.clone(),
                 &fixture.mesh,
-                AcousticStudyPlanningPolicy::experimental(),
+                AcousticStudyPlanningPolicy::standard(),
             )
             .unwrap(),
             product,
@@ -129,7 +129,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             .acoustic
             .as_mut()
             .unwrap()
-            .damping_ratio = runmat_types::physical::DampingRatio::new(0.01);
+            .damping_ratio = runmat_types::physical::Quantity::new(1.0);
         let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
             study: &fixture.study,
             geometry: &fixture.geometry,
@@ -142,7 +142,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             plan_acoustic_study_product(
                 compiled.clone(),
                 &fixture.mesh,
-                AcousticStudyPlanningPolicy::experimental()
+                AcousticStudyPlanningPolicy::standard()
             ),
             Err(AcousticStudyProductError::UnsupportedMaterial),
         ));
@@ -155,7 +155,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             plan_acoustic_study_product(
                 compiled,
                 &foreign.mesh,
-                AcousticStudyPlanningPolicy::experimental()
+                AcousticStudyPlanningPolicy::standard()
             ),
             Err(AcousticStudyProductError::Compilation(_)),
         ));
@@ -269,7 +269,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
         unit_evidence: geometry.source.unit_evidence.clone(),
         logical_path: "tests/acoustic-tetrahedron.step".into(),
         format: geometry.source.format,
-        unit_fallback: geometry.source.unit_evidence.uniform_unit(),
+        authored_units: geometry.source.unit_evidence.uniform_unit(),
         content_digest: geometry.source.content_digest,
         topology_digest: GeometryDigest::from_bytes([91; 32]),
         capabilities: GeometryAuthoringCapabilities {
@@ -278,7 +278,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
             ..Default::default()
         },
         exchange: None,
-    }));
+        shared_interfaces: false,    }));
     let study = RealizedStudy {
         module_path: MODULE.into(),
         study_id: "acoustic_cell".into(),
@@ -295,7 +295,6 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
             mesh_id: GEOMETRY.into(),
         },
         model,
-        formulation_requirement: FormulationRequirement::Experimental,
         included_models: Vec::new(),
         study_inputs: Vec::new(),
         assessments: Vec::new(),

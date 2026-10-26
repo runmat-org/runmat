@@ -1555,10 +1555,10 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     )
     .unwrap();
     let worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
         id: WorkerId::derive(&[b"stale-result-worker"]),
         pool_id,
         resources: inventory(1_000),
-        host: host_inventory(),
     };
     let old_active = Arc::new(AtomicUsize::new(0));
     pool.add_worker(Arc::new(FakeWorker {
@@ -2119,6 +2119,11 @@ end
     }
 }
 
+// witness: FEA-SHARED-EXECUTION-001/collective_failure_and_epoch_fencing @
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; coverage: partial;
+//   boundary: A remote rank failure releases a peer blocked in a collective within five seconds and
+//   surfaces the primary structured error with its source ordinal; SPMD runtime program, not a
+//   numerical solve.
 #[tokio::test]
 async fn remote_rank_failure_releases_a_peer_blocked_in_a_collective() {
     let program = compile_spmd_region_bundle(

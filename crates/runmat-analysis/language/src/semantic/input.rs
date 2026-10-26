@@ -162,6 +162,14 @@ fn type_assignable(expected: AuthoredInputType, actual: AuthoredInputType) -> bo
                     AuthoredInputType::Integer | AuthoredInputType::Real
                 )
         )
+        // A bare number is a dimensionless quantity.
+        || matches!(
+            (expected, actual),
+            (
+                AuthoredInputType::Quantity(dimension),
+                AuthoredInputType::Integer | AuthoredInputType::Real
+            ) if dimension.dimension() == runmat_types::PhysicalDimension::DIMENSIONLESS
+        )
 }
 
 fn integer(expression: &CheckedExpression) -> Option<i64> {

@@ -317,9 +317,46 @@ impl Driver {
                     )
             }))
         {
-            return Err(RunnerError::Invalid(
-                "task resource request cannot be satisfied by the target pool".into(),
-            ));
+            let request = &submission.request.resources;
+            let limit = &pool.spec.resource_limit;
+            let missing_capabilities = request
+                .required_capabilities
+                .difference(&limit.capabilities)
+                .collect::<Vec<_>>();
+            let workers = pool
+                .workers
+                .values()
+                .map(|worker| {
+                    let host = submission.request.host.is_satisfied_by(&worker.spec.host);
+                    format!(
+                        "worker {} millicores, {} memory bytes, {} scratch bytes, host {}, missing capabilities {:?}",
+                        worker.spec.resources.cpu_millicores,
+                        worker.spec.resources.memory_bytes,
+                        worker.spec.resources.scratch_bytes,
+                        match &host {
+                            Ok(()) => "satisfied".to_owned(),
+                            Err(reason) => format!("unsatisfied ({reason:?})"),
+                        },
+                        request
+                            .required_capabilities
+                            .difference(&worker.spec.resources.capabilities)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .take(2)
+                .collect::<Vec<_>>();
+            return Err(RunnerError::Invalid(format!(
+                "task resource request cannot be satisfied by the target pool: requested \
+                 {} millicores, {} memory bytes, {} scratch bytes; pool limit {} millicores, \
+                 {} memory bytes, {} scratch bytes, missing capabilities {missing_capabilities:?}; \
+                 {workers:?}",
+                request.cpu_millicores,
+                request.memory_bytes,
+                request.scratch_bytes,
+                limit.cpu_millicores,
+                limit.memory_bytes,
+                limit.scratch_bytes,
+            )));
         }
         if self.snapshot.tasks.contains_key(&submission.request.id) {
             return Err(RunnerError::Invalid(format!(

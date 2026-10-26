@@ -30,6 +30,7 @@ pub(super) fn closed_task() -> (
             },
         }));
     let task = prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: Digest::sha256(b"closed original fluid"),
         frozen_project_digest: None,
         program_revision: prior.program.request.recipe.program_revision.clone(),
@@ -56,16 +57,16 @@ fn native_closed_pressure_gauge_retains_original_wall_laws_and_cold_fields() {
     let r =
         FluidSteadySolverResult::from_canonical_bytes_for(&bytes, Digest::sha256(&bytes), &w, &m)
             .unwrap();
-    assert!(r.original().pressure_pa.iter().all(|p| *p == 101325.0));
+    assert!(r.original().pressure_pa.canonical_values().iter().all(|p| *p == 101325.0));
     assert!(r
         .original()
         .pressure_fluctuation_pa
-        .iter()
+        .canonical_values().iter()
         .all(|p| *p == 0.0));
     assert!(r
         .original()
         .face_volume_flux_m3_per_s
-        .iter()
+        .canonical_values().iter()
         .all(|q| *q == 0.0));
     let receipt = outputs
         .next()

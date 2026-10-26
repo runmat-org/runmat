@@ -23,7 +23,7 @@ fn two_orthogonal_shells_preserve_area_measure_normal_and_borrowed_labels() {
     shell.node_ids = [1, 2, 4];
     structural.elements.push(second);
     let topology = CanonicalStructuralNodeSpace::derive_explicit(&structural).unwrap();
-    let geometry = explicit_shell_surface_geometry(&structural, &topology, "shell_panel").unwrap();
+    let geometry = explicit_shell_surface_geometry(&structural, &topology, &runmat_meshing_core::fixtures::fixture_face("shell_panel")).unwrap();
     assert_eq!(geometry.area_m2.canonical_value(), 1.0);
     assert_eq!(geometry.triangles.len(), 2);
     assert_eq!(
@@ -62,7 +62,7 @@ fn two_orthogonal_shells_preserve_area_measure_normal_and_borrowed_labels() {
     let retained = geometry.nodes.len()
         * std::mem::size_of::<(StableDigest, ExplicitShellSurfaceNode)>()
         + geometry.triangles.len() * std::mem::size_of::<ExplicitShellTriangle<'_>>();
-    assert!(shell_surface_workspace_bytes(&structural, "shell_panel").unwrap() > retained as u64);
+    assert!(shell_surface_workspace_bytes(&structural, &runmat_meshing_core::fixtures::fixture_face("shell_panel")).unwrap() > retained as u64);
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn opposing_faces_reject_undefined_normal_and_degenerate_first_face_precedes_lat
     structural.elements.push(reverse);
     let topology = CanonicalStructuralNodeSpace::derive_explicit(&structural).unwrap();
     assert!(matches!(
-        explicit_shell_surface_geometry(&structural, &topology, "shell_panel"),
+        explicit_shell_surface_geometry(&structural, &topology, &runmat_meshing_core::fixtures::fixture_face("shell_panel")),
         Err(ExplicitShellSurfaceError::UndefinedNodeNormal { .. })
     ));
     structural.nodes[2].coordinates_m =
@@ -92,7 +92,7 @@ fn opposing_faces_reject_undefined_normal_and_degenerate_first_face_precedes_lat
     };
     shell.node_ids[0] = u32::MAX;
     assert!(matches!(
-        explicit_shell_surface_geometry(&structural, &topology, "shell_panel"),
+        explicit_shell_surface_geometry(&structural, &topology, &runmat_meshing_core::fixtures::fixture_face("shell_panel")),
         Err(ExplicitShellSurfaceError::DegenerateTriangle { .. })
     ));
 }

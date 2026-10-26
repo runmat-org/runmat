@@ -223,3 +223,29 @@ impl runmat_canonical_codec::CanonicalCodecControl for FeaCancellationToken {
 
 #[cfg(test)]
 mod control_tests;
+
+/// Wall-clock phase measurement exported as one tracing completion event
+/// (`target = "runmat_fea::phase"`, fields `phase`, `elapsed_ms`, `threads`).
+pub struct PhaseTimer {
+    phase: &'static str,
+    started: std::time::Instant,
+}
+
+pub fn phase_timer(phase: &'static str) -> PhaseTimer {
+    PhaseTimer {
+        phase,
+        started: std::time::Instant::now(),
+    }
+}
+
+impl Drop for PhaseTimer {
+    fn drop(&mut self) {
+        tracing::info!(
+            target: "runmat_fea::phase",
+            phase = self.phase,
+            elapsed_ms = self.started.elapsed().as_secs_f64() * 1e3,
+            threads = runmat_cpu_execution::current_threads(),
+            "fea phase complete"
+        );
+    }
+}

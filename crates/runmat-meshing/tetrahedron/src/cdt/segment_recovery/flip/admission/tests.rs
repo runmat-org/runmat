@@ -47,6 +47,13 @@ impl MeshingCancellationSignal for Counting {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Across four and sixty-four disconnected physical neighborhoods, raw reconnection
+//   creates a requested edge and exact physical repair removes it. Rejection preserves the original
+//   topology and retained admission, with bounded checkpoint growth after shared index preparation.
+//   This component series does not qualify arbitrary connected meshes, complete native recovery or
+//   whole-task memory. Unverified states and protected faces retain full admission.
 #[test]
 fn rejected_physical_edge_trial_preserves_original_and_avoids_global_readmission() {
     let mut costs = Vec::new();
@@ -129,6 +136,12 @@ fn rejected_physical_edge_trial_preserves_original_and_avoids_global_readmission
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Every tested checkpoint of an originally admitted edge-recovery transaction returns
+//   cancellation while preserving original canonical topology and an empty physical dirty
+//   inventory; retry reaches the complete original rejection. This verifies local transaction
+//   cancellation, not worker cancellation, original heat-sink acceptance or whole-task scaling.
 #[test]
 fn cancelled_local_recovery_trials_preserve_original_at_every_checkpoint() {
     struct CancelAt {

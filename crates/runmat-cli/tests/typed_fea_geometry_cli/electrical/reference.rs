@@ -21,7 +21,7 @@ pub(super) fn verify(
         .iter()
         .copied()
         .eq(projection.elements.iter().map(|e| e.element_id)));
-    assert_eq!(fields[0], r.potential_v);
+    assert_eq!(&fields[0], r.potential_v.canonical_values());
     for (&actual, node) in fields[0].iter().zip(&projection.nodes) {
         near(
             actual,
@@ -37,9 +37,9 @@ pub(super) fn verify(
             total_energy_j,
         } => (
             4.0 * 8.854_187_818_8e-12,
-            *total_energy_j,
-            energy_density_j_per_m3,
-            displacement_c_per_m2,
+            total_energy_j.canonical_value(),
+            energy_density_j_per_m3.canonical_values(),
+            displacement_c_per_m2.canonical_values(),
             true,
         ),
         ElectricalConstitutiveResponse::SteadyConduction {
@@ -48,9 +48,9 @@ pub(super) fn verify(
             total_joule_power_w,
         } => (
             3.0,
-            *total_joule_power_w,
-            joule_density_w_per_m3,
-            current_density_a_per_m2,
+            total_joule_power_w.canonical_value(),
+            joule_density_w_per_m3.canonical_values(),
+            current_density_a_per_m2.canonical_values(),
             false,
         ),
     };
@@ -58,6 +58,7 @@ pub(super) fn verify(
     assert_eq!(
         fields[1],
         r.element_electric_field_v_per_m
+            .canonical_values()
             .iter()
             .flatten()
             .copied()
@@ -116,7 +117,7 @@ pub(super) fn verify(
         }
         let expected = coefficient * voltage * if side.unwrap() { 1.0 } else { -1.0 };
         near(
-            terminal.outward_flux,
+            terminal.outward_flux.canonical_value(),
             expected,
             coefficient * voltage.abs(),
             "signed terminal outward flux",

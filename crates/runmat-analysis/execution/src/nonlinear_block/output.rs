@@ -12,10 +12,15 @@ pub(super) fn project(
     let profile = profiler.finish(kind)?;
     crate::thermal_execution::require_inventory(&profile, policy.inventory_limits())?;
     let mut output = projected_transport_output_resource_facts(&profile)?;
-    let materialization =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            bytes, 1,
+    let encoding = if kind == Kind::NonlinearSolidBlockArtifact {
+        runmat_analysis_fea::planning::resource::nonlinear_solid_block_output_construction_bytes(
+            bytes,
         )
+        .ok()
+    } else {
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(bytes, 1)
+    };
+    let materialization = encoding
         .and_then(|n| n.checked_add(output.transport_closure_bytes_upper_bound.0))
         .ok_or_else(|| invalid("nonlinear output construction overflow"))?;
     output.construction_resident_bytes_admission_budget.0 = output

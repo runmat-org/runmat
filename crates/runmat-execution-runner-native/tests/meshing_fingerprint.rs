@@ -82,6 +82,11 @@ fn unrelated_physics_preserves_both_stage_fingerprints() {
         ]
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A tetrahedron-only source edit changes volume identity while preserving upstream
+//   identity in an explicit dependency fixture. Current independent geometry/mesh admission remains
+//   required on reuse; this does not qualify a fresh original CAD execution.
 #[test]
 fn tetrahedron_changes_invalidate_volume_and_preserve_upstream() {
     let fixture = Fixture::new();
@@ -91,6 +96,12 @@ fn tetrahedron_changes_invalidate_volume_and_preserve_upstream() {
     assert_eq!(upstream, fixture.fingerprint(false, b"configuration"));
     assert_ne!(volume, fixture.fingerprint(true, b"configuration"));
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Actual build-helper fixtures bind both stage fingerprints to transitive build
+//   dependencies, native adapters and configuration changes. Optional local dependencies remain
+//   conservatively included; this is not exact active-feature reachability or an observed
+//   production cache hit.
 #[test]
 fn transitive_math_adapter_and_configuration_changes_invalidate_consumers() {
     for name in [
@@ -147,6 +158,10 @@ fn current_workspace_has_a_complete_stage_source_closure() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A regular source module below src/target changes both stage identities. This checks
+//   source visibility, not a production cache hit or numerical mesh accuracy.
 #[test]
 fn nested_source_target_directory_invalidates_both_stage_fingerprints() {
     let fixture = Fixture::new();
@@ -164,6 +179,11 @@ fn nested_source_target_directory_invalidates_both_stage_fingerprints() {
     assert_ne!(before[1], fixture.fingerprint(true, b"configuration"));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Package target/artifacts/.artifacts changes preserve stage identity while
+//   src/artifacts remains source. The actual Cargo watch plan excludes the package root and watches
+//   its source subtree; this does not measure cache throughput.
 #[test]
 fn package_output_changes_preserve_both_stage_fingerprints() {
     for output in ["target", "artifacts", ".artifacts"] {
@@ -208,6 +228,11 @@ fn package_output_changes_preserve_both_stage_fingerprints() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An unsupported linked source entry produces unavailable identity and cannot authorize
+//   cached work. This finite native fixture does not qualify arbitrary link graphs or a fresh
+//   numerical solve.
 #[cfg(unix)]
 #[test]
 fn linked_source_disables_reuse_instead_of_omitting_implementation() {
@@ -218,6 +243,11 @@ fn linked_source_disables_reuse_instead_of_omitting_implementation() {
     assert_eq!(fixture.fingerprint(true, b"configuration"), "unavailable");
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A changed JSON input in an inventoried local package invalidates both stage
+//   identities. Workspace-external generated inputs and exact active-feature reachability are not
+//   established by this fixture.
 #[test]
 fn non_rust_package_inputs_invalidate_both_stage_fingerprints() {
     let fixture = Fixture::new();
@@ -232,6 +262,11 @@ fn non_rust_package_inputs_invalidate_both_stage_fingerprints() {
     assert_ne!(before[1], fixture.fingerprint(true, b"configuration"));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An unrelated registered Cargo package nested below a selected package is excluded by
+//   ownership, while the selected package source remains influential. This is a
+//   dependency-visibility fixture, not whole-study resume qualification.
 #[test]
 fn nested_unrelated_package_does_not_become_a_dependency_by_directory_layout() {
     let mut fixture = Fixture::new();

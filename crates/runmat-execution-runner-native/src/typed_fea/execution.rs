@@ -19,303 +19,252 @@ pub(super) async fn execute_prepared_with_source(
     validate_prepared_execution(&prepared, options)?;
     let case_id = prepared.realized.study_id.clone();
     let workers = options.workers.unwrap_or(prepared.workers).max(1);
-    let (result, publication) = match prepared.root {
-        PreparedFeaStudyRoot::Electrical(root) => {
-            let result = electrical_execution::execute(root, workers, options).await?;
+    let root = crate::prepare_structural_study_root(prepared.root).map_err(|e| e.to_string())?;
+    let completed = crate::execute_prepared_study_locally_with_observers(
+        crate::NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?,
+        root,
+        workers,
+        crate::LocalStructuralStudyObservers {
+            progress: options.progress_observer.clone(),
+            mesh: options.mesh_observer.clone(),
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let result = match completed {
+        crate::LocalStudyCompletion::Structural(result) => {
+            CompletedFeaStudyResult::Structural(result)
+        }
+        crate::LocalStudyCompletion::Family(result) => *result,
+    };
+    let publication = prepare_study_publication(&result, "typed-local")?;
+    let publication = complete_prepared_publication(source, publication).await?;
+    Ok(CompletedLocalFeaCase {
+        case_id,
+        result,
+        publication,
+    })
+}
+
+/// Prepare the atomic publication of any completed authored study.
+///
+/// Local and remote completions use this one function. `placement` only labels the completion
+/// identity; the definition digest and the authenticated completion root fence the run.
+pub fn prepare_study_publication(
+    result: &CompletedFeaStudyResult,
+    placement: &str,
+) -> Result<runmat_runtime::analysis::PreparedStudyPublication, String> {
+    use runmat_runtime::analysis::{
+        AnalysisStudyCompletionIdentity, PrecisionMode, QualityPolicy,
+    };
+    let context = || runmat_runtime::operations::OperationContext::new(None, None);
+    // Every execution is its own attempt of the definition: a rerun publishes a fresh attempt
+    // rather than colliding with, or silently reusing, an earlier publication.
+    let attempt = AnalysisStudyCompletionIdentity::fresh_attempt();
+    // The definition run id is derived from the authored definition alone; the attempt fences
+    // each execution's publication (its authenticated completion root is part of that attempt).
+    let identity = |digest: runmat_execution::Digest, _root: &runmat_execution::Digest| {
+        AnalysisStudyCompletionIdentity::with_attempt(
+            format!("{placement}:{}", digest.to_string().trim_start_matches("sha256:")),
+            attempt.clone(),
+        )
+    };
+    let publication = match result {
+        CompletedFeaStudyResult::Electrical(result) => {
             let digest = result
                 .completion
                 .compiled
                 .definition_digest()
                 .map_err(|e| e.to_string())?;
-            let publication_options = runmat_runtime::analysis::AnalysisElectricalRunOptions {
-                deterministic_mode: true,
-                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-                quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
-                residual_target: result.completion.workload.relative_residual_target,
-            };
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest.to_string().trim_start_matches("sha256:"),
-                    result.completion.root.logical_digest,
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_electrical_study_publication(
+            runmat_runtime::analysis::prepare_electrical_study_publication(
                 &result.completion,
                 &result.source,
                 &result.mesh,
                 &result.meshing_evidence,
-                &publication_options,
-                digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Electrical(Box::new(result)),
-                publication,
-            )
-        }
-        PreparedFeaStudyRoot::Magnetic(root) => {
-            let result = magnetic_execution::execute(root, workers, options).await?;
-            let digest = result
-                .completion
-                .compiled
-                .definition_digest()
-                .map_err(|e| e.to_string())?;
-            let publication_options = runmat_runtime::analysis::AnalysisMagneticRunOptions {
-                deterministic_mode: true,
-                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-                quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
-                residual_target: result.completion.workload.relative_residual_target,
-            };
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest.to_string().trim_start_matches("sha256:"),
-                    result.completion.root.logical_digest,
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_magnetic_study_publication(
-                &result.completion,
-                &result.source,
-                &result.mesh,
-                &result.meshing_evidence,
-                &publication_options,
-                digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Magnetic(Box::new(result)),
-                publication,
-            )
-        }
-        PreparedFeaStudyRoot::Maxwell(root) => {
-            let result = maxwell_execution::execute(root, workers, options).await?;
-            let digest = result
-                .completion
-                .compiled
-                .definition_digest()
-                .map_err(|e| e.to_string())?;
-            let publication_options = runmat_runtime::analysis::AnalysisMaxwellRunOptions {
-                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-                residual_target: result.completion.workload.relative_residual_target,
-            };
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest.to_string().trim_start_matches("sha256:"),
-                    result.completion.root.logical_digest,
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_maxwell_study_publication(
-                &result.completion,
-                &result.source,
-                &result.mesh,
-                &result.meshing_evidence,
-                &publication_options,
-                digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Maxwell(Box::new(result)),
-                publication,
-            )
-        }
-        PreparedFeaStudyRoot::Nonlinear(root) => {
-            let result = nonlinear_execution::execute(*root, workers, options).await?;
-            let digest = result
-                .completion
-                .compiled
-                .definition_digest()
-                .map_err(|e| e.to_string())?;
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest, result.completion.root.logical_digest,
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_nonlinear_solid_study_publication(
-                &result.completion,
-                &result.source,
-                &result.mesh,
-                &result.meshing_evidence,
-                digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Nonlinear(Box::new(result)),
-                publication,
-            )
-        }
-        PreparedFeaStudyRoot::Fluid(root) => {
-            let result = fluid_execution::execute(root, workers, options).await?;
-            let digest = result
-                .completion
-                .compiled
-                .definition_digest()
-                .map_err(|e| e.to_string())?;
-            let publication_options = runmat_runtime::analysis::AnalysisCfdRunOptions {
-                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-                numerical: result.completion.workload.policy,
-                geometry: result.completion.workload.geometry_policy,
-            };
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest.to_string().trim_start_matches("sha256:"),
-                    result.completion.root.logical_digest,
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_fluid_study_publication(
-                &result.completion,
-                &result.source,
-                &result.mesh,
-                &result.meshing_evidence,
-                &publication_options,
-                digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Fluid(Box::new(result)),
-                publication,
-            )
-        }
-        PreparedFeaStudyRoot::Acoustic(root) => {
-            let result = acoustic_execution::execute(root, workers, options).await?;
-            let digest = result
-                .completion
-                .compiled
-                .definition_digest()
-                .map_err(|e| e.to_string())?;
-            let publication_options = runmat_runtime::analysis::AnalysisAcousticRunOptions {
-                deterministic_mode: true,
-                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-                quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
-                mode_count: 1,
-                residual_warn_threshold: result
-                    .completion
-                    .entries
-                    .iter()
-                    .map(|entry| entry.workload.solver.relative_tolerance)
-                    .reduce(f64::min)
-                    .ok_or("acoustic completion omits its frequency entries")?,
-            };
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest.to_string().trim_start_matches("sha256:"),
-                    result.completion.root.logical_digest,
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_acoustic_study_publication(
-                &result.completion,
-                &result.source,
-                &result.mesh,
-                &result.meshing_evidence,
-                &publication_options,
-                digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Acoustic(Box::new(result)),
-                publication,
-            )
-        }
-        PreparedFeaStudyRoot::Structural(root) => {
-            let result = crate::execute_prepared_structural_study_locally_with_observers(
-                crate::NativeExecutionConfig::for_current_executable()
-                    .map_err(|error| error.to_string())?,
-                root,
-                workers,
-                crate::LocalStructuralStudyObservers {
-                    progress: options.progress_observer.clone(),
-                    mesh: options.mesh_observer.clone(),
+                &runmat_runtime::analysis::AnalysisElectricalRunOptions {
+                    deterministic_mode: true,
+                    precision_mode: PrecisionMode::Fp64,
+                    quality_policy: QualityPolicy::Strict,
+                    residual_target: result.completion.workload.relative_residual_target,
                 },
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-            let digest = result.definition_digest()?;
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}",
-                    digest.to_string().trim_start_matches("sha256:")
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_structural_study_publication(
-                &result,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|error| error.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Structural(Box::new(result)),
-                publication,
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
             )
         }
-        PreparedFeaStudyRoot::Thermal(root) => {
-            let result = thermal_execution::execute(root, workers, options).await?;
+        CompletedFeaStudyResult::Magnetic(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_magnetic_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &runmat_runtime::analysis::AnalysisMagneticRunOptions {
+                    deterministic_mode: true,
+                    precision_mode: PrecisionMode::Fp64,
+                    quality_policy: QualityPolicy::Strict,
+                    residual_target: result.completion.workload.relative_residual_target,
+                },
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
+        CompletedFeaStudyResult::Maxwell(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_maxwell_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &runmat_runtime::analysis::AnalysisMaxwellRunOptions {
+                    precision_mode: PrecisionMode::Fp64,
+                    residual_target: result.completion.workload.relative_residual_target,
+                },
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
+        CompletedFeaStudyResult::Nonlinear(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_nonlinear_solid_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
+        CompletedFeaStudyResult::Fluid(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_fluid_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &runmat_runtime::analysis::AnalysisCfdRunOptions {
+                    precision_mode: PrecisionMode::Fp64,
+                    numerical: result.completion.workload.policy,
+                    geometry: result.completion.workload.geometry_policy,
+                },
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
+        CompletedFeaStudyResult::Acoustic(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_acoustic_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &runmat_runtime::analysis::AnalysisAcousticRunOptions {
+                    deterministic_mode: true,
+                    precision_mode: PrecisionMode::Fp64,
+                    quality_policy: QualityPolicy::Strict,
+                    mode_count: 1,
+                    residual_warn_threshold: result
+                        .completion
+                        .entries
+                        .iter()
+                        .map(|entry| entry.workload.solver.relative_tolerance)
+                        .reduce(f64::min)
+                        .ok_or("acoustic completion omits its frequency entries")?,
+                },
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
+        CompletedFeaStudyResult::AcousticResponse(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_acoustic_response_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &runmat_runtime::analysis::AnalysisAcousticResponseRunOptions {
+                    precision_mode: PrecisionMode::Fp64,
+                    residual_target: result.completion.workload.solver.relative_tolerance(),
+                },
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
+        CompletedFeaStudyResult::Structural(result) => {
+            let digest = result.definition_digest()?;
+            runmat_runtime::analysis::prepare_structural_study_publication(
+                result,
+                context(),
+                AnalysisStudyCompletionIdentity::with_attempt(
+                    format!("{placement}:{}", digest.to_string().trim_start_matches("sha256:")),
+                    attempt.clone(),
+                )?,
+            )
+        }
+        CompletedFeaStudyResult::Thermal(result) => {
             let digest = result
                 .completion
                 .compiled
                 .definition_digest()
                 .map_err(|e| e.to_string())?;
             let workload = &result.completion.workload;
-            let publication_options = runmat_runtime::analysis::AnalysisThermalRunOptions {
-                deterministic_mode: true,
-                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-                quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
-                snapshot_count: match workload.procedure {
-                    runmat_analysis_fea::ThermalProcedureControl::Steady => 1,
-                    runmat_analysis_fea::ThermalProcedureControl::BackwardEuler {
-                        snapshot_count,
-                    } => snapshot_count,
-                },
-                residual_warn_threshold: workload.residual_target,
-                solver_mesh_artifact_path: None,
-            };
-            // A fresh execution can retain different attempt/accounting objects even
-            // when its scientific definition and fields are unchanged. Fence publication
-            // by the authenticated completion, not the authored definition alone.
-            let identity =
-                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
-                    "typed-local:{}:{}",
-                    digest.to_string().trim_start_matches("sha256:"),
-                    result.completion.root.logical_digest
-                ))?;
-            let publication = runmat_runtime::analysis::prepare_thermal_study_publication(
+            // A fresh execution can retain different attempt/accounting objects even when its
+            // scientific definition and fields are unchanged; it publishes as its own attempt.
+            runmat_runtime::analysis::prepare_thermal_study_publication(
                 &result.completion,
                 &result.source,
                 &result.mesh,
                 &result.meshing_evidence,
-                &publication_options,
+                &runmat_runtime::analysis::AnalysisThermalRunOptions {
+                    deterministic_mode: true,
+                    precision_mode: PrecisionMode::Fp64,
+                    quality_policy: QualityPolicy::Strict,
+                    snapshot_count: match workload.procedure {
+                        runmat_analysis_fea::ThermalProcedureControl::Steady => 1,
+                        runmat_analysis_fea::ThermalProcedureControl::BackwardEuler {
+                            snapshot_count,
+                        } => snapshot_count,
+                    },
+                    residual_warn_threshold: workload.residual_target,
+                    solver_mesh_artifact_path: None,
+                },
                 digest,
-                runmat_runtime::operations::OperationContext::new(None, None),
-                identity,
-            )
-            .map_err(|e| e.message)?;
-            let publication = complete_prepared_publication(source, publication).await?;
-            (
-                CompletedFeaStudyResult::Thermal(Box::new(result)),
-                publication,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
             )
         }
     };
-    Ok(CompletedLocalFeaCase {
-        case_id,
-        result,
-        publication,
-    })
+    publication.map_err(|error| error.message)
 }
 
 async fn complete_prepared_publication(

@@ -112,7 +112,7 @@ fn decoded_preparation_cannot_authorize_forged_numerical_inputs() {
         let mut wire = PreparationWire::new(input).unwrap();
         match forgery {
             0 => wire.compiled.model.geometry_revision += 1,
-            1 => wire.policy.krylov_restart += 1,
+            1 => wire.policy.contraction_limit *= 0.5,
             _ => wire.mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO,
         }
         let decoded = roundtrip(&wire).into_preparation(access);

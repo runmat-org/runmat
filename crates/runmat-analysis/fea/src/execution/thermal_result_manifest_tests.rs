@@ -21,7 +21,6 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
                 solver_mesh: Some(canonical_tetrahedron_solver_mesh(order)),
                 ..ThermalSolveOptions::default()
@@ -34,7 +33,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let field_ids = manifest
             .fields
             .iter()
-            .map(|entries| entries.each_ref().map(|entry| entry.field))
+            .map(|entries| [entries[0].field, entries[1].field, entries[2].field, entries[3].field])
             .collect::<Vec<_>>();
         let expected_content = encode_contract(
             b"runmat-thermal-solver-result/v1\0",
@@ -76,6 +75,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             result.ordered_element_ids.len(),
             result.time_points_s.len(),
             result.residual_norms.len(),
+            result.interface_node_ids.len(),
         )
         .unwrap();
         let initial_shape =
@@ -94,7 +94,11 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 <= identity_shape.materialization_resident_bytes_estimate
                     + initial_shape.materialization_resident_bytes_estimate
         );
-        let streamed = super::thermal_result::identity::ManifestFieldIdentities(&manifest.fields);
+        let streamed = super::thermal_result::identity::FieldIdentities {
+            samples: &manifest.fields,
+            interface_node_ids: &manifest.interface_node_ids,
+            identities: super::thermal_result::identity::manifest_entry_identities,
+        };
         let streamed_payload = metadata.identity_serialization(streamed);
         assert_eq!(
             encode_contract(
@@ -134,6 +138,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let facts = crate::planning::resource::ThermalManifestCatalogResourceFacts::derive(
             &canonical_tetrahedron_solver_mesh(order),
             &schedule,
+            0,
         )
         .unwrap();
         let actual = runmat_canonical_codec::profile_serialized(&manifest.fields, LIMITS).unwrap();

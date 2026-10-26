@@ -105,7 +105,7 @@ fn vector_values(value: &CheckedExpression) -> Option<&[CheckedExpression]> {
     }
 }
 
-fn expression(
+pub(super) fn expression(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     expected: AuthoredInputType,
@@ -191,6 +191,7 @@ fn expression(
             value: inner,
             unit,
             source_unit_symbol,
+            ..
         } => AuthoredNumericExpressionKind::Quantity {
             value: Box::new(expression(
                 declaration,

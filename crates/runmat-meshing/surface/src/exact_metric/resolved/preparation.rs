@@ -62,12 +62,43 @@ impl ResolvedFaceMetricField {
                     error.to_string(),
                 )
             })?;
-            let resolved = resolved_by_face
+            let sizing = resolved_by_face
                 .remove(&face.id)
                 .expect("resolved every exact face");
+            let resolved = sizing.uniform;
+            let local = sizing.local;
+            let incident = incidence.incident_face_entities(face);
+            // Provenance names every source that can act on the face, graded or uniform.
+            let provenance_sources = resolver
+                .resolve(&incident)
+                .map_err(|error| invalid_request(error.to_string()))?;
+            tracing::info!(
+                event_code = "meshing.surface_metric.face",
+                face = ?face.id,
+                uniform_minimum_length_m = resolved.metric.conservative_minimum_length_m().unwrap_or(f64::NAN),
+                local_sources = local.len(),
+                active_sources = ?provenance_sources.active_sources,
+                applied = provenance_sources.applied_contribution_count,
+                "resolved face metric"
+            );
+            if let Some(control) = control {
+                let bytes = (local.capacity() as u64)
+                    .checked_mul(
+                        std::mem::size_of::<runmat_meshing_size::metric::LocalMetricSource>()
+                            as u64,
+                    )
+                    .ok_or_else(|| invalid_request("local metric source storage overflow"))?;
+                control.consume_allocation_bytes(bytes).map_err(|error| {
+                    ExactFaceMetricError::new(
+                        ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
+                        Some(&face.id),
+                        error.reason,
+                    )
+                })?;
+            }
             let provenance_bytes = super::super::ExactFaceMetricProvenance::storage_bytes(
                 &face.id,
-                &resolved.active_sources,
+                &provenance_sources.active_sources,
             )
             .ok_or_else(|| invalid_request("face provenance storage overflow"))?;
             if let Some(control) = control {
@@ -83,8 +114,8 @@ impl ResolvedFaceMetricField {
             }
             let provenance = std::sync::Arc::new(super::super::ExactFaceMetricProvenance {
                 source_face_id: face.id.clone(),
-                active_sources: resolved.active_sources.clone(),
-                applied_contribution_count: resolved.applied_contribution_count,
+                active_sources: provenance_sources.active_sources,
+                applied_contribution_count: provenance_sources.applied_contribution_count,
                 clipped_contribution_count: resolved.clipped_contribution_count,
                 rejected_contribution_count: resolved.rejected_contribution_count,
             });
@@ -95,6 +126,7 @@ impl ResolvedFaceMetricField {
                     surface_evaluator_id: face.surface_evaluator_id.clone(),
                     world_transform,
                     resolved,
+                    local,
                     boundary_metrics,
                     provenance,
                     evaluator_parameter_domain: OnceLock::new(),
@@ -102,7 +134,10 @@ impl ResolvedFaceMetricField {
             );
         }
         checkpoint(control)?;
-        Ok(Self { by_face })
+        Ok(Self {
+            by_face,
+            resolver: std::sync::Arc::new(resolver),
+        })
     }
 }
 

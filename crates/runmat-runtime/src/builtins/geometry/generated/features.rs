@@ -4,149 +4,103 @@ use runmat_geometry_core::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use super::args::{angle, exactly, length, position, vector3};
 use super::codec::{feature_value, region_output_from_value};
 use super::combine::{append_operation, merge_values, unary_operation};
-use super::primitives::{physical_scalar, position, scalar, vector3};
-use super::{feature_type, invalid};
+use super::invalid;
 use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "geometry.extrude",
-    category = "geometry",
-    summary = "Extrude an exact profile along a finite direction.",
-    keywords = "geometry,cad,extrude,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::EXTRUDE_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_extrude_builtin(
-    profile: Value,
-    distance: f64,
-    direction: Value,
-) -> BuiltinResult<Value> {
+pub async fn geometry_extrude_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.extrude";
-    let graph = super::codec::feature_from_value(&profile, builtin)?;
+    let args = exactly(builtin, args, 3)?;
+    let graph = super::codec::feature_from_value(&args[0], builtin)?;
     let operation = GeometryFeatureOperation::Extrude {
         profile: graph.result.clone(),
-        distance_m: physical_scalar(
-            distance,
-            runmat_types::physical::QuantityKind::Length,
-            builtin,
-        )?,
-        direction: vector3(&direction, builtin, "direction")?.map(scalar),
+        distance_m: length(&args[1], builtin, "distance")?,
+        direction: vector3(&args[2], builtin, "direction")?,
     };
-    feature_value(unary_operation(graph, operation)?)
+    feature_value(unary_operation(graph, operation, builtin)?, builtin)
 }
 
 #[runtime_builtin(
     name = "geometry.revolve",
-    category = "geometry",
-    summary = "Revolve an exact profile about a finite axis and origin.",
-    keywords = "geometry,cad,revolve,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::REVOLVE_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_revolve_builtin(
-    profile: Value,
-    axis: Value,
-    origin: Value,
-    angle: f64,
-) -> BuiltinResult<Value> {
+pub async fn geometry_revolve_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.revolve";
-    let graph = super::codec::feature_from_value(&profile, builtin)?;
+    let args = exactly(builtin, args, 4)?;
+    let graph = super::codec::feature_from_value(&args[0], builtin)?;
+    let angle = angle(&args[3], builtin, "angle")?;
     let operation = GeometryFeatureOperation::Revolve {
         profile: graph.result.clone(),
-        axis: vector3(&axis, builtin, "axis")?.map(scalar),
-        origin_m: position(vector3(&origin, builtin, "origin")?, builtin)?,
-        angle_rad: physical_scalar(angle, runmat_types::physical::QuantityKind::Angle, builtin)?,
+        axis: vector3(&args[1], builtin, "axis")?,
+        origin_m: position(&args[2], builtin, "origin")?,
+        angle_rad: angle,
     };
-    feature_value(unary_operation(graph, operation)?)
+    feature_value(unary_operation(graph, operation, builtin)?, builtin)
 }
 
 #[runtime_builtin(
     name = "geometry.hole",
-    category = "geometry",
-    summary = "Cut an exact cylindrical hole from a target feature.",
-    keywords = "geometry,cad,hole,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::HOLE_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_hole_builtin(
-    target: Value,
-    radius: f64,
-    depth: f64,
-    axis: Value,
-    origin: Value,
-) -> BuiltinResult<Value> {
+pub async fn geometry_hole_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.hole";
-    let graph = super::codec::feature_from_value(&target, builtin)?;
+    let args = exactly(builtin, args, 5)?;
+    let graph = super::codec::feature_from_value(&args[0], builtin)?;
     let operation = GeometryFeatureOperation::Hole {
         target: graph.result.clone(),
-        radius_m: physical_scalar(
-            radius,
-            runmat_types::physical::QuantityKind::Length,
-            builtin,
-        )?,
-        depth_m: physical_scalar(depth, runmat_types::physical::QuantityKind::Length, builtin)?,
-        axis: vector3(&axis, builtin, "axis")?.map(scalar),
-        origin_m: position(vector3(&origin, builtin, "origin")?, builtin)?,
+        radius_m: length(&args[1], builtin, "radius")?,
+        depth_m: length(&args[2], builtin, "depth")?,
+        axis: vector3(&args[3], builtin, "axis")?,
+        origin_m: position(&args[4], builtin, "origin")?,
     };
-    feature_value(unary_operation(graph, operation)?)
+    feature_value(unary_operation(graph, operation, builtin)?, builtin)
 }
 
 #[runtime_builtin(
     name = "geometry.pocket",
-    category = "geometry",
-    summary = "Sweep a profile to cut an exact pocket from a target feature.",
-    keywords = "geometry,cad,pocket,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::POCKET_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_pocket_builtin(
-    target: Value,
-    profile: Value,
-    depth: f64,
-    direction: Value,
-) -> BuiltinResult<Value> {
+pub async fn geometry_pocket_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.pocket";
-    let (graph, operands) = merge_values(vec![target, profile], builtin)?;
+    let mut args = exactly(builtin, args, 4)?;
+    let direction = vector3(&args[3], builtin, "direction")?;
+    let depth = length(&args[2], builtin, "depth")?;
+    args.truncate(2);
+    let (graph, operands) = merge_values(args, builtin)?;
     let operation = GeometryFeatureOperation::Pocket {
         target: operands[0].clone(),
         profile: operands[1].clone(),
-        depth_m: physical_scalar(depth, runmat_types::physical::QuantityKind::Length, builtin)?,
-        direction: vector3(&direction, builtin, "direction")?.map(scalar),
+        depth_m: depth,
+        direction,
     };
-    feature_value(append_operation(graph, operation)?)
+    feature_value(append_operation(graph, operation, builtin)?, builtin)
 }
 
 #[runtime_builtin(
     name = "geometry.fillet",
-    category = "geometry",
-    summary = "Round an exact, typed edge selection on a target feature.",
-    keywords = "geometry,cad,fillet,edges,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::FILLET_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_fillet_builtin(
-    target: Value,
-    edges: Value,
-    radius: f64,
-) -> BuiltinResult<Value> {
-    let radius = physical_scalar(
-        radius,
-        runmat_types::physical::QuantityKind::Length,
-        "geometry.fillet",
-    )?;
-    edge_treatment(target, edges, "geometry.fillet", |target, edges| {
+pub async fn geometry_fillet_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
+    let builtin = "geometry.fillet";
+    let args = exactly(builtin, args, 3)?;
+    let radius = length(&args[2], builtin, "radius")?;
+    edge_treatment(&args[0], &args[1], builtin, |target, edges| {
         GeometryFeatureOperation::Fillet {
             target,
             edges,
@@ -157,25 +111,15 @@ pub async fn geometry_fillet_builtin(
 
 #[runtime_builtin(
     name = "geometry.chamfer",
-    category = "geometry",
-    summary = "Bevel an exact, typed edge selection on a target feature.",
-    keywords = "geometry,cad,chamfer,edges,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::CHAMFER_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_chamfer_builtin(
-    target: Value,
-    edges: Value,
-    distance: f64,
-) -> BuiltinResult<Value> {
-    let distance = physical_scalar(
-        distance,
-        runmat_types::physical::QuantityKind::Length,
-        "geometry.chamfer",
-    )?;
-    edge_treatment(target, edges, "geometry.chamfer", |target, edges| {
+pub async fn geometry_chamfer_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
+    let builtin = "geometry.chamfer";
+    let args = exactly(builtin, args, 3)?;
+    let distance = length(&args[2], builtin, "distance")?;
+    edge_treatment(&args[0], &args[1], builtin, |target, edges| {
         GeometryFeatureOperation::Chamfer {
             target,
             edges,
@@ -185,16 +129,16 @@ pub async fn geometry_chamfer_builtin(
 }
 
 fn edge_treatment(
-    target: Value,
-    edges: Value,
+    target: &Value,
+    edges: &Value,
     builtin: &'static str,
     operation: impl FnOnce(
         runmat_geometry_core::GeometryFeatureRef,
         GeometryFeatureRegionSelection,
     ) -> GeometryFeatureOperation,
 ) -> BuiltinResult<Value> {
-    let graph = super::codec::feature_from_value(&target, builtin)?;
-    let edges = region_output_from_value(&edges, builtin)?;
+    let graph = super::codec::feature_from_value(target, builtin)?;
+    let edges = region_output_from_value(edges, builtin)?;
     if edges.role != GeometryRegionRole::Edge {
         return Err(invalid(builtin, "selection must contain edges"));
     }
@@ -206,5 +150,5 @@ fn edge_treatment(
             cardinality: edges.cardinality,
         },
     );
-    feature_value(unary_operation(graph, operation)?)
+    feature_value(unary_operation(graph, operation, builtin)?, builtin)
 }

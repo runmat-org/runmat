@@ -87,6 +87,9 @@ fn scoped_beam_and_shell_resultants_match_serial_in_canonical_element_order() {
     }
 }
 
+// witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+//   linear_structural/beam/numerical_kernel; coverage: partial;
+//   boundary: Two-element beam recovery preserves the physical assembly fields.
 #[test]
 fn scoped_two_element_beam_recovery_preserves_physical_assembly_fields() {
     use crate::planning::resource::LocalThreadCount;
@@ -223,7 +226,7 @@ fn synthetic_operator_recovery_does_not_publish_continuum_fields() {
         &model,
         &static_excitations(&model),
         None,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .expect("the synthetic fixture operator should assemble");
 
@@ -289,6 +292,7 @@ fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
     )
     .expect("valid Tet4 system should assemble");
     let solve = LinearSolveResult {
+        spectral_estimate: None,
         iterations: 1,
         residual_norm: 0.0,
         relative_residual: None,
@@ -353,6 +357,7 @@ fn solid_tetrahedron10_recovery_uses_midside_displacements() {
     )
     .expect("valid Tet10 system should assemble");
     let solve = LinearSolveResult {
+        spectral_estimate: None,
         iterations: 1,
         residual_norm: 0.0,
         relative_residual: None,
@@ -492,6 +497,7 @@ fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
     )
     .expect("valid Tet4 system should assemble");
     let solve = LinearSolveResult {
+        spectral_estimate: None,
         iterations: 10,
         residual_norm: 1.0e-4,
         relative_residual: None,

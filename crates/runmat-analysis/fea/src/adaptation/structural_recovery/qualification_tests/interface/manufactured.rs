@@ -40,7 +40,7 @@ fn solve_manufactured_interface(divisions: usize, order: ElementOrder) -> (f64, 
         constraint_id: "fixed_root".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             translations: [
                 StructuralTranslationDof::Ux,
                 StructuralTranslationDof::Uy,
@@ -83,7 +83,6 @@ fn solve_manufactured_interface(divisions: usize, order: ElementOrder) -> (f64, 
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()

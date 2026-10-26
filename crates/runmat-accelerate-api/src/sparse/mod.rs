@@ -7,6 +7,7 @@
 mod capability;
 mod execution;
 mod handles;
+mod multigrid;
 mod operations;
 mod pattern;
 mod types;
@@ -14,6 +15,7 @@ mod types;
 pub use capability::*;
 pub use execution::*;
 pub use handles::*;
+pub use multigrid::*;
 pub use operations::*;
 pub use pattern::*;
 pub use types::*;

@@ -9,7 +9,8 @@ use crate::{
     topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
 };
 pub use block::{
-    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_payload_bytes_upper_bound,
+    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_output_construction_bytes,
+    nonlinear_solid_block_payload_bytes_upper_bound,
 };
 
 pub(crate) fn build_nonlinear_resource_plan_with_output_limit(
@@ -60,12 +61,9 @@ fn derive_resource_input(
     let mesh = input.mesh.ok_or_else(|| {
         ResourcePlanningError::Invalid("nonlinear preflight requires its canonical mesh".into())
     })?;
-    if input.backend != crate::ComputeBackend::Cpu
-        || !input.local_execution.is_serial()
-        || !input.accelerator_requests.is_empty()
-    {
+    if input.backend != crate::ComputeBackend::Cpu || !input.accelerator_requests.is_empty() {
         return Err(ResourcePlanningError::Invalid(
-            "nonlinear execution envelope is serial CPU".into(),
+            "nonlinear execution envelope is accelerator-free CPU".into(),
         ));
     }
     let integration_storage = CanonicalSolidIntegrationPlan::derivation_resident_bytes_estimate(
@@ -79,7 +77,10 @@ fn derive_resource_input(
     let properties = crate::properties::compile_structural_property_map(input.model, Some(mesh))
         .map_err(|e| invalid(&e))?
         .identity;
-    let mut input = super::preflight::build_static_resource_input(input)?;
+    let mut input = super::preflight::build_static_resource_input(
+        input,
+        super::StaticSolvePath::ProvingFactorization,
+    )?;
     let FeaResourceDemand::StructuralLinearPipeline(mut baseline) = input.demand else {
         return Err(ResourcePlanningError::Invalid(
             "structural preflight omitted its operator demand".into(),

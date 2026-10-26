@@ -198,3 +198,75 @@ fn geometry_meshes_builtin_returns_patch_ready_surface_topology() {
     assert_eq!(faces.shape(), &[1, 3]);
     assert_eq!(faces.materialize_f64(), vec![1.0, 2.0, 3.0]);
 }
+
+fn load_with_options(path: &std::path::Path, options: Vec<Value>) -> crate::BuiltinResult<Value> {
+    block_on(geometry_load_builtin(
+        Value::String(path.to_string_lossy().to_string().into()),
+        crate::builtins::common::test_support::builtin_arguments(options),
+    ))
+}
+
+#[test]
+fn geometry_load_units_option_sets_the_asset_unit() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("part.stl");
+    std::fs::write(&path, TRIANGLE_STL).unwrap();
+    for (unit, expected) in [
+        ("mm", runmat_geometry_core::LengthUnit::Millimeter),
+        ("Inches", runmat_geometry_core::LengthUnit::Inch),
+        ("metre", runmat_geometry_core::LengthUnit::Meter),
+    ] {
+        let value = load_with_options(
+            &path,
+            vec![Value::String("Units".into()), Value::String(unit.into())],
+        )
+        .unwrap_or_else(|error| panic!("{unit}: {error:?}"));
+        let asset = geometry_asset_from_value_with_builtin(&value, GEOMETRY_LOAD_NAME).unwrap();
+        assert_eq!(asset.coordinate_units.map(|units| units.unit()), Some(expected), "{unit}");
+    }
+    let default = load_with_options(&path, Vec::new()).unwrap();
+    let asset = geometry_asset_from_value_with_builtin(&default, GEOMETRY_LOAD_NAME).unwrap();
+    // STL declares no length unit; without `Units` the asset carries no declared unit.
+    assert_eq!(asset.coordinate_units.map(|units| units.unit()), None);
+}
+
+#[test]
+fn geometry_load_rejects_invalid_options_before_reading_the_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    // The file does not exist: option errors must win over I/O errors.
+    let path = tmp.path().join("missing.stl");
+    for options in [
+        vec![Value::String("Units".into())],
+        vec![Value::String("Scale".into()), Value::String("mm".into())],
+        vec![Value::String("Units".into()), Value::String("ft".into())],
+        vec![Value::String("Units".into()), Value::Num(1.0)],
+        vec![Value::Num(1.0), Value::String("mm".into())],
+        vec![
+            Value::String("Units".into()),
+            Value::String("mm".into()),
+            Value::String("units".into()),
+            Value::String("m".into()),
+        ],
+    ] {
+        let error = load_with_options(&path, options).expect_err("invalid option");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:geometry:load:InvalidPath"),
+            "{}",
+            error.message()
+        );
+    }
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn geometry_mesh_method_reports_mesh_identifiers() {
+    let error = block_on(geometry_mesh_method_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .expect_err("non-asset");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:geometry:mesh:InvalidInput")
+    );
+}

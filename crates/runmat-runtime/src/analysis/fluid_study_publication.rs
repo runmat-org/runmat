@@ -83,11 +83,17 @@ pub fn prepare_fluid_study_publication(
         )
         .map_err(invalid)?
     };
-    let run_id = publication_identity.local_run_id(
-        runmat_analysis_core::PhysicsFamily::Fluid,
-        definition,
-        &completed.workload.step_id,
-    );
+    // The admitted step family names the run: standalone flow or a coupled flow study.
+    let family = completed
+        .workload
+        .model
+        .sequence
+        .steps
+        .first()
+        .map_or(runmat_analysis_core::PhysicsFamily::Fluid, |step| {
+            step.family
+        });
+    let run_id = publication_identity.local_run_id(family, definition, &completed.workload.step_id);
     let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
         .map_err(invalid)?;
     let object_artifact_paths = source
@@ -106,7 +112,6 @@ pub fn prepare_fluid_study_publication(
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.workload.formulation_requirement,
         solver_options: super::AnalysisSolverOptions::IncompressibleFlow(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(
@@ -146,7 +151,6 @@ pub fn prepare_fluid_study_publication(
         FluidNumericalEvidence {
             root: completed.root.clone(),
             catalog: completed.catalog.clone(),
-            layout: completed.layout.clone(),
             object_artifact_paths,
         },
         &mut published,
@@ -164,8 +168,6 @@ pub fn prepare_fluid_study_publication(
 struct FluidNumericalEvidence {
     root: runmat_execution::value::ValueRef,
     catalog: runmat_execution::value::PublishedObjectCatalog,
-    // Public field storage does not replace original Cell/owner-face identity.
-    layout: runmat_analysis_fea::results::field::FiniteVolumeFieldTopology,
     object_artifact_paths: Vec<String>,
 }
 

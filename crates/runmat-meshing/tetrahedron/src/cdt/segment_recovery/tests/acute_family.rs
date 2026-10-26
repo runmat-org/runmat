@@ -2,6 +2,13 @@
 //! This small geometric family is separate from captured application evidence.
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Six independently specified acute-ray geometries recover all simultaneous chains with
+//   original endpoints and strictly ordered full parameter spans, across three scales and two
+//   identity orders. A small feature family does not establish arbitrary assembly complexity,
+//   complete native thermal or modal acceptance, resource saturation or a distributed meshing
+//   envelope.
 #[test]
 fn acute_incident_rays_recover_simultaneously_across_scale_and_identity_order() {
     for scale in [1.0e-3, 1., 1.0e3] {

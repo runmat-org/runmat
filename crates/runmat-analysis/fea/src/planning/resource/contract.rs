@@ -29,20 +29,26 @@ pub use fluid_demand::{
     FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand,
     FluidTransientBlockResourceDemand,
 };
+mod electrical_recovery_demand;
 mod magnetic_recovery_demand;
 mod structural_recovery_demand;
 pub use structural_recovery_demand::StructuralFieldRecoveryResourceDemand;
 mod nonlinear_recovery_demand;
 pub use nonlinear_recovery_demand::NonlinearFieldRecoveryResourceDemand;
 mod maxwell_recovery_demand;
+mod acoustic_response_demand;
+pub use acoustic_response_demand::AcousticResponseResourceDemand;
 pub use maxwell_recovery_demand::MaxwellFieldRecoveryResourceDemand;
+mod acoustic_recovery_demand;
+pub use acoustic_recovery_demand::AcousticFieldRecoveryResourceDemand;
 mod magnetic_static_demand;
 mod maxwell_harmonic_demand;
 pub use acoustic_demand::AcousticHarmonicResourceDemand;
 pub use electrical_static_demand::ElectricalStaticResourceDemand;
+pub use electrical_recovery_demand::ElectricalFieldRecoveryResourceDemand;
 pub use magnetic_recovery_demand::MagneticFieldRecoveryResourceDemand;
 pub use magnetic_static_demand::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
-pub use maxwell_harmonic_demand::{MaxwellGmresResourceEnvelope, MaxwellHarmonicResourceDemand};
+pub use maxwell_harmonic_demand::{MaxwellDirectFactorEnvelope, MaxwellHarmonicResourceDemand};
 mod assembly_demand;
 pub use accuracy_demand::AccuracyEvaluationResourceDemand;
 mod error;
@@ -86,6 +92,7 @@ pub use transient_scope_demand::StructuralTransientScopeResourceDemand;
 
 pub use super::solve_policy::{
     NumericalScalar, PreconditionerStorage, SolveResourcePolicy, SolverAdmissionResourcePolicy,
+    StaticSolvePath, StaticSolveSelection,
 };
 
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";

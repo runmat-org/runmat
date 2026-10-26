@@ -89,6 +89,9 @@ study response {
 }
 "#;
 
+// witness: FEA-AUTHORING-OUTPUT-002/sampling_and_interpolation @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Bounded sampling, interpolation and series reductions are typed end to end.
 #[test]
 fn bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end() {
     let program = check(TRANSIENT_HISTORY_STUDY);

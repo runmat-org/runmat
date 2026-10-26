@@ -1,8 +1,7 @@
 use runmat_analysis_core::{
     AnalysisProcedure, CoupledPhysicsFamily, CouplingImplementation,
-    FormulationAdmissionRejectionReason, FormulationMaturity, FormulationRequirement,
-    PhysicsFamily, RecoveryImplementation, SolutionSpace, SourceImplementation,
-    StructuralFormulationRealization, StructuralOperatorImplementation,
+    FormulationAdmissionRejectionReason, PhysicsFamily, RecoveryImplementation, SolutionSpace,
+    SourceImplementation, StructuralFormulationRealization, StructuralOperatorImplementation,
     StructuralRecoveryImplementation, TopologyImplementation,
 };
 
@@ -83,7 +82,6 @@ fn procedure_labels_cannot_wrap_incompatible_thermal_or_harmonic_em_math() {
             family,
             procedure,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
         .expect_err("a static identity must not relabel non-static mathematics");
@@ -151,6 +149,7 @@ fn registered_realizations(
                 structural_exact_realization(StructuralRealizationInput {
                     assemblies: vec![assembly],
                     procedure,
+                    kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
                     coupling: CouplingImplementation::Uncoupled,
                     sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
                     boundary_transfers: vec![
@@ -169,7 +168,7 @@ fn registered_realizations(
 }
 
 #[test]
-fn every_registered_branch_requires_explicit_experimental_admission() {
+fn every_registered_branch_admits_its_exact_realization() {
     for (family, procedure) in exposed_identities() {
         let realizations = registered_realizations(family, procedure);
         assert!(
@@ -177,67 +176,36 @@ fn every_registered_branch_requires_explicit_experimental_admission() {
             "registry has no realization for family={family:?} procedure={procedure:?}"
         );
         for realization in realizations {
-            let experimental = FormulationAdmissionRequest {
+            let request = FormulationAdmissionRequest {
                 family,
                 procedure,
                 solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
                 realization: realization.clone(),
             };
-            let receipt = admit_formulation(experimental.clone())
-                .expect("registered current formulation should admit experimentally");
+            let receipt =
+                admit_formulation(request).expect("registered current formulation should admit");
             assert_eq!(receipt.family(), family);
             assert_eq!(receipt.procedure(), procedure);
             assert_eq!(receipt.solution_space(), SolutionSpace::Direct);
             assert_eq!(receipt.realization(), &realization);
-            assert_eq!(receipt.qualification(), FormulationMaturity::Experimental);
             let identity = receipt.clone().into_identity();
             assert_eq!(identity.family(), family);
             assert_eq!(identity.procedure(), procedure);
             assert_eq!(identity.solution_space(), SolutionSpace::Direct);
-            assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
-            assert!(identity.permits_fallback());
-            let production = FormulationAdmissionRequest {
-                requirement: FormulationRequirement::Production,
-                ..experimental
-            };
-            let rejection = admit_formulation(production)
-                .expect_err("no current formulation has completed its production gate");
-            assert_eq!(
-                rejection.reason,
-                FormulationAdmissionRejectionReason::ProductionQualificationMissing,
-                "family={family:?} procedure={procedure:?} realization={realization:?}"
-            );
         }
     }
 }
 
 #[test]
-fn availability_gate_rejects_production_for_every_registered_procedure() {
+fn availability_gate_admits_every_registered_procedure() {
     for (family, procedure) in exposed_identities() {
-        require_qualified_formulation(
-            family,
-            procedure,
-            SolutionSpace::Direct,
-            FormulationRequirement::Experimental,
-        )
-        .expect("every registered procedure should be available experimentally");
-        let rejection = require_qualified_formulation(
-            family,
-            procedure,
-            SolutionSpace::Direct,
-            FormulationRequirement::Production,
-        )
-        .expect_err("no current procedure has completed production qualification");
-        assert_eq!(
-            rejection.reason,
-            FormulationAdmissionRejectionReason::ProductionQualificationMissing
-        );
+        require_available_formulation(family, procedure, SolutionSpace::Direct)
+            .expect("every registered procedure should be available");
     }
 }
 
 #[test]
-fn transient_fluid_requires_its_distinct_experimental_realization() {
+fn transient_fluid_requires_its_distinct_realization() {
     let family = PhysicsFamily::Fluid;
     let procedure = AnalysisProcedure::TransientResponse;
     let registered = registered_formulations(family, procedure);
@@ -249,52 +217,39 @@ fn transient_fluid_requires_its_distinct_experimental_realization() {
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization: transient,
     })
-    .expect("canonical transient realization is available experimentally");
+    .expect("canonical transient realization is available");
     assert!(
         admit_formulation(FormulationAdmissionRequest {
             family,
             procedure,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: steady,
         })
         .is_err(),
         "steady realization cannot be relabeled transient"
     );
-    let rejection = require_qualified_formulation(
-        family,
-        procedure,
-        SolutionSpace::Direct,
-        FormulationRequirement::Production,
-    )
-    .expect_err("transient fluid has not completed production qualification");
-    assert_eq!(
-        rejection.reason,
-        FormulationAdmissionRejectionReason::ProductionQualificationMissing
-    );
+    require_available_formulation(family, procedure, SolutionSpace::Direct)
+        .expect("transient fluid is available");
 }
 
 #[test]
-fn thermomechanical_structural_procedures_are_available_experimentally() {
-    require_qualified_formulation(
+fn thermomechanical_static_procedure_is_available() {
+    require_available_formulation(
         PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
         AnalysisProcedure::Static,
         SolutionSpace::Direct,
-        FormulationRequirement::Experimental,
     )
     .expect("the implemented static thermomechanical procedure is available");
     for procedure in [
         AnalysisProcedure::TransientResponse,
         AnalysisProcedure::Nonlinear,
     ] {
-        let rejection = require_qualified_formulation(
+        let rejection = require_available_formulation(
             PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
             procedure,
             SolutionSpace::Direct,
-            FormulationRequirement::Experimental,
         )
         .expect_err("unimplemented coupled evolution must not borrow the J2 identity");
         assert_eq!(
@@ -357,8 +312,11 @@ fn structural_exact_identity_distinguishes_operator_topology_and_recovery() {
     }
 }
 
+// witness: FEA-SHARED-BASELINE-001/decode_revalidation_and_proxy_rejection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: An incompatible exact axis is rejected before admission.
 #[test]
-fn incompatible_exact_axis_is_rejected_before_qualification() {
+fn incompatible_exact_axis_is_rejected_before_admission() {
     let family = PhysicsFamily::Thermal;
     let procedure = AnalysisProcedure::TransientResponse;
     let mut realization = registered_realizations(family, procedure)
@@ -370,7 +328,6 @@ fn incompatible_exact_axis_is_rejected_before_qualification() {
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization,
     })
     .expect_err("an unregistered coupling axis must fail closed");
@@ -383,6 +340,9 @@ fn incompatible_exact_axis_is_rejected_before_qualification() {
     );
 }
 
+// witness: FEA-SHARED-BASELINE-001/decode_revalidation_and_proxy_rejection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Unsupported identity and solution space are typed rejections.
 #[test]
 fn unsupported_identity_and_solution_space_are_typed_rejections() {
     let realization =
@@ -391,13 +351,12 @@ fn unsupported_identity_and_solution_space_are_typed_rejections() {
             .next()
             .expect("thermal realization must be registered");
     let unsupported_family = admit_formulation(FormulationAdmissionRequest {
-        family: PhysicsFamily::Acoustic,
-        procedure: AnalysisProcedure::TransientResponse,
+        family: PhysicsFamily::Fluid,
+        procedure: AnalysisProcedure::ModalExtraction,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization: realization.clone(),
     })
-    .expect_err("transient acoustic is not exposed");
+    .expect_err("fluid modal extraction is not exposed");
     assert_eq!(
         unsupported_family.reason,
         FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
@@ -407,7 +366,6 @@ fn unsupported_identity_and_solution_space_are_typed_rejections() {
         family: PhysicsFamily::Thermal,
         procedure: AnalysisProcedure::Static,
         solution_space: SolutionSpace::ModalReduced,
-        requirement: FormulationRequirement::Experimental,
         realization,
     })
     .expect_err("current thermal formulation is not modal-reduced");
@@ -417,6 +375,10 @@ fn unsupported_identity_and_solution_space_are_typed_rejections() {
     );
 }
 
+// witness: FEA-SHARED-BASELINE-001/decode_revalidation_and_proxy_rejection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Thermal-transient identity cold decode revalidates and rejects fields outside the
+//   registry identity; no end-to-end publication proof.
 #[test]
 fn persisted_identity_is_revalidated_and_cannot_forge_production() {
     let family = PhysicsFamily::Thermal;
@@ -426,16 +388,15 @@ fn persisted_identity_is_revalidated_and_cannot_forge_production() {
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization,
     })
-    .expect("registered experimental formulation should admit")
+    .expect("registered formulation should admit")
     .into_identity();
     let mut encoded = serde_json::to_value(&identity).expect("identity should serialize");
     let object = encoded
         .as_object()
         .expect("identity wire representation must be an object");
-    assert_eq!(object.len(), 5);
+    assert_eq!(object.len(), 4);
     assert!(!object.contains_key("fallback_policy"));
     assert!(!object.contains_key("formulations"));
     let decoded = serde_json::from_value::<AnalysisRunIdentity>(encoded.clone())
@@ -443,9 +404,8 @@ fn persisted_identity_is_revalidated_and_cannot_forge_production() {
     assert_eq!(decoded, identity);
 
     encoded["qualification"] = serde_json::json!("production");
-    let error = serde_json::from_value::<AnalysisRunIdentity>(encoded)
-        .expect_err("persisted identity cannot forge production qualification");
-    assert!(error.to_string().contains("ProductionQualificationMissing"));
+    serde_json::from_value::<AnalysisRunIdentity>(encoded)
+        .expect_err("persisted identity rejects a field outside the registry identity");
 }
 
 #[test]
@@ -457,10 +417,9 @@ fn persisted_identity_cannot_forge_family_or_exact_realization() {
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization,
     })
-    .expect("registered experimental formulation should admit")
+    .expect("registered formulation should admit")
     .into_identity();
     let encoded = serde_json::to_value(&identity).expect("identity should serialize");
     let mut forged_family = encoded.clone();

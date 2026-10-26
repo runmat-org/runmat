@@ -27,16 +27,13 @@ pub(super) fn validate(
             .map_err(|e| e.to_string())?
             != definition
         || completed.workload.model != completed.compiled.model
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("Maxwell publication differs from its authenticated definition/root".into());
     }
     validate_options(options, completed.workload.relative_residual_target)?;
     let expected = runmat_analysis_fea::study::plan_maxwell_study(
         &completed.compiled,
-        runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
-        },
+        runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {},
     )
     .map_err(|e| e.to_string())?;
     if expected != completed.workload {

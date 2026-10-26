@@ -129,7 +129,6 @@ pub(super) fn curved_interior_tet10_patch_recovers_affine_stress_and_energy() {
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()

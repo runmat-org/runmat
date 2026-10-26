@@ -12,29 +12,27 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     for (face_index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if face_index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if face_index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let assignment = model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
-            .selected_region_id()
-            .expect("fixture uses selected material region")
-            .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+    let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
+        assignment.selected_region_id().expect("fixture uses selected material region"),
+    )
+    .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -45,24 +43,24 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         nodes: vec![
             StructuralNode {
                 node_id: 101,
-                coordinates_m: attached_coordinates,
+                coordinates_m: runmat_types::physical::Quantity::new(attached_coordinates),
                 solid_attachment: Some(ConformalSolidAttachment::SolverNode {
                     stable_identity: attached_node_identity,
                 }),
             },
             StructuralNode {
                 node_id: 102,
-                coordinates_m: [
+                coordinates_m: runmat_types::physical::Quantity::new([
                     attached_coordinates[0] + 1.0,
                     attached_coordinates[1],
                     attached_coordinates[2],
-                ],
+                ]),
                 solid_attachment: None,
             },
         ],
         elements: vec![StructuralElement {
             element_id: "beam".into(),
-            region_id: "beam_span".into(),
+            region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
             kind: StructuralElementKind::Beam(BeamElementModel {
                 node_ids: [101, 102],
                 section_id: "beam_section".into(),
@@ -71,18 +69,18 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         }],
         beam_sections: vec![BeamSectionModel {
             section_id: "beam_section".into(),
-            area_m2: 1.0e-4,
-            iy_m4: 1.0e-9,
-            iz_m4: 1.0e-9,
-            torsion_j_m4: 1.0e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.01,
-            torsion_outer_radius_m: 0.01,
+            area_m2: runmat_types::physical::Quantity::new(1.0e-4),
+            iy_m4: runmat_types::physical::Quantity::new(1.0e-9),
+            iz_m4: runmat_types::physical::Quantity::new(1.0e-9),
+            torsion_j_m4: runmat_types::physical::Quantity::new(1.0e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::new(0.01),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::new(0.01),
         }],
         shell_sections: Vec::new(),
     });
     let mut beam_assignment = model.material_assignments[0].clone();
-    beam_assignment.target = runmat_analysis_core::PropertyRegionTarget::beam("beam_span");
+    beam_assignment.target = runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span"));
     model.material_assignments.push(beam_assignment);
     model
         .constraints
@@ -110,7 +108,6 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -134,6 +131,9 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     let outputs = NativeAnalysisKernel

@@ -251,6 +251,9 @@ pub struct GeometryInspectionRequest {
     /// Authored source units used to normalize exact topology identity.
     pub source_units: Option<runmat_geometry_core::LengthUnit>,
     pub expected_content_digest: Option<SourceDigest>,
+    /// `interfaces = shared`: touching bodies join so coincident faces become shared interfaces.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared_interfaces: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -282,6 +285,10 @@ pub struct GeometryInspection {
     pub resolved_units: Option<runmat_geometry_core::LengthUnit>,
     #[serde(default)]
     pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
+    /// Authored names in the exact model by region role (`face`, `solid`), so a check can reject
+    /// a `select name` that matches nothing. Empty when the source carries no exact names.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub authored_names: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 pub trait GeometryInspectionSource {

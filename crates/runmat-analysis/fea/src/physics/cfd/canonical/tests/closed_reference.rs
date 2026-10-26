@@ -83,6 +83,10 @@ fn closed_original_uniform_translation_and_mean_trace_survive_cold_recovery() {
     }
 }
 
+// witness: FEA-FLUID-EQUATIONS-001/coupling @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Closed gauge/reference and net flux rejection; not full pressure-velocity envelope
+//   proof.
 #[test]
 fn closed_gauge_admission_rejects_missing_duplicate_outlet_and_incompatible_flux() {
     let mut empty = closed(2, [0.0; 3], 0.0);

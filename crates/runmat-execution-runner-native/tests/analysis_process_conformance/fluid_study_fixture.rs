@@ -61,14 +61,12 @@ pub(super) async fn cold_fixture(
         .resources
         .maximum_resident_bytes;
     let policy = FluidStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
         numerical: fixture.policy,
         geometry: geometry_policy(),
     };
     let compiled = CompiledAnalysisStudy {
         module_path: format!("qualification/{identity}.fea"),
         study_id: identity.into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),
@@ -107,6 +105,7 @@ pub(super) async fn cold_fixture(
         required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
     };
     let preparation = FluidStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product,
         mesh: fixture.mesh.clone(),
@@ -222,10 +221,7 @@ pub(super) async fn cold_fixture(
             entry.definition.clone(),
             entry.sample,
             partitions,
-            cold.fields
-                .manifest
-                .entity_counts
-                .entity_count(entry.definition.entity_domain()),
+            entry.definition.stored_entities(cold.fields.manifest.entity_counts),
         )
         .unwrap();
         assert_eq!(&actual, original);
@@ -236,7 +232,6 @@ pub(super) async fn cold_fixture(
     );
     let gate = runmat_analysis_fea::results::accuracy::publication_gate(
         &cold.workload.model.sequence.steps[0].accuracy,
-        FormulationRequirement::Production,
         cold.accuracy.artifact.evaluation(),
     )
     .unwrap();

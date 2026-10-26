@@ -23,7 +23,7 @@ pub(crate) fn import_workspace(references: &[ValueRef]) -> AnalysisBridgeResult<
         })
     })?;
     let decoded =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
             encoded,
             u64::try_from(references.len()).map_err(|_| {
                 runmat_analysis_fea::execution::AnalysisExecutionError::Limit(

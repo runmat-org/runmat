@@ -50,6 +50,9 @@ pub struct StructuralLinearProgramPreparation {
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
     pub local_execution: LocalExecutionPlan,
+    /// How the static solve path is chosen: within the effective ceiling for a fresh solve, or
+    /// the path an admitted plan recorded when a completion is imported or re-prepared.
+    pub solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection,
 }
 
 pub struct PreparedStructuralLinearProgram {
@@ -338,6 +341,7 @@ pub fn prepare_structural_linear_program(
         &preparation.accelerator_requests,
         preparation.local_execution,
         Some(&input_facts),
+        preparation.solve_selection,
     )?;
     let resource_plan_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
@@ -498,10 +502,7 @@ fn derive_identities(
     let discretization = DiscretizationIdentity::new(
         problem,
         topology_digest,
-        contract_digest(
-            "formulation",
-            &(workload.formulation_requirement, topology_digest),
-        )?,
+        contract_digest("formulation", &topology_digest)?,
     )?;
     let operator = OperatorIdentity::new(
         discretization,

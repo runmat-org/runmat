@@ -200,11 +200,11 @@ fn shell_orientation(
 }
 
 fn entity_id(kind: PersistentEntityKind, role: &str, index: usize) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: format!("faceted:{role}:{index:016x}"),
-        assembly_path: vec!["root".into()],
-    }
+        format!("faceted:{role}:{index:016x}"),
+        vec!["root".into()],
+    )
 }
 
 fn rotate_minimum_first(triangle: &mut [CoordinateKey; 3]) {

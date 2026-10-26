@@ -3,6 +3,7 @@ use crate::physics::electrical::tests::{mesh, model, prescribe};
 use runmat_analysis_core::*;
 use runmat_meshing_core::ElementOrder;
 
+mod coupled;
 mod source;
 
 fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
@@ -10,20 +11,21 @@ fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         gauge,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         gauge + voltage,
     );
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 
@@ -48,7 +50,7 @@ fn thermal() -> ThermalWorkload {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: face.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(face),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
                     value: PrescribedValue::Constant(Temperature::new(300.0)),
                 },
             }));
@@ -57,13 +59,16 @@ fn thermal() -> ThermalWorkload {
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::Steady,
         residual_target: 1e-11,
         initial_fields: vec![],
     }
 }
 
+// witness: FEA-COUPLING-ELECTROTHERMAL-001/heat @ electrothermal/tet4|tet10/public_study;
+//   boundary: Both-order constant-conductivity same-mesh steady one-way conduction to thermal slab;
+//   12 W terminal/supplied/boundary power, Tet10 quadratic temperature and cold transfer. No
+//   feedback or harmonic Maxwell coupling.
 #[test]
 fn retained_conduction_drives_independent_quadratic_thermal_patch_and_power() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -135,6 +140,9 @@ fn retained_conduction_drives_independent_quadratic_thermal_patch_and_power() {
     }
 }
 
+// witness: FEA-COUPLING-ELECTROTHERMAL-001/heat @ electrothermal/tet4|tet10/public_study;
+//   boundary: Tet4 two-mesh interior temperature refinement and Tet10 voltage sign/gauge invariance
+//   at constant conductivity; no two-way thermal iteration.
 #[test]
 fn tet4_refinement_and_voltage_sign_gauge_preserve_independent_heat_and_power() {
     let mut errors = Vec::new();
@@ -274,13 +282,10 @@ fn retained_transfer_and_unsupported_compositions_fail_closed() {
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat")]);
     transient.procedure = ThermalProcedureControl::BackwardEuler { snapshot_count: 2 };
     assert!(bind_retained_joule_heat(&electrical, &result, source, &transient, &mesh).is_err());
-    let mut production = thermal();
-    production.formulation_requirement = FormulationRequirement::Production;
-    assert!(bind_retained_joule_heat(&electrical, &result, source, &production, &mesh).is_err());
     let mut external_heat = thermal();
     external_heat.model.boundaries.push(AnalysisBoundary {
         boundary_id: "external_heat".into(),
-        target: RegionTarget::boundary("slab_left"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Constant(HeatFlux::new(1.0)),
         },

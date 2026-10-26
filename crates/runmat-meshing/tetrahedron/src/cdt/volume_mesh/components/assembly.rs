@@ -44,16 +44,14 @@ pub(in crate::cdt) fn assemble(
         facets: Vec::new(),
     };
     let mut facet_recovery_insertions = Vec::new();
-    let mut refinement_insertions = Vec::new();
-    let mut sliver_mutations = Vec::new();
+    let mut quality_mutations = Vec::new();
     for mesh in meshes {
         let DelaunayVolumeMesh {
             topology,
             quality,
             provenance: component_provenance,
             facet_recovery_insertions: component_facets,
-            refinement_insertions: component_refinement,
-            sliver_mutations: component_mutations,
+            quality_mutations: component_quality,
         } = mesh;
         // Neither the old quality nor incidence belongs to the aggregate graph.
         drop(quality);
@@ -87,8 +85,8 @@ pub(in crate::cdt) fn assemble(
         provenance.segments.extend(component_provenance.segments);
         provenance.facets.extend(component_provenance.facets);
         facet_recovery_insertions.extend(component_facets);
-        refinement_insertions.extend(component_refinement);
-        sliver_mutations.extend(component_mutations);
+        // Components share no mutable identities; each keeps its own applied order.
+        quality_mutations.extend(component_quality);
     }
     let nodes = nodes.into_values().collect::<Vec<_>>();
     let node_indices = nodes
@@ -136,8 +134,7 @@ pub(in crate::cdt) fn assemble(
         quality,
         provenance,
         facet_recovery_insertions,
-        refinement_insertions,
-        sliver_mutations,
+        quality_mutations,
     };
     sort_insertions(&mut mesh);
     Ok(mesh)

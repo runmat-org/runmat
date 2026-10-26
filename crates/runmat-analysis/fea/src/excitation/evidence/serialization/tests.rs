@@ -1,5 +1,5 @@
 use super::*;
-use runmat_canonical_codec::{encode_contract, profile_serialized, CanonicalLimits};
+use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1_000_000, 10_000, 100_000, 32);
 
@@ -74,8 +74,13 @@ fn scalar_projection_profile_matches_actual_records_across_samples_and_rules() {
                 integration_rule,
                 &actual.requirements,
             );
-            let projected = profile_serialized(&projection, LIMITS).unwrap();
-            assert_eq!(projected, profile_serialized(&actual, LIMITS).unwrap());
+            // The projection has the evidence's exact shape; values do not matter.
+            let projected =
+                runmat_canonical_codec::profile_serialized_shape(&projection, LIMITS).unwrap();
+            assert_eq!(
+                projected,
+                runmat_canonical_codec::profile_serialized_shape(&actual, LIMITS).unwrap()
+            );
             let bytes = encode_contract(b"test\0", "source", &actual, LIMITS).unwrap();
             assert!(bytes.len() as u64 <= projected.encoded_bytes_upper_bound);
             assert!(

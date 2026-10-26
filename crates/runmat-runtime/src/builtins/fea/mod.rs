@@ -18,15 +18,8 @@ use runmat_analysis_core::{
     ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
     ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::fea_contract::identities;
+use runmat_builtins::{BuiltinDescriptor, BuiltinErrorDescriptor};
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
 use runmat_types::MethodName;
@@ -135,7 +128,12 @@ pub(crate) fn ensure_value_classes_registered() {
     study_policies::ensure_study_policy_classes_registered();
 }
 
-pub use runmat_builtins::fea_contract::{descriptors::*, errors::*, integer::*, parameters::*};
+// Descriptors, error descriptors, parameter lists, and integer facts for the
+// FEA operation surface are owned by the canonical catalog in runmat-builtins.
+pub(crate) use runmat_builtins::fea_contract::descriptors::{
+    ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION,
+};
+pub use runmat_builtins::fea_contract::integer::FEA_STRUCTURAL_INTEGER_AUDIT;
 
 #[runtime_builtin(
     name = "fea.study",
@@ -223,6 +221,32 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
+    if matches!(
+        input,
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+    ) {
+        // A `.fea` path runs through the host's public study runner, as `runmat fea run`.
+        let path = scalar_string(&input, RUN_NAME, &ERROR_INPUT)?;
+        let service = crate::context::legacy::active()
+            .and_then(|runtime| runtime.service_ports().analysis().cloned())
+            .ok_or_else(|| {
+                builtin_error(
+                    RUN_NAME,
+                    &ERROR_OPERATION,
+                    "running a .fea document requires a host study runner",
+                )
+            })?;
+        let publication = service
+            .execute_document(std::path::PathBuf::from(path))
+            .await?;
+        let object = serializable_to_object_value(
+            RUN_NAME,
+            &ERROR_INTERNAL,
+            FEA_RUN_RESULT_CLASS,
+            &publication,
+        )?;
+        return Ok(Value::Object(object));
+    }
     match resolve_document_input(input, RUN_NAME).await? {
         RuntimeResolvedDocument::Study(mut composed) => {
             signals::materialize::materialize_study(
@@ -263,40 +287,31 @@ pub async fn fea_field_builtin(args: crate::call::BuiltinArguments) -> BuiltinRe
 
 #[runtime_builtin(
     name = "fea.fieldPage",
-    category = "fea",
-    summary = "Read a bounded page of real or complex values from an artifact-backed FEA field.",
-    keywords = "fea,field,page,values,complex,artifact",
-    descriptor(crate::builtins::fea::FEA_FIELD_PAGE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_FIELD_PAGE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_field_page_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_field_page_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     field_access::create_page_from_args(args)
 }
 
 #[runtime_builtin(
     name = "__runmat_fea_plot",
-    category = "fea",
-    summary = "Implement plot overloads for FEA result objects.",
-    keywords = "fea,plot,visualize,mesh,von_mises,stress,field",
-    descriptor(crate::builtins::fea::FEA_PLOT_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_plot_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     visualization::create_plot_from_args(args)
 }
 
 #[runtime_builtin(
     name = "__runmat_fea_mesh",
-    category = "fea",
-    summary = "Implement mesh overloads for FEA result objects.",
-    keywords = "fea,mesh,visualize,topology,solver,cad",
-    descriptor(crate::builtins::fea::FEA_MESH_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_mesh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_mesh_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     visualization::create_mesh_from_args(args)
 }
 
@@ -323,12 +338,12 @@ async fn resolve_document_input(
     builtin: &'static str,
 ) -> BuiltinResult<RuntimeResolvedDocument> {
     match input {
-        Value::Object(ref object) if object.class_name().display_name() == FEA_STUDY_CLASS => {
+        Value::Object(ref object) if object.class_name().is(identities::FEA_STUDY_CLASS) => {
             modeling::study_from_value_with_generators(builtin, &input)
                 .map(Box::new)
                 .map(RuntimeResolvedDocument::Study)
         }
-        Value::Object(ref object) if object.class_name().display_name() == FEA_SWEEP_CLASS => {
+        Value::Object(ref object) if object.class_name().is(identities::FEA_SWEEP_CLASS) => {
             modeling::sweep_from_value_with_generators(builtin, &input)
                 .map(RuntimeResolvedDocument::Sweep)
         }
@@ -354,11 +369,19 @@ fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> Built
         ));
     }
     if let Value::Object(object) = &args[0] {
-        if object.class_name().display_name() == FEA_RESULTS_CLASS && args.len() == 1 {
+        if object.class_name().is(identities::FEA_RESULTS_CLASS) && args.len() == 1 {
             return Ok(args[0].clone());
         }
     }
-    let run_id = run_id_from_value(RESULTS_NAME, &args[0])?;
+    let requested = run_id_from_value(RESULTS_NAME, &args[0])?;
+    // A definition run id names every attempt; the object reports the attempt it holds.
+    let run_id = crate::analysis::storage::resolve_run_attempt(&requested).map_err(|err| {
+        builtin_error(
+            RESULTS_NAME,
+            &ERROR_OPERATION,
+            format!("failed to resolve the latest FEA run attempt: {err}"),
+        )
+    })?;
     let query = results_query_from_args(args.view().range(1..)?)?;
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
@@ -433,26 +456,20 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
         ));
     }
     let field_id = field_selectors::from_value(FIELD_NAME, &args[1])?.field_id();
-    let sample = args
-        .get(2)
-        .map(|value| {
-            let hertz =
-                values::quantity_scalar(FIELD_NAME, value, values::FREQUENCY_CLASS, "hertz")?;
-            if !hertz.is_finite() || hertz <= 0.0 {
-                return Err(builtin_error(
-                    FIELD_NAME,
-                    &ERROR_INPUT,
-                    "frequency sample must be finite and positive",
-                ));
-            }
-            Ok(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(hertz))
-        })
-        .transpose()?;
+    let selection = match args.get(2) {
+        None => AnalysisFieldSelection::new(&field_id, None),
+        Some(value) => field_sample_selection(&field_id, value)?,
+    };
     let results = results_data_from_value(FIELD_NAME, &args[0])?;
-    let inline_field = sample
-        .is_none()
+    let sampled = selection.sample.is_some() || selection.transient_sample_index.is_some();
+    // A shell (declared shape, no values) is paged from the artifact rather than returned empty.
+    let inline_field = (!sampled)
         .then(|| find_field(results.fields.into_iter(), &field_id))
-        .flatten();
+        .flatten()
+        .filter(|field| {
+            field.shape.iter().product::<usize>() == 0
+                || field.as_host_f64().is_none_or(|values| !values.is_empty())
+        });
     let mut object = if let Some(field) = inline_field {
         let descriptor = find_descriptor(results.field_descriptors.iter(), &field_id)
             .cloned()
@@ -468,7 +485,7 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
         })?;
         let page = analysis_field_page_by_run_id_op(
             &run_id,
-            AnalysisFieldSelection::new(&field_id, sample),
+            selection,
             AnalysisFieldRequestOptions {
                 offset: Some(0),
                 limit: Some(0),
@@ -482,6 +499,66 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
     copy_study_context_property(&args[0], &mut object)?;
     copy_run_id_context_property(&args[0], &mut object)?;
     Ok(Value::Object(object))
+}
+
+/// The optional `fea.field` sample: a `fea.Frequency`, a `fea.Time`, or a one-based retained
+/// transient state index.
+fn field_sample_selection(field_id: &str, value: &Value) -> BuiltinResult<AnalysisFieldSelection> {
+    use runmat_analysis_fea::results::field::RecoveredFieldSample;
+    match value {
+        Value::Object(object) if object.class_name().is(identities::FEA_FREQUENCY_CLASS) => {
+            let hertz =
+                values::quantity_scalar(FIELD_NAME, value, values::FREQUENCY_CLASS, "hertz")?;
+            if !hertz.is_finite() || hertz <= 0.0 {
+                return Err(builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "frequency sample must be finite and positive",
+                ));
+            }
+            Ok(AnalysisFieldSelection::new(
+                field_id,
+                Some(RecoveredFieldSample::FrequencyHertz(hertz)),
+            ))
+        }
+        Value::Object(object) if object.class_name().is(identities::FEA_TIME_CLASS) => {
+            let seconds =
+                values::quantity_scalar(FIELD_NAME, value, values::TIME_CLASS, "seconds")?;
+            if !seconds.is_finite() {
+                return Err(builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "time sample must be finite",
+                ));
+            }
+            Ok(AnalysisFieldSelection::new(
+                field_id,
+                Some(RecoveredFieldSample::TimeSeconds(seconds)),
+            ))
+        }
+        Value::Object(_) => Err(builtin_error(
+            FIELD_NAME,
+            &ERROR_INPUT,
+            "fea.field sample must be a fea.Frequency, a fea.Time, or a positive integer state index",
+        )),
+        other => {
+            let index = usize_from_value(FIELD_NAME, other).map_err(|_| {
+                builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "fea.field sample must be a fea.Frequency, a fea.Time such as fea.Time.seconds(0.01), or a positive integer state index",
+                )
+            })?;
+            let index = index.checked_sub(1).ok_or_else(|| {
+                builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "transient state indices are one-based",
+                )
+            })?;
+            Ok(AnalysisFieldSelection::transient_index(field_id, index))
+        }
+    }
 }
 
 fn create_compare_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
@@ -672,7 +749,7 @@ fn results_query_from_args(
 
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::Object(object) if object.class_name().display_name() == FEA_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name().is(identities::FEA_RUN_RESULT_CLASS) => {
             let aggregate: crate::analysis::AnalysisStudyRunData =
                 object_payload(builtin, value, FEA_RUN_RESULT_CLASS)?;
             match aggregate.steps.as_slice() {
@@ -690,7 +767,9 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
             }
         }
         Value::Object(object)
-            if object.class_name().display_name() == FEA_STEP_RUN_RESULT_CLASS =>
+            if object
+                .class_name()
+                .is(identities::FEA_STEP_RUN_RESULT_CLASS) =>
         {
             run_id_from_object(object).ok_or_else(|| {
                 builtin_error(
@@ -701,7 +780,9 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
             })
         }
         Value::Object(object)
-            if object.class_name().display_name() == FEA_SWEEP_RUN_RESULT_CLASS =>
+            if object
+                .class_name()
+                .is(identities::FEA_SWEEP_RUN_RESULT_CLASS) =>
         {
             Err(builtin_error(
                 builtin,
@@ -735,7 +816,7 @@ fn results_data_from_value(
     value: &Value,
 ) -> BuiltinResult<crate::analysis::AnalysisResultsData> {
     match value {
-        Value::Object(object) if object.class_name().display_name() == FEA_RESULTS_CLASS => {
+        Value::Object(object) if object.class_name().is(identities::FEA_RESULTS_CLASS) => {
             object_payload(builtin, value, FEA_RESULTS_CLASS)
         }
         _ => {
@@ -827,7 +908,7 @@ fn study_context_value(value: &Value) -> Option<Value> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name().display_name() == FEA_STUDY_CLASS {
+    if object.class_name().is(identities::FEA_STUDY_CLASS) {
         return Some(value.clone());
     }
     object.properties().get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
@@ -952,6 +1033,9 @@ fn field_object(
     let sample = match descriptor.sample {
         Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(value)) => {
             values::quantity_to_value(FIELD_NAME, values::FREQUENCY_CLASS, "hertz", value)?
+        }
+        Some(runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(value)) => {
+            values::quantity_to_value(FIELD_NAME, values::TIME_CLASS, "seconds", value)?
         }
         Some(sample) => serializable_to_value_preserving_integers(
             FIELD_NAME,
@@ -1217,7 +1301,20 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .numeric_value_at(0)
                 .expect("validated scalar tensor storage"),
         ),
-        Value::Tensor(tensor) => nested_array_to_json(builtin, tensor.shape(), |index| {
+        // A `1xN` row is the typed-object form of a JSON vector.
+        Value::Tensor(tensor) if tensor.shape().len() == 2 && tensor.shape()[0] == 1 => (0..tensor
+            .shape()[1])
+            .map(|index| {
+                numeric_scalar_to_json(
+                    builtin,
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated row tensor storage"),
+                )
+            })
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(serde_json::Value::Array),
+        Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape(), |index| {
             numeric_scalar_to_json(
                 builtin,
                 tensor
@@ -1918,10 +2015,131 @@ fn value_from_json_preserving_integer_kinds(
     error: &'static BuiltinErrorDescriptor,
     json: &serde_json::Value,
 ) -> BuiltinResult<Value> {
-    let mut converted = value_from_json(json)
+    let mut converted = typed_value_from_json(json)
         .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
     promote_json_scalar_kinds(builtin, error, &mut converted, json)?;
+    orient_json_vectors_as_rows(builtin, error, &mut converted)?;
     Ok(converted)
+}
+
+/// Typed FEA payloads keep every JSON array of objects as a cell, element for
+/// element. `jsondecode` instead folds such arrays into struct arrays (and a
+/// one-element array into a scalar struct), which would lose the array when
+/// the object is decoded again by `value_to_json`.
+fn typed_value_from_json(json: &serde_json::Value) -> BuiltinResult<Value> {
+    fn holds_object(json: &serde_json::Value) -> bool {
+        match json {
+            serde_json::Value::Object(_) => true,
+            serde_json::Value::Array(items) => items.iter().any(holds_object),
+            _ => false,
+        }
+    }
+    match json {
+        serde_json::Value::Object(map) => {
+            let fields = map
+                .iter()
+                .map(|(name, child)| Ok((name.clone(), typed_value_from_json(child)?)))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            Ok(Value::Struct(
+                runmat_value::StructValue::from_fields_unbounded(fields),
+            ))
+        }
+        serde_json::Value::Array(items) if items.iter().any(holds_object) => {
+            let elements = items
+                .iter()
+                .map(typed_value_from_json)
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let (rows, columns) = if items.iter().all(serde_json::Value::is_object) {
+                (elements.len(), 1)
+            } else {
+                (1, elements.len())
+            };
+            runmat_value::CellArray::new(elements, rows, columns)
+                .map(Value::Cell)
+                .map_err(|message| build_runtime_error(message).build())
+        }
+        // A single nested row (`[[a, b, c]]`) would decode to a `1xN` tensor,
+        // which re-encodes as the flat vector `[a, b, c]`; keep its nesting.
+        serde_json::Value::Array(items)
+            if items.len() == 1 && matches!(items[0], serde_json::Value::Array(_)) =>
+        {
+            runmat_value::CellArray::new(vec![typed_value_from_json(&items[0])?], 1, 1)
+                .map(Value::Cell)
+                .map_err(|message| build_runtime_error(message).build())
+        }
+        other => value_from_json(other),
+    }
+}
+
+/// JSON arrays decode to rank-1 tensors, which report `1xN` from `size` but
+/// do not combine with ordinary row vectors in `==` or `isequal`. Typed FEA
+/// objects expose authored coordinate vectors as `1xN` rows instead. A
+/// single-element array keeps its rank-1 shape so it still re-encodes as a
+/// one-element JSON array rather than a scalar (see `value_to_json`).
+fn orient_json_vectors_as_rows(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    value: &mut Value,
+) -> BuiltinResult<()> {
+    match value {
+        Value::Tensor(tensor) if tensor.shape().len() == 1 && tensor.shape()[0] >= 2 => {
+            let columns = tensor.shape()[0];
+            tensor
+                .reshape_in_place(vec![1, columns])
+                .map_err(|message| builtin_error(builtin, error, message))?;
+        }
+        Value::StringArray(array) if array.shape().len() == 1 && array.shape()[0] >= 2 => {
+            let columns = array.shape()[0];
+            *array = runmat_value::StringArray::from_texts_unbounded(
+                array.data().to_vec(),
+                vec![1, columns],
+            )
+            .map_err(|message| builtin_error(builtin, error, message))?;
+        }
+        Value::Struct(structure) => {
+            let children = structure.fields.try_values_mut_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA vector orientation requires a unique struct generation",
+                )
+            })?;
+            for child in children {
+                orient_json_vectors_as_rows(builtin, error, child)?;
+            }
+        }
+        Value::Object(object) => {
+            let names = object
+                .properties()
+                .keys()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            for name in names {
+                let child = object.try_property_mut_unique(&name).ok_or_else(|| {
+                    builtin_error(
+                        builtin,
+                        error,
+                        "FEA vector orientation requires a unique object generation",
+                    )
+                })?;
+                orient_json_vectors_as_rows(builtin, error, child)?;
+            }
+        }
+        Value::Cell(cell) => {
+            let children = cell.try_data_mut_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA vector orientation requires a unique cell backing",
+                )
+            })?;
+            for child in children.iter_mut() {
+                orient_json_vectors_as_rows(builtin, error, child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn promote_json_scalar_kinds(
@@ -2160,10 +2378,6 @@ fn scalar_string(
     }
 }
 
-fn parse_scalar_enum<T: DeserializeOwned>(text: &str, label: &str) -> BuiltinResult<T> {
-    parse_scalar_enum_for_builtin(STUDY_NAME, text, label)
-}
-
 fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
     builtin: &'static str,
     text: &str,
@@ -2284,7 +2498,7 @@ mod tests {
     use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
     use runmat_types::MemberAccess;
-    use runmat_value::{CellArray, Closure};
+    use runmat_value::CellArray;
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -2300,6 +2514,7 @@ mod tests {
             runmat_analysis_fea::admission::StructuralRealizationInput {
                 assemblies: vec![assembly],
                 procedure,
+                kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
                 coupling: runmat_analysis_core::CouplingImplementation::Uncoupled,
                 sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
                 boundary_transfers: vec![
@@ -2313,7 +2528,6 @@ mod tests {
                 family: runmat_analysis_core::PhysicsFamily::Structural,
                 procedure,
                 solution_space: runmat_analysis_core::SolutionSpace::Direct,
-                requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 realization,
             },
         )
@@ -2769,7 +2983,19 @@ mod tests {
             value_to_json("fea.test", &Value::Tensor(tensor))
                 .expect("tensor json")
                 .to_string(),
-            "[[42,18446744073709551615]]"
+            "[42,18446744073709551615]"
+        );
+
+        let column = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![42, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("column tensor");
+        assert_eq!(
+            value_to_json("fea.test", &Value::Tensor(column))
+                .expect("column tensor json")
+                .to_string(),
+            "[[42],[18446744073709551615]]"
         );
     }
 
@@ -3383,6 +3609,214 @@ mod tests {
     }
 
     #[test]
+    fn material_and_plan_objects_match_their_portable_schemas() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        ensure_value_classes_registered();
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+                Value::String("MassDensityKgPerM3".into()),
+                Value::Num(7850.0),
+            ]),
+        ))
+        .expect("material");
+        let encoded = crate::execution::value_codec::encode_inline_value(&material)
+            .expect("a material must satisfy its portable schema");
+        assert_eq!(
+            crate::execution::value_codec::decode_inline_value(&encoded).expect("decode"),
+            material
+        );
+        for property in ["mass_density_kg_per_m3", "elasticity", "provenance"] {
+            assert!(
+                crate::class_registry::lookup_property(
+                    &runmat_types::ClassIdentity::from(FEA_MATERIAL_CLASS),
+                    &runmat_types::MemberName::from(property),
+                )
+                .is_some(),
+                "fea.Material must expose {property}"
+            );
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry_path = tmp.path().join("part.step");
+        std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
+            Value::String(geometry_path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("geometry should load");
+        let region_id = geometry_asset_from_value(MODEL_NAME, &geometry)
+            .expect("geometry payload")
+            .regions
+            .first()
+            .expect("fixture region")
+            .region_id
+            .clone();
+        let region = || {
+            block_on(crate::builtins::geometry::region::geometry_region_builtin(
+                geometry.clone(),
+                region_id.clone(),
+            ))
+            .expect("region")
+        };
+        let target = block_on(fea_property_region_target_solid_builtin(region())).expect("target");
+        let assignment = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                target,
+                material.clone(),
+            ]),
+        ))
+        .expect("assignment");
+        let fixed = block_on(structural_fixed_builtin("support".to_string(), region()))
+            .expect("constraint");
+        let step =
+            block_on(structural_static_builtin(Value::String("static".into()))).expect("step");
+        let model = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("schema_model".into()),
+                geometry.clone(),
+                Value::String("Materials".into()),
+                cell(vec![material]),
+                Value::String("MaterialAssignments".into()),
+                cell(vec![assignment]),
+                Value::String("Constraints".into()),
+                cell(vec![fixed]),
+                Value::String("Steps".into()),
+                cell(vec![step]),
+            ]),
+        ))
+        .expect("model");
+        let study = block_on(fea_study_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("schema_study".into()),
+                geometry,
+                model,
+            ]),
+        ))
+        .expect("study");
+        let plan = block_on(fea_plan_builtin(study)).expect("plan");
+        let encoded = crate::execution::value_codec::encode_inline_value(&plan)
+            .expect("a plan must satisfy its portable schema");
+        assert_eq!(
+            crate::execution::value_codec::decode_inline_value(&encoded).expect("decode"),
+            plan
+        );
+        for property in ["sequence_id", "steps", "operation_sequence"] {
+            assert!(
+                crate::class_registry::lookup_property(
+                    &runmat_types::ClassIdentity::from(FEA_PLAN_CLASS),
+                    &runmat_types::MemberName::from(property),
+                )
+                .is_some(),
+                "fea.Plan must expose {property}"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_enum_errors_are_attributed_to_the_calling_builtin() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry = test_support::load_stl_fixture(&tmp.path().join("part.stl"), 1.0);
+        let step = block_on(structural_static_builtin(Value::String("static".into())))
+            .expect("static step");
+        let frame_error = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("framed".into()),
+                geometry.clone(),
+                Value::String("Steps".into()),
+                step,
+                Value::String("Frame".into()),
+                Value::String("not_a_frame".into()),
+            ]),
+        ))
+        .expect_err("an unknown frame must be rejected");
+        assert_eq!(frame_error.context.builtin.as_deref(), Some(MODEL_NAME));
+        assert_eq!(frame_error.identifier(), Some("RunMat:fea:InvalidInput"));
+
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+            ]),
+        ))
+        .expect("material");
+        let target = block_on(fea_property_region_target_all_solids_builtin(geometry))
+            .expect("all-solids target");
+        let confidence_error = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                target,
+                material,
+                Value::String("Confidence".into()),
+                Value::String("certain".into()),
+            ]),
+        ))
+        .expect_err("an unknown confidence must be rejected");
+        assert_eq!(
+            confidence_error.context.builtin.as_deref(),
+            Some(MATERIAL_ASSIGNMENT_NAME)
+        );
+    }
+
+    #[test]
+    fn material_assignment_revision_is_uint32_and_round_trips_into_a_model() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry = test_support::load_stl_fixture(&tmp.path().join("part.stl"), 1.0);
+        let revision = geometry_asset_from_value(MODEL_NAME, &geometry)
+            .expect("geometry payload")
+            .revision;
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+            ]),
+        ))
+        .expect("material");
+        let target = block_on(fea_property_region_target_all_solids_builtin(
+            geometry.clone(),
+        ))
+        .expect("all-solids target");
+        let assignment = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                target,
+                material.clone(),
+            ]),
+        ))
+        .expect("assignment");
+        let Value::Object(object) = &assignment else {
+            panic!("expected fea.MaterialAssignment");
+        };
+        assert_eq!(
+            object.properties().get("geometry_revision"),
+            Some(&Value::Int(IntValue::U32(revision)))
+        );
+        let step = block_on(structural_static_builtin(Value::String("static".into())))
+            .expect("static step");
+        block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("uint32_revision".into()),
+                geometry,
+                Value::String("Materials".into()),
+                cell(vec![material]),
+                Value::String("MaterialAssignments".into()),
+                cell(vec![assignment]),
+                Value::String("Steps".into()),
+                step,
+            ]),
+        ))
+        .expect("a uint32 revision must decode when the assignment enters a model");
+    }
+
+    #[test]
     fn fea_model_rejects_ambiguous_component_option_aliases() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
@@ -3574,22 +4008,16 @@ mod tests {
             Value::Int(IntValue::U64(3)),
         ))
         .unwrap();
-        let generated_force = block_on(signals::callable::force(vec![
-            Value::String("generated_force".into()),
-            Value::Closure(Closure::new(
-                "loads.force".into(),
-                Some(crate::user_functions::test_support::exact_portable_binding(
-                    41,
-                    "fea generated force fixture",
-                )),
-                runmat_types::FunctionSourceRole::Anonymous,
-                None,
-                vec![Value::Num(2.0)],
-                None,
-            )),
-            signal_domain,
-            signal_sampling,
-        ]))
+        let (force_callable, _catalog) =
+            test_support::portable_closure_fixture("loads.force", 41, vec![Value::Num(2.0)]);
+        let generated_force = block_on(signals::callable::force(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("generated_force".into()),
+                force_callable,
+                signal_domain,
+                signal_sampling,
+            ]),
+        ))
         .expect("callable force signal should build");
 
         let model = block_on(fea_model_builtin(
@@ -3628,9 +4056,9 @@ mod tests {
         let Value::Object(substituted) = &mut substituted_model else {
             unreachable!()
         };
-        let Value::Cell(bindings) = substituted
-            .try_property_mut_unique(signals::bindings::FROZEN_GENERATORS_PROPERTY)
-            .unwrap()
+        let Some(Value::Cell(mut bindings)) = substituted
+            .property(signals::bindings::FROZEN_GENERATORS_PROPERTY)
+            .cloned()
         else {
             unreachable!()
         };
@@ -3655,20 +4083,25 @@ mod tests {
                     }
                 }),
         );
+        substituted.replace_property_unbounded(
+            signals::bindings::FROZEN_GENERATORS_PROPERTY.to_string(),
+            Value::Cell(bindings),
+        );
         assert!(modeling::model_from_value("test", &substituted_model).is_err());
 
-        let sequence = block_on(sequences::sequence(vec![
-            Value::String("bracket_sequence".to_string().into()),
-            cell(vec![step]),
-            cell(Vec::new()),
-            cell(Vec::new()),
-            cell(Vec::new()),
-        ]))
+        let sequence = block_on(sequences::sequence(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket_sequence".to_string().into()),
+                cell(vec![step]),
+                cell(Vec::new()),
+                cell(Vec::new()),
+                cell(Vec::new()),
+            ]),
+        ))
         .expect("sequence should build");
         let execution = block_on(execution::execution_plan_defaults(
             sequence,
             block_on(execution::backend_cpu()).unwrap(),
-            block_on(execution::requirement_production()).unwrap(),
         ))
         .expect("execution should build");
 
@@ -3756,6 +4189,10 @@ mod tests {
             FEA_RESULTS_CLASS
         );
         assert_eq!(
+            results_object.class_name().display_name(),
+            FEA_RESULTS_CLASS
+        );
+        assert_eq!(
             results_object.properties().get("run_id"),
             Some(&Value::String(run_id.clone().into()))
         );
@@ -3823,11 +4260,13 @@ mod tests {
             Some(&Value::String(run_id.clone().into()))
         );
 
-        let page = block_on(fea_field_page_builtin(vec![
-            field,
-            Value::Int(IntValue::U8(1)),
-            Value::Int(IntValue::U16(1)),
-        ]))
+        let page = block_on(fea_field_page_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                field,
+                Value::Int(IntValue::U8(1)),
+                Value::Int(IntValue::U16(1)),
+            ]),
+        ))
         .expect("persisted field page should load");
         let Value::Object(page) = page else {
             panic!("expected field page object")
@@ -4016,12 +4455,9 @@ mod tests {
             "synthetic_plot.sequence",
             vec![ProcedureStep::structural_static("static")],
         );
-        let execution = AnalysisExecutionPlan::for_sequence_with_requirement(
-            &sequence,
-            ComputeBackend::Cpu,
-            runmat_analysis_core::FormulationRequirement::Experimental,
-        )
-        .expect("execution plan should match the sequence");
+        let execution =
+            AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
+                .expect("execution plan should match the sequence");
         let model = runmat_analysis_core::AnalysisModel {
             model_id: runmat_analysis_core::AnalysisModelId("synthetic_plot.model".to_string()),
             geometry_id: geometry.geometry_id.clone(),
@@ -4072,8 +4508,8 @@ mod tests {
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: runmat_analysis_fea::SolverMethod::MatrixFreePcg,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
+                solver_method: runmat_analysis_fea::SolverMethod::SparseDirectCholesky,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
@@ -4082,6 +4518,8 @@ mod tests {
                     iterations: 0,
                     residual_norm: 0.0,
                     relative_residual: Some(0.0),
+                    operator_proof: runmat_analysis_fea::contracts::StaticOperatorProof::SparseCholesky,
+                    spectral_estimate: None,
                 }),
                 structural_static_balance: Some(synthetic_static_balance()),
                 structural_constraint_result: Some(synthetic_constraint_result()),
@@ -4118,14 +4556,7 @@ mod tests {
             result_quality: crate::analysis::QualityGate::Pass,
             run_status: crate::analysis::RunStatus::Completed,
             numerically_acceptable: true,
-            production_publishable: false,
             quality_reasons: Vec::new(),
-            production_publication_reasons: vec![
-                crate::analysis::ProductionPublicationReason {
-                    code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                    detail: "the admitted Structural/Static formulation is Experimental, not production-qualified".to_string(),
-                },
-            ],
             provenance: crate::analysis::RunProvenance {
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
@@ -4134,10 +4565,11 @@ mod tests {
                 solver_host_sync_count: 0,
                 precision_mode: "fp64".to_string(),
                 deterministic_mode: true,
-                solver_method: runmat_analysis_fea::SolverMethod::MatrixFreePcg,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
+                solver_method: runmat_analysis_fea::SolverMethod::SparseDirectCholesky,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
+                effective_memory_ceiling_bytes: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
@@ -4265,14 +4697,7 @@ mod tests {
             result_quality: crate::analysis::QualityGate::Pass,
             run_status: crate::analysis::RunStatus::Completed,
             numerically_acceptable: true,
-            production_publishable: false,
             quality_reasons: Vec::new(),
-            production_publication_reasons: vec![
-                crate::analysis::ProductionPublicationReason {
-                    code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                    detail: "the admitted Structural/TransientResponse formulation is Experimental, not production-qualified".to_string(),
-                },
-            ],
             provenance: crate::analysis::RunProvenance {
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
@@ -4285,6 +4710,7 @@ mod tests {
                 preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
+                effective_memory_ceiling_bytes: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("indexed run should persist");

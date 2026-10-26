@@ -9,7 +9,7 @@ use runmat_analysis_execution::{
 };
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ArtifactAccess, ArtifactResult, BundleCallable, LogicalObject, ObjectNamespace,
@@ -27,8 +27,8 @@ use runmat_geometry_io::ExactCadImportOptions;
 use runmat_geometry_ops::GeometryFeaturePlanLimits;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
 use runmat_types::{
-    CallableFact, CapabilitySet, EffectKind, EffectSet, ObjectFact, ProgramFunctionId,
-    QualifiedName, ShapeFact, StorageFact, SymbolName, ValueFact, ValueKindFact,
+    CallableFact, CapabilitySet, EffectKind, EffectSet, ObjectFact, ProgramFunctionId, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 use super::*;
@@ -82,6 +82,7 @@ fn constructed_and_derived_geometry_publish_reimportable_exact_closures() {
         &prepared,
         BTreeSet::new(),
         GeometryExecutionContext {
+            host: crate::test_support::host_requirement(),
             scope_id: ExecutionScopeId::derive(&[b"geometry-scope"]),
             pool_id: PoolId::derive(&[b"geometry-pool"]),
             program_artifact_id: ArtifactId::derive(&[prepared.program.artifact.id.0.bytes()]),
@@ -326,9 +327,13 @@ fn imported_ap242_is_verified_against_exact_exchange_inventory() {
     let GeometryDefinitionSource::Imported(imported) = &mut request.definition.source else {
         unreachable!()
     };
-    imported.exchange.as_mut().unwrap().parameters[0]
-        .value
-        .value_si = 0.009;
+    let parameter = &mut imported.exchange.as_mut().unwrap().parameters[0];
+    parameter.value = runmat_types::physical::SourceQuantity::from_canonical(
+        parameter.value.kind(),
+        0.009,
+        parameter.value.attribution().clone(),
+    )
+    .unwrap();
     let response = execute_imported_request(&request, bytes.as_bytes());
     assert!(format!("{response:?}").contains("exchange facts differ"));
 }
@@ -418,10 +423,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     let output = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(QualifiedName(vec![
-                SymbolName("geometry".into()),
-                SymbolName("Generated".into()),
-            ])),
+            runtime_class: Some(runmat_types::ClassIdentity::from("geometry.Generated")),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
@@ -433,6 +435,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
         function: ProgramFunctionId(4),
         captures: Vec::new(),
         callable: CallableFact {
+            capabilities: Default::default(),
             identity: None,
             parameters: Vec::new(),
             parameters_complete: true,
@@ -647,7 +650,7 @@ fn imported_request(
                 unit_evidence: Default::default(),
                 logical_path: "box.brep".into(),
                 format: GeometrySourceFormat::Brep,
-                unit_fallback: Some(runmat_geometry_core::LengthUnit::Meter),
+                authored_units: Some(runmat_geometry_core::LengthUnit::Meter),
                 content_digest: GeometryDigest::from_bytes(*source_digest.bytes()),
                 topology_digest,
                 capabilities: GeometryAuthoringCapabilities {
@@ -656,7 +659,7 @@ fn imported_request(
                     ..Default::default()
                 },
                 exchange: None,
-            })),
+                shared_interfaces: false,            })),
             regions: body_region(),
             cad_parameters: Vec::new(),
         },
@@ -758,14 +761,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"geometry-graph"),
         Digest::sha256(b"geometry-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"runtime"),
-            Digest::sha256(b"catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

@@ -58,7 +58,7 @@ fn replace_with_force(model: &mut AnalysisModel, id: &str, region_id: &str, forc
     })];
     model.excitations = vec![ExcitationAction::Force(excitation(
         id,
-        ExcitationTarget::Region(RegionTarget::authored(region_id)),
+        ExcitationTarget::Region(RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(region_id))),
         signal_id,
         ExcitationDistribution::PreserveResultant,
     ))];
@@ -97,7 +97,7 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
     }));
     let mut inlet = excitation(
         &excitation_id.0,
-        ExcitationTarget::Region(RegionTarget::boundary("fluid_inlet")),
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_inlet"))),
         signal_id,
         ExcitationDistribution::TopologyField,
     );
@@ -116,14 +116,10 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
-    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
-    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
-    fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
-    fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
-    fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
-    fea_transient_residual_norm_field_id, ComputeBackend, ExecutionBackend, SolverMethod,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_MODAL_EIGENVALUE,
+    fea_modal_mode_shape_field_id, fea_nonlinear_load_factor_field_id,
+    fea_nonlinear_residual_norm_field_id, fea_transient_residual_norm_field_id, ComputeBackend,
+    ExecutionBackend, SolverMethod, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_MODAL_EIGENVALUE,
     FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
     FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
     FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
@@ -131,9 +127,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{EntityKind, GeometryAsset, LengthUnit};
+use runmat_geometry_core::{EntityKind, GeometryAsset};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
+    CanonicalMeshingContract, ElementOrder, StableDigest,
 };
 use runmat_runtime::analysis::storage;
 use runmat_runtime::analysis::{
@@ -145,14 +141,12 @@ use runmat_runtime::analysis::{
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
     analysis_trends_op, analysis_validate, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, AnalysisChtRunOptions, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult,
-    AnalysisSolverOptions, AnalysisStructuralTimeStepPolicy, AnalysisStudySpec,
-    AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery,
-    FormulationRequirement, ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode,
-    PreconditionerMode, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
-    QualityReasonCode, RunStatus,
+    analysis_validate_study_sweep_op, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions,
+    AnalysisStructuralTimeStepPolicy, AnalysisStudySpec, AnalysisStudySweepSpec,
+    AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
+    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -203,7 +197,6 @@ fn assert_static_gpu_admission_rejected(trace_id: &str) {
     let error = analysis_run_linear_static_with_options(
         &contract_linear_static_model(),
         ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(Some(trace_id.to_string()), None),
     )
@@ -238,7 +231,7 @@ fn assert_static_gpu_admission_rejected(trace_id: &str) {
     );
 }
 
-fn assert_experimental_result_identity(
+fn assert_registered_result_identity(
     result: &AnalysisRunResult,
     family: PhysicsFamily,
     procedure: AnalysisProcedure,
@@ -249,20 +242,6 @@ fn assert_experimental_result_identity(
         result.run.identity.solution_space(),
         runmat_analysis_core::SolutionSpace::Direct
     );
-    assert_eq!(
-        result.run.identity.qualification(),
-        runmat_analysis_core::FormulationMaturity::Experimental
-    );
-    assert!(!result.production_publishable);
-    assert!(result.production_publication_reasons.iter().any(|reason| {
-        reason.code == ProductionPublicationReasonCode::FormulationNotProductionQualified
-    }));
-    assert_eq!(
-        result.production_publication_reasons.iter().any(|reason| {
-            reason.code == ProductionPublicationReasonCode::NumericalAcceptanceFailed
-        }),
-        !result.numerically_acceptable
-    );
 }
 
 fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf) {
@@ -272,10 +251,9 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let volume_region = model.material_assignments[0]
         .selected_region_id()
-        .map(|region_id| PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: region_id.to_owned(),
-            assembly_path: vec!["root".to_owned()],
+        .map(|region_id| {
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(region_id)
+                .expect("contract volume target is a canonical fixture selector")
         })
         .unwrap_or_else(|| mesh.topology.regions[0].region_id.clone());
     mesh.topology.regions[0].region_id = volume_region.clone();
@@ -293,13 +271,10 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
         };
         Some(target.region_id.as_str())
     }) {
-        mesh.topology.boundary_faces[0]
-            .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: boundary_region_id.to_string(),
-                assembly_path: vec!["root".to_owned()],
-            });
+        mesh.topology.boundary_faces[0].provenance.push(
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(boundary_region_id)
+                .expect("contract thermal target is a canonical fixture face selector"),
+        );
         mesh.topology.boundary_faces[0].provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -335,7 +310,6 @@ fn contract_study_spec(
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
-                requirement: FormulationRequirement::Experimental,
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -381,7 +355,7 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     model.constraints.clear();
     model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
         boundary_id: "acoustic_rigid_wall".to_string(),
-        target: RegionTarget::boundary("root"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
         operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
     }];
     let id = "acoustic_pressure";
@@ -397,7 +371,7 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     })];
     model.excitations = vec![ExcitationAction::AcousticPressure(excitation(
         id,
-        ExcitationTarget::Region(RegionTarget::boundary("tip")),
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip"))),
         signal_id,
         ExcitationDistribution::PreserveResultant,
     ))];
@@ -426,7 +400,7 @@ fn contract_thermal_model(model_id: &str, procedure: AnalysisProcedure) -> Analy
         runmat_analysis_core::ThermalConstraint {
             constraint_id: "thermal_reference".to_string(),
             kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Temperature::new(293.15),
                 ),
@@ -474,6 +448,8 @@ fn contract_cht_model(model_id: &str) -> AnalysisModel {
         density: runmat_analysis_core::MassDensity::new(1.225),
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     model
 }
@@ -489,7 +465,7 @@ fn material_conflict_contract_model() -> AnalysisModel {
         .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(3.0e9);
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Inferred,
@@ -691,13 +667,7 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
         AnalysisProcedure::Static
     );
     assert!(run.data.numerically_acceptable);
-    assert!(!run.data.production_publishable);
     assert_eq!(run.data.steps[0].quality_reasons.len(), 0);
-    assert_eq!(run.data.steps[0].production_publication_reasons.len(), 1);
-    assert_eq!(
-        run.data.steps[0].production_publication_reasons[0].code,
-        ProductionPublicationReasonCode::FormulationNotProductionQualified
-    );
     assert_eq!(
         run.data.steps[0].provenance.requested_backend,
         ComputeBackend::Cpu
@@ -1053,7 +1023,6 @@ fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-3".to_string()), None),
     )
@@ -1063,7 +1032,7 @@ fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
     assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
     assert_eq!(envelope.data.run_status, RunStatus::Completed);
     assert!(envelope.data.numerically_acceptable);
-    assert_experimental_result_identity(
+    assert_registered_result_identity(
         &envelope.data,
         PhysicsFamily::Structural,
         AnalysisProcedure::Static,
@@ -1129,7 +1098,6 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     let modal_envelope = analysis_run_modal_with_options_op(
         &modal_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-modal-3".to_string()), None),
     )
@@ -1138,7 +1106,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         modal_envelope.data.run.solver_method,
-        SolverMethod::MatrixFreeSubspaceIteration
+        SolverMethod::ShiftInvertBlockLanczos
     );
     let modal_results = modal_envelope
         .data
@@ -1220,7 +1188,6 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     let invalid = analysis_run_modal_with_options_op(
         &contract_linear_static_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-modal-4".to_string()), None),
     )
@@ -1237,7 +1204,6 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
     let envelope = analysis_run_modal_with_options_op(
         &modal_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisModalRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -1265,7 +1231,6 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
     let invalid = analysis_run_modal_with_options_op(
         &modal_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisModalRunOptions {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
@@ -1290,7 +1255,6 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
     let envelope = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-acoustic-3".to_string()), None),
     )
@@ -1330,7 +1294,6 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
     let invalid = analysis_run_acoustic_with_options_op(
         &contract_linear_static_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-acoustic-4".to_string()), None),
     )
@@ -1350,6 +1313,8 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
         density: runmat_analysis_core::MassDensity::new(1.225),
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     model.boundaries.clear();
     // Explicit signed components are authored by this fixture, never inferred from speed.
@@ -1358,7 +1323,7 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
         runmat_analysis_core::FluidConstraint {
             constraint_id: "bc_cfd_inlet".into(),
             kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::authored("fluid_inlet"),
+                target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("fluid_inlet")),
                 value: runmat_analysis_core::PrescribedValue::Constant(velocity),
             },
         },
@@ -1367,7 +1332,6 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
     let envelope = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-cfd-1".to_string()), None),
     )
@@ -1388,83 +1352,27 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
 }
 
 #[test]
-fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
+fn analysis_run_cht_contract_requires_an_authored_study() {
     let model = contract_cht_model("contract_cht_model");
-
-    let (_artifact_root, mesh_path) = write_model_solver_mesh(&model);
-
     let envelope = analysis_run_cht_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisChtRunOptions {
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..Default::default()
-        },
+        Default::default(),
         OperationContext::new(Some("trace-contract-cht-3".to_string()), None),
     )
-    .expect("cht run should return envelope");
+    .expect_err("the removed reduced executor cannot publish fields");
     assert_eq!(envelope.operation, "fea.run_cht");
     assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_experimental_result_identity(
-        &envelope.data,
-        PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer),
-        AnalysisProcedure::TransientResponse,
-    );
     assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::ChtConjugateProjection
+        envelope.error_code,
+        "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED"
     );
-    assert!(envelope.data.transient_results.is_none());
-
-    let fluid_velocity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CHT_FLUID_VELOCITY)
-        .expect("cht fluid velocity should be present");
-    let fluid_pressure = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CHT_FLUID_PRESSURE)
-        .expect("cht fluid pressure should be present");
-    let fluid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_fluid_temperature_field_id(0))
-        .expect("cht fluid temperature should be present");
-    let solid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_solid_temperature_field_id(0))
-        .expect("cht solid temperature should be present");
-    let interface_heat_flux = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_heat_flux_field_id(0))
-        .expect("cht interface heat flux should be present");
-    let interface_temperature_jump = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_temperature_jump_field_id(0))
-        .expect("cht interface temperature jump should be present");
-    let thermal = envelope
-        .data
-        .thermal_results
-        .as_ref()
-        .expect("cht should retain the thermal payload");
-    let thermal_flux_face_count = thermal
-        .heat_flux_snapshots
-        .first()
-        .and_then(|field| field.shape.first().copied())
-        .expect("thermal heat-flux snapshot should carry a recovery domain");
-
-    assert_eq!(fluid_velocity.shape.len(), 2);
-    assert_eq!(fluid_velocity.shape[1], 3);
-    assert_eq!(fluid_pressure.shape, vec![fluid_velocity.shape[0]]);
-    assert_eq!(solid_temperature.shape, fluid_temperature.shape);
-    assert_eq!(interface_heat_flux.shape.len(), 1);
-    assert!(interface_heat_flux.shape[0] >= thermal_flux_face_count);
-    assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
+    assert!(!envelope.retryable);
+    let wire = serde_json::to_value(&envelope).unwrap();
+    assert!(
+        wire.get("data").is_none(),
+        "rejection must not publish proxy fields"
+    );
 }
 
 #[test]
@@ -1478,7 +1386,6 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
     let envelope = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         runmat_runtime::analysis::AnalysisThermalRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..Default::default()
@@ -1488,7 +1395,7 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
     .expect("thermal transient run should succeed");
     assert_eq!(envelope.operation, "fea.run_thermal");
     assert_eq!(envelope.op_version, "fea.run_thermal/v1");
-    assert_experimental_result_identity(
+    assert_registered_result_identity(
         &envelope.data,
         PhysicsFamily::Thermal,
         AnalysisProcedure::TransientResponse,
@@ -1500,7 +1407,6 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
     let steady = analysis_run_thermal_with_options_op(
         &steady_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         runmat_runtime::analysis::AnalysisThermalRunOptions {
             solver_mesh_artifact_path: Some(steady_mesh_path.display().to_string()),
             ..Default::default()
@@ -1508,7 +1414,7 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
         OperationContext::new(Some("trace-contract-thermal-5".to_string()), None),
     )
     .expect("steady thermal run should succeed");
-    assert_experimental_result_identity(
+    assert_registered_result_identity(
         &steady.data,
         PhysicsFamily::Thermal,
         AnalysisProcedure::Static,
@@ -1528,7 +1434,6 @@ fn thermomechanical_transient_contract_fails_closed() {
     let error = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-thermomechanical-3".to_string()), None),
     )
@@ -1548,7 +1453,6 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-transient-1".to_string()), None),
     )
@@ -1590,7 +1494,6 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     let invalid = analysis_run_transient_with_options_op(
         &contract_linear_static_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-transient-2".to_string()), None),
     )
@@ -1601,7 +1504,7 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_run_fsi_contract_is_v1_and_typed() {
+fn analysis_run_fsi_contract_requires_an_authored_study() {
     let mut model = contract_linear_static_model();
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
         "fsi_sequence",
@@ -1615,97 +1518,29 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
         density: runmat_analysis_core::MassDensity::new(1.225),
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
+        rheology: None,
+        porous_zones: Vec::new(),
     });
     append_inlet_velocity_history(&mut model, "fsi_inlet_velocity", [(0.0, 2.4), (1.0, 4.0)]);
 
     let envelope = analysis_run_fsi_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-fsi-1".to_string()), None),
     )
-    .expect("fsi run should return envelope");
+    .expect_err("the removed reduced executor cannot publish fields");
     assert_eq!(envelope.operation, "fea.run_fsi");
     assert_eq!(envelope.op_version, "fea.run_fsi/v1");
-    assert_experimental_result_identity(
-        &envelope.data,
-        PhysicsFamily::Coupled(
-            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
-        ),
-        AnalysisProcedure::TransientResponse,
-    );
     assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::FsiPartitionedProjection
+        envelope.error_code,
+        "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED"
     );
-    assert!(envelope.data.transient_results.is_none());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_RESIDUAL"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING"));
-    let interface_pressure = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_pressure_field_id(0))
-        .expect("fsi interface pressure field should be present");
-    let interface_traction = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_traction_field_id(0))
-        .expect("fsi interface traction field should be present");
-    let interface_displacement = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_displacement_field_id(0))
-        .expect("fsi interface displacement field should be present");
-    assert_eq!(interface_pressure.shape.len(), 1);
-    assert_eq!(
-        interface_traction.shape,
-        vec![interface_pressure.shape[0], 3]
+    let wire = serde_json::to_value(&envelope).unwrap();
+    assert!(
+        wire.get("data").is_none(),
+        "rejection must not publish proxy fields"
     );
-    assert_eq!(interface_displacement.shape.len(), 2);
-    assert_eq!(interface_displacement.shape[1], 3);
-    assert_eq!(
-        interface_displacement.shape[0],
-        interface_pressure.shape[0] + 1
-    );
-
-    let mut invalid_model = model.clone();
-    invalid_model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
-        "fsi_flow_only".to_string(),
-    )];
-    let invalid = analysis_run_fsi_with_options_op(
-        &invalid_model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-contract-fsi-2".to_string()), None),
-    )
-    .expect_err("fsi run should reject missing transient step");
-    assert_eq!(invalid.operation, "fea.run_fsi");
-    assert_eq!(invalid.op_version, "fea.run_fsi/v1");
-    assert_eq!(invalid.error_code, "RM.FEA.RUN_FSI.INVALID_MODEL");
 }
 
 #[test]
@@ -1714,7 +1549,6 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-nonlinear-1".to_string()), None),
     )
@@ -1813,7 +1647,6 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     let invalid = analysis_run_nonlinear_with_options_op(
         &contract_linear_static_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-nonlinear-2".to_string()), None),
     )
@@ -1829,7 +1662,6 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(
             Some("trace-contract-nonlinear-diagnostics-1".to_string()),
@@ -1880,7 +1712,6 @@ fn nonlinear_contract_snapshot_matches_expected_shape() {
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(
             Some("trace-contract-nonlinear-snapshot-1".to_string()),
@@ -1933,7 +1764,6 @@ fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Strict,
             max_newton_iters: 1,
@@ -1949,7 +1779,7 @@ fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
 
     assert_eq!(envelope.operation, "fea.run_nonlinear");
     assert_eq!(envelope.op_version, "fea.run_nonlinear/v1");
-    assert_experimental_result_identity(
+    assert_registered_result_identity(
         &envelope.data,
         PhysicsFamily::Structural,
         AnalysisProcedure::Nonlinear,
@@ -1970,7 +1800,6 @@ fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
         analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisNonlinearRunOptions {
                 quality_policy: policy,
                 max_newton_iters: 1,
@@ -2011,7 +1840,6 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
         analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisNonlinearRunOptions {
                 quality_policy: policy,
                 max_newton_iters: 3,
@@ -2044,7 +1872,6 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     let baseline = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-compare-1".to_string()), None),
     )
@@ -2052,7 +1879,6 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     let candidate = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-compare-2".to_string()), None),
     )
@@ -2094,7 +1920,6 @@ fn analysis_trends_contract_is_v1_and_typed() {
         let run = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(Some(format!("trace-contract-trends-{idx}")), None),
         )
@@ -2139,7 +1964,6 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
             deterministic_mode: true,
             quality_policy: QualityPolicy::Balanced,
@@ -2170,7 +1994,6 @@ fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
     let envelope = analysis_run_modal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisModalRunOptions {
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(8),
             ..AnalysisModalRunOptions::balanced()
@@ -2245,7 +2068,6 @@ fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
             time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 24 },
             ..AnalysisTransientRunOptions::balanced()
@@ -2318,7 +2140,6 @@ fn analysis_results_contract_is_v1_and_filterable() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-3b-run".to_string()), None),
     )
@@ -2359,7 +2180,6 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-3c-run".to_string()), None),
     )
@@ -2395,7 +2215,6 @@ fn analysis_results_modal_query_controls_are_typed() {
     let modal_run = analysis_run_modal_with_options_op(
         &modal_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-modal-results-3".to_string()), None),
     )
@@ -2467,7 +2286,6 @@ fn analysis_results_transient_query_controls_are_typed() {
     let transient_run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-transient-results-1".to_string()), None),
     )
@@ -2531,7 +2349,6 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-results-id-run".to_string()), None),
     )
@@ -2600,7 +2417,6 @@ fn analysis_run_contract_maps_fixture_validation_failure() {
     let err = analysis_run_linear_static_with_options(
         &missing_materials,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-4".to_string()), None),
     )
@@ -2623,7 +2439,6 @@ fn multi_material_confidence_mismatch_degrades_publishability() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-multi-material".to_string()), None),
     )
@@ -2631,7 +2446,6 @@ fn multi_material_confidence_mismatch_degrades_publishability() {
 
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
     assert!(!envelope.data.numerically_acceptable);
-    assert!(!envelope.data.production_publishable);
     assert!(envelope
         .data
         .quality_reasons
@@ -2659,7 +2473,6 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
     let first = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         options.clone(),
         OperationContext::new(Some("trace-contract-6a".to_string()), None),
     )
@@ -2667,7 +2480,6 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
     let second = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         options.clone(),
         OperationContext::new(Some("trace-contract-6b".to_string()), None),
     )
@@ -2691,7 +2503,6 @@ fn analysis_run_cpu_provenance_and_gpu_admission_are_truthful() {
     let cpu = analysis_run_linear_static_with_options(
         &contract_linear_static_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(Some("trace-contract-7a".to_string()), None),
     )
@@ -2795,7 +2606,6 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2854,7 +2664,6 @@ fn balanced_and_strict_reject_the_same_material_conflict() {
     let balanced = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2869,7 +2678,6 @@ fn balanced_and_strict_reject_the_same_material_conflict() {
     let strict = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2894,7 +2702,6 @@ fn balanced_and_strict_reject_the_same_material_conflict() {
     assert!(balanced.data.provenance.fallback_events.is_empty());
     assert!(strict.data.provenance.fallback_events.is_empty());
     for result in [&balanced.data, &strict.data] {
-        assert!(!result.production_publishable);
         assert!(result
             .run
             .diagnostics
@@ -2928,7 +2735,6 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
     let balanced_run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2942,7 +2748,6 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
     let strict_run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2971,7 +2776,6 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
         balanced_results.data.quality_reasons,
         balanced_run.data.quality_reasons
     );
-    assert!(!balanced_results.data.production_publishable);
     assert_eq!(balanced_results.data.run_status, RunStatus::Degraded);
     assert!(!balanced_results.data.numerically_acceptable);
     assert_eq!(balanced_results.data.provenance.quality_policy, "balanced");
@@ -2985,7 +2789,6 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
         strict_results.data.quality_reasons,
         strict_run.data.quality_reasons
     );
-    assert!(!strict_results.data.production_publishable);
     assert_eq!(strict_results.data.run_status, RunStatus::Degraded);
     assert!(!strict_results.data.numerically_acceptable);
     assert_eq!(strict_results.data.provenance.quality_policy, "strict");
@@ -3012,7 +2815,6 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
         balanced_by_id.data.quality_reasons,
         balanced_run.data.quality_reasons
     );
-    assert!(!balanced_by_id.data.production_publishable);
     assert_eq!(balanced_by_id.data.run_status, RunStatus::Degraded);
     assert!(!balanced_by_id.data.numerically_acceptable);
     assert_eq!(balanced_by_id.data.provenance.quality_policy, "balanced");
@@ -3026,7 +2828,6 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
         strict_by_id.data.quality_reasons,
         strict_run.data.quality_reasons
     );
-    assert!(!strict_by_id.data.production_publishable);
     assert_eq!(strict_by_id.data.run_status, RunStatus::Degraded);
     assert!(!strict_by_id.data.numerically_acceptable);
     assert_eq!(strict_by_id.data.provenance.quality_policy, "strict");

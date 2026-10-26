@@ -39,6 +39,13 @@ fn neighborhoods(count: usize, height: f64) -> DelaunayVolumeTopology {
     .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Maintained canonical legalization matches the complete legacy operator and flip count
+//   on one, four and 32 separated neighborhoods, with sphere-inside, sphere-outside and cospherical
+//   cases, focused or unfocused queries and protected faces. It preserves symbolic policy and
+//   independently admits final topology. This checks numerical kernel equivalence, not parallel
+//   throughput, allocator demand, arbitrary relocation locality or whole-study scaling.
 #[test]
 fn maintained_canonical_legalization_matches_full_rebuilds_with_focus_and_barriers() {
     let mut accepted = 0;
@@ -89,11 +96,11 @@ fn maintained_legalization_preserves_region_barriers_and_rejects_exhausted_work(
     let mut original = neighborhoods(1, 4.);
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
     for (index, cell) in original.tetrahedra.iter_mut().enumerate() {
-        cell.region_id = Some(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: format!("region-{index}"),
-            assembly_path: Vec::new(),
-        });
+        cell.region_id = Some(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            format!("region-{index}"),
+            Vec::new(),
+        ));
     }
     original.incidence = crate::cdt::incidence::build_volume_incidence(
         &original.nodes,

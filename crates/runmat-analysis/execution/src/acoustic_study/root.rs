@@ -45,6 +45,8 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     policy: AcousticStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: AcousticFrequencyWorkload,
@@ -63,6 +65,7 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.frequency_workload()?;
         Ok(Self {
+            local_execution: preparation.local_execution,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -96,6 +99,7 @@ impl PreparationWire {
             .map_err(|error| invalid(&error.to_string()))?;
         let expected_workload = self.workload;
         let preparation = AcousticStudyPreparation {
+            local_execution: self.local_execution,
             policy: self.policy,
             product: AcousticStudyProduct {
                 compiled: self.compiled,

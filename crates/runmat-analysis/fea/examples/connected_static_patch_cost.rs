@@ -19,9 +19,9 @@ mod peak_allocator;
 use peak_allocator::{begin_measurement, end_measurement, process_peak_rss_bytes};
 
 use runmat_analysis_core::{
-    AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement,
-    MaterialElasticityModel, PrescribedStructuralDofs, PrescribedValue, RegionTarget,
-    StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+    AnalysisConstraint, CoordinateFrame, Displacement, MaterialElasticityModel,
+    PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_analysis_fea::{
     constraints::CanonicalStructuralConstraintPlan,
@@ -62,9 +62,9 @@ fn refine(
         let expected_elements =
             (mesh.topology.volume_elements.len() as u64) * 4_u64.pow(levels as u32);
         let added_nodes = (expected_elements - mesh.topology.volume_elements.len() as u64) / 3;
-        mesh.resolved_request.resources.maximum_nodes =
+        mesh.resolved_request.limits.maximum_nodes =
             mesh.topology.nodes.len() as u64 + added_nodes;
-        mesh.resolved_request.resources.maximum_elements = expected_elements;
+        mesh.resolved_request.limits.maximum_elements = expected_elements;
     }
     for _ in 0..levels {
         let parents = std::mem::take(&mut mesh.topology.volume_elements);
@@ -221,7 +221,6 @@ fn solve_patch(
         model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             solver_mesh_artifact_path: Some("connected-static-patch-cost.rmmesh".into()),
             local_execution,
@@ -250,7 +249,6 @@ fn plan_patch(
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         preconditioner: runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend:
             runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,

@@ -288,7 +288,7 @@ fn profile<T: Serialize>(
     source: &T,
     limits: runmat_canonical_codec::CanonicalLimits,
 ) -> Result<u64, ContactOperatorError> {
-    let p = runmat_canonical_codec::profile_serialized(source, limits)
+    let p = runmat_canonical_codec::profile_serialized_shape(source, limits)
         .map_err(|_| ContactOperatorError::Budget)?;
     add(
         p.materialization_resident_bytes_estimate,

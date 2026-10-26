@@ -16,6 +16,7 @@ impl SolverMeshArtifact {
         checkpoint: &mut impl FnMut() -> Result<(), MeshingContractError>,
     ) -> Result<u64, MeshingContractError> {
         let mut storage = Storage {
+            seen: Some(Default::default()),
             bytes: 0,
             maximum,
             checkpoint,
@@ -39,12 +40,15 @@ impl SolverMeshArtifact {
 impl super::SolverMeshProjection {
     /// Same capacity inventory as the final artifact, without cloning or assembling
     /// a temporary artifact. Includes the projection's inline value and original request.
+    /// A projection is built from live exact geometry, whose identity allocations it shares;
+    /// it owns handles only.
     pub fn retained_storage_bytes(
         &self,
         maximum: u64,
         checkpoint: &mut impl FnMut() -> Result<(), MeshingContractError>,
     ) -> Result<u64, MeshingContractError> {
         let mut storage = Storage {
+            seen: None,
             bytes: 0,
             maximum,
             checkpoint,
@@ -64,6 +68,7 @@ impl super::SolverMeshTopology {
         checkpoint: &mut impl FnMut() -> Result<(), MeshingContractError>,
     ) -> Result<u64, MeshingContractError> {
         let mut storage = Storage {
+            seen: Some(Default::default()),
             bytes: 0,
             maximum,
             checkpoint,
@@ -83,6 +88,7 @@ impl super::MeshingRequest {
         checkpoint: &mut impl FnMut() -> Result<(), MeshingContractError>,
     ) -> Result<u64, MeshingContractError> {
         let mut storage = Storage {
+            seen: Some(Default::default()),
             bytes: 0,
             maximum,
             checkpoint,
@@ -97,6 +103,7 @@ impl super::SolverMeshNode {
     /// Actual owned buffer capacities, excluding the node's inline slot.
     pub fn owned_buffer_bytes(&self) -> Result<u64, MeshingContractError> {
         let mut storage = Storage {
+            seen: None,
             bytes: 0,
             maximum: u64::MAX,
             checkpoint: &mut || Ok(()),
@@ -107,6 +114,9 @@ impl super::SolverMeshNode {
 }
 
 struct Storage<'a, F> {
+    /// Distinct shared identity allocations already charged. `None` inventories one record,
+    /// which owns only handles; the shared allocations belong to the geometry and artifact.
+    seen: Option<std::collections::HashSet<usize>>,
     bytes: u64,
     maximum: u64,
     checkpoint: &'a mut F,
@@ -116,14 +126,20 @@ impl<F: FnMut() -> Result<(), MeshingContractError>> Storage<'_, F> {
         let super::MeshingRequest {
             schema_version: _,
             element_order: _,
+            dimension: _,
             deterministic_seed: _,
             algorithms,
             tolerance: _,
             metric,
             quality: _,
-            resources: _,
+            limits: _,
             cancellation: _,
+            size_controls,
         } = request;
+        for control in size_controls {
+            self.add(control.control_id.len() as u64)?;
+            self.add(control.region_id.len() as u64)?;
+        }
         let super::AlgorithmVersionSet {
             geometry,
             curve,
@@ -252,16 +268,14 @@ impl<F: FnMut() -> Result<(), MeshingContractError>> Storage<'_, F> {
     fn string(&mut self, value: &String) -> Result<(), MeshingContractError> {
         self.add(slots::<u8>(value.capacity())?)
     }
+    /// Records hold a pointer (inside their slot); each distinct shared identity
+    /// allocation is charged once per inventory.
     fn entity(&mut self, value: &PersistentEntityId) -> Result<(), MeshingContractError> {
-        let PersistentEntityId {
-            kind: _,
-            source_topology_id,
-            assembly_path,
-        } = value;
-        self.string(source_topology_id)?;
-        self.vector(assembly_path)?;
-        for segment in assembly_path {
-            self.string(segment)?;
+        let Some(seen) = self.seen.as_mut() else {
+            return Ok(());
+        };
+        if seen.insert(value.shared_address()) {
+            self.add(value.shared_heap_bytes())?;
         }
         Ok(())
     }
@@ -281,6 +295,7 @@ impl super::MeshingPartitionDescriptor {
     /// Original capacity inventory bounds the two owned endpoint identity clones.
     pub fn owned_buffer_bytes(&self) -> Result<u64, MeshingContractError> {
         let mut storage = Storage {
+            seen: None,
             bytes: 0,
             maximum: u64::MAX,
             checkpoint: &mut || Ok(()),

@@ -22,7 +22,7 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
     model.signals.clear();
     model.excitations.clear();
     model.excitation_cases.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
             youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(1000.0),
@@ -59,7 +59,7 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         .excitations
         .push(ExcitationAction::Traction(AnalysisExcitation {
             excitation_id: ExcitationId("pull".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary("slab_right")),
+            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,
@@ -110,7 +110,6 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         NonlinearSolidWorkload {
             model,
             controls: NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 increment_count: 10,
                 max_accepted_increments: 12,
                 max_newton_iters: 32,
@@ -132,7 +131,6 @@ pub(crate) fn compiled(
     serde_json::from_value(serde_json::json!({
         "module_path": "tests/original-j2.fea",
         "study_id": "plastic",
-        "formulation_requirement": FormulationRequirement::Experimental,
         "study_inputs": [], "outputs": [],
         "model": workload.model,
         "properties": runmat_analysis_fea::properties::compile_property_map(&workload.model, Some(mesh)).unwrap(),

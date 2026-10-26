@@ -100,14 +100,17 @@ fn execute_native_dag(
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
     request.quality.volume.minimum_scaled_jacobian = 0.01;
-    request.resources.maximum_search_work = 1_000_000;
-    request.resources.maximum_iterations = 1_000_000;
+    // Geometry-derived proximity sizing places two elements across the
+    // tetrahedron's opposite edges, so the mesh is several hundred elements.
+    request.limits.maximum_nodes = 10_000;
+    request.limits.maximum_elements = 10_000;
 
     let mut executor =
         NativeExactMeshingExecutor::new(&session, MeshingExecutionPolicy::default()).unwrap();
     let result = runmat_meshing_execution::execute_exact_meshing_dag(
         runmat_meshing_execution::ExactMeshingDagRun {
             geometry: &geometry,
+            ceilings: super::dag_ceilings(),
             request,
             artifact_access: access,
             capability_cohort: Some("native-cohort-v1".into()),
@@ -125,12 +128,14 @@ fn execute_native_dag(
                 sizing: Vec::new(),
                 cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )
     .unwrap();
     result.evidence.validate(&result.artifact).unwrap();
-    assert_eq!(result.artifact.topology.volume_elements.len(), 4);
+    let elements = result.artifact.topology.volume_elements.len() as u64;
+    assert!(elements > 4 && elements <= result.artifact.resolved_request.limits.maximum_elements);
     assert!(!executor.drain_progress().is_empty());
     result.artifact
 }
@@ -210,7 +215,7 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> E
         ],
     };
     let host =
-        MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
+        MeshingHostWorkload::new(workload, identity, request, super::fixture_ceilings(), access, Some(document)).unwrap();
     let request = host
         .prepare_program_request(revision, std::slice::from_ref(input.root_input()))
         .unwrap()

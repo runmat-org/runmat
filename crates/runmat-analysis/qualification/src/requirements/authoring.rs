@@ -5,11 +5,9 @@ mod compiler;
 mod geometry;
 mod language;
 mod outputs;
-const SOURCE_CHECK: &[Envelope] = &[envelope(
-    Formulation::SharedInfrastructure,
-    MeshOrder::MeshIndependent,
-    ExecutionEnvelope::SourceCheck,
-)];
+/// Authoring is compiled source: the same checked study must result at source check and
+/// reach every placement unchanged. Numerical-kernel, thread, domain-decomposition and
+/// accelerator envelopes do not apply to source semantics.
 const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
@@ -19,17 +17,12 @@ const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SharedInfrastructure,
@@ -39,17 +32,7 @@ const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::ClaimedAccelerator,
+        ExecutionEnvelope::RemoteExecution,
     ),
 ];
 const FEA_AUTHORING_COMPOSITION_001: Requirement = Requirement {
@@ -141,43 +124,6 @@ const FEA_AUTHORING_COMPOSITION_001: Requirement = Requirement {
             EvidenceKind::SemanticRealization,
             ALL,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-AUTHORING-MODULE-BINDING",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-language",
-                target: CargoTarget::Integration("modules"),
-                name: "compiler_loads_transitive_modules_and_binds_explicit_symbols",
-                source: "crates/runmat-analysis/language/tests/modules.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "explicit_imports",
-                envelopes: SOURCE_CHECK,
-                boundary: concat!(
-                    "Mock host checks three-module transitive imports, explicit model/function ",
-                    "binding and symbol-use provenance; no geometry execution, numerical result ",
-                    "or remote equivalence.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-AUTHORING-IMPORT-REJECTION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-language",
-                target: CargoTarget::Integration("modules"),
-                name: "compiler_reports_cycles_duplicates_and_missing_exports",
-                source: "crates/runmat-analysis/language/tests/modules.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "explicit_imports",
-                envelopes: SOURCE_CHECK,
-                boundary: concat!(
-                    "Mock-host binding diagnostics identify cyclic imports, duplicate symbols ",
-                    "and missing exports; no complete semantic or numerical qualification.",
-                ),
-            }],
-        },
     ],
 };
 const FEA_AUTHORING_GEOMETRY_001: Requirement = Requirement {
@@ -315,24 +261,6 @@ const FEA_AUTHORING_GEOMETRY_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-AUTHORING-PERSISTENT-SELECTORS",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-language",
-            target: CargoTarget::Integration("geometry_features"),
-            name: "imported_source_aliases_are_rejected",
-            source: "crates/runmat-analysis/language/tests/geometry_features.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "persistent_topology",
-            envelopes: SOURCE_CHECK,
-            boundary: concat!(
-                "Compiler rejects source aliases as persistent topology identities ",
-                "at the source boundary; no native CAD feature history, regeneration or AP242 export ",
-                "evidence.",
-            ),
-        }],
-    }],
 };
 const FEA_AUTHORING_CUTOVER_001: Requirement = Requirement {
     id: "FEA-AUTHORING-CUTOVER-001",
@@ -556,7 +484,6 @@ const FEA_AUTHORING_CUTOVER_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 // Standing language syntax, semantics, host boundaries and product acceptance.
 const LANGUAGE_SOURCE_SCOPE: &[Envelope] = &[envelope(
@@ -573,12 +500,12 @@ const LANGUAGE_REALIZATION_SCOPE: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SharedInfrastructure,
@@ -588,7 +515,7 @@ const LANGUAGE_REALIZATION_SCOPE: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
 ];
 const LANGUAGE_DESKTOP_SCOPE: &[Envelope] = &[envelope(

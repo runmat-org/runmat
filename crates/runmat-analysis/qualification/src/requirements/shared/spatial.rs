@@ -1,128 +1,81 @@
 //! Standing shared spatial acceptance.
-use super::{ALL, KERNEL};
+use super::ALL;
 use crate::requirement::*;
 pub(super) const FEA_SHARED_TOPOLOGY_001: Requirement = Requirement {
     id: "FEA-SHARED-TOPOLOGY-001",
     title: "Canonical analysis topology and deterministic projections",
-    stages: &[
-        Stage::SharedAuthorities
-    ],
+    stages: &[Stage::SharedAuthorities],
     acceptance: concat!(
-"Canonical analysis topology and deterministic projections requires every ",
-"listed criterion in its declared supported scope. A passing component ",
-"witness does not discharge unrelated criteria or broader execution ",
-"envelopes.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/topology/mod.rs"
-    ],
-    dependencies: &[
-    ],
+        "Canonical analysis topology and deterministic projections requires every ",
+        "listed criterion in its declared supported scope. A passing component ",
+        "witness does not discharge unrelated criteria or broader execution ",
+        "envelopes.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/topology/mod.rs"],
+    dependencies: &[],
     obligations: &[
         obligation(
             "canonical_input",
             concat!(
-"The analysis projection is the central prerequisite for every family. It ",
-"consumes a validated canonical `SolverMeshArtifact` and produces immutable, ",
-"indexed analysis data.",
-),
+                "The analysis projection is the central prerequisite for every family. It ",
+                "consumes a validated canonical `SolverMeshArtifact` and produces immutable, ",
+                "indexed analysis data.",
+            ),
             EvidenceKind::IndependentReference,
-            ALL
+            ALL,
         ),
         obligation(
             "projection_inventory",
             concat!(
-"Dense node-index mapping from canonical node IDs. Element index, canonical ",
-"identity, order, node connectivity, region ownership, orientation, Jacobian ",
-"data, volume, centroid, and characteristic length. Quadrature points, ",
-"weights, shape functions, and gradients for each supported element/order. ",
-"Boundary-face index, canonical identity, adjacent element, local face, ",
-"orientation, outward normal, area, quadrature, and complete provenance. ",
-"Physical-region inventories and exact material assignments. Authored load ",
-"and boundary-condition bindings with zero, one, or multiple match ",
-"diagnostics. Interface inventories with primary and secondary sides, ",
-"ownership, orientation, conformity status, and transfer policy. Contact ",
-"candidate pairs and the geometry needed by the contact implementation, ",
-"without embedding contact constitutive behavior in the projection. ",
-"Finite-volume cell-face incidence, owner and neighbour, oriented area ",
-"vector, centroid distance, interpolation weight, non-orthogonality measure, ",
-"skewness measure, and boundary ownership. Stable field-location definitions ",
-"for nodes, elements, integration points, boundary faces, edges, and cells. ",
-"Stable identities needed for h- and p-adaptation transfer.",
-),
+                "Dense node-index mapping from canonical node IDs. Element index, canonical ",
+                "identity, order, node connectivity, region ownership, orientation, Jacobian ",
+                "data, volume, centroid, and characteristic length. Quadrature points, ",
+                "weights, shape functions, and gradients for each supported element/order. ",
+                "Boundary-face index, canonical identity, adjacent element, local face, ",
+                "orientation, outward normal, area, quadrature, and complete provenance. ",
+                "Physical-region inventories and exact material assignments. Authored load ",
+                "and boundary-condition bindings with zero, one, or multiple match ",
+                "diagnostics. Interface inventories with primary and secondary sides, ",
+                "ownership, orientation, conformity status, and transfer policy. Contact ",
+                "candidate pairs and the geometry needed by the contact implementation, ",
+                "without embedding contact constitutive behavior in the projection. ",
+                "Finite-volume cell-face incidence, owner and neighbour, oriented area ",
+                "vector, centroid distance, interpolation weight, non-orthogonality measure, ",
+                "skewness measure, and boundary ownership. Stable field-location definitions ",
+                "for nodes, elements, integration points, boundary faces, edges, and cells. ",
+                "Stable identities needed for h- and p-adaptation transfer.",
+            ),
             EvidenceKind::IndependentReference,
-            ALL
+            ALL,
         ),
         obligation(
             "projection_invariants",
             concat!(
-"Every element has exactly one supported physical-region/material resolution ",
-"or a typed failure. Every applied boundary condition and load resolves to ",
-"an allowed topological dimension. Boundary orientation agrees with adjacent ",
-"element orientation. Interface sides cannot be silently empty, multiply ",
-"owned, or self-paired. Conservation-oriented topology has reciprocal ",
-"owner/neighbour relationships. Projection is deterministic and independent ",
-"of execution placement. The projection is cacheable by canonical mesh ",
-"digest plus analysis-projection policy digest.",
-),
+                "Every element has exactly one supported physical-region/material resolution ",
+                "or a typed failure. Every applied boundary condition and load resolves to ",
+                "an allowed topological dimension. Boundary orientation agrees with adjacent ",
+                "element orientation. Interface sides cannot be silently empty, multiply ",
+                "owned, or self-paired. Conservation-oriented topology has reciprocal ",
+                "owner/neighbour relationships. Projection is deterministic and independent ",
+                "of execution placement. The projection is cacheable by canonical mesh ",
+                "digest plus analysis-projection policy digest.",
+            ),
             EvidenceKind::IndependentReference,
-            ALL
+            ALL,
         ),
         obligation(
             "projection_reference_corpus",
             concat!(
-"Tet4 and Tet10 geometry and quadrature invariants. Boundary normals and ",
-"integrated areas on analytic primitives. Multi-region and multi-material ",
-"ownership. Pressure resultant and moment recovery. Body-force volume ",
-"integration. Interface side resolution and invalid ambiguity cases. ",
-"Finite-volume divergence theorem checks. Stable projection identity across ",
-"serialization and execution shapes.",
-),
+                "Tet4 and Tet10 geometry and quadrature invariants. Boundary normals and ",
+                "integrated areas on analytic primitives. Multi-region and multi-material ",
+                "ownership. Pressure resultant and moment recovery. Body-force volume ",
+                "integration. Interface side resolution and invalid ambiguity cases. ",
+                "Finite-volume divergence theorem checks. Stable projection identity across ",
+                "serialization and execution shapes.",
+            ),
             EvidenceKind::IndependentReference,
-            ALL
+            ALL,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-SHARED-PROJECTION-GEOMETRY",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: "topology::tests::canonical_tetrahedron_projection_has_indexed_oriented_geometry",
-                source: "crates/runmat-analysis/fea/src/topology/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "projection_inventory",
-                    envelopes: KERNEL,
-                    boundary: concat!(
-"Single affine Tet10 tetrahedron checks node/element/face inventory, ",
-"positive volume, integrated shapes and world gradient, outward normals and ",
-"repeatable projection digest; no arbitrary mixed topology or distributed ",
-"equivalence.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-SHARED-PROJECTION-SUBSTITUTION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: "topology::tests::projection_rejects_a_substituted_mesh_digest",
-                source: "crates/runmat-analysis/fea/src/topology/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "projection_invariants",
-                    envelopes: KERNEL,
-                    boundary: concat!(
-"Tet4 node-coordinate substitution without digest resealing rejects ",
-"projection; no exhaustive provenance or interface invalid-case corpus.",
-)
-                }
-            ]
-        },
     ],
 };
 pub(super) const FEA_SHARED_PROPERTIES_001: Requirement = Requirement {
@@ -384,27 +337,6 @@ pub(super) const FEA_SHARED_PROPERTIES_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-EXPLICIT-PROPERTY-CACHE",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "properties::preparation::tests::explicit_cache_exact_ceiling_preserves_ident",
-                "ity_shape_and_bytes",
-            ),
-            source: "crates/runmat-analysis/fea/src/properties/preparation/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "independent_section_coverage",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Explicit beam and shell fixture topology cache preserves identities, ",
-                "borrowed source and exact resource ceiling; no material coverage, laminate ",
-                "physics or distributed semantic proof.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_CONSTRAINTS_001: Requirement = Requirement {
     id: "FEA-SHARED-CONSTRAINTS-001",
@@ -803,25 +735,4 @@ pub(super) const FEA_SHARED_CONSTRAINTS_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-CONSTRAINT-COMPILER",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "constraints::compilation::admission::tests::exact_caller_boundary_preserves_",
-                "original_plan_across_all_compiler_routes",
-            ),
-            source: "crates/runmat-analysis/fea/src/constraints/compilation/admission/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "canonical_plan_and_affine_reduction",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Prepared structural constraint fixtures compare original canonical plans ",
-                "and bytes at the exact requested workspace boundary and reject one byte ",
-                "below; no cross-family enforcement or whole-task memory proof.",
-            ),
-        }],
-    }],
 };

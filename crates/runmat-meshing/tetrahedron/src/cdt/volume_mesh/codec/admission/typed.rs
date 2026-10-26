@@ -2,7 +2,7 @@
 //! tagged-enum Serde scratch is bounded for one row, never every numeric cell.
 use crate::cdt::volume_mesh::representation::quality::QualityValues;
 use crate::cdt::volume_mesh::representation::{FacetRow, NodeRow, SegmentRow};
-use crate::cdt::{DelaunayFacetSteinerInsertion, DelaunayVolumeNode, DelaunayVolumeSliverMutation};
+use crate::cdt::{DelaunayFacetSteinerInsertion, DelaunayVolumeNode};
 use runmat_canonical_codec::{
     CanonicalCodecControl, CanonicalCodecError, CanonicalCodecErrorKind, ExactVec,
 };
@@ -126,7 +126,12 @@ impl Inventory<'_, '_> {
         let length = self.decoder.str().map_err(invalid)?.len();
         self.add(length as u64)
     }
+    /// One shared identity allocation per dictionary entity; handles live in their slots.
     fn entity(&mut self) -> Result<(), CanonicalCodecError> {
+        self.add(
+            (std::mem::size_of::<runmat_geometry_core::PersistentEntityIdData>()
+                + 2 * std::mem::size_of::<usize>()) as u64,
+        )?;
         self.fields(|profile, key| match key {
             "kind" => profile.skip(),
             "source_topology_id" => profile.string(),
@@ -214,6 +219,28 @@ impl Inventory<'_, '_> {
         })?;
         self.temporary_since(start)
     }
+    /// Canonical maps order "kind" before "mutation", so the step kind selects its profile.
+    fn quality_mutation(&mut self) -> Result<(), CanonicalCodecError> {
+        let mut refined = None;
+        self.fields(|profile, key| match key {
+            "kind" => {
+                refined = Some(match profile.decoder.str().map_err(invalid)? {
+                    "refined" => true,
+                    "optimized" => false,
+                    _ => return Err(invalid("unknown volume quality mutation kind")),
+                });
+                Ok(())
+            }
+            "mutation" => match refined {
+                Some(true) => profile.node(),
+                Some(false) => profile.mutation(),
+                None => Err(invalid(
+                    "volume quality mutation kind must precede its payload",
+                )),
+            },
+            _ => Err(invalid("unknown volume quality mutation field")),
+        })
+    }
     fn mesh(&mut self) -> Result<(), CanonicalCodecError> {
         self.fields(|profile, key| match key {
             "volume" => profile.volume(),
@@ -221,8 +248,9 @@ impl Inventory<'_, '_> {
             "facet_recovery_insertions" => {
                 profile.vector::<DelaunayFacetSteinerInsertion>(Self::skip)
             }
-            "refinement_insertions" => profile.vector::<DelaunayVolumeNode>(Self::node),
-            "sliver_mutations" => profile.vector::<DelaunayVolumeSliverMutation>(Self::mutation),
+            "quality_mutations" => {
+                profile.vector::<crate::cdt::DelaunayVolumeQualityMutation>(Self::quality_mutation)
+            }
             _ => Err(invalid("unknown indexed mesh field")),
         })
     }

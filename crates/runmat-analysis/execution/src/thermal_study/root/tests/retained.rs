@@ -32,7 +32,7 @@ fn retained_preparation() -> ThermalStudyPreparation {
         "heat",
         runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
             backend: input.product.workload.backend,
-            formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         },
     )
     .unwrap();
@@ -77,8 +77,9 @@ fn retained_preparation() -> ThermalStudyPreparation {
     let electrical = ElectricalStaticWorkload {
         model: electrical_model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        element_temperature_k: None,
+        operating_time_s: None,
     };
     let result = electrical.execute(&input.mesh).unwrap();
     let expected = result.source_result_identity().unwrap();
@@ -112,7 +113,7 @@ fn selected_source_replanning_preserves_original_authority_and_rejects_other_int
     wrong.product.compiled.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes += 1;
+        .maximum_resident_bytes -= 1;
     assert!(ThermalStudyCoordinator::new(wrong).is_err());
     let mut wrong = retained_preparation();
     wrong.field_source = None;

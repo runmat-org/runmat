@@ -43,7 +43,7 @@ fn outward_recovered_power(result: &CanonicalAcousticResponse, target: &str) -> 
     let mut power = 0.0;
     for face in result
         .projection
-        .boundary_faces_for_target(&RegionTarget::boundary(target))
+        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
     {
         let velocity =
             &result.element_velocity_m_per_s.canonical_values()[face.adjacent_element_indices[0]];
@@ -199,13 +199,13 @@ pub(super) fn two_medium(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "total_inlet_pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "matched_transmitted_medium".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(Z2),
         },
@@ -251,14 +251,14 @@ pub(super) fn two_medium(
         .as_mut()
         .unwrap()
         .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(2.0);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("incident_medium");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("incident_medium"));
     let mut right = model.materials[0].clone();
     right.material_id = "transmitted_fluid".into();
     right.mass_density_kg_per_m3 = (Some(5.0)).map(runmat_types::physical::MassDensity::new);
     right.acoustic.as_mut().unwrap().speed_of_sound_m_per_s =
         runmat_types::physical::SpeedOfSound::new(4.0);
     let mut assignment = model.material_assignments[0].clone();
-    assignment.target = PropertyRegionTarget::solid("transmitted_medium");
+    assignment.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("transmitted_medium"));
     assignment.assigned_material_id = right.material_id.clone();
     assignment.expected_material_id = right.material_id.clone();
     model.materials.push(right);
@@ -266,6 +266,9 @@ pub(super) fn two_medium(
     (model, mesh)
 }
 
+// witness: FEA-ACOUSTIC-OPERATOR-001/regions @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary
+//   heterogeneous or curved-interface qualification.
 #[test]
 fn two_fluid_interface_pressure_mean_velocity_and_power_refine() {
     let mut failures = Vec::new();
@@ -293,11 +296,8 @@ fn two_fluid_interface_pressure_mean_velocity_and_power_refine() {
                         "acoustic",
                         Frequency::new(FREQUENCY),
                         AcousticHarmonicPolicy {
-                            uniqueness: None,
-                            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
                             relative_tolerance: 1e-11,
-                            restart: 128,
-                            maximum_iterations: 8192,
+                            ..Default::default()
                         },
                         1e-8,
                     )

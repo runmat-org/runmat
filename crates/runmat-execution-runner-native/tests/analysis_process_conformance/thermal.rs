@@ -1,8 +1,7 @@
 //! Placement parity through the production coordinator, not distributed-solve qualification.
 use super::publication_chain::{ProcessDriver, PublicationChainDriver};
 use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,
-    Temperature, ThermalDomain,
+    AnalysisSequence, IndependentDomain, ProcedureStep, StateId, Temperature, ThermalDomain,
 };
 use runmat_analysis_execution::{
     import_thermal_completion, import_thermal_result, AnalysisOutputPolicy, ImportedThermalResult,
@@ -96,7 +95,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             .boundaries
             .push(runmat_analysis_core::AnalysisBoundary {
                 boundary_id: "insulated-face".into(),
-                target: runmat_analysis_core::RegionTarget::boundary(insulated_face),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(insulated_face))),
                 operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::HeatFlux::new(0.0),
@@ -131,7 +130,6 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         let compiled = CompiledAnalysisStudy {
             module_path: "conformance/thermal.fea".into(),
             study_id: "thermal".into(),
-            formulation_requirement: FormulationRequirement::Experimental,
             study_inputs: Vec::new(),
             assessments: Vec::new(),
             outputs: Vec::new(),
@@ -141,7 +139,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         };
         let policy = ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         };
         let workload = match scope {
             ThermalStudyScope::Standalone => plan_thermal_study(&compiled, policy),
@@ -429,10 +427,6 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         assert_eq!(receipt.source_resource_usage, baseline.evidence.identity());
         assert_eq!(receipt.source_resource_plan, solve_plan);
         assert_eq!(receipt.source_observations, Some(observation_catalog));
-        assert_eq!(
-            receipt.formulation_requirement,
-            FormulationRequirement::Experimental
-        );
         assert_eq!(receipt.accuracy_status, AccuracyStatus::Satisfied);
         let recovered =
             cold_reimport::assert_closed_completion(driver.store(), completed, limits.inventory);

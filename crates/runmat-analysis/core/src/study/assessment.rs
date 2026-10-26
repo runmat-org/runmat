@@ -389,6 +389,22 @@ mod tests {
         );
     }
     #[test]
+    fn unconverged_numerical_evidence_is_indeterminate_whatever_its_value() {
+        let definition = assessment(AssessmentEvidenceRequirement::AuthoredSamples);
+        // A value inside and a value outside the criterion: neither may pass or fail when the
+        // solve that produced it did not meet its numerical acceptance gates.
+        for value in [0.0005, 0.002] {
+            let mut unconverged = measure(value);
+            unconverged.numerically_acceptable = false;
+            let result = evaluate_assessment(&definition, Some(unconverged));
+            assert_eq!(result.status, AssessmentStatus::Indeterminate);
+            assert_eq!(
+                result.issue,
+                Some(AssessmentIssue::NumericalEvidenceUnavailable)
+            );
+        }
+    }
+    #[test]
     fn function_result_requires_admitted_measurement_and_evaluated_evidence() {
         let mut definition = assessment(AssessmentEvidenceRequirement::AuthoredSamples);
         definition.rule = AssessmentRule::Function {

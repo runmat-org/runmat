@@ -379,9 +379,7 @@ async fn run_exact_structural_sweep_conformance() {
             .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {
@@ -394,6 +392,7 @@ async fn run_exact_structural_sweep_conformance() {
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"exact-study-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"exact-study-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"exact-study-worker"]),
         pool_id,
         resources: inventory.clone(),
@@ -490,7 +489,7 @@ async fn run_exact_structural_sweep_conformance() {
             pool.snapshot()
                 .tasks
                 .values()
-                .filter(|task| task.submission.request.callable.qualified_name == "loads.pulse")
+                .filter(|task| task.submission.request.callable.qualified_name() == "loads.pulse")
                 .count(),
             1,
             "identical signal materializations must execute once across a sweep"
@@ -751,6 +750,7 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"direct-exact-study-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"direct-exact-study-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"direct-exact-study-worker"]),
         pool_id,
         resources: inventory.clone(),
@@ -1200,6 +1200,7 @@ async fn generated_box_workload(
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(
@@ -1215,7 +1216,13 @@ async fn generated_box_workload(
         .unwrap();
     let executable = unit.portable_envelope_for(Some("pulse")).unwrap();
     let function = unit
-        .function_analysis(executable.manifest.identity.entrypoint_function)
+        .function_analysis(
+            executable
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("pulse entrypoint function"),
+        )
         .cloned()
         .expect("pulse static facts");
     let admitted = admit_named_signal_generator(
@@ -1285,7 +1292,6 @@ fn box_structural_workload() -> StructuralLinearWorkload {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1309,7 +1315,6 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
@@ -1357,7 +1362,6 @@ fn box_structural_frequency_workload() -> StructuralFrequencyWorkload {
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
@@ -1381,7 +1385,6 @@ fn box_structural_modal_workload() -> StructuralModalWorkload {
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -1423,7 +1426,6 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
         model: model.clone(),
         step_id: ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -1438,7 +1440,6 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
     };
@@ -1526,7 +1527,6 @@ pub(crate) fn box_modal_response_spectrum_workloads(
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(12),
@@ -1540,7 +1540,6 @@ pub(crate) fn box_modal_response_spectrum_workloads(
         model,
         step_id: response_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
     };
@@ -1628,7 +1627,6 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -1642,7 +1640,6 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
         model,
         step_id: response_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         integration_policy: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy {
@@ -1718,7 +1715,6 @@ fn box_buckling_workloads() -> runmat_analysis_execution::StructuralStudyWorkloa
         model: preload_workload.model.clone(),
         step_id: ProcedureStepId("buckling".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(1, 1.0e-8, 256).unwrap(),
@@ -1791,10 +1787,7 @@ fn coarse_box_request() -> MeshingRequest {
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
     request.quality.volume.minimum_scaled_jacobian = 0.01;
-    request.resources.maximum_nodes = 10_000;
-    request.resources.maximum_elements = 10_000;
-    request.resources.maximum_search_work = 1_000_000;
-    request.resources.maximum_iterations = 1_000_000;
-    request.resources.maximum_wall_time_ms = 180_000;
+    request.limits.maximum_nodes = 10_000;
+    request.limits.maximum_elements = 10_000;
     request
 }

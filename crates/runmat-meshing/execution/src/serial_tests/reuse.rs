@@ -1,6 +1,11 @@
 use super::*;
 use crate::AcceptedMeshingStageReceipt;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An accepted surface-stage receipt rebinds session access, preserves original
+//   observations and rejects changed implementation, changed input, understated limits and corrupt
+//   storage. Reuse is not fresh numerical execution or a native scaling measurement.
 #[test]
 fn accepted_stage_reuse_rebinds_authority_and_preserves_original_observations() {
     let mut fixture = Fixture::new();
@@ -48,18 +53,18 @@ fn accepted_stage_reuse_rebinds_authority_and_preserves_original_observations() 
         )
         .unwrap();
     assert!(rebound
-        .result_objects
+        .result_objects()
         .iter()
         .all(|reference| reference.authorization_scope == "new-session"
             && reference.encryption_context == current.artifact_access.encryption_context));
     assert_eq!(
-        root(&rebound.outputs[0]).logical_digest,
-        root(&success.outputs[0]).logical_digest
+        root(&rebound.values().unwrap().0[0]).logical_digest,
+        root(&success.values().unwrap().0[0]).logical_digest
     );
     let mut observation = crate::import_stage_evidence_observation(
         &destination,
         &current,
-        &rebound.result_objects,
+        rebound.result_objects(),
         ObjectInventoryLimits::default(),
     )
     .unwrap();
@@ -103,7 +108,7 @@ fn accepted_stage_reuse_rebinds_authority_and_preserves_original_observations() 
             smaller
         )
         .is_err());
-    let manifest = root(&success.outputs[0]).logical_digest;
+    let manifest = root(&success.values().unwrap().0[0]).logical_digest;
     persistent.objects.insert(manifest, b"corrupt".to_vec());
     assert!(cold
         .restore(
@@ -120,7 +125,7 @@ fn accepted_stage_reuse_rebinds_authority_and_preserves_original_observations() 
 fn incomplete_stage_receipts_never_enter_the_persistent_cache() {
     let fixture = Fixture::new();
     let mut persistent = MemoryStore::default();
-    let incomplete = runmat_execution_runner::AttemptSuccess {
+    let incomplete = runmat_execution_runner::AttemptSuccess::Values {
         outputs: Vec::new(),
         result_objects: Vec::new(),
         resources: None,

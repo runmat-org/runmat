@@ -3,7 +3,8 @@ use runmat_analysis_core::AnalysisField;
 use crate::contracts::{
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
     FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
-    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_NODAL_STRESS, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
     FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
@@ -14,7 +15,7 @@ use crate::{
     planning::resource::LocalExecutionPlan,
     post::{
         error::StructuralFieldRecoveryError, solid::recover_solid_fields_with_plan,
-        volume_weighted::recover_volume_weighted_nodal_scalar,
+        volume_weighted::recover_volume_weighted_nodal_tensor,
     },
     solve::linear::LinearSolveResult,
 };
@@ -202,15 +203,18 @@ fn recover_deformation_result_fields_with_plan(
             .stress
             .unwrap_or_else(|| recover_stress(&strain_values, summary.structural_material));
         let von_mises_values = recover_von_mises(&stress_values);
-        let nodal_von_mises_values = if detail == DeformationRecoveryDetail::Complete {
-            recover_volume_weighted_nodal_scalar(
+        // Nodal stress is recovered as a tensor from each element's own field at its nodes,
+        // then averaged; nodal von Mises is computed from that averaged tensor.
+        let nodal_stress_values = if detail == DeformationRecoveryDetail::Complete {
+            recover_volume_weighted_nodal_tensor(
                 &summary.structural_solid_recovery,
-                &von_mises_values,
+                &strain_recovery.integration_point_stress,
                 node_count,
             )?
         } else {
             Vec::new()
         };
+        let nodal_von_mises_values = recover_von_mises(&nodal_stress_values);
         let strain_energy_density_values = strain_recovery
             .strain_energy_density
             .unwrap_or_else(|| recover_strain_energy_density(&strain_values, &stress_values));
@@ -222,6 +226,7 @@ fn recover_deformation_result_fields_with_plan(
             stress_values,
             von_mises_values,
             nodal_von_mises_values,
+            nodal_stress_values,
             strain_energy_density_values,
             integration_point_strain,
             integration_point_stress,
@@ -248,6 +253,7 @@ fn recover_deformation_result_fields_with_plan(
         stress_values,
         von_mises_values,
         nodal_von_mises_values,
+        nodal_stress_values,
         strain_energy_density_values,
         integration_point_strain,
         integration_point_stress,
@@ -291,6 +297,11 @@ fn recover_deformation_result_fields_with_plan(
                     FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
                     vec![node_count],
                     nodal_von_mises_values,
+                ),
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_NODAL_STRESS,
+                    vec![node_count, TENSOR_COMPONENT_COUNT],
+                    nodal_stress_values,
                 ),
             ]);
         }
@@ -427,6 +438,7 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, vec![0], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_STRESS, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
             vec![0],

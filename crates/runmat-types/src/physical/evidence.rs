@@ -52,6 +52,13 @@ pub enum LengthUnitEvidence {
         declaration: LengthUnitDeclaration,
         source: String,
     },
+    /// An authored unit reinterprets coordinates whose file declares a different single length
+    /// unit. The file declaration stays as provenance in `declared`.
+    AuthoredOverride {
+        declaration: LengthUnitDeclaration,
+        declared: Vec<LengthUnitDeclaration>,
+        source: String,
+    },
 }
 impl Default for LengthUnitEvidence {
     fn default() -> Self {
@@ -78,6 +85,7 @@ impl LengthUnitEvidence {
                 contexts.iter().all(|c| c.unit == first).then_some(first)
             }
             Self::ExplicitFallback { declaration, .. }
+            | Self::AuthoredOverride { declaration, .. }
             | Self::FormatConvention { declaration, .. } => Some(declaration.unit),
             Self::Missing { .. } | Self::Unsupported { .. } | Self::Conflicting { .. } => None,
         }
@@ -86,7 +94,9 @@ impl LengthUnitEvidence {
         matches!(self,Self::Declared{contexts}if !contexts.is_empty())
             || matches!(
                 self,
-                Self::ExplicitFallback { .. } | Self::FormatConvention { .. }
+                Self::ExplicitFallback { .. }
+                    | Self::AuthoredOverride { .. }
+                    | Self::FormatConvention { .. }
             )
     }
     pub fn validate(&self) -> Result<(), UnitError> {
@@ -141,6 +151,22 @@ impl LengthUnitEvidence {
                     return Err(UnitError::InvalidSymbol);
                 }
             }
+            Self::AuthoredOverride {
+                declaration,
+                declared,
+                source,
+            } => {
+                declaration.validate()?;
+                if declared.is_empty() || declared.len() > 4096 || !label(source, 1024) {
+                    return Err(UnitError::InvalidSymbol);
+                }
+                for context in declared {
+                    context.validate()?;
+                    if context.unit == declaration.unit {
+                        return Err(UnitError::InvalidConversion);
+                    }
+                }
+            }
             Self::Missing { reason } | Self::Unsupported { reason, .. } => {
                 if !label(reason, 1024) {
                     return Err(UnitError::InvalidSymbol);
@@ -148,6 +174,49 @@ impl LengthUnitEvidence {
             }
         }
         Ok(())
+    }
+    /// Apply an authored coordinate unit. Authored units are authoritative: a file declaring one
+    /// different length unit is reinterpreted and its declaration kept as provenance; a file
+    /// declaring the same unit keeps its declaration; a source without a declaration takes the
+    /// authored unit as its explicit unit. Missing-declaration sources are returned as
+    /// `ExplicitFallback`; callers that require a file declaration (STEP, IGES) refuse that
+    /// state. Unsupported or conflicting declarations cannot be reinterpreted and are returned
+    /// unchanged as the error.
+    pub fn apply_authored(self, unit: LengthUnit, source: &str) -> Result<Self, Self> {
+        let declaration = LengthUnitDeclaration {
+            context: "authored geometry units".into(),
+            source_symbol: unit.symbol().into(),
+            unit,
+        };
+        match self {
+            Self::Declared { contexts } => match contexts.first().map(|c| c.unit) {
+                Some(first) if contexts.iter().all(|c| c.unit == first) => {
+                    if first == unit {
+                        Ok(Self::Declared { contexts })
+                    } else {
+                        Ok(Self::AuthoredOverride {
+                            declaration,
+                            declared: contexts,
+                            source: source.into(),
+                        })
+                    }
+                }
+                _ => Err(Self::Declared { contexts }),
+            },
+            Self::Missing { .. } => Ok(Self::ExplicitFallback {
+                declaration,
+                source: source.into(),
+            }),
+            Self::ExplicitFallback { .. } | Self::AuthoredOverride { .. } => Ok(self),
+            other => Err(other),
+        }
+    }
+    /// The file-declared unit an authored unit overrode, when it did.
+    pub fn overridden_declared_unit(&self) -> Option<LengthUnit> {
+        match self {
+            Self::AuthoredOverride { declared, .. } => declared.first().map(|c| c.unit),
+            _ => None,
+        }
     }
     pub fn resolve_fallback(self, unit: Option<LengthUnit>, source: &str) -> Self {
         if !matches!(self, Self::Missing { .. }) {
@@ -193,6 +262,11 @@ impl<'de> Deserialize<'de> for LengthUnitEvidence {
                 declaration: LengthUnitDeclaration,
                 source: String,
             },
+            AuthoredOverride {
+                declaration: LengthUnitDeclaration,
+                declared: Vec<LengthUnitDeclaration>,
+                source: String,
+            },
         }
         let value = match Wire::deserialize(d)? {
             Wire::Missing { reason } => Self::Missing { reason },
@@ -211,6 +285,15 @@ impl<'de> Deserialize<'de> for LengthUnitEvidence {
                 source,
             } => Self::ExplicitFallback {
                 declaration,
+                source,
+            },
+            Wire::AuthoredOverride {
+                declaration,
+                declared,
+                source,
+            } => Self::AuthoredOverride {
+                declaration,
+                declared,
                 source,
             },
         };

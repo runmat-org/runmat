@@ -6,17 +6,19 @@ mod assembly;
 mod boundary;
 mod recovery;
 mod response;
+pub(crate) use response::closure_target;
 pub(crate) mod sources;
+mod terminals;
 #[cfg(test)]
 pub(crate) mod tests;
 
 pub use response::{
-    CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalTerminalResponse,
+    CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalOperatorProof,
+    ElectricalTerminalResponse,
 };
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, ElectromagneticDomain, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureSettings, ProcedureStep, RestartPolicy,
-    SolutionSpace, StateCompleteness, StateKind,
+    AnalysisModel, AnalysisProcedure, ElectromagneticDomain, IndependentDomain, PhysicsFamily,
+    ProcedureSettings, ProcedureStep, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 pub use sources::{CanonicalElectricalSource, ElectricalChargeSources};
@@ -39,7 +41,13 @@ pub enum ElectricalStaticError {
     Operator(String),
     #[error("canonical electrical boundary is invalid: {0}")]
     Boundary(String),
-    #[error("canonical electrical solve did not converge after {iterations} iterations (residual {residual:e})")]
+    #[error(
+        "canonical electrical solve did not converge after {iterations} iterations (residual {residual:e}){}",
+        diagnostics
+            .iter()
+            .map(|diagnostic| format!("; {}: {}", diagnostic.code, diagnostic.message))
+            .collect::<String>()
+    )]
     NotConverged {
         iterations: u32,
         residual: f64,
@@ -54,21 +62,60 @@ pub fn solve_canonical_static(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
-    solve_canonical_static_with_admission(model, mesh, step_id, requirement, residual_target, None)
+    solve_canonical_static_with_admission(
+        model,
+        mesh,
+        step_id,
+        residual_target,
+        None,
+        None,
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+}
+
+/// A planned solve: the admitted proof envelope and the planned strategy (sparse Cholesky
+/// when `direct`, AMG-preconditioned CG otherwise).
+#[derive(Clone, Copy)]
+pub(crate) struct PlannedElectricalSolve<'a> {
+    pub admission: &'a crate::planning::resource::SolverAdmissionResourcePolicy,
+    pub direct: bool,
+}
+
+impl PlannedElectricalSolve<'_> {
+    pub(crate) fn strategy(&self) -> crate::solve::preconditioner::SpdPreconditionerKind {
+        if self.direct {
+            crate::solve::preconditioner::SpdPreconditionerKind::Direct
+        } else {
+            crate::solve::preconditioner::SpdPreconditionerKind::Amg
+        }
+    }
 }
 
 pub(crate) fn solve_canonical_static_with_admission(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
-    admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+    admission: Option<PlannedElectricalSolve<'_>>,
+    element_conductivity_s_per_m: Option<&[f64]>,
+    sample: crate::excitation::ExcitationSamplePoint<'_>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
-    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
+    if terminals::has_floating_terminals(model) {
+        return terminals::solve(model, step_id, sample.clone(), |fixed| {
+            solve_canonical_static_with_admission(
+                fixed,
+                mesh,
+                step_id,
+                residual_target,
+                admission,
+                element_conductivity_s_per_m,
+                sample.clone(),
+            )
+        });
+    }
     let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
         unreachable!("validated static electrical domain")
     };
@@ -76,10 +123,69 @@ pub(crate) fn solve_canonical_static_with_admission(
         .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
     let properties = crate::properties::compile_solid_property_map(model, mesh)
         .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
-    let assembled = assembly::ElectricalAssembly::assemble(projection, &properties, *equation)?;
-    let mut assembled = assembled.with_constraints(model, mesh, step)?;
-    assembled.charge_sources = sources::assemble(model, mesh, step, &assembled.projection)?;
+    let assembled = assembly::ElectricalAssembly::assemble(
+        projection,
+        &properties,
+        *equation,
+        element_conductivity_s_per_m,
+    )?;
+    let mut assembled = assembled.with_constraints(model, mesh, step, sample)?;
+    assembled.charge_sources = sources::assemble(model, mesh, step, &assembled.projection, sample)?;
     response::solve(assembled, *equation, residual_target, admission)
+}
+
+/// Steady conduction inside a coupled electrothermal solve: the conductivity of every
+/// element is supplied by the caller (the material law evaluated at the element
+/// temperature) and terminal sources are sampled at the coupled step's time.
+pub(crate) fn solve_conduction_with_conductivity(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    step_id: &str,
+    residual_target: f64,
+    sample: crate::excitation::ExcitationSamplePoint<'_>,
+    element_conductivity_s_per_m: &[f64],
+) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
+    let step = validate_canonical_input(
+        model,
+        step_id,
+        residual_target,
+    )?;
+    if terminals::has_floating_terminals(model) {
+        return terminals::solve(model, step_id, sample.clone(), |fixed| {
+            solve_conduction_with_conductivity(
+                fixed,
+                mesh,
+                step_id,
+                residual_target,
+                sample.clone(),
+                element_conductivity_s_per_m,
+            )
+        });
+    }
+    if !matches!(
+        model.electromagnetic,
+        Some(ElectromagneticDomain::Static {
+            equation: runmat_analysis_core::StaticElectricalEquation::SteadyConduction
+        })
+    ) {
+        return Err(ElectricalStaticError::InvalidInput(
+            "coupled conduction requires a steady-conduction model".into(),
+        ));
+    }
+    let projection = crate::topology::AnalysisProjection::derive(mesh)
+        .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
+    let properties = crate::properties::compile_solid_property_map(model, mesh)
+        .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
+    let equation = runmat_analysis_core::StaticElectricalEquation::SteadyConduction;
+    let assembled = assembly::ElectricalAssembly::assemble(
+        projection,
+        &properties,
+        equation,
+        Some(element_conductivity_s_per_m),
+    )?;
+    let mut assembled = assembled.with_constraints(model, mesh, step, sample)?;
+    assembled.charge_sources = sources::assemble(model, mesh, step, &assembled.projection, sample)?;
+    response::solve(assembled, equation, residual_target, None)
 }
 
 /// Checks intent without allocating topology or assembling an operator. This numerical
@@ -87,14 +193,8 @@ pub(crate) fn solve_canonical_static_with_admission(
 pub(crate) fn validate_canonical_input<'a>(
     model: &'a AnalysisModel,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<&'a ProcedureStep, ElectricalStaticError> {
-    if requirement != FormulationRequirement::Experimental {
-        return Err(ElectricalStaticError::Unsupported(
-            "production qualification".into(),
-        ));
-    }
     if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
         return Err(ElectricalStaticError::InvalidInput(
             "relative residual target".into(),
@@ -124,7 +224,6 @@ pub(crate) fn validate_canonical_input<'a>(
             output.kind != StateKind::ElectromagneticStatic
                 || output.completeness != StateCompleteness::Complete
         })
-        || !step.observations.is_empty()
         || !step.activations.is_empty()
         || model.sequence.steps.len() != 1
         || !model.sequence.dependencies.is_empty()
@@ -153,18 +252,46 @@ pub(crate) fn validate_canonical_input<'a>(
             !matches!(
                 action,
                 runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
+                    | runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
+                    | runmat_analysis_core::ExcitationAction::TerminalVoltage(_)
+                    | runmat_analysis_core::ExcitationAction::ElectricCharge(_)
+                    | runmat_analysis_core::ExcitationAction::CurrentDensity(_)
             )
         })
-        || (sources::kind(model) == CanonicalElectricalSource::VolumeCharge
-            && !matches!(
-                model.electromagnetic,
-                Some(ElectromagneticDomain::Static {
-                    equation: runmat_analysis_core::StaticElectricalEquation::Electrostatics
-                })
-            ))
     {
         return Err(ElectricalStaticError::Unsupported(
-            "non-electrostatic volume charge or unsupported source/natural/Robin boundary".into(),
+            "unsupported electrical source or natural/Robin boundary".into(),
+        ));
+    }
+    let equation = match &model.electromagnetic {
+        Some(ElectromagneticDomain::Static { equation }) => *equation,
+        _ => unreachable!("validated static electrical domain"),
+    };
+    let has = |current: bool| {
+        model.excitations.iter().any(|action| {
+            matches!(
+                (current, action),
+                (
+                    true,
+                    runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
+                        | runmat_analysis_core::ExcitationAction::CurrentDensity(_)
+                )
+                    | (
+                        false,
+                        runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
+                    )
+            )
+        })
+    };
+    if has(false) && equation != runmat_analysis_core::StaticElectricalEquation::Electrostatics {
+        return Err(ElectricalStaticError::Unsupported(
+            "volume charge belongs to electrostatics; steady conduction takes terminal currents"
+                .into(),
+        ));
+    }
+    if has(true) && equation != runmat_analysis_core::StaticElectricalEquation::SteadyConduction {
+        return Err(ElectricalStaticError::Unsupported(
+            "terminal current belongs to steady conduction".into(),
         ));
     }
     Ok(step)

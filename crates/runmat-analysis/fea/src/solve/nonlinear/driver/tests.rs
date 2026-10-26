@@ -6,9 +6,9 @@ use crate::{
     solve::nonlinear::nonlinear_solver_content_digest,
 };
 use runmat_analysis_core::{
-    AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement,
-    PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
-    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+    AnalysisConstraint, CoordinateFrame, Displacement, PrescribedStructuralDofs, PrescribedValue,
+    RegionTarget, StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof,
+    TranslationDofValue,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
@@ -98,7 +98,6 @@ fn uniaxial(order: ElementOrder) -> (AnalysisModel, AssemblySummary, NonlinearSo
 
 fn options(mesh: SolverMeshArtifact) -> NonlinearSolveOptions {
     NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         increment_count: 4,
         tolerance: 1e-9,
         linear_tolerance: 1e-12,
@@ -243,9 +242,6 @@ fn driver_honors_authored_boundaries_and_global_accepted_cap() {
 fn driver_does_not_fallback_for_unqualified_backend_or_missing_physical_mesh() {
     let (model, summary, mut options) = uniaxial(ElementOrder::Tet4);
     assert!(solve_nonlinear_system(&model, &summary, &options, ComputeBackend::Gpu).is_err());
-    options.formulation_requirement = FormulationRequirement::Production;
-    assert!(solve_nonlinear_system(&model, &summary, &options, ComputeBackend::Cpu).is_err());
-    options.formulation_requirement = FormulationRequirement::Experimental;
     options.solver_mesh = None;
     assert!(solve_nonlinear_system(&model, &summary, &options, ComputeBackend::Cpu).is_err());
 }

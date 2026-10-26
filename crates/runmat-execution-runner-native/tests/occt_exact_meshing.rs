@@ -11,7 +11,7 @@ use runmat_geometry_io::{
 };
 use runmat_meshing_core::{
     AlgorithmVersionSet, CacheAdmissionDecision, CancellationPolicy, CurveQualityTargets,
-    ElementOrder, MeshingChunkPolicy, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    ElementOrder, MeshingChunkPolicy, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled,
     PlatformBuildIdentity, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
@@ -228,6 +228,7 @@ fn execute_fixture_with_layout(
     let result = execute_exact_meshing_dag(
         ExactMeshingDagRun {
             geometry: &geometry,
+            ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
             request: request(document.tolerance),
             artifact_access: access,
             capability_cohort: Some("occt-native-corpus".into()),
@@ -245,6 +246,7 @@ fn execute_fixture_with_layout(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )
@@ -256,6 +258,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 7,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -272,6 +275,8 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
             global_metric: MetricTensor3::isotropic_length_m(10.0).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            entity_supports: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -293,21 +298,16 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
                 maximum_metric_edge_length: 10.0,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 10_000,
             maximum_elements: 10_000,
-            maximum_memory_bytes: 512 << 20,
-            maximum_scratch_bytes: 512 << 20,
-            maximum_wall_time_ms: 60_000,
-            maximum_artifact_bytes: 512 << 20,
-            maximum_search_work: 10_000_000,
             maximum_recursion_depth: 128,
-            maximum_iterations: 10_000_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 10_000,
             maximum_work_units_between_checks: 1_000_000,
         },
+        size_controls: Vec::new(),
     }
 }
 

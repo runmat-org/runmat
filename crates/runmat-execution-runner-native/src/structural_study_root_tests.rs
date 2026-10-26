@@ -42,7 +42,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     let checked =
         runmat_runtime::analysis::check_fea_path_in_root(temporary.path(), &path).unwrap();
     assert!(checked.is_valid(), "{:#?}", checked.diagnostics);
-    let resolved = checked.resolve_study("project/main.fea", "static").unwrap();
+    let resolved = checked.resolve_study("main.fea", "static").unwrap();
     let realized = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])
@@ -87,7 +87,6 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         .unwrap();
     let planning = StructuralStudyPlanningPolicy {
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        formulation_requirement: realized.formulation_requirement,
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
     let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
@@ -106,7 +105,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         frozen_project_digest: Some(Digest::sha256(b"frozen-project")),
         study: realized.clone(),
         materials: resolved.material_catalog.clone(),
-        planning,
+        planning: crate::StudyRootPlanning::Structural(planning),
         analysis_accelerator_requests: Vec::new(),
         local_execution,
         input_materializations: Vec::new(),
@@ -148,7 +147,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     let decoded = decode_structural_study_root(prepared.request(), &store).unwrap();
     assert_eq!(decoded.study, realized);
     assert_eq!(decoded.materials, resolved.material_catalog);
-    assert_eq!(decoded.planning, planning);
+    assert_eq!(decoded.planning, crate::StudyRootPlanning::Structural(planning));
     assert_eq!(decoded.local_execution, local_execution);
     assert!(decoded.analysis_accelerator_requests.is_empty());
     assert_eq!(
@@ -302,9 +301,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
         cpu_millicores: 1_000,
         memory_bytes: 2 << 30,
         scratch_bytes: 2 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let mut capabilities = runmat_analysis_execution::analysis_worker_capabilities(
@@ -337,6 +334,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
     };
     let pool_id = runmat_execution::PoolId::derive(&[b"typed-study-root-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"typed-study-root-worker"]),
         pool_id,
         resources: inventory.clone(),
@@ -520,7 +518,7 @@ fn prepare_source(
 ) -> PreparedStructuralStudyRoot {
     let checked = runmat_runtime::analysis::check_fea_path_in_root(source_root, path).unwrap();
     assert!(checked.is_valid(), "{:#?}", checked.diagnostics);
-    let resolved = checked.resolve_study("project/main.fea", "static").unwrap();
+    let resolved = checked.resolve_study("main.fea", "static").unwrap();
     let realized = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])
@@ -541,12 +539,11 @@ fn prepare_source(
         &source.roots,
     )
     .unwrap();
-    let mut meshing_request = crate::resolve_native_meshing_request(
+    let meshing_request = crate::resolve_native_meshing_request(
         &geometry_request.import_options,
         resolved.mesh.settings,
     )
     .unwrap();
-    meshing_request.resources.maximum_wall_time_ms = 180_000;
     let geometry_meshing =
         crate::prepare_geometry_meshing_root(crate::GeometryMeshingRootPreparation {
             program_revision: revision.clone(),
@@ -563,7 +560,6 @@ fn prepare_source(
         &resolved.material_catalog,
     )
     .unwrap();
-    let formulation_requirement = realized.formulation_requirement;
     prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
@@ -571,11 +567,10 @@ fn prepare_source(
         frozen_project_digest: Some(Digest::sha256(b"frozen-project")),
         study: realized,
         materials: resolved.material_catalog,
-        planning: StructuralStudyPlanningPolicy {
+        planning: crate::StudyRootPlanning::Structural(StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
-        },
+        }),
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
@@ -649,7 +644,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve {
         structural static {}
     }

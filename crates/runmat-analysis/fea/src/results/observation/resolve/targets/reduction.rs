@@ -78,8 +78,25 @@ pub(super) fn resolve_reduction_target(
                 enforce_cardinality(region.cardinality, 1, spec)?;
                 nodes_target(selected_indices(std::iter::once(index), maximum)?, topology, maximum)
             }
+            // Reactions over a face region are the discrete sum at the nodes of its faces.
+            ObservationTarget::Spatial(ExcitationTarget::Region(region))
+                if region.entity_dimension == EntityDimension::Face
+                    && region.expected_topology == ExpectedTopology::BoundaryFace =>
+            {
+                let projection = solid_projection(topology, spec)?;
+                let faces = matching_faces(region, projection);
+                enforce_cardinality(region.cardinality, faces.clone().count(), spec)?;
+                let indices = unique_nodes(
+                    faces.flat_map(|index| {
+                        projection.boundary_faces[index].node_indices.iter().copied()
+                    }),
+                    topology.nodes.len(),
+                    limits,
+                )?;
+                nodes_target(indices, topology, maximum)
+            }
             ObservationTarget::Constraint { .. } => Err(ObservationError::Unsupported("constraint-target reaction resultants require the canonical executed constraint plan")),
-            _ => Err(target_error(spec, "reaction resultants support the whole model or an exact structural node")),
+            _ => Err(target_error(spec, "reaction resultants support the whole model, an exact structural node, or a boundary face region")),
         };
     }
     let projection = solid_projection(topology, spec)?;
@@ -102,8 +119,12 @@ pub(super) fn resolve_reduction_target(
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
                     volume_target(selected_indices(indices, maximum)?, projection)
                 }
+                // An element field on a boundary reads each face's owning element: its trace on
+                // the surface is piecewise constant, weighted by face area.
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace)
-                    if materialized_field_location(spec) == FieldLocation::Node =>
+                    if materialized_field_location(spec) == FieldLocation::Node
+                        || (materialized_field_location(spec) == FieldLocation::Element
+                            && field_domain == RecoveredFieldEntityDomain::VolumeElements) =>
                 {
                     let indices = matching_faces(region, projection);
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
@@ -121,7 +142,7 @@ pub(super) fn resolve_reduction_target(
                 }
                 _ => Err(target_error(
                     spec,
-                    "reductions support admitted volumes and nodal fields on admitted boundaries",
+                    "reductions support admitted volumes, and nodal or volume-element fields on admitted boundaries",
                 )),
             }
         }

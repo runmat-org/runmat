@@ -47,6 +47,12 @@ fn exhaustive(topology: &DelaunayVolumeTopology) -> bool {
         })
     })
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Strict containment agrees with exhaustive adaptive predicates at faces, edges and
+//   adjacent floating-point positions across three scales and three coordinate permutations. An
+//   exact open-box broad phase is not a replacement for canonical topology, Delaunay, physical
+//   quality or native throughput admission.
 #[test]
 fn indexed_containment_matches_exhaustive_predicates_at_faces_edges_and_nearby_points() {
     let below = f64::from_bits(0.5f64.to_bits() - 1);
@@ -74,6 +80,12 @@ fn indexed_containment_matches_exhaustive_predicates_at_faces_edges_and_nearby_p
         }
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A 1,028-node coplanar inventory produces zero strict-interior candidates with fewer
+//   than 128 spatial-query checkpoint visits and matches exhaustive containment. This bounds the
+//   declared aligned-plane query, not arbitrary occupied geometry, index construction cost,
+//   measured allocator storage or whole-study scaling.
 #[test]
 fn aligned_plane_inventory_is_rejected_before_adaptive_predicates() {
     let points = (0..32)

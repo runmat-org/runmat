@@ -39,7 +39,7 @@ pub(super) fn admit(
         execution_backend: ExecutionBackend::Cpu,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
-        solver_method: SolverMethod::GeneralGmres,
+        solver_method: SolverMethod::SparseDirectLu,
         preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
         accelerator_evidence: Vec::new(),
@@ -58,8 +58,6 @@ pub(super) fn admit(
             .map(|field| field.into_storage())
             .collect(),
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, accuracy.numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
         execution_backend: run.execution_backend,
@@ -74,6 +72,7 @@ pub(super) fn admit(
         // Original mandatory accuracy evidence governs acceptance, never an override.
         quality_policy: contracts::format_quality_policy(QualityPolicy::Strict),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),
@@ -90,9 +89,7 @@ pub(super) fn admit(
         result_quality: accuracy.result_quality,
         run_status: accuracy.run_status,
         numerically_acceptable: accuracy.numerically_acceptable,
-        production_publishable,
         quality_reasons: accuracy.quality_reasons,
-        production_publication_reasons,
         provenance,
     };
     Ok(OperationEnvelope::new(

@@ -67,6 +67,15 @@ pub(super) fn add_count(total: &mut u32, count: u32) -> Result<(), FeaRunError> 
 }
 
 pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, FeaRunError> {
+    use crate::physics::scalar_constraints;
+    // Tie, periodic and jump relations: the iterate satisfies them exactly, each correction
+    // solves the reduced Newton system (so it keeps them satisfied) and convergence and the
+    // line search measure the reduced residual T^T r, where the relation reactions cancel.
+    let relations = scalar_constraints::about_reference(
+        &input.assembly.relations,
+        input.reference_temperature.canonical_value(),
+    );
+    let correction_relations = scalar_constraints::homogeneous(&relations);
     let mut current = input.initial_departure_k.to_vec();
     for (node, prescribed) in input
         .assembly
@@ -79,6 +88,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             current[node] = value - input.reference_temperature.canonical_value()[node];
         }
     }
+    scalar_constraints::enforce(&mut current, &relations);
     let evaluate = |temperature: &[f64]| {
         input.assembly.nonlinear_residual(
             input.model,
@@ -90,7 +100,8 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
         )
     };
     let free_norm = |residual: &[f64]| {
-        norm(residual.iter().enumerate().filter_map(|(node, value)| {
+        let reduced = scalar_constraints::reduce_residual(residual, &relations);
+        norm(reduced.iter().enumerate().filter_map(|(node, value)| {
             input.assembly.prescribed_temperature_k.canonical_values()[node]
                 .is_none()
                 .then_some(*value)
@@ -135,6 +146,8 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             None,
             &input.facts.operators,
             linear_target,
+            None,
+            &correction_relations,
         )?;
         maximum_linear_residual = maximum_linear_residual.max(linear_residual(&correction)?);
         add_count(&mut host_sync_count, correction.host_sync_count)?;

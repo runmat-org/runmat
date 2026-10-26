@@ -5,14 +5,23 @@ use runmat_analysis_core::{
 
 use crate::{
     algebra::{
+        element_assembly::{
+            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape,
+            ElementOutputs,
+        },
         spmv, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
         ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
         RealSparseMatrix,
     },
     excitation::{
-        sample_prescribed_heat_flux, sample_prescribed_temperature, ExcitationSamplePoint,
+        sample_prescribed_heat_flux, sample_prescribed_temperature,
+        sample_prescribed_temperature_difference, ExcitationSamplePoint,
         RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
         ScalarProjectionAccumulator, SpatialIntegrationRule, SpatialProjectionEvidence,
+    },
+    physics::{
+        scalar_constraints::{self, ScalarNodeRelation, ScalarPairing},
+        thermal_interface::{self, InterfaceDofs},
     },
     topology::{AnalysisProjection, ProjectedElement},
 };
@@ -48,6 +57,10 @@ pub(crate) struct ThermalOperatorAssembly {
         runmat_types::physical::kind::Temperature,
         Vec<Option<f64>>,
     >,
+    /// Tie, periodic and affine-jump relations: each secondary node follows its primaries.
+    pub relations: Vec<ScalarNodeRelation>,
+    /// Projection nodes: the mesh nodes, then one side-owned node per conductance-interface node.
+    pub dofs: InterfaceDofs,
     pub positive_robin_weight: runmat_types::physical::Quantity<
         runmat_types::physical::kind::ThermalConductance,
         Vec<f64>,
@@ -161,6 +174,11 @@ pub(crate) fn assemble(
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+    // A finite-conductance interface splits its nodes: the second side's elements and faces use
+    // their own side-owned nodes, joined to the first side by the interface conductance.
+    let (interfaces, dofs) = thermal_interface::solid_conduction(&projection, &model.interfaces)
+        .map_err(ThermalAssemblyError::InvalidProjection)?;
+    let projection = dofs.split_projection(&projection, &interfaces);
     if properties.identity.mesh_digest != Some(mesh.canonical_digest)
         || properties.identity.geometry_id != model.geometry_id
         || properties.identity.geometry_revision != model.geometry_revision
@@ -175,35 +193,10 @@ pub(crate) fn assemble(
         ));
     }
     volume_source::validate_fields(mesh, &projection, excitations)?;
-    let mut conductivity = RealSparseAssembler::with_pattern(
-        support
-            .try_clone()
-            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
-        OperatorRole::Conductivity,
-        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-    )
-    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
-    let mut capacity = RealSparseAssembler::with_pattern(
-        support
-            .try_clone()
-            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
-        OperatorRole::Capacity,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-    )
-    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
-    conductivity.add_contribution(ContributionProvenance {
-        domain: ContributionDomain::Thermal,
-        contribution_id: ContributionId("conductive_element_and_boundary_terms".to_string()),
-    });
-    capacity.add_contribution(ContributionProvenance {
-        domain: ContributionDomain::Thermal,
-        contribution_id: ContributionId("consistent_heat_capacity".to_string()),
-    });
     let mut element_conductivity_w_per_mk = Vec::with_capacity(projection.elements.len());
     let mut element_volumetric_capacity_j_per_m3k = Vec::with_capacity(projection.elements.len());
     let mut element_specific_heat_j_per_kgk = Vec::with_capacity(projection.elements.len());
     let mut element_density_kg_per_m3 = Vec::with_capacity(projection.elements.len());
-
     for element in &projection.elements {
         let material = &properties
             .solid_material(element.stable_identity)
@@ -223,36 +216,87 @@ pub(crate) fn assemble(
         element_density_kg_per_m3.push(mass_density_kg_per_m3);
         element_volumetric_capacity_j_per_m3k
             .push(mass_density_kg_per_m3 * thermal.specific_heat_j_per_kgk.canonical_value());
-        projection
-            .visit_element_quadrature(element, |point| {
-                for (local_row, &row) in element.node_indices.iter().enumerate() {
-                    for (local_column, &column) in element.node_indices.iter().enumerate() {
-                        let gradient_product = point.physical_shape_gradients()[local_row]
-                            .iter()
-                            .zip(point.physical_shape_gradients()[local_column])
-                            .map(|(left, right)| left * right)
-                            .sum::<f64>();
-                        conductivity.add(
-                            row,
-                            column,
-                            thermal.conductivity_w_per_mk.canonical_value()
-                                * gradient_product
-                                * point.volume_weight_m3,
-                        );
-                        capacity.add(
-                            row,
-                            column,
-                            mass_density_kg_per_m3
-                                * thermal.specific_heat_j_per_kgk.canonical_value()
-                                * point.shape_values()[local_row]
-                                * point.shape_values()[local_column]
-                                * point.volume_weight_m3,
-                        );
-                    }
-                }
-            })
-            .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
     }
+    // Element conduction/capacity kernels run on the admitted CPU pool and scatter onto the
+    // planned support in canonical element order (thread-count independent values).
+    let element_map = crate::topology::projection_element_map(&projection)
+    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+    let assembled = assemble_elements(
+        &element_map,
+        support,
+        ElementOutputShape {
+            matrices: 2,
+            ..Default::default()
+        },
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        |index, _, out: &mut ElementOutputs<'_, f64>| {
+            let element = &projection.elements[index];
+            let n = element.node_indices.len();
+            let conductivity = element_conductivity_w_per_mk[index];
+            let capacity = element_volumetric_capacity_j_per_m3k[index];
+            let mut local_conductivity = vec![0.0; n * n];
+            let mut local_capacity = vec![0.0; n * n];
+            projection
+                .visit_element_quadrature(element, |point| {
+                    let gradients = point.physical_shape_gradients();
+                    let shapes = point.shape_values();
+                    for row in 0..n {
+                        for column in 0..n {
+                            let gradient_product = gradients[row]
+                                .iter()
+                                .zip(gradients[column])
+                                .map(|(left, right)| left * right)
+                                .sum::<f64>();
+                            local_conductivity[row * n + column] +=
+                                conductivity * gradient_product * point.volume_weight_m3;
+                            local_capacity[row * n + column] +=
+                                capacity * shapes[row] * shapes[column] * point.volume_weight_m3;
+                        }
+                    }
+                })
+                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+            out.matrix(0).copy_from_slice(&local_conductivity);
+            out.matrix(1).copy_from_slice(&local_capacity);
+            Ok(())
+        },
+        no_visit,
+    )
+    .map_err(|error| match error {
+        ElementAssemblyError::Element { error, .. } => error,
+        other => ThermalAssemblyError::SparseOperator(other.to_string()),
+    })?;
+    drop(element_map);
+    let mut matrices = assembled.matrices.into_iter();
+    let mut conductivity = RealSparseAssembler::from_planned_values(
+        support
+            .try_clone()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
+        matrices.next().unwrap_or_default(),
+        OperatorRole::Conductivity,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+    let mut capacity = RealSparseAssembler::from_planned_values(
+        support
+            .try_clone()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
+        matrices.next().unwrap_or_default(),
+        OperatorRole::Capacity,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+    conductivity.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Thermal,
+        contribution_id: ContributionId("conductive_element_and_boundary_terms".to_string()),
+    });
+    thermal_interface::add_conductance(&projection, &interfaces, &dofs, |row, column, value| {
+        conductivity.add(row, column, value)
+    })
+    .map_err(ThermalAssemblyError::InvalidProjection)?;
+    capacity.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Thermal,
+        contribution_id: ContributionId("consistent_heat_capacity".to_string()),
+    });
 
     let mut applied_source = vec![0.0; projection.nodes.len()];
     let mut source_evidence = Vec::new();
@@ -352,12 +396,58 @@ pub(crate) fn assemble(
     let mut prescribed_temperature_k =
         temperature_field::prescribed_temperatures(&projection, excitations)?;
     let mut positive_robin_weight = vec![0.0; projection.nodes.len()];
+    let identity = runmat_analysis_core::PeriodicTransform::Identity;
+    let mut pairings = Vec::new();
     for constraint in &model.constraints {
         let AnalysisConstraint::Thermal(constraint) = constraint else {
             continue;
         };
-        let ThermalConstraintKind::Prescribed { target, value } = &constraint.kind else {
-            continue;
+        let (target, value) = match &constraint.kind {
+            ThermalConstraintKind::Prescribed { target, value } => (target, value),
+            ThermalConstraintKind::Tie(pair) => {
+                pairings.push(ScalarPairing {
+                    constraint_id: &constraint.constraint_id,
+                    pair,
+                    transform: &identity,
+                    offset: 0.0,
+                });
+                continue;
+            }
+            ThermalConstraintKind::Periodic(periodic) => {
+                pairings.push(ScalarPairing {
+                    constraint_id: &constraint.constraint_id,
+                    pair: &periodic.pair,
+                    transform: &periodic.transform,
+                    offset: 0.0,
+                });
+                continue;
+            }
+            ThermalConstraintKind::AffineJump {
+                periodic,
+                temperature_jump,
+            } => {
+                let jump = sample_prescribed_temperature_difference(
+                    temperature_jump,
+                    &model.signals,
+                    sample,
+                )
+                .map_err(|error| ThermalAssemblyError::SignalRealization {
+                    operator_id: constraint.constraint_id.clone(),
+                    message: error.to_string(),
+                })?;
+                if jump.imaginary != 0.0 || !jump.real.is_finite() {
+                    return Err(ThermalAssemblyError::ComplexBoundary {
+                        operator_id: constraint.constraint_id.clone(),
+                    });
+                }
+                pairings.push(ScalarPairing {
+                    constraint_id: &constraint.constraint_id,
+                    pair: &periodic.pair,
+                    transform: &periodic.transform,
+                    offset: jump.real,
+                });
+                continue;
+            }
         };
         let temperature =
             sample_prescribed_temperature(value, &model.signals, sample).map_err(|error| {
@@ -389,6 +479,32 @@ pub(crate) fn assemble(
                 prescribed_temperature_k[node_index] = Some(temperature.real);
             }
         }
+    }
+
+    let relations = scalar_constraints::relations(mesh, &projection, &pairings)
+        .map_err(ThermalAssemblyError::InvalidProjection)?;
+    // Ties and periodic pairs resolve mesh nodes; a node split by a conductance interface has
+    // two temperatures, and the pairing does not say which side it means.
+    if relations.iter().any(|relation| {
+        std::iter::once(relation.secondary)
+            .chain(relation.primaries.iter().map(|&(node, _)| node))
+            .any(|node| {
+                dofs.second()
+                    .binary_search_by_key(&node, |&(split, _)| split)
+                    .is_ok()
+            })
+    }) {
+        return Err(ThermalAssemblyError::InvalidProjection(
+            "a tie, periodic or jump relation reaches a node split by a conductance interface; pair faces away from the interface".into(),
+        ));
+    }
+    if let Some(relation) = relations.iter().find(|relation| {
+        prescribed_temperature_k[relation.secondary].is_some()
+    }) {
+        return Err(ThermalAssemblyError::InvalidProjection(format!(
+            "solver node {} is both prescribed and the secondary of a tie, periodic or jump relation",
+            projection.nodes[relation.secondary].node_id
+        )));
     }
 
     for boundary in &model.boundaries {
@@ -520,32 +636,34 @@ pub(crate) fn assemble(
                 applied_source,
             ),
         source_evidence,
-        prescribed_temperature_k: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::Temperature,
-            _,
-        >::new(prescribed_temperature_k),
-        positive_robin_weight: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::ThermalConductance,
-            _,
-        >::new(positive_robin_weight),
-        element_conductivity_w_per_mk: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::ThermalConductivity,
-            _,
-        >::new(element_conductivity_w_per_mk),
-        element_volumetric_capacity_j_per_m3k: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::VolumetricHeatCapacity,
-            _,
-        >::new(element_volumetric_capacity_j_per_m3k),
+        prescribed_temperature_k: runmat_types::physical::Quantity::new(prescribed_temperature_k),
+        relations,
+        dofs,
+        positive_robin_weight: runmat_types::physical::Quantity::new(positive_robin_weight),
+        element_conductivity_w_per_mk: runmat_types::physical::Quantity::new(
+            element_conductivity_w_per_mk,
+        ),
+        element_volumetric_capacity_j_per_m3k: runmat_types::physical::Quantity::new(
+            element_volumetric_capacity_j_per_m3k,
+        ),
     })
 }
 
 /// Shared by operator assembly and physical recovery, including signal side/approach.
+/// An `ambient_temperature` excitation on the boundary's faces supplies the ambient (for
+/// example a chamber temperature that varies in time) in place of the authored value.
 fn sample_ambient_temperature(
     model: &AnalysisModel,
     boundary_id: &str,
     value: &PrescribedValue<Temperature>,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<f64, ThermalAssemblyError> {
+    let excited = model
+        .boundaries
+        .iter()
+        .find(|boundary| boundary.boundary_id == boundary_id)
+        .and_then(|boundary| ambient_excitation(model, &boundary.target));
+    let value = excited.as_ref().unwrap_or(value);
     let ambient =
         sample_prescribed_temperature(value, &model.signals, sample).map_err(|error| {
             ThermalAssemblyError::SignalRealization {
@@ -602,3 +720,23 @@ pub(super) fn apply_matrix(matrix: &RealSparseMatrix, vector: &[f64]) -> Vec<f64
 
 #[cfg(test)]
 mod tests;
+
+/// The ambient supplied by an `ambient_temperature` excitation on exactly these faces.
+pub(crate) fn ambient_excitation(
+    model: &AnalysisModel,
+    target: &runmat_analysis_core::RegionTarget,
+) -> Option<PrescribedValue<Temperature>> {
+    model.excitations.iter().find_map(|action| match action {
+        runmat_analysis_core::ExcitationAction::AmbientTemperature(excitation) => {
+            match &excitation.target {
+                runmat_analysis_core::ExcitationTarget::Region(region)
+                    if region.region_id == target.region_id =>
+                {
+                    Some(PrescribedValue::Signal(excitation.signal_id.clone()))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    })
+}

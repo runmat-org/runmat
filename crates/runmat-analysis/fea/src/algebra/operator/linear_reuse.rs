@@ -5,7 +5,13 @@ use crate::algebra::CoercivityCertificate;
 #[derive(Default)]
 pub(crate) struct LinearPreparationReuse {
     certificate: Option<CoercivityCertificate>,
+    /// Factorization behind a sparse Cholesky certificate; reused for every solve with the same
+    /// operator (time steps, eigen iterations, load cases).
+    factor: Option<crate::algebra::coercivity::SharedFactor>,
     local_energy: Option<LocalEnergySource>,
+    /// Elastic rigidity proof from the assembly that built the operator. It is the only proof
+    /// tried: a refusal is final, never a fallback to factorization.
+    elastic: Option<crate::algebra::elastic_rigidity::ElasticRigidityProof>,
 }
 
 enum LocalEnergySource {
@@ -23,9 +29,25 @@ enum LocalEnergySource {
 impl LinearPreparationReuse {
     pub(crate) const RESIDENT_BYTES: u64 = std::mem::size_of::<Self>() as u64;
 
+    /// The certificate of the last prepared operator, if any.
+    pub(crate) fn certificate(&self) -> Option<&CoercivityCertificate> {
+        self.certificate.as_ref()
+    }
+
     pub(crate) fn clear(&mut self) {
         self.certificate = None;
+        self.factor = None;
         self.local_energy = None;
+        self.elastic = None;
+    }
+
+    pub(crate) fn with_elastic_rigidity(
+        proof: crate::algebra::elastic_rigidity::ElasticRigidityProof,
+    ) -> Self {
+        Self {
+            elastic: Some(proof),
+            ..Self::default()
+        }
     }
 
     /// Original source is consumed once and freed after proof; no serialized claim enters.
@@ -36,11 +58,13 @@ impl LinearPreparationReuse {
     ) -> Self {
         Self {
             certificate: None,
+            factor: None,
             local_energy: Some(LocalEnergySource::Identity(
                 source,
                 prescribed,
                 normalization,
             )),
+            elastic: None,
         }
     }
 
@@ -50,7 +74,9 @@ impl LinearPreparationReuse {
     ) -> Self {
         Self {
             certificate: None,
+            factor: None,
             local_energy: Some(LocalEnergySource::Selection(source, rows)),
+            elastic: None,
         }
     }
 
@@ -67,6 +93,7 @@ impl LinearPreparationReuse {
         {
             return PreparedSolverAdmissibility::bind_existing_with_source(
                 certificate.clone(),
+                self.factor.clone(),
                 matrix,
                 rhs,
                 source,
@@ -74,8 +101,17 @@ impl LinearPreparationReuse {
         }
         // A failed replacement cannot leave a stale proof available for later work.
         let local_energy = self.local_energy.take();
+        let elastic = self.elastic.take();
         self.clear();
-        let evidence = if let Some(local) = local_energy {
+        let evidence = if let Some(proof) = elastic {
+            PreparedSolverAdmissibility::bind_existing_with_source(
+                CoercivityCertificate::from_elastic_rigidity(matrix, &proof)?,
+                None,
+                matrix,
+                rhs,
+                source,
+            )?
+        } else if let Some(local) = local_energy {
             let certificate = match local {
                 LocalEnergySource::Identity(local, prescribed, normalization) => {
                     CoercivityCertificate::prove_local_energy(
@@ -83,22 +119,32 @@ impl LinearPreparationReuse {
                         &prescribed,
                         local,
                         normalization,
-                    )?
+                    )
                 }
                 LocalEnergySource::Selection(local, rows) => {
-                    CoercivityCertificate::prove_selected_energy(matrix, local, &rows)?
+                    CoercivityCertificate::prove_selected_energy(matrix, local, &rows)
                 }
             };
-            PreparedSolverAdmissibility::bind_existing_with_source(
-                certificate,
-                matrix,
-                rhs,
-                source,
-            )?
+            match certificate {
+                Ok(certificate) => PreparedSolverAdmissibility::bind_existing_with_source(
+                    certificate,
+                    None,
+                    matrix,
+                    rhs,
+                    source,
+                )?,
+                // A local-energy bound too weak to separate the assembly error from zero is not
+                // a disproof: the sparse Cholesky proof decides, and its factor serves the solve.
+                Err(CoercivityError::EnergyIndeterminate { .. }) => {
+                    PreparedSolverAdmissibility::prove(matrix, rhs, source)?
+                }
+                Err(error) => return Err(error),
+            }
         } else {
             PreparedSolverAdmissibility::prove(matrix, rhs, source)?
         };
         self.certificate = Some(evidence.coercivity().clone());
+        self.factor = evidence.factor().cloned();
         Ok(evidence)
     }
 }

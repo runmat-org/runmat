@@ -75,7 +75,10 @@ fn transient_rod_tet4_and_tet10_converge_to_the_independent_damped_and_undamped_
     // instantaneous mode value. Acceleration includes its complete nodal history.
     for quadratic in [false, true] {
         for damped in [false, true] {
-            let cells = if quadratic { [1, 2, 4] } else { [2, 4, 8] };
+            // Each order is refined until its spatial error sits below the bound: Tet10 nodal
+            // acceleration converges at about h^2 (0.142, 0.029, 0.0061, 0.0014 over cells
+            // 1, 2, 4, 8 at 400 intervals) and Tet4 acceleration at about h.
+            let cells = if quadratic { [2, 4, 8] } else { [4, 8, 16] };
             let errors = cells.map(|cells| {
                 let mesh = mesh(quadratic, cells);
                 errors(&mesh, damped, &run(&mesh, damped, 400))
@@ -109,7 +112,10 @@ fn transient_rod_time_refinement_is_independent_of_spatial_refinement() {
     // or solver-to-solver reference and the continuum spatial floor is not subtracted.
     // At 40 intervals the same phase estimate is 0.001615 rad; the 0.2% normalized
     // U/V bound is therefore a physical time-accuracy criterion, not a residual target.
-    let mesh = mesh(true, 4);
+    // Eight quadratic cells put the spatial floor (displacement 1e-5, velocity 3.4e-5) far below
+    // the temporal error being refined; on four cells the velocity floor (about 3.6e-4 damped,
+    // more undamped) masks the time step's second order.
+    let mesh = mesh(true, 8);
     for damped in [false, true] {
         let errors =
             [10, 20, 40].map(|intervals| errors(&mesh, damped, &run(&mesh, damped, intervals)));
@@ -128,5 +134,24 @@ fn transient_rod_time_refinement_is_independent_of_spatial_refinement() {
             );
         }
         eprintln!("transient temporal damped={damped} errors={errors:?}");
+    }
+}
+
+#[test]
+#[ignore = "diagnostic: temporal order of the cold-block rod configuration"]
+fn diagnostic_cold_block_rod_temporal_order() {
+    let fixed = mesh(true, 4);
+    for intervals in [80, 160, 320, 640] {
+        eprintln!(
+            "rod temporal intervals={intervals} errors={:?}",
+            errors(&fixed, true, &run(&fixed, true, intervals))
+        );
+    }
+    for cells in [1, 2, 4, 8] {
+        let refined = mesh(true, cells);
+        eprintln!(
+            "rod spatial cells={cells} errors={:?}",
+            errors(&refined, true, &run(&refined, true, 400))
+        );
     }
 }

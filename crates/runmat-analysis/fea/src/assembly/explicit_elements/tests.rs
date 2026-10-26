@@ -60,11 +60,10 @@ fn scoped_beam_waves_preserve_serial_operators_and_recovery_order() {
         Ok::<_, ()>(assemble(plan))
     })
     .unwrap();
-    assert!(matches!(
-        &nested[0],
-        Err(super::StructuralAssemblyError::LocalExecution(message))
-            if message.contains("nested local numerical execution")
-    ));
+    // Element assembly composes with an enclosing serial chunk and stays canonical.
+    let nested = nested[0].as_ref().expect("nested element assembly");
+    assert_eq!(nested.stiffness, serial.stiffness);
+    assert_eq!(nested.beam_recovery, serial.beam_recovery);
 
     let cancellation = FeaCancellationToken::new();
     cancellation.cancel();
@@ -214,10 +213,6 @@ fn scoped_shell_waves_preserve_damped_operators_and_recovery_order() {
             );
         }
     }
-    assert!(
-        std::mem::size_of::<super::ShellElementContribution>() * 8 <= 128 * 1024,
-        "a retained shell wave must fit the fixed per-worker assembly scratch"
-    );
 
     let mut invalid = model.clone();
     invalid.structural.as_mut().unwrap().elements[9].region_id = "unassigned".into();

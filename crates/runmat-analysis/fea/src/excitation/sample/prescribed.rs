@@ -4,8 +4,8 @@ use super::{
     ExcitationSamplePoint, RealizationError, SampledValue,
 };
 use runmat_analysis_core::{
-    ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, Signal, Temperature,
-    Velocity,
+    ElectricCurrent, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, Signal, Temperature,
+    TemperatureDifference, Velocity,
 };
 
 pub(crate) fn sample_prescribed_velocity(
@@ -50,6 +50,23 @@ pub(crate) fn sample_prescribed_potential(
     )
 }
 
+pub(crate) fn sample_prescribed_current(
+    value: &PrescribedValue<ElectricCurrent>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::ElectricCurrent(signal) => Some(signal),
+            _ => None,
+        },
+        |current| current.canonical_value(),
+    )
+}
+
 pub(crate) fn sample_prescribed_temperature(
     value: &PrescribedValue<Temperature>,
     signals: &[PhysicalSignal],
@@ -64,6 +81,23 @@ pub(crate) fn sample_prescribed_temperature(
             _ => None,
         },
         |temperature| temperature.canonical_value(),
+    )
+}
+
+pub(crate) fn sample_prescribed_temperature_difference(
+    value: &PrescribedValue<TemperatureDifference>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::TemperatureDifference(signal) => Some(signal),
+            _ => None,
+        },
+        |difference| difference.canonical_value(),
     )
 }
 

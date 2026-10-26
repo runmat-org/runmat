@@ -1,8 +1,7 @@
 use super::*;
 use runmat_analysis_core::{
-    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, FormulationRequirement,
-    Frequency, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure,
-    PropertyRegionTarget, RegionTarget,
+    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, Frequency, IndependentDomain,
+    MaterialAcousticModel, PrescribedValue, Pressure, PropertyRegionTarget, RegionTarget,
 };
 use runmat_analysis_fea::execution::{
     AccuracySourceKind, AccuracySourceReceipt, AcousticHarmonicWorkload,
@@ -43,7 +42,7 @@ pub(super) fn workload() -> AcousticHarmonicWorkload {
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.sequence.steps = vec![step];
@@ -52,7 +51,7 @@ pub(super) fn workload() -> AcousticHarmonicWorkload {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));
@@ -60,17 +59,14 @@ pub(super) fn workload() -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
-        solver: AcousticHarmonicPolicy {
-            uniqueness: Some(
-                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            ),
-            ..Default::default()
-        },
+        solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }
 }
 
+// witness: FEA-ACOUSTIC-ACCURACY-001/lineage @ acoustic_harmonic/tet4|tet10/prepared_controller;
+//   boundary: Both-order accepted-output bridge fixture validates exact context and rejects
+//   production relabeling; not actual native worker or full public gate evidence.
 #[test]
 fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -79,6 +75,8 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
             let workload = workload();
             let mesh = canonical_tetrahedron_solver_mesh(order);
             let task = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 authored_study_digest: digest("acoustic"),
                 frozen_project_digest: None,
                 program_revision: revision(),
@@ -151,7 +149,6 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
                 source_context_inputs: context.clone(),
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
                 step: workload.model.sequence.steps[0].clone(),
-                formulation_requirement: workload.formulation_requirement,
                 program_revision: revision(),
                 chunk_bytes: chunk,
                 inventory_limits: limits,
@@ -199,22 +196,12 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
                 substituted[index] = replacement;
                 assert!(check(&substituted).is_err());
             }
-            let weakened = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
-                prepared.request.producer,
-                prepared.request.source_kind,
-                prepared.request.source_result,
-                None,
-                FormulationRequirement::Production,
-                prepared.request.plan.clone(),
-            )
-            .unwrap();
-            assert!(validate_accuracy_source_context(
-                &weakened,
+            super::accuracy_source_context_tests::assert_accuracy_plan_identity_bound(
+                &prepared.request,
                 &source,
                 None,
-                &context.iter().collect::<Vec<_>>()
-            )
-            .is_err());
+                &context.iter().collect::<Vec<_>>(),
+            );
             let mut missing = preparation();
             missing.source_context_inputs.pop();
             assert!(prepare_accuracy(missing).is_err());

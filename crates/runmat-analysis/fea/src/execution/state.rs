@@ -13,8 +13,10 @@ use super::{
 };
 
 const STATE_PREFIX: &[u8] = b"runmat-analysis-semantic-state/v1\0";
+/// Semantic states carry complete fields of any admitted mesh, so their collections are
+/// bounded by the contract's encoded-byte ceiling rather than a fixed item count.
 const STATE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 pub(super) mod field_validation;
 mod resource_profile;
@@ -44,7 +46,7 @@ pub use acoustic::{AcousticPhasorConvention, CanonicalAcousticStatePayload};
 use field_validation::{select_structural_state_fields, validate_portable_fields};
 pub use payload::CanonicalSemanticStatePayload;
 pub use thermal::CanonicalThermalStatePayload;
-pub use thermal_transfer::BoundThermalStateTransfer;
+pub use thermal_transfer::{BoundThermalStateTransfer, SolvedTemperatureField};
 
 mod publication_request;
 pub use publication_request::{SemanticStatePublicationRequest, SemanticStatePublicationSource};
@@ -152,7 +154,10 @@ impl CanonicalSemanticState {
                 state.validate()?;
             }
             CanonicalSemanticStatePayload::Fluid { state } => {
-                if self.kind != StateKind::Fluid || self.completeness != StateCompleteness::Complete
+                // A coupled flow study (conjugate heat transfer) declares its complete state as
+                // the coupled interface state; its payload is the same retained flow result.
+                if !matches!(self.kind, StateKind::Fluid | StateKind::CoupledInterface)
+                    || self.completeness != StateCompleteness::Complete
                 {
                     return Err(AnalysisExecutionError::Invalid(
                         "fluid semantic payload requires complete fluid state".into(),
@@ -350,23 +355,43 @@ impl CanonicalSemanticState {
     }
 
     fn derive_identity(&self) -> AnalysisExecutionResult<StateIdentity> {
-        let declaration_digest = Digest::sha256(encode_contract(
-            STATE_PREFIX,
-            "semantic-state-declaration",
-            &(
-                &self.state_id,
-                self.kind,
-                self.completeness,
-                self.persistence,
-            ),
-            STATE_LIMITS,
-        )?);
-        StateIdentity::new(
+        Self::identity_for(
             self.producer,
-            declaration_digest,
+            &self.state_id,
+            self.kind,
+            self.completeness,
+            self.persistence,
             self.topology_digest,
             self.source_result,
             self.content_digest,
+        )
+    }
+
+    /// The identity a state with this header and content digest has. Lets a persisted
+    /// reference prove its header without loading the state payload.
+    #[allow(clippy::too_many_arguments)]
+    pub fn identity_for(
+        producer: StepIdentity,
+        state_id: &StateId,
+        kind: StateKind,
+        completeness: StateCompleteness,
+        persistence: StatePersistence,
+        topology_digest: Digest,
+        source_result: SolverResultIdentity,
+        content_digest: Digest,
+    ) -> AnalysisExecutionResult<StateIdentity> {
+        let declaration_digest = Digest::sha256(encode_contract(
+            STATE_PREFIX,
+            "semantic-state-declaration",
+            &(state_id, kind, completeness, persistence),
+            STATE_LIMITS,
+        )?);
+        StateIdentity::new(
+            producer,
+            declaration_digest,
+            topology_digest,
+            source_result,
+            content_digest,
         )
     }
 }

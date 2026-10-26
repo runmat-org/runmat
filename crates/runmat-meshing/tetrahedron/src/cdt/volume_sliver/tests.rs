@@ -10,11 +10,7 @@ use crate::cdt::{
 };
 
 fn entity(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, name.to_owned(), Vec::new())
 }
 
 fn region() -> PersistentEntityId {
@@ -27,10 +23,12 @@ fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
 
 pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 

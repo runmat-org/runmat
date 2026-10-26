@@ -1,72 +1,72 @@
 //! Standing physical acceptance requirements. Witness links describe assertion scope,
-//! not successful execution or production qualification.
+//! not successful execution or release qualification.
 use crate::requirement::*;
 const THERMOELASTIC: &[Envelope] = &[
     envelope(
         Formulation::Thermoelastic,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::Thermoelastic,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
 ];
 const THERMOELASTIC_PUBLIC: &[Envelope] = &[
     envelope(
         Formulation::Thermoelastic,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::Thermoelastic,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
 ];
 const ELECTROTHERMAL_PUBLIC: &[Envelope] = &[
     envelope(
         Formulation::Electrothermal,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::Electrothermal,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
 ];
 const CHT: &[Envelope] = &[envelope(
     Formulation::ConjugateHeatTransfer,
     MeshOrder::CanonicalMixedTopology,
-    ExecutionEnvelope::SerialCpuPublicStudy,
+    ExecutionEnvelope::PublicStudy,
 )];
 const FSI: &[Envelope] = &[envelope(
     Formulation::FluidStructureInteraction,
     MeshOrder::CanonicalMixedTopology,
-    ExecutionEnvelope::SerialCpuPublicStudy,
+    ExecutionEnvelope::PublicStudy,
 )];
 const COUPLED: &[Envelope] = &[
     envelope(
         Formulation::Thermoelastic,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::Electrothermal,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ConjugateHeatTransfer,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::FluidStructureInteraction,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
 ];
 const FSI_GOVERNED: &[Envelope] = &[
@@ -79,12 +79,17 @@ const FSI_GOVERNED: &[Envelope] = &[
     envelope(
         Formulation::FluidStructureInteraction,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::FluidStructureInteraction,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::FluidStructureInteraction,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::FluidStructureInteraction,
@@ -147,7 +152,6 @@ const FEA_COUPLING_INTERFACE_001: Requirement = Requirement {
             COUPLED,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_COUPLING_THERMOELASTIC_001: Requirement = Requirement {
     id: "FEA-COUPLING-THERMOELASTIC-001",
@@ -197,51 +201,6 @@ const FEA_COUPLING_THERMOELASTIC_001: Requirement = Requirement {
             THERMOELASTIC_PUBLIC,
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-COUPLING-THERMAL-STRESS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "post::solid::thermoelastic_tests::solved_linear_temperature_recovers_pointwi",
-                    "se_stress_and_integrated_energy",
-                ),
-                source: "crates/runmat-analysis/fea/src/post/solid/thermoelastic_tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "strain",
-                envelopes: THERMOELASTIC,
-                boundary: concat!(
-                    "Both-order single-tetrahedron recovery from an supplied linear temperature ",
-                    "array: fixed point stresses/integrated energy and Tet10 compatible free ",
-                    "displacement. Despite test name, no upstream thermal solve or sequence ",
-                    "transition asserted.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-COUPLING-FREE-EXPANSION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "post::solid::thermoelastic_tests::thermal_eigenstrain_recovery_is_stress_fre",
-                    "e_for_free_expansion_and_compressive_when_fixed",
-                ),
-                source: "crates/runmat-analysis/fea/src/post/solid/thermoelastic_tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "strain",
-                envelopes: THERMOELASTIC,
-                boundary: concat!(
-                    "Both-order single-element uniform eigenstrain free/fixed recovery; not ",
-                    "coupled equilibrium, temperature-dependent property iteration or mapped ",
-                    "transition.",
-                ),
-            }],
-        },
-    ],
 };
 const FEA_COUPLING_ELECTROTHERMAL_001: Requirement = Requirement {
     id: "FEA-COUPLING-ELECTROTHERMAL-001",
@@ -286,83 +245,19 @@ const FEA_COUPLING_ELECTROTHERMAL_001: Requirement = Requirement {
             concat!(
                 "Cold transfer authenticates the complete original electrical result and ",
                 "intended thermal consumer before use; reject foreign lineage, altered ",
-                "power/inventory, unsupported equations, feedback and production intent.",
+                "power/inventory, unsupported equations, feedback and release intent.",
             ),
             EvidenceKind::ColdReplay,
             ELECTROTHERMAL_PUBLIC,
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-COUPLING-JOULE-PATCH",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "execution::electrothermal::tests::retained_conduction_drives_independent_qua",
-                    "dratic_thermal_patch_and_power",
-                ),
-                source: "crates/runmat-analysis/fea/src/execution/electrothermal/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "heat",
-                envelopes: ELECTROTHERMAL_PUBLIC,
-                boundary: concat!(
-                    "Experimental both-order constant-conductivity same-mesh steady one-way ",
-                    "conduction to thermal slab; 12 W terminal/supplied/boundary power, Tet10 ",
-                    "quadratic temperature and cold transfer. No feedback or harmonic Maxwell ",
-                    "coupling.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-COUPLING-JOULE-REFINE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "execution::electrothermal::tests::tet4_refinement_and_voltage_sign_gauge_pre",
-                    "serve_independent_heat_and_power",
-                ),
-                source: "crates/runmat-analysis/fea/src/execution/electrothermal/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "heat",
-                envelopes: ELECTROTHERMAL_PUBLIC,
-                boundary: concat!(
-                    "Tet4 two-mesh interior temperature refinement and Tet10 voltage sign/gauge ",
-                    "invariance at constant conductivity; no two-way thermal iteration.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-COUPLING-JOULE-COLD",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "execution::electrothermal::tests::source::retained_source_cold_binding_authe",
-                    "nticates_original_result_and_target",
-                ),
-                source: "crates/runmat-analysis/fea/src/execution/electrothermal/tests/source.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "cold",
-                envelopes: ELECTROTHERMAL_PUBLIC,
-                boundary: concat!(
-                    "Both-order retained source/target binding and mutated density rejection in ",
-                    "one process; no native termination/restart or remote transfer.",
-                ),
-            }],
-        },
-    ],
 };
 const FEA_COUPLING_CHT_001: Requirement = Requirement {
     id: "FEA-COUPLING-CHT-001",
-    title: "Production thermal/fluid conjugate heat transfer",
+    title: "Thermal/fluid conjugate heat transfer",
     stages: &[Stage::Fluid, Stage::Thermal],
     acceptance: concat!(
-        "CHT requires independently production-ready thermal and fluid operators and ",
+        "CHT requires independently complete thermal and fluid operators and ",
         "exact solid/fluid interfaces. Re-solve both domains until interface and ",
         "global energy closure pass rather than reporting an inferred terminal heat ",
         "profile.",
@@ -393,7 +288,7 @@ const FEA_COUPLING_CHT_001: Requirement = Requirement {
         obligation(
             "dependencies",
             concat!(
-                "Reject production CHT while either standalone operator, transfer, ",
+                "Reject CHT while either standalone operator, transfer, ",
                 "state/resource admission or mandatory accuracy is unqualified; shared ",
                 "signal/source and boundary energy attribution remain intact.",
             ),
@@ -401,14 +296,13 @@ const FEA_COUPLING_CHT_001: Requirement = Requirement {
             CHT,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_COUPLING_FSI_001: Requirement = Requirement {
     id: "FEA-COUPLING-FSI-001",
-    title: "Production dynamics/fluid interaction with stable conservative ALE execution",
+    title: "Dynamics/fluid interaction with stable conservative ALE execution",
     stages: &[Stage::FluidStructureInteraction],
     acceptance: concat!(
-        "FSI depends on independently production-ready structural dynamics and CFD. ",
+        "FSI depends on independently complete structural dynamics and CFD. ",
         "Exact interface mapping conserves traction, velocity and work while a ",
         "documented mesh-motion/ALE and partitioned iteration policy governs moving ",
         "domains.",
@@ -461,7 +355,6 @@ const FEA_COUPLING_FSI_001: Requirement = Requirement {
             FSI_GOVERNED,
         ),
     ],
-    witnesses: &[],
 };
 pub(crate) const REQUIREMENTS: &[Requirement] = &[
     FEA_COUPLING_INTERFACE_001,

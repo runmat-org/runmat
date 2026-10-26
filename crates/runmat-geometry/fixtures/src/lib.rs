@@ -239,6 +239,7 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
             consolidate_duplicates: false,
             repair_tolerance_scale_gaps: false,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::FacetedSolid {
             model: FacetedSolidModel {
@@ -261,15 +262,15 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: name.into(),
-        assembly_path: if kind == PersistentEntityKind::Assembly && name == "root" {
+        name.into(),
+        if kind == PersistentEntityKind::Assembly && name == "root" {
             Vec::new()
         } else {
             vec!["part".into()]
         },
-    }
+    )
 }
 
 fn parameter(start: f64, end: f64) -> ParameterRange {
@@ -425,6 +426,7 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::ExactBRep { model },
         display_tessellations: Vec::new(),

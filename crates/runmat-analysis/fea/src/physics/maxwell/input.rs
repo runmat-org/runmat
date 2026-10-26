@@ -1,5 +1,5 @@
 //! Frozen, mesh/sample-bound physical coefficients and impressed volume current.
-use super::{invalid, topology, ComplexVector3, MaxwellError};
+use super::{invalid, topology, ComplexPhasor, ComplexVector3, MaxwellError};
 use crate::results::field::{SampledVolumeFieldTopology, VolumeFieldSamplingRule};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -28,6 +28,42 @@ pub struct MaxwellCurrentSample {
         ComplexVector3,
     >,
 }
+/// Constant vector carried by one element (unit generator field or unit closure current).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaxwellElementVector {
+    pub element_identity: StableDigest,
+    pub vector: [f64; 3],
+}
+
+/// How a terminal pair drives its conductor: total current or terminal voltage (peak phasors).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum MaxwellDriveExcitation {
+    Current { amperes: ComplexPhasor },
+    Voltage { volts: ComplexPhasor },
+}
+
+/// A solid conductor driven between two terminal faces (A-V formulation with an
+/// electrokinetic unit potential). Inside the conductor the total field is
+/// E + U g with g = -grad v0, where v0 solves div(sigma grad v0) = 0 with v0 = 1 on the
+/// driven terminal and 0 on the return terminal. Current leaving the conductor through a
+/// terminal that is not on a grounded boundary continues as a discrete potential flow in
+/// the electrically transparent medium (the gap feed), so the impressed current is
+/// discretely solenoidal and no artificial charge builds up on the terminals.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaxwellTerminalDrive {
+    pub drive_id: String,
+    pub excitation: MaxwellDriveExcitation,
+    /// DC conductance between the terminals, integral of sigma |grad v0|^2 (S).
+    pub conductance_s: f64,
+    /// g = -grad v0 per driven-conductor element for a 1 V drive (V/m per V).
+    pub unit_generator_field: Vec<MaxwellElementVector>,
+    /// Gap-feed closure current density per transparent element for a 1 V drive (A/m^2 per V).
+    pub unit_closure_current: Vec<MaxwellElementVector>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaxwellInput {
@@ -38,6 +74,10 @@ pub struct MaxwellInput {
     pub volumes: Vec<MaxwellVolumeData>,
     /// Exact canonical integration-sample order, no omissions/aliases/callbacks.
     pub source_current: Vec<MaxwellCurrentSample>,
+    /// Sorted exterior faces with tangential E = 0 (vector-potential ground / PEC).
+    /// Every other exterior face carries the natural condition n x H = 0.
+    pub grounded_faces: Vec<StableDigest>,
+    pub drives: Vec<MaxwellTerminalDrive>,
 }
 impl MaxwellInput {
     /// Canonical input identity includes exact sample authority, source, frequency
@@ -54,7 +94,36 @@ impl MaxwellInput {
         Ok(Digest::sha256(bytes))
     }
     pub fn validate_for_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), MaxwellError> {
-        self.ordered_volumes(mesh).map(|_| ())
+        self.ordered_volumes(mesh)?;
+        if self.grounded_faces.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(invalid("grounded faces must be sorted and unique"));
+        }
+        let elements: std::collections::BTreeSet<_> =
+            self.sampling.element_identities().iter().copied().collect();
+        let mut ids = std::collections::BTreeSet::new();
+        for drive in &self.drives {
+            if drive.drive_id.trim().is_empty()
+                || !ids.insert(drive.drive_id.as_str())
+                || !drive.conductance_s.is_finite()
+                || drive.conductance_s <= 0.0
+                || drive.unit_generator_field.is_empty()
+                || !match drive.excitation {
+                    MaxwellDriveExcitation::Current { amperes } => amperes.is_finite(),
+                    MaxwellDriveExcitation::Voltage { volts } => volts.is_finite(),
+                }
+                || drive
+                    .unit_generator_field
+                    .iter()
+                    .chain(&drive.unit_closure_current)
+                    .any(|value| {
+                        !elements.contains(&value.element_identity)
+                            || value.vector.iter().any(|v| !v.is_finite())
+                    })
+            {
+                return Err(invalid("invalid terminal drive"));
+            }
+        }
+        Ok(())
     }
     pub(super) fn ordered_volumes(
         &self,
@@ -102,11 +171,7 @@ impl MaxwellInput {
             {
                 return Err(invalid("invalid or duplicate Maxwell element law"));
             }
-            if volume.conductivity_s_per_m.canonical_value() == 0.0 {
-                return Err(MaxwellError::Unsupported("zero-loss Maxwell regions need independent spectral/nonresonance authority; residual is not uniqueness evidence".into()));
-            }
             if !(omega * volume.conductivity_s_per_m.canonical_value()).is_finite()
-                || omega * volume.conductivity_s_per_m.canonical_value() == 0.0
                 || !(omega * omega * volume.permittivity_f_per_m.canonical_value()).is_finite()
                 || omega * omega * volume.permittivity_f_per_m.canonical_value() == 0.0
                 || !(1.0 / volume.permeability_h_per_m.canonical_value()).is_finite()

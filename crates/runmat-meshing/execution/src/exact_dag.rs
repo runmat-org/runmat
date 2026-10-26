@@ -114,6 +114,7 @@ impl ExactMeshingDagPlanner {
     pub fn new(
         geometry: &PreparedExactGeometryInput,
         request: MeshingRequest,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings,
         artifact_access: ArtifactAccess,
         capability_cohort: Option<String>,
     ) -> MeshingExecutionResult<Self> {
@@ -193,6 +194,7 @@ impl ExactMeshingDagPlanner {
             workload,
             identity,
             request,
+            ceilings,
             artifact_access,
             Some(document.clone()),
         )?;
@@ -316,7 +318,7 @@ impl ExactMeshingDagPlanner {
             .pass_index
             .checked_add(1)
             .ok_or_else(|| invalid("surface pass index overflowed"))?;
-        if pass_index >= self.seed.resolved_request.resources.maximum_recursion_depth {
+        if pass_index >= self.seed.resolved_request.limits.maximum_recursion_depth {
             return Err(invalid(
                 "surface convergence exhausted the resolved recursion budget",
             ));
@@ -515,6 +517,7 @@ impl ExactMeshingDagPlanner {
             workload,
             identity,
             self.seed.resolved_request.clone(),
+            self.seed.ceilings,
             self.seed.artifact_access.clone(),
             geometry_document,
         )?;

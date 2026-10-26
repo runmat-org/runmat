@@ -49,7 +49,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve { structural static {} }
 }
 "#;
@@ -147,9 +146,8 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
     #[cfg(feature = "occt-native")]
     {
         let prepared = prepared.unwrap();
-        let crate::PreparedFeaStudyRoot::Structural(root) = prepared.root else {
-            panic!("expected a source structural root")
-        };
+        assert!(prepared.root.planning.structural().is_some());
+        let root = crate::prepare_structural_study_root(prepared.root).unwrap();
         assert_eq!(root.result_expectation().study, realized);
         assert_eq!(
             root.result_expectation().input_materializations,
@@ -219,6 +217,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
         let meshing = runmat_meshing_execution::execute_exact_meshing_dag(
             runmat_meshing_execution::ExactMeshingDagRun {
                 geometry: &exact,
+                ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
                 request,
                 artifact_access: decoded.artifact_access.clone(),
                 capability_cohort: Some(output.platform.capability_cohort.clone()),
@@ -231,6 +230,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
                     sizing: Vec::new(),
                     cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
                 },
+                named_regions: Default::default(),
             },
             &mut executor,
         )
@@ -274,6 +274,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
             else {
                 panic!("named density callable failed: {response:?}")
             };
+            let [value] = <[_; 1]>::try_from(values).expect("one generator output");
             outputs.push(runmat_analysis_execution::GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
                 value,

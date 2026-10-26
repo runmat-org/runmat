@@ -20,7 +20,6 @@ fn workload() -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
@@ -167,7 +166,6 @@ fn element_scalar_field_is_included_in_both_order_exact_preassembly_ceiling() {
                 Some(&mesh),
                 SourceImplementation::CanonicalVolumeProjection,
                 BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap(),
         )
@@ -333,7 +331,7 @@ fn inventory_counts_all_actions_and_each_case_membership_without_copying_selecti
     entity
         .assembly_path
         .extend((0..100).map(|index| format!("component_{index}_{}", "x".repeat(180))));
-    let mut target = RegionTarget::boundary("resolved_face");
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("resolved_face"));
     target.bind_resolved_entities(vec![entity]).unwrap();
     let ExcitationAction::Force(action) = &mut workload.model.excitations[0] else {
         panic!("force fixture")
@@ -363,7 +361,6 @@ fn realization_budget_is_composed_and_enforced_for_both_element_orders() {
                 Some(&mesh),
                 runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
                 runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap(),
         )

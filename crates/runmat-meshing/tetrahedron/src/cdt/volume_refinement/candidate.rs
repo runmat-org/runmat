@@ -132,6 +132,25 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
             );
         }
     }
+    // A size defect that the circumcenter cannot reach (thin sections put it
+    // outside the region) is an over-long edge. Interior lattice points of the
+    // source keep that edge, so split it near its midpoint before them.
+    if let Some(midpoint) = metric_edge_midpoint(topology, tetrahedron_index, quality, quality_options) {
+        if strictly_inside_region_from(
+            topology,
+            tetrahedron_index,
+            &quality.region_id,
+            midpoint,
+            work.cancellation,
+        )? {
+            choices.push(CandidateChoice {
+                kind: DelaunayRefinementCandidateKind::MetricEdgeMidpoint,
+                coordinates_m: runmat_types::physical::Quantity::new(midpoint),
+                construction_node_identities: quality.node_identities,
+                construction_point_index: 0,
+            });
+        }
+    }
     work.evaluate()?;
     // Preserve the original family order, but construct only the prefix needed
     // to find an available point. A valid circumcenter needs no interior lattice.
@@ -192,6 +211,71 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
         resolved_metric: quality.resolved_metric,
         source_violation_ratio: quality.refinement_violation_ratio,
     })
+}
+
+/// The longest edge of the source whose metric length exceeds the size bound
+/// and which has a non-boundary endpoint, so its interior is strictly inside
+/// the region and on no protected facet. The point sits on the source side of
+/// the midpoint (1/16 toward the centroid), strictly inside the source, so a
+/// Delaunay insertion removes the edge. The construction is invariant under
+/// vertex order.
+pub(in crate::cdt::volume_refinement) fn metric_edge_midpoint(
+    topology: &impl VolumeTopologyRead,
+    tetrahedron_index: usize,
+    quality: &DelaunayTetrahedronQuality,
+    quality_options: crate::cdt::DelaunayVolumeQualityOptions,
+) -> Option<[f64; 3]> {
+    let vertices = topology.tetrahedron(tetrahedron_index as u32)?.vertex_indices;
+    let corners = vertices.map(|vertex| {
+        (
+            topology.nodes()[vertex as usize].coordinates_m.canonical_value(),
+            topology.vertex_is_boundary(vertex),
+        )
+    });
+    let metric = quality.resolved_metric;
+    let mut best: Option<(f64, [f64; 3], [f64; 3])> = None;
+    for left in 0..4 {
+        for right in (left + 1)..4 {
+            let ((a, a_boundary), (b, b_boundary)) = (corners[left], corners[right]);
+            if a_boundary && b_boundary {
+                continue;
+            }
+            let (low, high) = if compare_points(&a, &b) == std::cmp::Ordering::Greater {
+                (b, a)
+            } else {
+                (a, b)
+            };
+            let delta: [f64; 3] = std::array::from_fn(|axis| high[axis] - low[axis]);
+            let product = [
+                metric.xx * delta[0] + metric.xy * delta[1] + metric.xz * delta[2],
+                metric.xy * delta[0] + metric.yy * delta[1] + metric.yz * delta[2],
+                metric.xz * delta[0] + metric.yz * delta[1] + metric.zz * delta[2],
+            ];
+            let length = (delta[0] * product[0] + delta[1] * product[1] + delta[2] * product[2]).sqrt();
+            if !length.is_finite() || length <= quality_options.maximum_metric_edge_length {
+                continue;
+            }
+            let better = match best {
+                None => true,
+                Some((best_length, best_low, best_high)) => {
+                    length > best_length
+                        || length == best_length
+                            && (compare_points(&low, &best_low), compare_points(&high, &best_high))
+                                < (std::cmp::Ordering::Equal, std::cmp::Ordering::Equal)
+                }
+            };
+            if better {
+                best = Some((length, low, high));
+            }
+        }
+    }
+    let (_, low, high) = best?;
+    let centroid = average(corners.iter().map(|(point, _)| *point));
+    let point: [f64; 3] = std::array::from_fn(|axis| {
+        let midpoint = 0.5 * (low[axis] + high[axis]);
+        midpoint + (centroid[axis] - midpoint) / 16.0
+    });
+    point.iter().all(|value| value.is_finite()).then_some(point)
 }
 
 fn compare_points(left: &[f64; 3], right: &[f64; 3]) -> std::cmp::Ordering {

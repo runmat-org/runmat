@@ -1,0 +1,59 @@
+// Engineering physics belongs in the importing study.
+
+geometry part {
+    file = "./geometry/box.brep"
+    units = m
+    region body : solid { select id "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"; expect exactly_one }
+    region support : face { select id "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"; expect exactly_one }
+    region hot : face { select id "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"; expect exactly_one }
+}
+mesh volume on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 10 m
+        maximum_deviation = 0.1 m
+    }
+}
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+    thermal {
+        reference_temperature = 293.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        conductivity = 45 W/m/K
+        specific_heat = 500 J/kg/K
+        expansion_coefficient = 0.000012 K^-1
+    }
+}
+model structure {
+    thermal { reference_temperature = 293.15 K }
+    thermomechanical { reference_temperature = 293.15 K }
+    assign material.steel to geometry.part.region.body
+    constraint base {
+        structural.fixed { target = geometry.part.region.support }
+    }
+    constraint hot {
+        thermal.temperature {
+            target = geometry.part.region.hot
+            value = 303.15 K
+        }
+    }
+}
+study heated_modes {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    analysis heat { thermal steady {} retain heated }
+    analysis preload after analysis.heat {
+        thermomechanical preload { temperature = analysis.heat.state.heated }
+    }
+    analysis modes after analysis.preload {
+        structural prestressed_modal {
+            prestress = analysis.preload.state.geometric_stiffness
+            modes = 1
+        }
+    }
+}

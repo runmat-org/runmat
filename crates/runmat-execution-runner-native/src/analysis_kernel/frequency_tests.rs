@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateTransition,
-    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
     execute_serial_analysis, import_structural_frequency_entry,
@@ -35,7 +35,7 @@ use runmat_analysis_fea::{
     solve::dynamics::DirectHarmonicPolicy,
     ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions, ModalTruncationPolicy,
 };
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
@@ -88,14 +88,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("structural-frequency-graph"),
         digest("structural-frequency-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("structural-frequency-runtime"),
-            digest("structural-frequency-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }
@@ -119,7 +112,6 @@ fn direct_fixture() -> (
         model,
         step_id: runmat_analysis_core::ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
@@ -172,7 +164,6 @@ fn prestressed_direct_fixture() -> (
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -214,7 +205,6 @@ fn prestressed_direct_fixture() -> (
         model,
         step_id: ProcedureStepId("prestressed_frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
@@ -257,6 +247,7 @@ fn execute_frequency(
     )
     .unwrap();
     let fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         prestress_state: prestress_state.clone(),
@@ -290,6 +281,8 @@ fn execute_frequency(
         if recover_fields {
             let recovery = prepare_structural_frequency_field_recovery(
                 StructuralFrequencyFieldRecoveryPreparation {
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                     source_host: task.host.clone(),
                     workload: workload_objects.clone(),
                     mesh: mesh_objects.clone(),
@@ -366,6 +359,8 @@ fn execute_frequency(
     if recover_fields && recovery_sources.len() > 1 {
         assert!(prepare_structural_frequency_field_recovery(
             StructuralFrequencyFieldRecoveryPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 source_host: recovery_sources[0].0.clone(),
                 workload: workload_objects.clone(),
                 mesh: mesh_objects.clone(),
@@ -468,6 +463,11 @@ fn execute_frequency(
     (result, recovered)
 }
 
+// witness: FEA-SHARED-EXECUTION-001/deterministic_independent_fanout @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A two-frequency native fan-out and fan-in publishes samples in authored order with
+//   recovered fields per frequency; order independence under reversed completion is in the sibling
+//   response-spectrum test.
 #[test]
 fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
     let (workload, mesh) = direct_fixture();
@@ -544,6 +544,7 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
     )
     .unwrap();
     let mut fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         prestress_state: None,
@@ -653,7 +654,6 @@ fn native_modal_frequency_uses_the_exact_portable_basis_state() {
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(6),
             solver_mesh: Some(mesh.clone()),
-            formulation_requirement: FormulationRequirement::Experimental,
             ..ModalSolveOptions::default()
         },
     )
@@ -685,7 +685,6 @@ fn native_modal_frequency_uses_the_exact_portable_basis_state() {
         model,
         step_id: runmat_analysis_core::ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
@@ -735,7 +734,6 @@ fn modal_frequency_coordinator_publishes_and_binds_the_exact_basis() {
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(6),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -748,7 +746,6 @@ fn modal_frequency_coordinator_publishes_and_binds_the_exact_basis() {
         model,
         step_id: frequency_step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
     };

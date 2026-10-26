@@ -18,11 +18,7 @@ use runmat_meshing_core::{
 };
 
 fn provenance(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 pub(super) fn mesh(order: ElementOrder) -> SolverMeshArtifact {
@@ -105,7 +101,7 @@ fn shared_shell_boundary() -> (AnalysisModel, SolverMeshArtifact) {
         constraint_id: "shared_shell_boundary".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: RegionTarget::boundary("skin"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
         },
     })];
     (model, mesh)
@@ -129,13 +125,13 @@ pub(super) fn cases() -> Vec<(&'static str, AnalysisModel, Option<SolverMeshArti
             constraint_id: "shell_symmetry".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::Symmetry {
-                target: RegionTarget::boundary("skin"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
             },
         }));
     let mut redundant_solid = tet4.clone();
     redundant_solid.constraints = vec![
-        prescribed("first", RegionTarget::boundary("root"), 0.0),
-        prescribed("second", RegionTarget::boundary("root"), 0.0),
+        prescribed("first", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")), 0.0),
+        prescribed("second", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")), 0.0),
     ];
     let mut redundant_mixed = mixed.clone();
     redundant_mixed.constraints = vec![
@@ -266,7 +262,7 @@ fn conflicting_solid_and_generic_prescriptions_retain_typed_provenance() {
         let target = if mixed {
             RegionTarget::point("node:102")
         } else {
-            RegionTarget::boundary("root")
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root"))
         };
         model.constraints = vec![
             prescribed("first", target.clone(), 0.0),
@@ -348,7 +344,7 @@ fn counted_unique_ids_preserve_first_authored_duplicate_diagnostic() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut constraints = Vec::new();
     for id in ["z", "z", "a", "a"] {
-        constraints.push(prescribed(id, RegionTarget::boundary("root"), 0.0));
+        constraints.push(prescribed(id, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")), 0.0));
     }
     model.constraints = constraints;
     assert_eq!(

@@ -13,7 +13,7 @@ fn transient_departures_retain_heating_below_absolute_temperature_resolution() {
         let assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &heat_generation(generation),
@@ -64,6 +64,10 @@ fn transient_departures_retain_heating_below_absolute_temperature_resolution() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/assembly @ thermal_steady/tet10/numerical_kernel,
+//   thermal_transient/tet10/numerical_kernel;
+//   boundary: Single Tet10 conductivity constant patch, integrated capacity, linear gradient and
+//   flux; no general curved-mesh convergence.
 #[test]
 fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -72,7 +76,7 @@ fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() 
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -129,7 +133,7 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &heat_generation(density),
@@ -185,7 +189,7 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     let no_source = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -215,6 +219,10 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     }
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: Exact face flux and convection preserve integrated power and the ambient state on a
+//   Tet4 fixture.
 #[test]
 fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -224,7 +232,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let selector = face.provenance[0].analysis_selection_id().unwrap();
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "applied_flux".into(),
-        target: RegionTarget::boundary(selector.clone()),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector.clone()))),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Constant(HeatFlux::new(240.0)),
         },
@@ -232,7 +240,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let flux = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -247,7 +255,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "ambient_convection".into(),
-        target: RegionTarget::boundary(selector),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(305.0)),
             coefficient: HeatTransferCoefficient::new(18.0),
@@ -256,7 +264,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let convection = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -313,14 +321,14 @@ fn prescribed_face_temperature_is_enforced_exactly() {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "fixed_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(selector),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                 value: PrescribedValue::Constant(Temperature::new(290.0)),
             },
         }));
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -371,7 +379,7 @@ fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode()
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -421,11 +429,11 @@ fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode()
 fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let (mut model, mut mesh, free_node, base_region) = thermal_reference_model();
     prescribe_base(&mut model, base_region, 350.0);
-    let convection_region = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "convective_sides".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let convection_region = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "convective_sides".into(),
+        vec!["root".into()],
+    );
     let base_node_ids = mesh.topology.boundary_faces.iter().find_map(|face| {
         face.provenance
             .iter()
@@ -448,7 +456,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let ambient_temperature_k = 290.0;
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "side_convection".into(),
-        target: RegionTarget::boundary(convection_region.source_topology_id),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(convection_region.source_topology_id.clone()))),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient_temperature_k)),
             coefficient: HeatTransferCoefficient::new(coefficient),
@@ -458,7 +466,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),

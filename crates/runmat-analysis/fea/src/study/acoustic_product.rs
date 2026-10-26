@@ -83,7 +83,8 @@ fn validate_canonical_acoustic_materials(
                 .canonical_value()
                 .is_finite()
             || acoustic.speed_of_sound_m_per_s.canonical_value() <= 0.0
-            || acoustic.damping_ratio.canonical_value() != 0.0
+            || !acoustic.damping_ratio.canonical_value().is_finite()
+            || !(0.0..1.0).contains(&acoustic.damping_ratio.canonical_value())
         {
             return Err(AcousticStudyProductError::UnsupportedMaterial);
         }

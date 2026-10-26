@@ -16,11 +16,20 @@ macro_rules! identity_type {
                 self.0
             }
 
+            #[allow(dead_code)]
             pub(in crate::execution) fn derive<T: Serialize>(
                 domain: &'static str,
                 input: &T,
             ) -> AnalysisExecutionResult<Self> {
                 Ok(Self(super::derive_digest(domain, input)?))
+            }
+
+            #[allow(dead_code)]
+            pub(in crate::execution) fn derive_content<T: Serialize>(
+                domain: &'static str,
+                input: &T,
+            ) -> AnalysisExecutionResult<Self> {
+                Ok(Self(super::derive_content_digest(domain, input)?))
             }
         }
     };
@@ -124,6 +133,7 @@ pub enum AnalysisWorkKind {
     SolveAcousticHarmonic,
     AssembleAcousticFrequencyResult,
     SolveElectricalStatic,
+    SolveAcousticResponse,
     SolveMagnetostatic,
     SolveMaxwellHarmonic,
     MaterializeSignal,

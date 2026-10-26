@@ -25,5 +25,6 @@ pub const FEA_REFERENCE_POINT_FROM_COORDINATES_CATALOG_ENTRY: BuiltinCatalogEntr
         &contract::REFERENCE_POINT_DESCRIPTOR,
     );
 
+#[cfg(test)]
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
     &[&FEA_REFERENCE_POINT_FROM_COORDINATES_CATALOG_ENTRY];

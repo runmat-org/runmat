@@ -123,6 +123,7 @@ async fn execute_command(
             element_order,
             max_elements,
             seed,
+            shared_interfaces,
             force,
             json,
         } => {
@@ -138,6 +139,7 @@ async fn execute_command(
                         element_order,
                         maximum_elements: max_elements,
                         deterministic_seed: seed,
+                        shared_interfaces,
                         force,
                         json,
                     },

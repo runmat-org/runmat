@@ -25,7 +25,7 @@ fn workload(
         "electrical",
         vec![ProcedureStep::electromagnetic_static("potential")],
     );
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -50,8 +50,9 @@ fn workload(
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 
@@ -84,7 +85,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 AccuracySourceKind::ElectricalStatic,
                 receipt.source_result(),
                 None,
-                workload.formulation_requirement,
                 workload.model.sequence.steps[0].accuracy.clone(),
             )
             .unwrap();
@@ -127,18 +127,7 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 changed_plan,
-            )
-            .unwrap();
-            assert!(validate(&changed, &receipt, None, &refs).is_err());
-            let changed = AccuracyEvaluationRequest::new(
-                request.producer,
-                request.source_kind,
-                request.source_result,
-                None,
-                FormulationRequirement::Production,
-                request.plan.clone(),
             )
             .unwrap();
             assert!(validate(&changed, &receipt, None, &refs).is_err());
@@ -149,7 +138,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 request.plan.clone(),
             )
             .unwrap();

@@ -79,7 +79,6 @@ pub(super) fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> FeaRunR
         model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()

@@ -89,7 +89,6 @@ fn general_equation_spans_solid_and_explicit_nodes() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..crate::LinearStaticSolveOptions::default()
         },
@@ -144,7 +143,7 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
             constraint_id: "nonconformal_beam_root_tie".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Tie(PairedConstraint {
-                primary: runmat_analysis_core::RegionTarget::boundary("solid_load"),
+                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("solid_load")),
                 secondary: runmat_analysis_core::RegionTarget::point("node:101"),
                 pairing: PairingPolicy::GeometricTolerance(Length::new(1.0e-9)),
             }),
@@ -166,7 +165,6 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..crate::LinearStaticSolveOptions::default()
         },
@@ -177,6 +175,9 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
         .is_some());
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/normal_symmetry_rigid_coupling @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell symmetry uses the authored surface normal.
 #[test]
 fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
     let (mut model, mesh) = shell_model_and_mesh();
@@ -186,7 +187,7 @@ fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
             constraint_id: "shell_symmetry".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::Symmetry {
-                target: runmat_analysis_core::RegionTarget::boundary("skin"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
             },
         }));
 
@@ -204,6 +205,12 @@ fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
     }));
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell distributing coupling retains reference-point evidence.
+// witness: FEA-STRUCTURAL-EXECUTION-001/constraints_reactions_shell @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell distributing coupling with reference-point evidence.
 #[test]
 fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
     let (mut model, mesh) = shell_model_and_mesh();
@@ -213,7 +220,7 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
             constraint_id: "shell_reference_coupling".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-                target: runmat_analysis_core::RegionTarget::boundary("skin"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
                 reference_point: ReferencePoint {
                     reference_point_id: "shell_control".into(),
                     position: Position::new([0.0, 0.0, 0.0]),
@@ -247,7 +254,6 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..crate::LinearStaticSolveOptions::default()
         },
@@ -303,6 +309,9 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
         .unwrap();
 }
 
+// witness: FEA-STRUCTURAL-EXECUTION-001/constraints_reactions_shell @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: A mesh-free shell reference coupling uses the same generalized DOF path.
 #[test]
 fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
     let mut model = crate::fixtures::fixture_model(
@@ -314,7 +323,7 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
             constraint_id: "panel_reference_coupling".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                target: runmat_analysis_core::RegionTarget::boundary("shell_panel"),
+                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("shell_panel")),
                 reference_point: ReferencePoint {
                     reference_point_id: "panel_control".into(),
                     position: Position::new([0.25, 0.25, 0.0]),
@@ -327,7 +336,6 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             ..crate::LinearStaticSolveOptions::default()
         },
     )
@@ -349,27 +357,29 @@ fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
 fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.topology.boundary_faces[1]
         .provenance
-        .push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "solid_load".into(),
-            assembly_path: vec!["root".into()],
-        });
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "solid_load".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.boundary_faces[1].provenance.sort();
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
@@ -388,7 +398,7 @@ fn mixed_dispatch_preserves_target_failure_and_cancellation_instead_of_falling_t
         constraint_id: "absent".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: runmat_analysis_core::RegionTarget::boundary("absent"),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("absent")),
         },
     };
     let direct = super::super::prepared::PreparedTargets::derive(

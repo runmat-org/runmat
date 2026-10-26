@@ -6,7 +6,7 @@ use runmat_geometry_core::{
 use runmat_geometry_io::import::GeometryImportError;
 use runmat_geometry_io::{
     import_exact_cad, ExactCadImportOptions, GeometryFormat, GeometryImportContext,
-    OcctExactEvaluator,
+    OcctExactEvaluator, SourceUnitsAuthority,
 };
 
 const NIST_SEEKER_TABLE: &[u8] = include_bytes!("fixtures/nist_seeker_table_acis.step");
@@ -49,6 +49,11 @@ fn concurrent_step_imports_keep_independent_units_and_physical_properties() {
     });
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Declared STEP units preserve physical scale across requested coordinate units; mixed
+//   or missing unit rejection is not asserted here.
 #[test]
 fn declared_step_units_preserve_physical_scale_across_requested_coordinate_units() {
     for units in [LengthUnit::Meter, LengthUnit::Millimeter, LengthUnit::Inch] {
@@ -80,6 +85,252 @@ fn declared_step_units_preserve_physical_scale_across_requested_coordinate_units
     }
 }
 
+/// The round-pipe flow fixture (radius 0.05, length 0.5) with its unit header relabelled as
+/// millimetres, as the fixture shipped before its generator was fixed.
+fn pipe_labelled_millimetres() -> Vec<u8> {
+    let metres = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
+    assert!(metres.contains("SI_UNIT($,.METRE.)"));
+    metres
+        .replace("SI_UNIT($,.METRE.)", "SI_UNIT(.MILLI.,.METRE.)")
+        .into_bytes()
+}
+
+fn pipe_volume_m3(options: &ExactCadImportOptions) -> (f64, runmat_geometry_io::ImportedExactCad) {
+    let imported = import_exact_cad(
+        "pipe.step",
+        &pipe_labelled_millimetres(),
+        GeometryFormat::Step,
+        options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let mass = evaluator
+        .mass_properties(
+            &imported.topology.bodies[0].mass_properties_evaluator_id,
+            &Unlimited,
+        )
+        .unwrap();
+    (mass.volume_m3.canonical_value(), imported)
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: An authored metre unit over a STEP file declaring millimetres reads the coordinates
+//   in metres, records the declared unit as provenance in the geometry document, and survives
+//   closure; without authority the declaration governs.
+#[test]
+fn authored_step_units_override_a_different_declaration_and_record_it() {
+    let pipe_m3 = std::f64::consts::PI * 0.05 * 0.05 * 0.5;
+    let (authored_volume, authored) = pipe_volume_m3(&ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        source_units_authority: SourceUnitsAuthority::Authored,
+        ..ExactCadImportOptions::default()
+    });
+    assert!(
+        (authored_volume / pipe_m3 - 1.0).abs() < 1.0e-9,
+        "{authored_volume} vs {pipe_m3}"
+    );
+    assert_eq!(authored.source_unit_evidence.uniform_unit(), Some(LengthUnit::Meter));
+    assert_eq!(authored.source_unit_evidence.overridden_declared_unit(), Some(LengthUnit::Millimeter));
+    assert!((authored.kernel_units.meters_per_unit() - 1.0).abs() < 1.0e-15);
+    let document = authored.geometry_document().unwrap();
+    assert_eq!(document.source.unit_evidence.overridden_declared_unit(), Some(LengthUnit::Millimeter));
+    authored.build_closure().unwrap();
+
+    // Without authority the caller's unit is only a fallback: the millimetre declaration governs.
+    let (declared_volume, declared) = pipe_volume_m3(&ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        ..ExactCadImportOptions::default()
+    });
+    assert!((declared_volume / (pipe_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
+    assert_eq!(declared.source_unit_evidence.overridden_declared_unit(), None);
+
+    // An authored unit equal to the declaration is not an override.
+    let (same_volume, same) = pipe_volume_m3(&ExactCadImportOptions {
+        source_units: Some(LengthUnit::Millimeter),
+        source_units_authority: SourceUnitsAuthority::Authored,
+        ..ExactCadImportOptions::default()
+    });
+    assert!((same_volume / (pipe_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
+    assert_eq!(same.source_unit_evidence.overridden_declared_unit(), None);
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: An authored metre unit over an IGES file whose global section declares millimetres
+//   reads the coordinates in metres and records the declared unit; without authority the
+//   declaration governs.
+#[test]
+fn authored_iges_units_override_a_different_declaration_and_record_it() {
+    let import = |options: &ExactCadImportOptions| {
+        let imported = import_exact_cad(
+            "box_metre_values_mm_label.igs",
+            include_bytes!("fixtures/box_metre_values_mm_label.igs"),
+            GeometryFormat::Iges,
+            options,
+            &GeometryImportContext::new(),
+        )
+        .unwrap();
+        let volume = OcctExactEvaluator::new(&imported)
+            .unwrap()
+            .mass_properties(
+                &imported.topology.bodies[0].mass_properties_evaluator_id,
+                &Unlimited,
+            )
+            .unwrap()
+            .volume_m3;
+        (volume.canonical_value(), imported)
+    };
+    let box_m3 = 0.5 * 0.1 * 0.02;
+    let (authored_volume, authored) = import(&ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        source_units_authority: SourceUnitsAuthority::Authored,
+        ..ExactCadImportOptions::default()
+    });
+    assert!(
+        (authored_volume / box_m3 - 1.0).abs() < 1.0e-9,
+        "{authored_volume} vs {box_m3}"
+    );
+    assert_eq!(authored.source_unit_evidence.overridden_declared_unit(), Some(LengthUnit::Millimeter));
+    authored.build_closure().unwrap();
+    let (declared_volume, declared) = import(&ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        ..ExactCadImportOptions::default()
+    });
+    assert!((declared_volume / (box_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
+    assert_eq!(declared.source_unit_evidence.overridden_declared_unit(), None);
+}
+
+fn step_volume_m3(
+    name: &str,
+    bytes: &[u8],
+    options: &ExactCadImportOptions,
+) -> (f64, runmat_geometry_io::ImportedExactCad) {
+    let imported = import_exact_cad(
+        name,
+        bytes,
+        GeometryFormat::Step,
+        options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let volume = OcctExactEvaluator::new(&imported)
+        .unwrap()
+        .mass_properties(
+            &imported.topology.bodies[0].mass_properties_evaluator_id,
+            &Unlimited,
+        )
+        .unwrap()
+        .volume_m3
+        .canonical_value();
+    (volume, imported)
+}
+
+const PIPE_METRE_UNIT: &str = "#114 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );";
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: STEP files declaring centimetres (SI prefix) or feet (conversion-based unit with a
+//   304.8 mm factor) import at their declared scale, and an authored metre unit over either reads
+//   the coordinates in metres and records the declared unit.
+#[test]
+fn centimetre_and_foot_step_declarations_resolve_and_accept_authored_overrides() {
+    let pipe = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
+    assert!(pipe.contains(PIPE_METRE_UNIT));
+    let centimetres = pipe.replacen(
+        PIPE_METRE_UNIT,
+        "#114 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.) );",
+        1,
+    );
+    let feet = pipe.replacen(
+        PIPE_METRE_UNIT,
+        "#114 = ( CONVERSION_BASED_UNIT('FOOT',#900) LENGTH_UNIT() NAMED_UNIT(#901) );\n\
+         #900 = LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(304.8),#902);\n\
+         #901 = DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.);\n\
+         #902 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );",
+        1,
+    );
+    let pipe_m3 = std::f64::consts::PI * 0.05 * 0.05 * 0.5;
+    for (name, bytes, meters_per_unit) in [
+        ("centimetres.step", centimetres, 0.01),
+        ("feet.step", feet, 0.3048),
+    ] {
+        let (declared_volume, _) =
+            step_volume_m3(name, bytes.as_bytes(), &ExactCadImportOptions::default());
+        let scaled = pipe_m3 * meters_per_unit * meters_per_unit * meters_per_unit;
+        assert!(
+            (declared_volume / scaled - 1.0).abs() < 1.0e-9,
+            "{name}: {declared_volume} vs {scaled}"
+        );
+        let (authored_volume, authored) = step_volume_m3(
+            name,
+            bytes.as_bytes(),
+            &ExactCadImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                source_units_authority: SourceUnitsAuthority::Authored,
+                ..ExactCadImportOptions::default()
+            },
+        );
+        assert!(
+            (authored_volume / pipe_m3 - 1.0).abs() < 1.0e-9,
+            "{name}: {authored_volume} vs {pipe_m3}"
+        );
+        let declared = authored
+            .source_unit_evidence.overridden_declared_unit().map(LengthUnit::meters_per_unit);
+        assert!(
+            (declared.unwrap() / meters_per_unit - 1.0).abs() < 1.0e-12,
+            "{name}: {declared:?}"
+        );
+        authored.build_closure().unwrap();
+    }
+}
+
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Authored units over a STEP file whose global contexts declare several different
+//   length units, or no length unit, are refused with GEOMETRY_UNITS_UNRESOLVED instead of
+//   skipping the rescale. Both files are synthetic variants of the shipped fixtures.
+#[test]
+fn authored_units_refuse_step_files_without_one_declared_unit() {
+    let tube = include_str!("../../../../docs/simulation/examples/geometry/compliant-tube.step");
+    let mixed = tube.replacen(
+        "#136 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );",
+        "#136 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );",
+        1,
+    );
+    assert_ne!(mixed, tube);
+    let pipe = include_str!("../../../../docs/simulation/examples/geometry/pipe.step");
+    let undeclared = pipe.replacen(
+        PIPE_METRE_UNIT,
+        "#114 = ( NAMED_UNIT(*) SI_UNIT($,.METRE.) );",
+        1,
+    );
+    assert_ne!(undeclared, pipe);
+    for (name, bytes) in [("mixed.step", mixed), ("undeclared.step", undeclared)] {
+        let refused = import_exact_cad(
+            name,
+            bytes.as_bytes(),
+            GeometryFormat::Step,
+            &ExactCadImportOptions {
+                source_units: Some(LengthUnit::Meter),
+                source_units_authority: SourceUnitsAuthority::Authored,
+                ..ExactCadImportOptions::default()
+            },
+            &GeometryImportContext::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(refused, GeometryImportError::UnresolvedUnits(_)),
+            "{name}: {refused}"
+        );
+    }
+}
+
 struct Unlimited;
 
 impl GeometryEvaluationControl for Unlimited {
@@ -100,6 +351,12 @@ impl GeometryEvaluationControl for Unlimited {
     }
 }
 
+// witness: FEA-MESH-GEOMETRY-001/exact_formats @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: A public NIST ACIS STEP part imports with one body, solid, shell, six faces, twelve
+//   edges and eight vertices and kernel mass-property volume equal to the reference within 1e-12;
+//   IGES and BREP and the rest of the corpus are not asserted here.
 #[test]
 fn public_industrial_step_imports_exact_topology_and_mass_properties() {
     let options = ExactCadImportOptions {

@@ -13,7 +13,6 @@ pub(super) fn through_authored_product(
     let compiled = crate::study::CompiledAnalysisStudy {
         module_path: "tests/original-temperature.fea".into(),
         study_id: "original-temperature".into(),
-        formulation_requirement: expected.formulation_requirement,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),
@@ -23,10 +22,10 @@ pub(super) fn through_authored_product(
     };
     let policy = crate::study::ThermalStudyPlanningPolicy {
         backend: expected.backend,
-        formulation_requirement: expected.formulation_requirement,
+        element_heat_source: None,
     };
-    mixed::verify_source_selection(&compiled, &expected.initial_fields, policy);
-    assert!(crate::study::plan_thermal_study(&compiled, policy).is_err());
+    mixed::verify_source_selection(&compiled, &expected.initial_fields, policy.clone());
+    assert!(crate::study::plan_thermal_study(&compiled, policy.clone()).is_err());
     let product = crate::study::plan_thermal_study_product_with_fields(
         compiled,
         mesh,

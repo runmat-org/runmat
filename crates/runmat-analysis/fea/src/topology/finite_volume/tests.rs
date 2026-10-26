@@ -3,11 +3,11 @@ use runmat_meshing_core::{fixtures, ElementOrder, StableDigest};
 
 fn policy() -> FiniteVolumeProjectionPolicy {
     FiniteVolumeProjectionPolicy {
-        max_cells: 10000,
-        max_face_incidences: 40000,
-        max_boundary_faces: 40000,
-        max_scratch_bytes: 100_000_000,
-        max_traversal_operations: 100_000_000,
+        max_cells: Some(10000),
+        max_face_incidences: Some(40000),
+        max_boundary_faces: Some(40000),
+        max_scratch_bytes: Some(100_000_000),
+        max_traversal_operations: Some(100_000_000),
     }
 }
 
@@ -72,6 +72,10 @@ fn two_cells() -> AnalysisProjection {
     source
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/inventory @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Two affine Tet4 cells; oriented surface closure, volume and original face mapping. No
+//   skew/curved mesh envelope proof.
 #[test]
 fn exact_two_cell_geometry_is_conservative_and_retains_original_boundary_mapping() {
     let source = two_cells();
@@ -129,6 +133,9 @@ fn refined_cube_exact_volume_and_both_affine_orders_have_closed_faces() {
     }
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/geometry @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Two-cell source access reordering, not execution placement equivalence.
 #[test]
 fn stable_cell_face_physics_is_invariant_to_reordered_source_access_indices() {
     let source = two_cells();
@@ -192,6 +199,9 @@ fn rigid_rotation_tiny_scale_and_translation_preserve_vector_geometry() {
     assert!(geometry::length(sum) < 1e-25);
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/quality @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Selected malformed source cases only, not complete quality-envelope convergence.
 #[test]
 fn rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record() {
     let mut source = two_cells();
@@ -235,26 +245,35 @@ fn rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record()
     );
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/budget @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Exact finite-volume construction counts and one-below limits; requested bytes are not
+//   RSS.
 #[test]
 fn exact_admission_bounds_succeed_and_each_one_below_rejects() {
     let source = two_cells();
-    let r = FiniteVolumeTopology::reserve(&source, policy()).unwrap();
+    let r = FiniteVolumeTopology::reserve(
+        &source,
+        policy(),
+        &crate::topology::FiniteVolumeCellSelection::AllElements,
+    )
+    .unwrap();
     let exact = FiniteVolumeProjectionPolicy {
-        max_cells: r.cell_count,
-        max_face_incidences: r.face_incidence_count,
-        max_boundary_faces: r.boundary_face_count,
-        max_scratch_bytes: r.scratch_bytes,
-        max_traversal_operations: r.traversal_operations,
+        max_cells: Some(r.cell_count),
+        max_face_incidences: Some(r.face_incidence_count),
+        max_boundary_faces: Some(r.boundary_face_count),
+        max_scratch_bytes: Some(r.scratch_bytes),
+        max_traversal_operations: Some(r.traversal_operations),
     };
     FiniteVolumeTopology::derive(&source, exact).unwrap();
     for field in 0..5 {
         let mut p = exact;
         match field {
-            0 => p.max_cells -= 1,
-            1 => p.max_face_incidences -= 1,
-            2 => p.max_boundary_faces -= 1,
-            3 => p.max_scratch_bytes -= 1,
-            _ => p.max_traversal_operations -= 1,
+            0 => p.max_cells = p.max_cells.map(|v| v - 1),
+            1 => p.max_face_incidences = p.max_face_incidences.map(|v| v - 1),
+            2 => p.max_boundary_faces = p.max_boundary_faces.map(|v| v - 1),
+            3 => p.max_scratch_bytes = p.max_scratch_bytes.map(|v| v - 1),
+            _ => p.max_traversal_operations = p.max_traversal_operations.map(|v| v - 1),
         }
         assert!(matches!(
             FiniteVolumeTopology::derive(&source, p),

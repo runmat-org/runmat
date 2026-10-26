@@ -41,7 +41,7 @@ pub(in crate::planning::resource) fn result_output(
         "modal metadata and coordinate layout",
     )?;
     let metadata_resident =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             metadata, 1,
         )
         .ok_or(ResourcePlanningError::Overflow(
@@ -64,6 +64,12 @@ pub(in crate::planning::resource) fn result_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: A60000DOF/256vector/3residual numeric output shape retains the complete
+    //   search-capacity bound and conservative metadata while avoiding the unknown-shape byte
+    //   multiplier. This count-only planning witness does not establish an eigensolve, physical
+    //   convergence or whole-task capacity.
     #[test]
     fn full_search_capacity_does_not_treat_every_numeric_byte_as_a_map_node() {
         let values = super::super::modal_output_value_count(60_000, 256, 3).unwrap();
@@ -72,7 +78,11 @@ mod tests {
             facts.encoded_payload_bytes_upper_bound.0,
         )
         .unwrap();
-        assert!(generic.construction_resident_bytes_admission_budget.0 > 8 * 1024 * 1024 * 1024);
+        // The generic direct-encoding projection is bounded by three encoded copies.
+        assert!(
+            generic.construction_resident_bytes_admission_budget.0
+                >= 3 * facts.encoded_payload_bytes_upper_bound.0
+        );
         assert!(facts.construction_resident_bytes_admission_budget.0 < 2 * 1024 * 1024 * 1024);
         assert!(
             result_output(values, 257, 3, 60_000, 20_000)

@@ -1,7 +1,7 @@
 use super::*;
 use crate::cdt::{
     topology::build_delaunay_volume_topology_with_regions, DelaunayTopologyOptions,
-    DelaunayVolumeNode, DelaunayVolumeSliverMutation,
+    DelaunayVolumeNode,
 };
 use crate::cdt::{DelaunayVolumeMesh, DelaunayVolumeProvenance};
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
@@ -146,20 +146,11 @@ pub(in super::super::super) fn assemble_insertions(
     insertions
 }
 
-pub(in super::super::super) fn assemble_refinement_insertions(
+pub(in super::super::super) fn assemble_quality_mutations(
     meshes: &[DelaunayVolumeMesh],
-) -> Vec<DelaunayVolumeNode> {
+) -> Vec<crate::cdt::DelaunayVolumeQualityMutation> {
     meshes
         .iter()
-        .flat_map(|mesh| mesh.refinement_insertions.iter().copied())
-        .collect()
-}
-
-pub(in super::super::super) fn assemble_sliver_mutations(
-    meshes: &[DelaunayVolumeMesh],
-) -> Vec<DelaunayVolumeSliverMutation> {
-    meshes
-        .iter()
-        .flat_map(|mesh| mesh.sliver_mutations.iter().cloned())
+        .flat_map(|mesh| mesh.quality_mutations.iter().cloned())
         .collect()
 }

@@ -436,6 +436,10 @@ mod tests {
         assert!(ninety[1][2].abs() < 1.0e-5);
     }
 
+    // witness: FEA-STRUCTURAL-REFERENCE-001/patch_reference_convergence @
+    //   linear_structural/shell/numerical_kernel; coverage: partial;
+    //   boundary: A one-layer membrane patch matches the independent plane-stress reference; no
+    //   convergence series.
     #[test]
     fn one_layer_membrane_patch_matches_the_independent_plane_stress_reference() {
         let thickness = 0.001;

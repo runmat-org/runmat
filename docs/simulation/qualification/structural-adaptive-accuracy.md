@@ -24,8 +24,8 @@ lacks a relative measure, the complete transfer contribution is indeterminate.
 
 `Converged` requires shared `Satisfied` and both solvers' convergence. A shared
 `NotSatisfied` report permits `Continue` only when the authored action is `Refine`
-and another cycle remains. Indeterminate evidence rejects; experimental warning
-policies cannot produce adaptive convergence. The shared refinement ceiling counts
+and another cycle remains. Indeterminate evidence rejects and cannot produce adaptive
+convergence. The shared refinement ceiling counts
 completed mesh changes, including the first source-to-target pair. No separate
 adaptive tolerance defaults or private publication evaluator remain.
 
@@ -64,5 +64,5 @@ the original cantilever convergence gate still fails.
 This foundation does not qualify Stage 11. Authoring/planning the adaptive graph,
 whole-task admission and measured memory, frozen physical source receipt binding,
 actual adaptive re-solve and target convergence, durable/remote/retry/cancellation,
-irreversible state transfer and semantic publication remain required. Production
+irreversible state transfer and semantic publication remain required. Public adaptive
 execution must additionally admit a scientifically validated family estimator.

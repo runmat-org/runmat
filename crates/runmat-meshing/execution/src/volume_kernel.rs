@@ -83,9 +83,9 @@ impl ExactVolumeKernel {
                     .absolute_floor_m
                     .canonical_value(),
             ),
-            maximum_nodes: invocation.host.resolved_request.resources.maximum_nodes,
-            maximum_triangles: invocation.host.resolved_request.resources.maximum_elements,
-            maximum_boundary_segments: invocation.host.resolved_request.resources.maximum_elements,
+            maximum_nodes: invocation.host.resolved_request.limits.maximum_nodes,
+            maximum_triangles: invocation.host.resolved_request.limits.maximum_elements,
+            maximum_boundary_segments: invocation.host.resolved_request.limits.maximum_elements,
         };
         let surface_codec = crate::codec_control::CodecControl::new(&reconstruction);
         let surface = decode_published_exact_surface_mesh_admitted(
@@ -234,10 +234,7 @@ impl ExactVolumeKernel {
             "volume_boundary_facets".into(),
             mesh.provenance.facets.len() as u64,
         );
-        let mutation_count = mesh
-            .refinement_insertions
-            .len()
-            .saturating_add(mesh.sliver_mutations.len()) as u64;
+        let mutation_count = mesh.quality_mutations.len() as u64;
         entity_counts.insert("volume_mutations".into(), mutation_count);
         entity_counts.insert("encoded_surface_bytes".into(), surface_encoded_bytes);
         entity_counts.insert("encoded_volume_bytes".into(), encoded.len() as u64);

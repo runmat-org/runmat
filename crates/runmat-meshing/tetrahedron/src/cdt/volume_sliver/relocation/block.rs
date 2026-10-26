@@ -55,21 +55,23 @@ pub(super) fn candidate<'ctx>(
         })
         .collect::<Vec<_>>();
     let mut mutations = prefix.to_vec();
-    mutations.extend(replacements.iter().map(|(index, replacement)| {
-        let source_cell = topology
-            .ordered_vertex_star(*index)
-            .into_iter()
-            .next()
-            .expect("nonempty star");
-        relocation_mutation(
-            topology.node(*index).identity,
-            *replacement,
-            topology
-                .cell(source_cell)
-                .vertex_indices
-                .map(|vertex| topology.node(vertex).identity),
-        )
-    }));
+    mutations.extend(grouped_relocation_mutations(replacements.iter().map(
+        |(index, replacement)| {
+            let source_cell = topology
+                .ordered_vertex_star(*index)
+                .into_iter()
+                .next()
+                .expect("nonempty star");
+            (
+                topology.node(*index).identity,
+                *replacement,
+                topology
+                    .cell(source_cell)
+                    .vertex_indices
+                    .map(|vertex| topology.node(vertex).identity),
+            )
+        },
+    )));
     let created = cells
         .iter()
         .map(|index| {

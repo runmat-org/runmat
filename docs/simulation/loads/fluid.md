@@ -10,11 +10,11 @@ selected faces, using their total area and the admitted density. It checks the r
 the source's projection tolerance. A complete velocity or pressure law on the same faces is an
 unsupported overlap; a pressure reference supplies a gauge rather than another face law.
 
-The native typed `.fea` executor supports one fresh independent direct **experimental steady** fluid
-step on serial CPU. Transient source histories are supported by the canonical numerical and scheduled
-checkpoint/block APIs; authored transient whole-study roots remain unsupported. These routes do not
-qualify remote, GPU, turbulence, symmetry, periodic, CHT or FSI execution. See the
-[signed-source witness](../qualification/fluid-mass-flow-native.md) for the verified scope.
+`fea run` realizes every load on this page in steady and transient flow, standalone or coupled to
+heat transfer or a structure. `inlet_velocity` and `wall_motion` prescribe the face velocity from a
+vector signal, or from a scalar speed history with a unit `direction`; wall motion is tangential,
+and wall motion normal to the wall comes from a coupled structure. See the
+[signed-source witness](../qualification/fluid-mass-flow-native.md) for mass flow.
 
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |
@@ -234,7 +234,7 @@ enter volume-per-time units into `mass_flow`.
 
 The current closed load set provides inlet velocity, mass flow, wall motion, and outlet pressure. It
 does not yet define a first-class pump/fan curve or internal pressure-jump object. Do not hide a
-pump curve in an unrelated outlet pressure. A production contract needs upstream/downstream regions,
+pump curve in an unrelated outlet pressure. A complete contract needs upstream/downstream regions,
 flow-vs-pressure data, rotation/control state where applicable, interpolation/extrapolation policy,
 and power-balance evidence.
 

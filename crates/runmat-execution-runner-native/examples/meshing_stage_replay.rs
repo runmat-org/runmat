@@ -154,7 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("diagnostic only accepts curve/surface stages; publication is excluded".into());
     }
     if seconds.checked_mul(1000).is_none_or(|milliseconds| {
-        milliseconds > host.resolved_request.resources.maximum_wall_time_ms
+        milliseconds > host.ceilings.maximum_wall_time_ms
     }) {
         return Err("diagnostic interval exceeds the original stage wall-time budget".into());
     }

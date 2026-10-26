@@ -1,15 +1,7 @@
-//! Shared general GMRES over the complete real complex block; physical acceptance.
-use super::{
-    assembly::MaxwellAssembly, complex::ComplexVector3, invalid, operator, recovery, ComplexPhasor,
-    MaxwellError,
-};
-use crate::{
-    algebra::{dot_canonical, spmv},
-    solve::krylov::{restarted_gmres, GmresPolicy},
-};
+//! Retained harmonic response at one frequency (peak phasors, exp(+i omega t)).
+use super::{complex::ComplexVector3, ComplexPhasor, MaxwellDriveResponse};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
-use runmat_types::physical::{QuantityField, QuantityLayout};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -66,7 +58,8 @@ pub struct MaxwellResponse {
         Vec<ComplexPhasor>,
     >,
     pub samples: Vec<MaxwellFieldSample>,
-    #[serde(with = "runmat_types::physical::canonical_storage")]
+    /// Terminal voltage, current and power of every driven conductor.
+    pub drives: Vec<MaxwellDriveResponse>,
     /// Peak-phasor average energies: (1/4)∫ε|E|² and (1/4)∫μ|H|².
     pub electric_energy_j:
         runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
@@ -74,12 +67,14 @@ pub struct MaxwellResponse {
     pub magnetic_energy_j:
         runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
-    /// Delivered source power: -(1/2)∫E·conj(J_impressed), not the opposite sign.
+    /// Complex power delivered by the sources: terminal drives (1/2) U conj(I) plus
+    /// -(1/2)∫E·conj(J) of impressed volume and gap-feed currents.
     pub source_power_va: runmat_types::physical::Quantity<
         runmat_types::physical::kind::ApparentPower,
         ComplexPhasor,
     >,
     #[serde(with = "runmat_types::physical::canonical_storage")]
+    /// Cycle-averaged Joule loss (1/2)∫sigma|E|^2 with the total field E.
     pub ohmic_power_w: runmat_types::physical::Quantity<runmat_types::physical::kind::Power, f64>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     /// 2ω(Wmagnetic−Welectric), positive inductive for exp(+iωt).
@@ -90,97 +85,5 @@ pub struct MaxwellResponse {
     pub relative_complex_power_error: f64,
     /// Interior corner-gradient tests of div[(σ+iωε)E+J]=0; no solenoidal projection.
     pub relative_charge_continuity_residual: f64,
-    pub iterations: u32,
 }
 
-pub(super) fn solve(
-    assembled: MaxwellAssembly<'_>,
-    tolerance: f64,
-) -> Result<MaxwellResponse, MaxwellError> {
-    let n = assembled.block.input_layout().component_count();
-    // The shared Krylov recurrence uses dot-based norms. A finite nonzero
-    // forcing must not be mistaken for zero when its squared norm underflows.
-    // No dimensional floor, rescaled source, or altered physical equation.
-    let krylov_rhs_squared_norm = dot_canonical(
-        assembled.rhs.canonical_values(),
-        assembled.rhs.canonical_values(),
-    );
-    if !krylov_rhs_squared_norm.is_finite()
-        || (krylov_rhs_squared_norm == 0.0
-            && assembled
-                .rhs
-                .canonical_values()
-                .iter()
-                .any(|value| *value != 0.0))
-    {
-        return Err(MaxwellError::Unsupported(
-            "physical forcing norm is outside the representable shared Krylov envelope".into(),
-        ));
-    }
-    let (solution, iterations) = if n == 0 {
-        (Vec::new(), 0)
-    } else {
-        let maximum_iterations = n
-            .checked_mul(40)
-            .map(|v| v.max(128))
-            .filter(|v| u32::try_from(*v).is_ok())
-            .ok_or_else(|| invalid("Maxwell GMRES iteration envelope overflow"))?;
-        let result = assembled
-            .block
-            .with_canonical_storage(|block| {
-                restarted_gmres(
-                    assembled.rhs.canonical_values(),
-                    &vec![0.0; n],
-                    GmresPolicy {
-                        relative_tolerance: tolerance,
-                        restart: n.min(128),
-                        maximum_iterations,
-                    },
-                    |x| spmv(block, x).map_err(operator),
-                    |a, b| Ok(dot_canonical(a, b)),
-                    || false,
-                )
-            })?
-            .ok_or_else(|| MaxwellError::NotConverged("invalid shared Krylov contract".into()))?;
-        if !result.converged || result.cancelled {
-            return Err(MaxwellError::NotConverged(format!(
-                "general GMRES iterations={}, residual={:e}",
-                result.iterations, result.residual_norm
-            )));
-        }
-        (result.solution, result.iterations)
-    };
-    let solution = QuantityField::try_new(*assembled.block.input_layout(), solution)
-        .map_err(|e| operator(format!("invalid Maxwell voltage coordinates: {e:?}")))?;
-    solution.with_canonical_storage(|solution| {
-        let action = assembled
-            .block
-            .with_canonical_storage(|block| spmv(block, solution))
-            .map_err(operator)?;
-        let defect: Vec<_> = action
-            .iter()
-            .zip(assembled.rhs.canonical_values())
-            .map(|(a, b)| a - b)
-            .collect();
-        // Independently measure the ORIGINAL equation with a stable norm: residual
-        // squaring must not underflow and hide incomplete Krylov convergence.
-        let norm = |x: &[f64]| x.iter().fold(0.0_f64, |sum, value| sum.hypot(*value));
-        let load_norm = norm(assembled.rhs.canonical_values());
-        let residual = if load_norm > 0.0 {
-            norm(&defect) / load_norm
-        } else {
-            norm(&defect)
-        };
-        if !residual.is_finite() || residual > tolerance * 8.0 {
-            return Err(MaxwellError::NotConverged(format!(
-                "physical complex residual={residual:e}"
-            )));
-        }
-        let free = assembled.plan.free_edge_indices().len();
-        let mut edges = vec![ComplexPhasor::ZERO; assembled.edge_space.edges().len()];
-        for (row, &edge) in assembled.plan.free_edge_indices().iter().enumerate() {
-            edges[edge] = ComplexPhasor::new(solution[row], solution[row + free]);
-        }
-        recovery::recover(&assembled, edges, residual, iterations, tolerance)
-    })
-}

@@ -143,7 +143,6 @@ pub(crate) fn prepare_sparse_uniqueness(
                 let x = ilu.apply(y, crate::is_fea_cancelled).map_err(ilu_error)?;
                 spmv(matrix, &x).map_err(|_| SparseUniquenessError::Operator)
             },
-            |x, y| Ok(crate::algebra::dot_canonical(x, y)),
             crate::is_fea_cancelled,
         )?
         .ok_or(SparseUniquenessError::Operator)?;

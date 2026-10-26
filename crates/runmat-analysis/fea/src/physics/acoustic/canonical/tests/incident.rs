@@ -23,17 +23,16 @@ fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalAcousticR
         "acoustic",
         Frequency::new(0.2),
         AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
-            restart: 128,
-            maximum_iterations: 8192,
+            ..Default::default()
         },
         1e-8,
     )
     .unwrap()
 }
 
+// witness: FEA-ACOUSTIC-SOURCE-001/incident @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Planar incident/impedance fixture, phase and net-power refinement only.
 #[test]
 fn incoming_pressure_reflection_transmission_and_net_power_refine() {
     let mut inventory = std::collections::BTreeSet::new();
@@ -152,10 +151,10 @@ fn incoming_pressure_reflection_transmission_and_net_power_refine() {
 fn matched_incident_power_is_not_double_counted_at_small_amplitude() {
     for amplitude in [[1.0, 0.4], [1e-12, 4e-13]] {
         let mut model = model();
-        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "outlet".into(),
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             operator: BoundaryOperator::AcousticImpedance {
                 impedance: SpecificAcousticImpedance::new(6.0),
             },
@@ -210,7 +209,7 @@ fn incident_rejects_nonplanar_target_and_boundary_overlap() {
     source(&mut model, [1.0, 0.4]);
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "conflict".into(),
-        target: RegionTarget::boundary("slab_left"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         operator: BoundaryOperator::AcousticRigidWall,
     });
     assert!(matches!(
@@ -226,7 +225,7 @@ fn incident_rejects_nonplanar_target_and_boundary_overlap() {
     ));
     model.boundaries.pop();
     model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("slab"));
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab")));
     assert!(solve_canonical_harmonic(
         &model,
         &mesh,

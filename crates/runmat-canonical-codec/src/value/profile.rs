@@ -171,15 +171,22 @@ impl<'a, I: Iterator<Item = &'a [u8]>> Reader<'a, '_, I> {
                     .string_bytes
                     .checked_add(length)
                     .ok_or_else(|| invalid("string bytes overflow"))?;
+                profile.value_string_bytes = profile
+                    .value_string_bytes
+                    .checked_add(length)
+                    .ok_or_else(|| invalid("string bytes overflow"))?;
+                profile.heap_containers += 1;
                 Ok(())
             }
             (4, Some(length)) => {
+                profile.heap_containers += 1;
                 for _ in 0..length {
                     self.value(depth + 1, profile)?;
                 }
                 Ok(())
             }
             (5, Some(length)) => {
+                profile.maps += 1;
                 profile.map_entries = profile
                     .map_entries
                     .checked_add(length)

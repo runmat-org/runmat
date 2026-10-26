@@ -57,6 +57,68 @@ pub fn profile_serialized_shape<T: Serialize + ?Sized>(
     profile(value, limits, true)
 }
 
+/// Resident estimate of an owned typed value from its serialization shape: eight bytes per
+/// scalar, a collection header per array or string, string bytes, and inline structs, with the
+/// fixed per-contract allowance. This prices typed storage that already exists or is decoded
+/// directly; it builds neither a value tree nor an encoding.
+pub fn profile_typed_resident_bytes<T: Serialize + ?Sized>(
+    value: &T,
+    limits: CanonicalLimits,
+) -> Result<u64, CanonicalCodecError> {
+    let mut counter = Counter {
+        profile: MaterializationProfile::default(),
+        encoded_bytes: 0,
+        limits,
+        live_map_metadata: 0,
+        peak_map_metadata: 0,
+        integer_value_bounds: false,
+        child_peak: 0,
+    };
+    counter.encoded(ENVELOPE_BYTES)?;
+    value.serialize(Profiler::value(&mut counter, 0))?;
+    crate::materialization::typed_resident_bytes_estimate(counter.profile)
+}
+
+/// Direct-codec materialization of an owned typed value: the typed storage the direct decoder
+/// builds (or the producer already holds), priced from the serialization shape exactly as
+/// [`crate::canonical_payload_typed_resident_bytes_estimate`] prices the resulting wire, plus
+/// its canonical bytes and the direct encoder's peak workspace (reserved output, held child
+/// buffers, live sorted-map metadata). The direct encoder and decoder build no value tree, so
+/// owners of typed values charge this, not the value-tree [`profile_serialized`] estimate,
+/// which costs tens of bytes per scalar (about 80 bytes per element of an embedded byte vector).
+pub fn profile_direct_materialization<T: Serialize + ?Sized>(
+    value: &T,
+    limits: CanonicalLimits,
+) -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
+    let mut counter = Counter {
+        profile: MaterializationProfile::default(),
+        encoded_bytes: 0,
+        limits,
+        live_map_metadata: 0,
+        peak_map_metadata: 0,
+        integer_value_bounds: false,
+        child_peak: 0,
+    };
+    counter.encoded(ENVELOPE_BYTES)?;
+    value.serialize(Profiler::value(&mut counter, 0))?;
+    let overflow =
+        || CanonicalCodecError::resource_limit("direct materialization profile", "byte count overflow");
+    let typed = crate::materialization::typed_resident_bytes_estimate(counter.profile)?;
+    let encoding = counter
+        .encoded_bytes
+        .checked_add(counter.child_peak)
+        .and_then(|bytes| bytes.checked_add(counter.peak_map_metadata))
+        .ok_or_else(overflow)?;
+    let materialization = typed
+        .checked_add(counter.encoded_bytes)
+        .and_then(|bytes| bytes.checked_add(encoding))
+        .ok_or_else(overflow)?;
+    Ok(SerializedCanonicalProfile {
+        encoded_bytes_upper_bound: counter.encoded_bytes,
+        materialization_resident_bytes_estimate: materialization,
+    })
+}
+
 fn profile<T: Serialize + ?Sized>(
     value: &T,
     limits: CanonicalLimits,
@@ -69,6 +131,7 @@ fn profile<T: Serialize + ?Sized>(
         live_map_metadata: 0,
         peak_map_metadata: 0,
         integer_value_bounds,
+        child_peak: 0,
     };
     counter.encoded(ENVELOPE_BYTES)?;
     value.serialize(Profiler::value(&mut counter, 0))?;

@@ -105,12 +105,12 @@ fn interface_model(
     model.materials = vec![left_material, right_material];
     model.material_assignments = vec![
         MaterialAssignment::to_solid_region(
-            "left_layer",
+            runmat_meshing_core::fixtures::fixture_region("left_layer"),
             "left_material",
             EvidenceConfidence::Verified,
         ),
         MaterialAssignment::to_solid_region(
-            "right_layer",
+            runmat_meshing_core::fixtures::fixture_region("right_layer"),
             "right_material",
             EvidenceConfidence::Verified,
         ),
@@ -217,8 +217,6 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
                 &missing_assignment,
                 ComputeBackend::Cpu,
                 LinearStaticSolveOptions {
-                    formulation_requirement:
-                        runmat_analysis_core::FormulationRequirement::Experimental,
                     solver_mesh: Some(mesh.clone()),
                     require_solver_mesh_for_solid: true,
                     ..LinearStaticSolveOptions::default()
@@ -232,7 +230,6 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -322,7 +319,7 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             constraint_id: "fixed_root".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary("root"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
                 translations: [
                     StructuralTranslationDof::Ux,
                     StructuralTranslationDof::Uy,
@@ -350,7 +347,6 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -423,7 +419,6 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             &reordered,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()

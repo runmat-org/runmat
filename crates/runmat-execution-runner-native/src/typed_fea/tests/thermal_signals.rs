@@ -69,7 +69,6 @@ study heating {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.heated
-    formulation = experimental
     analysis heat {
         thermal transient {
             start_time = 0 s
@@ -81,6 +80,11 @@ study heating {
 }
 "#;
 
+// witness: FEA-THERMAL-INPUT-001/equivalence @ thermal_transient/tet4/public_study; coverage:
+//   partial;
+//   boundary: A linear-order transient with function-generated heating and initial temperature checks
+//   and runs through the typed study path and matches tables and an independent
+//   source/boundary energy; explicit and field-artifact variants are not compared here.
 #[tokio::test]
 async fn checked_named_thermal_inputs_match_tables_and_independent_source_boundary_energy() {
     let directory = tempfile::tempdir().unwrap();
@@ -149,8 +153,9 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
     assert!(matches!(
         authored
             .expect("prepare standalone authored thermal study")
-            .root,
-        crate::PreparedFeaStudyRoot::Thermal(_)
+            .root
+            .planning,
+        crate::StudyRootPlanning::Thermal(_)
     ));
     let realized = resolved
         .study
@@ -377,12 +382,12 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
             .zip(&reference.energy_balances)
         {
             balance.validate().unwrap();
-            assert!((balance.applied_power_w - 2.0).abs() < 1e-10);
-            assert!((balance.storage_rate_w - 2.0).abs() < 1e-8);
-            assert!(balance.boundary_loss_w.abs() < 1e-10);
-            assert!(balance.prescribed_boundary_power_w.abs() < 1e-10);
+            assert!((balance.applied_power_w - runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-10));
+            assert!((balance.storage_rate_w - runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+            assert!(balance.boundary_loss_w.abs() < runmat_types::physical::Quantity::new(1e-10));
+            assert!(balance.prescribed_boundary_power_w.abs() < runmat_types::physical::Quantity::new(1e-10));
             assert!(balance.relative_residual <= 1e-8);
-            assert!((balance.applied_power_w - other.applied_power_w).abs() < 1e-10);
+            assert!((balance.applied_power_w - other.applied_power_w).abs() < runmat_types::physical::Quantity::new(1e-10));
         }
         for field in actual.energy_storage_rate_snapshots.iter().skip(1) {
             assert!(field
@@ -422,10 +427,10 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         assert_eq!(boundary.energy_balances.len(), 2);
         for balance in &boundary.energy_balances {
             balance.validate().unwrap();
-            assert!(balance.applied_power_w.abs() < 1e-10);
-            assert!((balance.storage_rate_w - 2.0).abs() < 1e-8);
-            assert!((balance.prescribed_boundary_power_w + 2.0).abs() < 1e-8);
-            assert!(balance.boundary_loss_w.abs() < 1e-10);
+            assert!(balance.applied_power_w.abs() < runmat_types::physical::Quantity::new(1e-10));
+            assert!((balance.storage_rate_w - runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+            assert!((balance.prescribed_boundary_power_w + runmat_types::physical::Quantity::new(2.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+            assert!(balance.boundary_loss_w.abs() < runmat_types::physical::Quantity::new(1e-10));
             assert!(balance.relative_residual <= 1e-8);
         }
     }
@@ -452,7 +457,7 @@ fn prescribed_boundary_workload(
             AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: format!("temperature_face_{index}"),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(target.source_topology_id.clone()),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target.source_topology_id.clone()))),
                     value: PrescribedValue::Signal(SignalId("start".into())),
                 },
             })
@@ -483,7 +488,7 @@ fn workload(
                 .unwrap();
             AnalysisBoundary {
                 boundary_id: format!("insulated_face_{index}"),
-                target: RegionTarget::boundary(target.source_topology_id.clone()),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target.source_topology_id.clone()))),
                 operator: BoundaryOperator::ThermalHeatFlux {
                     value: PrescribedValue::Constant(HeatFlux::new(0.0)),
                 },
@@ -544,7 +549,6 @@ fn workload(
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-10,
     }

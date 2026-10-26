@@ -5,89 +5,13 @@ use crate::builtins::geometry::region::{region_ref_from_value, GeometryRegionRef
 pub(super) const STRUCTURAL_FIXED_NAME: &str = "fea.StructuralConstraint.fixed";
 pub(super) const THERMAL_PRESCRIBED_NAME: &str = "fea.ThermalConstraint.prescribed";
 
-const FIXED_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Constraint identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "A geometry.Region selected from the model geometry.",
-    },
-];
-const FIXED_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "constraint = fea.StructuralConstraint.fixed(id, region)",
-    inputs: &FIXED_INPUTS,
-    outputs: &OUT_ANY,
-}];
-
-pub(super) const STRUCTURAL_FIXED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FIXED_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub(super) const STRUCTURAL_FIXED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "The fixed structural-constraint constructor accepts an identifier and an immutable geometry.Region; it has no integer input role.",
-    };
-
-const THERMAL_PRESCRIBED_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Constraint identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "A geometry.Region selected from the model geometry.",
-    },
-    BuiltinParamDescriptor {
-        name: "temperature",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "A fea.Temperature value.",
-    },
-];
-const THERMAL_PRESCRIBED_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "constraint = fea.ThermalConstraint.prescribed(id, region, temperature)",
-        inputs: &THERMAL_PRESCRIBED_INPUTS,
-        outputs: &OUT_ANY,
-    }];
-pub(super) const THERMAL_PRESCRIBED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &THERMAL_PRESCRIBED_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const THERMAL_PRESCRIBED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "The prescribed-temperature constructor accepts an identifier, geometry.Region, and already-dimensioned fea.Temperature value; it has no direct integer input role.",
-    };
-pub(super) const TYPED_CONSTRAINT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role.",
-    };
+/// Reject a request for more outputs than the catalog signature declares.
+pub(crate) fn fixed_outputs(
+    descriptor: &'static BuiltinDescriptor,
+    builtin: &str,
+) -> BuiltinResult<()> {
+    crate::output_count::validate_fixed_outputs(descriptor, &ERROR_INPUT, builtin)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -244,14 +168,14 @@ pub(super) fn bound_constraint_to_object<T: Serialize>(
 
 #[runtime_builtin(
     name = "fea.StructuralConstraint.fixed",
-    category = "fea",
-    summary = "Create a fixed structural constraint on a selected geometry region.",
-    keywords = "fea,structural,constraint,fixed,region",
-    descriptor(crate::builtins::fea::constraints::STRUCTURAL_FIXED_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::constraints::STRUCTURAL_FIXED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints"
 )]
 pub async fn structural_fixed_builtin(id: String, region: Value) -> BuiltinResult<Value> {
+    fixed_outputs(
+        &runmat_builtins::FEA_STRUCTURAL_CONSTRAINT_FIXED_DESCRIPTOR,
+        STRUCTURAL_FIXED_NAME,
+    )?;
     if id.is_empty() {
         return Err(builtin_error(
             STRUCTURAL_FIXED_NAME,
@@ -282,11 +206,7 @@ pub async fn structural_fixed_builtin(id: String, region: Value) -> BuiltinResul
 
 #[runtime_builtin(
     name = "fea.ThermalConstraint.prescribed",
-    category = "fea",
-    summary = "Create a prescribed-temperature constraint on a selected geometry region.",
-    keywords = "fea,thermal,constraint,temperature,region",
-    descriptor(crate::builtins::fea::constraints::THERMAL_PRESCRIBED_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::constraints::THERMAL_PRESCRIBED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints"
 )]
 pub async fn thermal_prescribed_builtin(
@@ -294,6 +214,10 @@ pub async fn thermal_prescribed_builtin(
     region: Value,
     temperature: Value,
 ) -> BuiltinResult<Value> {
+    fixed_outputs(
+        &runmat_builtins::FEA_THERMAL_CONSTRAINT_PRESCRIBED_DESCRIPTOR,
+        THERMAL_PRESCRIBED_NAME,
+    )?;
     if id.is_empty() {
         return Err(builtin_error(
             THERMAL_PRESCRIBED_NAME,
@@ -330,32 +254,16 @@ pub async fn thermal_prescribed_builtin(
 
 macro_rules! define_simple_constraint {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin_name:literal, $label:literal, $summary:literal, $class:expr,
-        $builtin_path:literal,
-        $build:expr
+        $function:ident, $descriptor:ident, $builtin_name:literal, $class:expr,
+        $builtin_path:literal, $build:expr
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &FIXED_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-                                                    name = $builtin_name,
-                                                    category = "fea",
-                                                    summary = $summary,
-                                                    keywords = "fea,constraint,region,typed",
-                                                    descriptor($descriptor),
-                                                    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-                                                    builtin_path = $builtin_path
-                                                )]
+                                            name = $builtin_name,
+                                            binding_variant = "default",
+                                            builtin_path = $builtin_path
+                                        )]
         pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $builtin_name)?;
             let (id, geometry_id, geometry_revision, target) =
                 bound_region($builtin_name, id, &region)?;
             let constraint = ($build)(id, target);
@@ -372,55 +280,16 @@ macro_rules! define_simple_constraint {
 
 macro_rules! define_quantity_constraint {
     (
-        $function:ident, $descriptor:ident, $signatures:ident, $inputs:ident,
-        $builtin_name:literal, $label:literal, $summary:literal, $class:expr,
-        $builtin_path:literal,
-        $value_name:literal, $value_class:expr, $value_field:literal, $build:expr
+        $function:ident, $descriptor:ident, $builtin_name:literal, $class:expr,
+        $builtin_path:literal, $value_class:expr, $value_field:literal, $build:expr
     ) => {
-        const $inputs: [BuiltinParamDescriptor; 3] = [
-            BuiltinParamDescriptor {
-                name: "id",
-                ty: BuiltinParamType::StringScalar,
-                arity: BuiltinParamArity::Required,
-                default: None,
-                description: "Constraint identifier.",
-            },
-            BuiltinParamDescriptor {
-                name: "region",
-                ty: BuiltinParamType::Any,
-                arity: BuiltinParamArity::Required,
-                default: None,
-                description: "A geometry.Region selected from the model geometry.",
-            },
-            BuiltinParamDescriptor {
-                name: $value_name,
-                ty: BuiltinParamType::Any,
-                arity: BuiltinParamArity::Required,
-                default: None,
-                description: "A dimension-specific immutable FEA value.",
-            },
-        ];
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &$inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
                                             name = $builtin_name,
-                                            category = "fea",
-                                            summary = $summary,
-                                            keywords = "fea,constraint,region,quantity,typed",
-                                            descriptor($descriptor),
-                                            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                                            binding_variant = "default",
                                             builtin_path = $builtin_path
                                         )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $builtin_name)?;
             let (id, geometry_id, geometry_revision, target) =
                 bound_region($builtin_name, id, &region)?;
             let value = quantity_scalar($builtin_name, &value, $value_class, $value_field)?;
@@ -454,6 +323,9 @@ use self::{
     electrical::electrical_potential_reference_builtin, fluid::fluid_no_slip_wall_builtin,
     magnetic::magnetic_vector_potential_ground_builtin,
 };
+
+#[cfg(test)]
+mod coverage_tests;
 
 #[cfg(test)]
 mod tests {

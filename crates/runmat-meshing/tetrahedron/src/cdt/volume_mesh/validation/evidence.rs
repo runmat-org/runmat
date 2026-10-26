@@ -6,7 +6,10 @@ use super::super::{
     error, DelaunayVolumeMesh, DelaunayVolumeMeshError, DelaunayVolumeMeshErrorKind,
     DelaunayVolumeMeshOptions, DelaunayVolumeMeshStage,
 };
-use crate::cdt::{DelaunayConstraints, DelaunayVolumeNode, DelaunayVolumeSliverMutation};
+use crate::cdt::{
+    DelaunayConstraints, DelaunayVolumeNode, DelaunayVolumeQualityMutation,
+    DelaunayVolumeSliverMutation,
+};
 
 pub(super) fn validate_facet_insertions(
     constraints: &DelaunayConstraints,
@@ -74,40 +77,55 @@ pub(super) fn validate_mutations(
     mesh: &DelaunayVolumeMesh,
     options: DelaunayVolumeMeshOptions,
 ) -> Result<(), DelaunayVolumeMeshError> {
-    let insertion_count = mesh.refinement_insertions.len() as u64;
-    let treatment_count = mesh.sliver_mutations.len() as u64;
+    let insertion_count = mesh.refinement_insertions().count() as u64;
+    let treatment_count = mesh.optimization_mutations().count() as u64;
     let maximum_treatments = insertion_count
         .saturating_add(1)
         .saturating_mul(options.sliver.maximum_passes);
     if insertion_count > options.refinement.maximum_insertions
         || treatment_count > maximum_treatments
     {
-        return Err(invalid_mutations());
+        return Err(lineage_failure("mutation counts exceed their admitted budgets", None));
     }
 
-    // Replay identities backwards from the published topology. This verifies that every ordered
-    // insertion, relocation, and deletion has an exact predecessor without reconstructing CAD or
-    // rerunning tetrahedralization.
+    // Replay identities backwards from the published topology in the original interleaved order.
+    // This verifies that every insertion, relocation, and deletion has an exact predecessor
+    // without reconstructing CAD or rerunning tetrahedralization.
     let mut identities = mesh
         .topology
         .nodes
         .iter()
         .map(|node| node.identity)
         .collect::<BTreeSet<_>>();
-    for mutation in mesh.sliver_mutations.iter().rev() {
+    for (position, step) in mesh.quality_mutations.iter().enumerate().rev() {
+        let at = Some(position);
+        let mutation = match step {
+            DelaunayVolumeQualityMutation::Refined(node) => {
+                validate_node(*node)?;
+                if !identities.remove(&node.identity) {
+                    return Err(lineage_failure("refined node is absent from later topology", at));
+                }
+                continue;
+            }
+            DelaunayVolumeQualityMutation::Optimized(mutation) => mutation,
+        };
         match mutation {
             DelaunayVolumeSliverMutation::Relocated(relocation) => {
                 validate_source_tetrahedron(
                     relocation.source_node_identity,
                     relocation.source_tetrahedron_node_identities,
                     &identities,
-                )?;
+                )
+                .map_err(|_| lineage_failure("relocation source tetrahedron is inconsistent", at))?;
                 validate_node(relocation.replacement_node)?;
-                if !crate::cdt::volume_sliver::relocation_identity_is_valid(relocation)
-                    || !identities.remove(&relocation.replacement_node.identity)
-                    || !identities.insert(relocation.source_node_identity)
-                {
-                    return Err(invalid_mutations());
+                if !crate::cdt::volume_sliver::relocation_identity_is_valid(relocation) {
+                    return Err(lineage_failure("relocation identity is not derived", at));
+                }
+                if !identities.remove(&relocation.replacement_node.identity) {
+                    return Err(lineage_failure("relocated node is absent from later topology", at));
+                }
+                if !identities.insert(relocation.source_node_identity) {
+                    return Err(lineage_failure("relocation source is still present", at));
                 }
             }
             DelaunayVolumeSliverMutation::Deleted(deletion) => {
@@ -115,9 +133,10 @@ pub(super) fn validate_mutations(
                     deletion.source_node_identity,
                     deletion.source_tetrahedron_node_identities,
                     &identities,
-                )?;
+                )
+                .map_err(|_| lineage_failure("deletion source tetrahedron is inconsistent", at))?;
                 if !identities.insert(deletion.source_node_identity) {
-                    return Err(invalid_mutations());
+                    return Err(lineage_failure("deleted node is still present", at));
                 }
             }
             DelaunayVolumeSliverMutation::Reconnected(reconnection) => {
@@ -138,28 +157,26 @@ pub(super) fn validate_mutations(
                     )
                     .any(|identity| !identities.contains(identity))
                 {
-                    return Err(invalid_mutations());
+                    return Err(lineage_failure("reconnection references an absent node", at));
                 }
             }
             DelaunayVolumeSliverMutation::Inserted(insertion) => {
                 validate_node(insertion.inserted_node)?;
-                if !crate::cdt::volume_sliver::insertion_identity_is_valid(insertion)
-                    || !identities.remove(&insertion.inserted_node.identity)
-                    || insertion
-                        .source_tetrahedron_node_identities
-                        .iter()
-                        .chain(&insertion.source_edge_node_identities)
-                        .any(|identity| !identities.contains(identity))
+                if !crate::cdt::volume_sliver::insertion_identity_is_valid(insertion) {
+                    return Err(lineage_failure("optimization insertion identity is not derived", at));
+                }
+                if !identities.remove(&insertion.inserted_node.identity) {
+                    return Err(lineage_failure("optimization insertion is absent from later topology", at));
+                }
+                if insertion
+                    .source_tetrahedron_node_identities
+                    .iter()
+                    .chain(&insertion.source_edge_node_identities)
+                    .any(|identity| !identities.contains(identity))
                 {
-                    return Err(invalid_mutations());
+                    return Err(lineage_failure("optimization insertion source is absent", at));
                 }
             }
-        }
-    }
-    for node in mesh.refinement_insertions.iter().rev() {
-        validate_node(*node)?;
-        if !identities.remove(&node.identity) {
-            return Err(invalid_mutations());
         }
     }
     if constraints
@@ -167,7 +184,7 @@ pub(super) fn validate_mutations(
         .iter()
         .any(|node| !identities.contains(&node.identity))
     {
-        return Err(invalid_mutations());
+        return Err(lineage_failure("constraint nodes are not recovered by replay", None));
     }
     Ok(())
 }
@@ -284,8 +301,8 @@ fn lineage_identities(mesh: &DelaunayVolumeMesh) -> BTreeSet<StableDigest> {
         .iter()
         .map(|node| node.identity)
         .collect::<BTreeSet<_>>();
-    identities.extend(mesh.refinement_insertions.iter().map(|node| node.identity));
-    for mutation in &mesh.sliver_mutations {
+    identities.extend(mesh.refinement_insertions().map(|node| node.identity));
+    for mutation in mesh.optimization_mutations() {
         match mutation {
             DelaunayVolumeSliverMutation::Relocated(relocation) => {
                 identities.insert(relocation.source_node_identity);
@@ -321,6 +338,18 @@ fn lineage_identities(mesh: &DelaunayVolumeMesh) -> BTreeSet<StableDigest> {
         }
     }
     identities
+}
+
+fn lineage_failure(reason: &str, position: Option<usize>) -> DelaunayVolumeMeshError {
+    let detail = match position {
+        Some(position) => format!("{reason} at quality step {position}"),
+        None => reason.to_string(),
+    };
+    error(
+        DelaunayVolumeMeshStage::Refinement,
+        DelaunayVolumeMeshErrorKind::InvalidTopology,
+        format!("refinement and optimization evidence do not form a valid ordered identity lineage: {detail}"),
+    )
 }
 
 fn invalid_mutations() -> DelaunayVolumeMeshError {

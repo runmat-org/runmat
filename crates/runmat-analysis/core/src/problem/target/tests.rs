@@ -3,11 +3,7 @@ use super::*;
 #[test]
 fn volume_targets_retain_exact_solid_or_mesh_region_identity_not_surface_or_cell_aliases() {
     for kind in [PersistentEntityKind::Solid, PersistentEntityKind::Region] {
-        let entity = PersistentEntityId {
-            kind,
-            source_topology_id: "volume_1".into(),
-            assembly_path: vec!["occurrence_1".into()],
-        };
+        let entity = PersistentEntityId::new(kind, "volume_1".into(), vec!["occurrence_1".into()]);
         let mut target = RegionTarget::volume("bulk");
         target.bind_resolved_entities(vec![entity.clone()]).unwrap();
         target.validate_resolution().unwrap();
@@ -36,11 +32,11 @@ fn volume_targets_retain_exact_solid_or_mesh_region_identity_not_surface_or_cell
     ] {
         let mut target = RegionTarget::new("wrong", dimension, topology, TargetCardinality::One);
         assert!(target
-            .bind_resolved_entities(vec![PersistentEntityId {
+            .bind_resolved_entities(vec![PersistentEntityId::new(
                 kind,
-                source_topology_id: "entity_1".into(),
-                assembly_path: vec![],
-            }])
+                "entity_1".into(),
+                vec![]
+            )])
             .is_err());
     }
 }

@@ -8,7 +8,7 @@ use runmat_geometry_core::{Ap242Capability, Ap242CapabilityDisposition, Ap242Exc
 use runmat_geometry_io::import::GeometryImportError;
 use runmat_geometry_io::{
     detect_geometry_format, import_exact_cad, import_geometry, ExactCadImportOptions,
-    GeometryFormat, GeometryImportContext, GeometryImportOptions,
+    GeometryFormat, GeometryImportContext, GeometryImportOptions, SourceUnitsAuthority,
 };
 use sha2::{Digest, Sha256};
 
@@ -50,7 +50,7 @@ pub(super) fn inspect_geometry_bytes(
     let key = (
         logical_path.to_string(),
         content_digest,
-        format!("{:?}", request.source_units),
+        format!("{:?}/{}", request.source_units, request.shared_interfaces),
     );
     if let Some(cached) = inspection_cache::get(&key) {
         return Ok(cached);
@@ -66,14 +66,22 @@ fn inspect_uncached(
     logical_path: &str,
     content_digest: SourceDigest,
 ) -> Result<GeometryInspection, SourceDiagnostic> {
-    let unit_evidence = runmat_geometry_io::source_unit_evidence(logical_path, bytes)
-        .resolve_fallback(request.source_units, "explicit geometry authoring units");
-    if !unit_evidence.physical_scale_resolved() {
-        return Err(diagnostic("fea.host.geometry_units_undeclared",format!("geometry `{logical_path}` has missing, unsupported or conflicting length-unit evidence"),SourceAvailability::Available));
-    }
-    let units = unit_evidence
-        .uniform_unit()
-        .unwrap_or(runmat_geometry_core::LengthUnit::Meter);
+    // Authored `units` are authoritative: they reinterpret a file declaring a different single
+    // length unit (the declaration stays in the evidence as provenance). Without authored units
+    // the file's own single declared unit applies.
+    let inspected = runmat_geometry_io::source_unit_evidence(logical_path, bytes);
+    let unit_evidence = match request.source_units {
+        Some(authored) => inspected
+            .apply_authored(authored, "authored geometry units")
+            .unwrap_or_else(|unresolved| unresolved),
+        None => inspected,
+    };
+    let units = match request.source_units {
+        Some(authored) => authored,
+        None => unit_evidence
+            .uniform_unit()
+            .ok_or_else(|| undeclared_units(bytes, logical_path))?,
+    };
     let imported = import_geometry(
         logical_path,
         bytes,
@@ -101,16 +109,37 @@ fn inspect_uncached(
             logical_path,
             bytes,
             format,
-            &ExactCadImportOptions {
-                source_units: request.source_units,
-                ..ExactCadImportOptions::default()
+            &{
+                let mut options = ExactCadImportOptions {
+                    source_units: Some(units),
+                    source_units_authority: SourceUnitsAuthority::Authored,
+                    ..ExactCadImportOptions::default()
+                };
+                options.analysis.healing.shared_interfaces = request.shared_interfaces;
+                options
             },
             &GeometryImportContext::new(),
         )
     })
     .transpose();
+    let mut authored_names = std::collections::BTreeMap::<String, Vec<String>>::new();
     let (topology_digest, exact_topology) = match exact {
         Ok(Some(exact)) => {
+            for (id, names) in &exact.entity_names {
+                let role = match id.kind {
+                    runmat_geometry_core::PersistentEntityKind::Face => "face",
+                    runmat_geometry_core::PersistentEntityKind::Solid => "solid",
+                    _ => continue,
+                };
+                authored_names
+                    .entry(role.to_string())
+                    .or_default()
+                    .extend(names.iter().cloned());
+            }
+            for names in authored_names.values_mut() {
+                names.sort();
+                names.dedup();
+            }
             let closure = exact.build_closure().map_err(|error| {
                 diagnostic(
                     "fea.host.geometry_inspection_failed",
@@ -150,9 +179,33 @@ fn inspect_uncached(
         topology_digest,
         capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
         exchange,
-        resolved_units: unit_evidence.uniform_unit(),
+        resolved_units: Some(units),
+        authored_names,
         unit_evidence,
     })
+}
+
+/// An imported geometry without authored `units` uses the single length unit its STEP or IGES
+/// file declares. A BREP must state its unit; an exchange file without one declared length unit
+/// cannot be read in any authored unit either and must be re-exported with one.
+fn undeclared_units(bytes: &[u8], logical_path: &str) -> SourceDiagnostic {
+    let exchange = matches!(
+        detect_geometry_format(logical_path, bytes),
+        GeometryFormat::Step | GeometryFormat::Iges
+    );
+    diagnostic(
+        "fea.host.geometry_units_undeclared",
+        if exchange {
+            format!(
+                "geometry `{logical_path}` does not declare a single length unit (none, or several different ones); re-export it with one declared unit"
+            )
+        } else {
+            format!(
+                "geometry `{logical_path}` declares no length unit; add `units = mm`, `m`, or `in`"
+            )
+        },
+        SourceAvailability::Available,
+    )
 }
 
 fn preview_extent_m(asset: &runmat_geometry_core::GeometryAsset) -> Option<[f64; 3]> {

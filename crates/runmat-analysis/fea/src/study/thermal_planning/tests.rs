@@ -11,7 +11,7 @@ fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
         runmat_analysis_core::ThermalConstraint {
             constraint_id: "temperature".into(),
             kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                target: runmat_analysis_core::RegionTarget::authored("root"),
+                target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
                 value: runmat_analysis_core::PrescribedValue::Constant(Temperature::new(293.15)),
             },
         },
@@ -27,7 +27,6 @@ fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
     CompiledAnalysisStudy {
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -40,7 +39,7 @@ fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
 fn policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
+        element_heat_source: None,
     }
 }
 
@@ -269,14 +268,8 @@ fn rejects_nonthermal_actions_instead_of_ignoring_them() {
 }
 
 #[test]
-fn requires_authored_residual_target_and_matching_formulation() {
+fn requires_authored_residual_target() {
     let mut study = compiled(ProcedureStep::thermal_steady("heat"));
-    let mut mismatch = policy();
-    mismatch.formulation_requirement = FormulationRequirement::Production;
-    assert!(matches!(
-        plan_thermal_study(&study, mismatch),
-        Err(ThermalStudyPlanningError::FormulationRequirementMismatch)
-    ));
     study.model.sequence.steps[0].accuracy.criteria.clear();
     assert!(matches!(
         plan_thermal_study(&study, policy()),

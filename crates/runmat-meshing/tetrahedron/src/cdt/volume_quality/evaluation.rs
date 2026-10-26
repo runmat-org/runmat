@@ -20,6 +20,8 @@ pub(super) struct TetrahedronEvaluationContext {
     pub(super) metric: ResolvedMetricEvaluation,
     pub(super) boundary_node_count: u8,
     pub(super) protected_facet_count: u8,
+    /// Edges on protected facets (see `protected_edge_mask`), excluded from the size criterion.
+    pub(super) protected_edges: u8,
 }
 
 pub(super) fn evaluate_tetrahedron(
@@ -51,6 +53,7 @@ pub(super) fn evaluate_tetrahedron_nodes(
         metric,
         boundary_node_count,
         protected_facet_count,
+        protected_edges,
     } = context;
     let points = nodes.map(|node| node.coordinates_m.canonical_value());
     let identities = nodes.map(|node| node.identity);
@@ -62,7 +65,7 @@ pub(super) fn evaluate_tetrahedron_nodes(
         )
     })?;
     let (refinement_violation_ratio, optimization_violation_ratio) = violation_ratios(
-        geometry.maximum_metric_edge_length,
+        volume_owned_maximum_metric_edge_length(points, metric.metric, protected_edges),
         geometry.metric_radius_edge_ratio,
         geometry.metric_scaled_jacobian,
         boundary_node_count,
@@ -90,15 +93,18 @@ pub(super) fn evaluate_tetrahedron_nodes(
     })
 }
 
+/// Size, radius-edge and shape violations of one tetrahedron. `refinement_metric_edge_length` is
+/// the longest metric edge the volume stage can split: edges of protected facets belong to the
+/// published surface mesh and are excluded, as the surface stage owns their length.
 pub(in crate::cdt) fn violation_ratios(
-    maximum_metric_edge_length: f64,
+    refinement_metric_edge_length: f64,
     metric_radius_edge_ratio: f64,
     metric_scaled_jacobian: f64,
     boundary_node_count: u8,
     options: DelaunayVolumeQualityOptions,
 ) -> (f64, f64) {
     let size_violation_ratio = saturated_ratio(
-        maximum_metric_edge_length,
+        refinement_metric_edge_length,
         options.maximum_metric_edge_length,
     );
     let radius_edge_violation_ratio =
@@ -122,6 +128,30 @@ pub(in crate::cdt) fn violation_ratios(
     let optimization_violation_ratio = jacobian_violation_ratio;
 
     (refinement_violation_ratio, optimization_violation_ratio)
+}
+
+/// Longest metric edge length over the edges not on a protected facet (zero when every edge is
+/// protected). Computed directly as sqrt(d^T M d) per edge.
+pub(in crate::cdt) fn volume_owned_maximum_metric_edge_length(
+    points: [[f64; 3]; 4],
+    metric: runmat_meshing_size::metric::MetricTensor3,
+    protected_edges: u8,
+) -> f64 {
+    super::TETRAHEDRON_EDGES
+        .iter()
+        .enumerate()
+        .filter(|(bit, _)| protected_edges & (1 << bit) == 0)
+        .map(|(_, (left, right))| {
+            let [x, y, z]: [f64; 3] =
+                std::array::from_fn(|axis| points[*right][axis] - points[*left][axis]);
+            (metric.xx * x * x
+                + metric.yy * y * y
+                + metric.zz * z * z
+                + 2.0 * (metric.xy * x * y + metric.xz * x * z + metric.yz * y * z))
+                .max(0.0)
+                .sqrt()
+        })
+        .fold(0.0, f64::max)
 }
 
 pub(super) const fn radius_edge_is_refinement_owned(boundary_node_count: u8) -> bool {

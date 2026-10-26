@@ -2,7 +2,8 @@
 //! Codec numeric-wide bounds cover all finite physical values, not sample zeros.
 use super::*;
 use crate::physics::maxwell::{
-    ComplexPhasor, MaxwellCurrentSample, MaxwellFieldSample, MaxwellVolumeData,
+    ComplexPhasor, MaxwellCurrentSample, MaxwellDriveExcitation, MaxwellDriveResponse,
+    MaxwellElementVector, MaxwellFieldSample, MaxwellVolumeData,
 };
 use crate::results::field::{
     SampledOrientedEdge, VolumeFieldIntegrationSample, VolumeFieldSamplingRule,
@@ -36,6 +37,14 @@ struct Sampling<'a> {
     sampling_digest: Digest,
 }
 #[derive(Serialize)]
+struct Drive<'a> {
+    drive_id: &'a str,
+    excitation: MaxwellDriveExcitation,
+    conductance_s: f64,
+    unit_generator_field: Repeated<'a, MaxwellElementVector>,
+    unit_closure_current: Repeated<'a, MaxwellElementVector>,
+}
+#[derive(Serialize)]
 struct Input<'a> {
     #[serde(with = "runmat_types::physical::canonical_storage")]
     angular_frequency_rad_per_s:
@@ -43,6 +52,8 @@ struct Input<'a> {
     sampling: Sampling<'a>,
     volumes: Repeated<'a, MaxwellVolumeData>,
     source_current: Repeated<'a, MaxwellCurrentSample>,
+    grounded_faces: Repeated<'a, StableDigest>,
+    drives: Vec<Drive<'a>>,
 }
 #[derive(Serialize)]
 struct Response<'a> {
@@ -61,6 +72,7 @@ struct Response<'a> {
         Repeated<'a, ComplexPhasor>,
     >,
     samples: Repeated<'a, MaxwellFieldSample>,
+    drives: Vec<MaxwellDriveResponse>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     electric_energy_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
@@ -78,7 +90,6 @@ struct Response<'a> {
     relative_physical_residual: f64,
     relative_complex_power_error: f64,
     relative_charge_continuity_residual: f64,
-    iterations: u32,
 }
 #[derive(Serialize)]
 struct ResultProjection<'a> {
@@ -158,6 +169,25 @@ pub(super) fn profile(
             _,
         >::new([zero; 3]),
     };
+    // Every electrical terminal constraint or terminal current can head one drive.
+    let labels: Vec<String> = w
+        .model
+        .constraints
+        .iter()
+        .filter(|c| matches!(c, runmat_analysis_core::AnalysisConstraint::Electrical(_)))
+        .map(|c| c.constraint_id().to_string())
+        .chain(w.model.excitations.iter().filter_map(|action| match action {
+            runmat_analysis_core::ExcitationAction::ElectricCurrent(value) => {
+                Some(value.excitation_id.0.clone())
+            }
+            _ => None,
+        }))
+        .collect();
+    let element_vector = MaxwellElementVector {
+        element_identity: stable,
+        vector: [0.0; 3],
+    };
+    let excitation = MaxwellDriveExcitation::Current { amperes: zero };
     let value = ResultProjection {
         source_workload: w.identity().map_err(invalid)?,
         producer: w.producer_identity().map_err(invalid)?,
@@ -211,6 +241,26 @@ pub(super) fn profile(
                 value: &current,
                 count: samples,
             },
+            grounded_faces: Repeated {
+                value: &stable,
+                count: m.topology.boundary_faces.len(),
+            },
+            drives: labels
+                .iter()
+                .map(|label| Drive {
+                    drive_id: label,
+                    excitation,
+                    conductance_s: 0.0,
+                    unit_generator_field: Repeated {
+                        value: &element_vector,
+                        count: elements,
+                    },
+                    unit_closure_current: Repeated {
+                        value: &element_vector,
+                        count: elements,
+                    },
+                })
+                .collect(),
         },
         response: Response {
             input_identity: digest,
@@ -237,6 +287,15 @@ pub(super) fn profile(
                 value: &field,
                 count: samples,
             },
+            drives: labels
+                .iter()
+                .map(|label| MaxwellDriveResponse {
+                    drive_id: label.clone(),
+                    voltage_v: zero,
+                    current_a: zero,
+                    complex_power_va: zero,
+                })
+                .collect(),
             electric_energy_j: runmat_types::physical::Quantity::<
                 runmat_types::physical::kind::Energy,
                 _,
@@ -258,7 +317,6 @@ pub(super) fn profile(
             relative_physical_residual: 0.0,
             relative_complex_power_error: 0.0,
             relative_charge_continuity_residual: 0.0,
-            iterations: 0,
         },
     };
     runmat_canonical_codec::profile_serialized_shape(&value, LIMITS).map_err(invalid)

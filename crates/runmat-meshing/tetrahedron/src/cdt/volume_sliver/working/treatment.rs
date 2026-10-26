@@ -59,15 +59,22 @@ pub(in crate::cdt) struct WorkingTreatment<'ctx> {
     pub(in crate::cdt) mutations: Vec<DelaunayVolumeSliverMutation>,
 }
 
-/// A terminal local minimum retains its owned state for diagnostic handoff.
-/// Other failures carry no partially applied state. No observer or I/O lives here.
+/// A terminal local minimum retains its owned state, together with the
+/// mutations this call applied to reach it, so callers that continue from
+/// that state keep a complete lineage. Other failures carry no partially
+/// applied state. No observer or I/O lives here.
 pub(in crate::cdt) struct WorkingFailure<'ctx> {
     pub(in crate::cdt) error: DelaunayVolumeSliverError,
     pub(in crate::cdt) state: Option<Box<WorkingState<'ctx>>>,
+    pub(in crate::cdt) applied: Vec<DelaunayVolumeSliverMutation>,
 }
 impl From<DelaunayVolumeSliverError> for WorkingFailure<'_> {
     fn from(error: DelaunayVolumeSliverError) -> Self {
-        Self { error, state: None }
+        Self {
+            error,
+            state: None,
+            applied: Vec::new(),
+        }
     }
 }
 impl From<crate::cdt::volume_state::VolumeStateError> for WorkingFailure<'_> {
@@ -304,13 +311,14 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
                 .map(|index| state.topology().node(index).coordinates_m.canonical_value())
         });
         let error = error(DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization, format!(
-            "no legal reconnection, interior relocation, or protected-boundary insertion improves volume defect {} at {:?} with {} boundary nodes and {} protected facets, optimization ratio {}, scaled Jacobian {}, and target {}; reconnection rejections {:?}; relocation rejections {:?}; insertion rejections {:?}; first insertion rejection details {:?}",
+            "no legal reconnection, interior relocation, or protected-boundary insertion improves volume defect {} at {:?} with {} boundary nodes and {} protected facets, refinement ratio {} (objective {:?}), optimization ratio {}, scaled Jacobian {}, and target {}; reconnection rejections {:?}; relocation rejections {:?}; insertion rejections {:?}; first insertion rejection details {:?}",
             stable_simplex(source.node_identities), source_nodes, source.boundary_node_count, source.protected_facet_count,
-            source.optimization_violation_ratio, source.metric_scaled_jacobian, context.quality_options.minimum_metric_scaled_jacobian,
+            source.refinement_violation_ratio, objective, source.optimization_violation_ratio, source.metric_scaled_jacobian, context.quality_options.minimum_metric_scaled_jacobian,
             reconnection.rejection_counts, relocation_rejections, insertion.rejection_counts, insertion.first_rejection_details));
         return Err(WorkingFailure {
             error,
             state: Some(Box::new(state)),
+            applied: mutations,
         });
     }
     let remaining = state

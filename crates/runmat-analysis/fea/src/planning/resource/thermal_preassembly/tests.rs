@@ -18,12 +18,14 @@ fn workload() -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         procedure: crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
 }
 
+// witness: FEA-THERMAL-EXECUTION-001/admission @ thermal_transient/tet4|tet10/public_study;
+//   boundary: Both-order initial-field construction scratch contributes to the preassembly ceiling;
+//   no measured RSS or whole native pipeline evidence.
 #[test]
 fn field_construction_scratch_is_composed_before_assembly() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -83,6 +85,12 @@ fn field_construction_scratch_is_composed_before_assembly() {
 #[test]
 fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     let mut workload = workload();
+    // An authored ceiling with the same canonical integer width as the values set below, so the
+    // workload encoding (and the requirement derived from it) does not change with the value.
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = u64::from(u32::MAX);
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let schedule = workload.solve_schedule().unwrap();
     let facts = ThermalPreassemblyResourceFacts::derive(
@@ -99,11 +107,16 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - catalog;
+        .maximum_resident_bytes = required - 1;
+    // The catalog is part of that complete requirement.
+    assert!(catalog > 0 && catalog < required);
+    let outcome = workload.execute(&mesh);
     assert!(
-        matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
+        matches!(&outcome, Err(crate::FeaRunError::Resource(
         ResourcePlanningError::AccuracyCeiling { required: actual, .. }
-    )) if actual == required)
+    )) if *actual == required),
+        "{:?} versus {required}",
+        outcome.as_ref().err()
     );
     let mut overflow = facts.manifest_catalog;
     overflow.validation_scratch_bytes = ByteCount(u64::MAX);
@@ -385,7 +398,7 @@ fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
         mesh.validate_canonical().unwrap();
         let mut workload = workload();
         let schedule = workload.solve_schedule().unwrap();
-        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule).unwrap();
+        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
         let model_bytes = runmat_canonical_codec::profile_serialized_shape(
             &workload.model,
             crate::execution::THERMAL_WORKLOAD_LIMITS,
@@ -497,7 +510,6 @@ fn admitted_identity(
         Some(mesh),
         runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
         runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        workload.formulation_requirement,
     )
     .unwrap()
 }

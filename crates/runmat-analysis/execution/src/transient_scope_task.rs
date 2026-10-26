@@ -30,9 +30,13 @@ use crate::{
 };
 
 const TASK_PREFIX: &[u8] = b"runmat-analysis-transient-scope-task/v1\0";
-const TASK_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
+/// Identity digests hash the authored model and constraint plan, which grow with generated
+/// signals and the mesh; only the digest is retained, never the encoded bytes.
+const IDENTITY_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64);
 
 pub struct StructuralTransientScopeTaskPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: StructuralTransientWorkload,
     pub mesh: SolverMeshArtifact,
     pub modal_state: Option<CanonicalSemanticState>,
@@ -105,6 +109,7 @@ pub fn prepare_structural_transient_scope_task(
             preparation.modal_state.as_ref(),
             prepared_input_resource_facts(&numerical_inputs)?,
             projected_output_set_resource_facts(),
+            preparation.local_execution,
         )?;
     let (study, step, execution_plan) =
         transient_scope_task_identity(&preparation.workload, &preparation.mesh, &resource_plan)?;
@@ -193,7 +198,7 @@ pub fn transient_scope_task_identity(
     let discretization = DiscretizationIdentity::new(
         problem,
         mesh_digest,
-        digest("scope-formulation", &workload.formulation_requirement)?,
+        digest("scope-formulation", &mesh_digest)?,
     )?;
     let operator = OperatorIdentity::new(discretization, demand.operator.numerical_scope_digest)?;
     let numerical = NumericalPlanIdentity::new(
@@ -321,7 +326,7 @@ fn digest<T: Serialize>(domain: &'static str, input: &T) -> AnalysisBridgeResult
         TASK_PREFIX,
         domain,
         input,
-        TASK_LIMITS,
+        IDENTITY_LIMITS,
     )?))
 }
 

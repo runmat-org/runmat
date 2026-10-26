@@ -1,6 +1,5 @@
 use super::*;
 use crate::admission::{admit_canonical_magnetostatic, registered_formulations};
-use runmat_analysis_core::{FormulationAdmissionRejectionReason, FormulationMaturity};
 use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
 #[test]
@@ -51,9 +50,7 @@ fn canonical_harmonic_maxwell_is_exact_order_bound_and_distinct_from_static_and_
     let mut identities = Vec::new();
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
-        let identity =
-            admit_canonical_maxwell(&mesh, FormulationRequirement::Experimental).unwrap();
-        assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
+        let identity = admit_canonical_maxwell(&mesh).unwrap();
         assert_eq!(
             identity.realization(),
             &canonical_maxwell_realization(order)
@@ -76,10 +73,7 @@ fn canonical_harmonic_maxwell_is_exact_order_bound_and_distinct_from_static_and_
                 vec![TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve]
             );
         }
-        assert_ne!(
-            admit_canonical_magnetostatic(&mesh, FormulationRequirement::Experimental).unwrap(),
-            identity
-        );
+        assert_ne!(admit_canonical_magnetostatic(&mesh).unwrap(), identity);
         assert!(!identities.contains(&identity));
         let wire = serde_json::to_vec(&identity).unwrap();
         assert_eq!(
@@ -87,7 +81,8 @@ fn canonical_harmonic_maxwell_is_exact_order_bound_and_distinct_from_static_and_
             identity
         );
         identities.push(identity);
-        assert!(admit_canonical_maxwell(&mesh, FormulationRequirement::Production).is_err());
+        // Re-admission of the same mesh is deterministic.
+        assert_eq!(&admit_canonical_maxwell(&mesh).unwrap(), identities.last().unwrap());
     }
 }
 
@@ -112,7 +107,6 @@ fn maxwell_axis_splicing_and_foreign_procedure_fail_closed() {
                 family: PhysicsFamily::Electromagnetic,
                 procedure: AnalysisProcedure::HarmonicResponse,
                 solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
                 realization: forged,
             })
             .is_err());
@@ -121,29 +115,23 @@ fn maxwell_axis_splicing_and_foreign_procedure_fail_closed() {
             family: PhysicsFamily::Electromagnetic,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: exact.clone(),
         })
         .is_err());
-        let error = admit_formulation(FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Electromagnetic,
             procedure: AnalysisProcedure::HarmonicResponse,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Production,
             realization: exact,
         })
-        .unwrap_err();
-        assert_eq!(
-            error.reason,
-            FormulationAdmissionRejectionReason::ProductionQualificationMissing
-        );
+        .expect("exact Maxwell realization is admitted");
     }
 }
 
 #[test]
 fn serialized_identity_cannot_upgrade_qualification_or_replace_one_axis() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let identity = admit_canonical_maxwell(&mesh, FormulationRequirement::Experimental).unwrap();
+    let identity = admit_canonical_maxwell(&mesh).unwrap();
     let mut wire = serde_json::to_value(&identity).unwrap();
     wire["qualification"] = serde_json::json!("production");
     assert!(serde_json::from_value::<AnalysisRunIdentity>(wire).is_err());

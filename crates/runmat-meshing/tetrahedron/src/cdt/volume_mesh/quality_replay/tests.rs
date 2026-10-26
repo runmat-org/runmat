@@ -19,11 +19,25 @@ fn binding() -> VolumeQualityBinding {
 }
 const LIMITS: CanonicalLimits = CanonicalLimits::new(4 * 1024 * 1024, 100_000, 4096, 64);
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The retained96-node/236-cell scoped collar has a certified fixed-boundary quality
+//   conflict at the unchanged0.01 target. Increasing the explicitly bound search cap cannot make it
+//   feasible. Exact protected-facet preservation remains mandatory; a generated surface must
+//   instead be repaired by its surface owner. This witness does not establish positive convergence,
+//   upstream surface repair or completed studies.
 #[test]
 fn thin_boundary_collar_requires_surface_remeshing() {
     compatibility::assert_incompatible(include_bytes!("fixtures/noncommuting-source-quality.cbor"));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An outward common-metric edge-star bound proves that the retained108-node/292-cell
+//   fixed boundary cannot satisfy its unchanged0.01 metric scaled-Jacobian target. Original and
+//   explicitly rebound million-operation controls reject with a surface-remeshing diagnosis before
+//   volume search. This is incompatibility classification, not positive convergence, surface
+//   repair, native CAD acceptance or study qualification.
 #[test]
 fn retained_terminal_collar_requires_surface_remeshing() {
     compatibility::assert_incompatible(include_bytes!(
@@ -31,6 +45,13 @@ fn retained_terminal_collar_requires_surface_remeshing() {
     ));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A retained96node/236cell diagnostic binds an explicit2048candidate-per-pass cap and
+//   rejects substitution of a million-candidate policy before execution. Native governing requests
+//   are independently projected and charged by the shared stage authority; this authority check
+//   does not predict budget exhaustion or establish quality convergence, CAD acceptance or a
+//   completed study.
 #[test]
 fn noncommuting_source_fixture_preserves_its_explicit_small_search_cap() {
     #[derive(Deserialize)]
@@ -100,7 +121,10 @@ fn diagnostic_replay_revalidates_the_original_coupled_state_without_cad() {
         .unwrap();
         assert!(result.quality.worst_refinement_tetrahedron.is_none());
         assert!(result.quality.worst_optimization_tetrahedron.is_none());
-        assert!(!result.sliver_mutations.is_empty());
+        assert!(result
+            .quality_mutations
+            .iter()
+            .any(|step| matches!(step, super::super::DelaunayVolumeQualityMutation::Optimized(_))));
         crate::cdt::validate_delaunay_volume_quality(
             &result.topology,
             &metric,
@@ -113,6 +137,11 @@ fn diagnostic_replay_revalidates_the_original_coupled_state_without_cad() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Quality-stage diagnostics reject changed request/geometry/implementation identities,
+//   changed original controls, damaged geometry, truncation and byte/item ceilings. Replay remains
+//   diagnostic input and cannot manufacture complete CAD publication authority.
 #[test]
 fn diagnostics_reject_changed_identity_controls_topology_and_hostile_bounds() {
     let (mut topology, provenance) = fixture(false, 0);

@@ -26,9 +26,9 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
     let beam_id = definition("rail-section");
     let shell_id = definition("skin-section");
     let orientation_id = definition("rail-axes");
-    let mut beam_target = PropertyRegionTarget::beam("rail");
+    let mut beam_target = PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("rail"));
     beam_target.bind_resolved_entities(vec![edge]).unwrap();
-    let mut shell_target = PropertyRegionTarget::shell("skin");
+    let mut shell_target = PropertyRegionTarget::shell(runmat_meshing_core::fixtures::fixture_face("skin"));
     shell_target.bind_resolved_entities(vec![face]).unwrap();
     let properties = RealizedModelProperties {
         sections: vec![
@@ -204,9 +204,5 @@ fn definition(property_id: &str) -> AuthoredPropertyDefinitionRef {
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, source_topology_id.into(), vec!["root".into()])
 }

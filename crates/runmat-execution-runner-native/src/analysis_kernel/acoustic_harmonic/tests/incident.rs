@@ -57,7 +57,7 @@ fn incident_task(order: ElementOrder, chunk: usize) -> PreparedAcousticHarmonicT
         .push(ExcitationAction::AcousticIncidentPressure(
             AnalysisExcitation {
                 excitation_id: ExcitationId("incident-inlet".into()),
-                target: ExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
                 frame: CoordinateFrame::BoundaryNormalTangent,
                 direction: None,
                 distribution: ExcitationDistribution::UniformKinematic,
@@ -80,6 +80,7 @@ fn incident_task(order: ElementOrder, chunk: usize) -> PreparedAcousticHarmonicT
     // Rebuild authenticated input authority after changing the physical source. The existing
     // face:3 impedance remains rho*c=6; inlet admittance belongs to canonical source lowering.
     prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: Digest::sha256("acoustic-native-incident-test"),
         frozen_project_digest: None,
         program_revision: original.program.request.recipe.program_revision,
@@ -196,7 +197,8 @@ fn native_incident_pressure_source_and_cold_publication_are_transport_independen
             assert_eq!(payload.ordered_node_ids, result.ordered_node_ids());
             assert_eq!(payload.ordered_element_ids, result.ordered_element_ids());
             let fields = payload.fields.fields();
-            assert_eq!(fields.len(), 2);
+            // Pressure, particle velocity and active intensity.
+            assert_eq!(fields.len(), 3);
             let original_pressure = result
                 .pressure_pa()
                 .iter()

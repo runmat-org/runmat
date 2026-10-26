@@ -277,6 +277,9 @@ pub enum Commands {
         /// Deterministic meshing seed
         #[arg(long, default_value_t = 0)]
         seed: u64,
+        /// Join touching bodies so coincident faces become shared, conformally meshed interfaces
+        #[arg(long)]
+        shared_interfaces: bool,
         /// Replace existing output files atomically
         #[arg(long)]
         force: bool,

@@ -7,7 +7,7 @@ pub(super) fn inventory(
 ) -> Result<(u64, u64), AnalysisPublicationError> {
     let mesh =
         crate::analysis::storage::publication::retained_mesh_storage(result.mesh(), maximum)?;
-    let original = crate::analysis::storage::publication::resident(
+    let original = crate::analysis::storage::publication::typed_resident(
         &(
             result.meshing_evidence(),
             result.workloads(),
@@ -18,7 +18,7 @@ pub(super) fn inventory(
     // Intent resolution and workload dispatch introduce additional small metadata
     // owners. Compiled element/audit inventories share their validated originals.
     // Keep conservative existing profiles where no typed-buffer inventory exists.
-    let copies = crate::analysis::storage::publication::resident(
+    let copies = crate::analysis::storage::publication::typed_resident(
         &(
             &result.compiled().model,
             &result.compiled().model,

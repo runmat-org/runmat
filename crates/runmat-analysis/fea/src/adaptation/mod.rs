@@ -7,7 +7,7 @@ pub use solved_source::{
 };
 mod field_transfer;
 mod iteration;
-mod structural_recovery;
+pub(crate) mod structural_recovery;
 
 pub use field_transfer::{
     measure_solver_field_transfer_error, transfer_solver_field, SolverFieldTransferError,

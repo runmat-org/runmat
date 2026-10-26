@@ -19,8 +19,9 @@ pub fn region_selector(
         [select, kind, value] if select == "select" => match kind.as_str() {
             "name" => Ok(GeometryRegionSelector::Name(value.clone())),
             "tag" => Ok(GeometryRegionSelector::Tag(value.clone())),
-            "id" => Err("source aliases are not geometry identities; save the inspected entity as a named CAD selection and use `select name` in the study".into()),
-            "persistent_id" => {
+            // Ids are canonical `persistent-entity:sha256:` analysis selection ids only;
+            // source aliases are rejected by the validation below.
+            "id" | "persistent_id" => {
                 runmat_geometry_core::PersistentEntityId::validate_analysis_selection_id(value)
                     .map_err(|error| error.to_string())?;
                 Ok(GeometryRegionSelector::PersistentId(value.clone()))

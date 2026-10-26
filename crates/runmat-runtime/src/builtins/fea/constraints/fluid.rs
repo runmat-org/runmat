@@ -36,35 +36,32 @@ fn vector_velocity(
 }
 
 macro_rules! define_vector_velocity_constraint {
-    ($function:ident, $descriptor:ident, $signatures:ident, $inputs:ident,
-     $name:literal, $label:literal, $summary:literal, $build:expr) => {
-        const $inputs: [BuiltinParamDescriptor; 3] = [
-            BuiltinParamDescriptor { name: "id", ty: BuiltinParamType::StringScalar, arity: BuiltinParamArity::Required, default: None, description: "Constraint identifier." },
-            BuiltinParamDescriptor { name: "region", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Required, default: None, description: "Exact geometry.Region boundary target." },
-            BuiltinParamDescriptor { name: "velocity", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Required, default: None, description: "Three typed fea.Velocity components in a cell vector (global), or a framed vector fea.VelocitySignal retained by the model; no scalar speed." },
-        ];
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor { label: $label, inputs: &$inputs, outputs: &OUT_ANY }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor { signatures: &$signatures, output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::Public, errors: &ERRORS };
-        #[runtime_builtin(name = $name, category = "fea", summary = $summary,
-            keywords = "fea,constraint,region,velocity,vector,typed",
-            descriptor($descriptor), integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-            builtin_path = "crate::builtins::fea::constraints::fluid")]
+    ($function:ident, $descriptor:ident, $name:literal, $build:expr) => {
+        #[runtime_builtin(
+                                    name = $name,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::constraints::fluid"
+                                )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let (id, geometry_id, geometry_revision, target) = bound_region($name, id, &region)?;
             let velocity = vector_velocity($name, &value)?;
             let constraint = ($build)(id, target, velocity);
-            bound_constraint_to_object($name, FEA_FLUID_CONSTRAINT_CLASS, geometry_id, geometry_revision, constraint)
+            bound_constraint_to_object(
+                $name,
+                FEA_FLUID_CONSTRAINT_CLASS,
+                geometry_id,
+                geometry_revision,
+                constraint,
+            )
         }
     };
 }
 
 define_simple_constraint!(
     fluid_no_slip_wall_builtin,
-    FLUID_NO_SLIP_WALL_DESCRIPTOR,
-    FLUID_NO_SLIP_WALL_SIGNATURES,
+    FEA_FLUID_CONSTRAINT_NO_SLIP_WALL_DESCRIPTOR,
     "fea.FluidConstraint.noSlipWall",
-    "constraint = fea.FluidConstraint.noSlipWall(id, region)",
-    "Create a fluid no-slip wall constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::fluid",
     |constraint_id, target| FluidConstraint {
@@ -78,11 +75,8 @@ mod vector_tests;
 
 define_simple_constraint!(
     fluid_slip_wall_builtin,
-    FLUID_SLIP_WALL_DESCRIPTOR,
-    FLUID_SLIP_WALL_SIGNATURES,
+    FEA_FLUID_CONSTRAINT_SLIP_WALL_DESCRIPTOR,
     "fea.FluidConstraint.slipWall",
-    "constraint = fea.FluidConstraint.slipWall(id, region)",
-    "Create a fluid slip-wall constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::fluid",
     |constraint_id, target| FluidConstraint {
@@ -93,11 +87,8 @@ define_simple_constraint!(
 
 define_simple_constraint!(
     fluid_symmetry_builtin,
-    FLUID_SYMMETRY_DESCRIPTOR,
-    FLUID_SYMMETRY_SIGNATURES,
+    FEA_FLUID_CONSTRAINT_SYMMETRY_DESCRIPTOR,
     "fea.FluidConstraint.symmetry",
-    "constraint = fea.FluidConstraint.symmetry(id, region)",
-    "Create a fluid symmetry constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::fluid",
     |constraint_id, target| FluidConstraint {
@@ -108,12 +99,8 @@ define_simple_constraint!(
 
 define_vector_velocity_constraint!(
     fluid_prescribed_velocity_builtin,
-    FLUID_PRESCRIBED_VELOCITY_DESCRIPTOR,
-    FLUID_PRESCRIBED_VELOCITY_SIGNATURES,
-    FLUID_PRESCRIBED_VELOCITY_INPUTS,
+    FEA_FLUID_CONSTRAINT_PRESCRIBED_VELOCITY_DESCRIPTOR,
     "fea.FluidConstraint.prescribedVelocity",
-    "constraint = fea.FluidConstraint.prescribedVelocity(id, region, velocity)",
-    "Create an exact three-component prescribed fluid-velocity constraint.",
     |constraint_id, target, velocity| FluidConstraint {
         constraint_id,
         kind: FluidConstraintKind::PrescribedVelocity {
@@ -125,12 +112,8 @@ define_vector_velocity_constraint!(
 
 define_vector_velocity_constraint!(
     fluid_moving_wall_builtin,
-    FLUID_MOVING_WALL_DESCRIPTOR,
-    FLUID_MOVING_WALL_SIGNATURES,
-    FLUID_MOVING_WALL_INPUTS,
+    FEA_FLUID_CONSTRAINT_MOVING_WALL_DESCRIPTOR,
     "fea.FluidConstraint.movingWall",
-    "constraint = fea.FluidConstraint.movingWall(id, region, velocity)",
-    "Create an exact three-component moving-wall velocity constraint.",
     |constraint_id, target, velocity| FluidConstraint {
         constraint_id,
         kind: FluidConstraintKind::MovingWall { target, velocity },
@@ -139,15 +122,10 @@ define_vector_velocity_constraint!(
 
 define_quantity_constraint!(
     fluid_pressure_reference_builtin,
-    FLUID_PRESSURE_REFERENCE_DESCRIPTOR,
-    FLUID_PRESSURE_REFERENCE_SIGNATURES,
-    FLUID_PRESSURE_REFERENCE_INPUTS,
+    FEA_FLUID_CONSTRAINT_PRESSURE_REFERENCE_DESCRIPTOR,
     "fea.FluidConstraint.pressureReference",
-    "constraint = fea.FluidConstraint.pressureReference(id, region, pressure)",
-    "Create a fluid pressure-reference constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::fluid",
-    "pressure",
     PRESSURE_CLASS,
     "pascals",
     |constraint_id, target, pascals| FluidConstraint {

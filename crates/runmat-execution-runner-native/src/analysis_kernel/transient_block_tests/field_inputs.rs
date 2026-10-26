@@ -97,7 +97,6 @@ fn native_cold_field_inputs_preserve_original_state_and_partition_equivalence() 
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
             residual_target: 1e-10,

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
@@ -156,14 +156,8 @@ pub fn mesh_source_with_native_execution(
     let program_revision = ProgramRevision::new(
         Digest::sha256(&request_bytes),
         Digest::sha256(&source_bytes),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(env!("CARGO_PKG_VERSION").as_bytes()),
-            Digest::sha256(b"runmat-meshing-catalog/v1"),
-            "matlab",
-        )
-        .map_err(|error| NativeMeshingSourceError::InvalidRequest(error.to_string()))?,
+        // The executing workers advertise this runtime's own environment.
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .map_err(|error| NativeMeshingSourceError::InvalidRequest(error.to_string()))?;
     let source_name = request.source.to_string_lossy().into_owned();
@@ -243,11 +237,7 @@ mod tests {
         kind: runmat_geometry_core::PersistentEntityKind,
         source: &str,
     ) -> runmat_geometry_core::PersistentEntityId {
-        runmat_geometry_core::PersistentEntityId {
-            kind,
-            source_topology_id: source.into(),
-            assembly_path: vec!["root".into()],
-        }
+        runmat_geometry_core::PersistentEntityId::new(kind, source.into(), vec!["root".into()])
     }
 
     #[test]

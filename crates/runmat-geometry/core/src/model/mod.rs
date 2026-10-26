@@ -34,7 +34,8 @@ mod units;
 mod validation_storage;
 
 pub use analysis_identity::{
-    GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
+    GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityIdData,
+    PersistentEntityKind,
 };
 pub use assembly::AssemblyNode;
 pub use authoring::*;
@@ -68,6 +69,7 @@ pub use units::LengthUnit;
 
 #[cfg(test)]
 mod exact_topology_tests;
-
 mod named_selections;
-pub use named_selections::{GeometryNamedSelections, geometry_selection_metadata_path, is_geometry_selection_metadata_path};
+pub use named_selections::{
+    geometry_selection_metadata_path, is_geometry_selection_metadata_path, GeometryNamedSelections,
+};

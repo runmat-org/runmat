@@ -1,8 +1,8 @@
 //! Authored thermal intent, independent of task placement and transport.
 use runmat_analysis_core::{
-    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement,
-    IndependentDomain, ObservationRequest, PhysicsFamily, ProcedureSettings, RestartPolicy,
-    SamplingPolicy, SolutionSpace, StateKind,
+    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, IndependentDomain,
+    ObservationRequest, PhysicsFamily, ProcedureSettings, RestartPolicy, SamplingPolicy,
+    SolutionSpace, StateKind,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,11 +18,46 @@ pub use initial_selection::thermal_step_initial_selection_supported;
 mod tests;
 
 /// Backend admission is resolved by the caller; physical and accuracy controls remain authored.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalStudyPlanningPolicy {
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
+    /// A solved upstream loss field that heats this analysis (`heat_source = analysis.<p>.state.<s>`).
+    pub element_heat_source: Option<ElementHeatSource>,
+}
+
+/// Element heat generation solved by an upstream analysis on the same canonical mesh.
+///
+/// The density of each element, in canonical element order, is bound as the heat source
+/// `source_id` of the thermal step `step_id`, so the total heat equals the upstream loss.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElementHeatSource {
+    pub step_id: String,
+    pub source_id: String,
+    pub element_density_w_per_m3: Vec<f64>,
+}
+
+impl ElementHeatSource {
+    /// Bind the solved density into the compiled thermal model as the step's heat source.
+    pub fn bind(
+        &self,
+        model: &mut runmat_analysis_core::AnalysisModel,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> crate::execution::AnalysisExecutionResult<()> {
+        let transient = model.sequence.steps.iter().any(|step| {
+            step.step_id.as_str() == self.step_id
+                && step.procedure == AnalysisProcedure::TransientResponse
+        });
+        crate::execution::bind_element_heat_source(
+            model,
+            &self.step_id,
+            &self.source_id,
+            runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
+            &[(0.0, self.element_density_w_per_m3.clone())],
+            transient,
+        )
+    }
 }
 
 /// Plan one fresh steady or backward-Euler thermal step without rewriting its authored model.
@@ -40,9 +75,6 @@ pub fn plan_thermal_study_with_fields(
     policy: ThermalStudyPlanningPolicy,
     initial_fields: Vec<crate::execution::InitialFieldBinding>,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
-    }
     let step = validation::standalone_step(study)?;
     plan_selected(study, &step.step_id.0, policy, false, initial_fields)
 }
@@ -74,16 +106,12 @@ fn plan_selected(
     mixed_context: bool,
     initial_fields: Vec<crate::execution::InitialFieldBinding>,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
-    }
     let (step, procedure, residual_target) = authored_controls(&study.model, step_id)?;
     let workload = ThermalWorkload {
         initial_fields,
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         procedure,
         residual_target,
     };
@@ -174,10 +202,14 @@ fn authored_controls<'a>(
     for request in &step.observations {
         let spec = match request {
             ObservationRequest::History(spec) => spec,
-            ObservationRequest::Field(spec) if spec.sampling == SamplingPolicy::Final => spec,
+            ObservationRequest::Field(spec) | ObservationRequest::Reduction(spec)
+                if spec.sampling == SamplingPolicy::Final =>
+            {
+                spec
+            }
             _ => {
                 return Err(ThermalStudyPlanningError::Observation(format!(
-                    "observation {:?} is not a supported thermal history or final field",
+                    "observation {:?} is not a supported thermal history, final field or final spatial reduction",
                     request.observation_id()
                 )))
             }
@@ -222,8 +254,6 @@ fn validate_sources(
 
 #[derive(Debug, Error)]
 pub enum ThermalStudyPlanningError {
-    #[error("thermal planning policy differs from the compiled formulation requirement")]
-    FormulationRequirementMismatch,
     #[error("thermal workload differs from the compiled authored intent")]
     WorkloadMismatch,
     #[error("thermal planning requires a fresh independent step with only authored physical thermal initial selection; standalone planning additionally requires a single-step sequence")]

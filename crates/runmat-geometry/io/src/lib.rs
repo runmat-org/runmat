@@ -28,6 +28,7 @@ mod occt;
 
 pub use exact::{
     import_exact_cad, ExactCadAnalysisOptions, ExactCadImportOptions, ImportedExactCad,
+    SourceUnitsAuthority,
 };
 pub use faceted::{import_faceted_solid, FacetedSolidImportOptions, ImportedFacetedSolid};
 pub use import::{

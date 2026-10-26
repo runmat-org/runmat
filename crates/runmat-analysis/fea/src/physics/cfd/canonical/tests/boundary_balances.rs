@@ -5,11 +5,15 @@ use runmat_analysis_core::{
     Pressure, RegionTarget, Velocity,
 };
 
+// witness: FEA-FLUID-RECOVERY-001/balance @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent constant translation exact group signs/pressure forces; no general
+//   wall-shear convergence.
 #[test]
 fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
     for reference in [0.0, 101325.0] {
         let mut f = case(2, ReferenceCase::Couette, false);
-        let mut walls = RegionTarget::boundary("inlet_and_walls");
+        let mut walls = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("inlet_and_walls"));
         let entities = f
             .constraints
             .iter()
@@ -21,7 +25,7 @@ fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
             })
             .collect();
         walls.bind_resolved_entities(entities).unwrap();
-        let mut outlet = RegionTarget::boundary("outlet");
+        let mut outlet = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("outlet"));
         outlet
             .bind_resolved_entities(
                 f.operators
@@ -106,6 +110,10 @@ fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
     }
 }
 
+// witness: FEA-FLUID-RECOVERY-001/fields @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Couette boundary shear/source attribution preserved under cold recovery; one fixture
+//   only.
 #[test]
 fn original_couette_boundary_shear_and_cold_attribution_are_preserved() {
     let f = case(2, ReferenceCase::Couette, false);

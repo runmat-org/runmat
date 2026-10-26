@@ -1,12 +1,11 @@
-geometry selection.
 // Engineering physics belongs in the importing study.
 
 geometry beam {
     file = "./geometry/cantilever.step"
     units = mm
-    region body : solid { select name "body"; expect exactly_one }
-    region fixed_end : face { select name "fixed_end"; expect exactly_one }
-    region loaded_end : face { select name "loaded_end"; expect exactly_one }
+    region body : solid { select name "Beam"; expect exactly_one }
+    region fixed_end : face { select name "Fixed end"; expect exactly_one }
+    region loaded_end : face { select name "Loaded end"; expect exactly_one }
 }
 
 mesh beam on geometry.beam {
@@ -40,8 +39,14 @@ study cantilever_medium {
     geometry = geometry.beam
     mesh = mesh.beam
     model = model.loaded_beam
-    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
+    output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.beam.region.loaded_end)
+    assessment tip_deflection_matches_beam_theory {
+        value = output.tip_deflection
+        minimum = 0.19 mm
+        maximum = 0.21 mm
+        evidence = authored_samples
+    }
 }

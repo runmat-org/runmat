@@ -46,9 +46,9 @@ pub struct CompletedFluidStudy {
     pub workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
     pub result: ImportedFluidSteadyResult,
     pub fields: crate::ImportedRecoveredFields,
-    pub observations: Option<crate::ImportedObservations>,
-    pub observation_catalog:
-        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    /// Field outputs assembled per retained sample, histories finalized over them, and the
+    /// publication catalog of both.
+    pub observations: crate::CompletedSampledObservations,
     pub accuracy: ImportedAccuracy,
     pub states: Vec<ImportedSemanticState>,
     pub baseline_usage: PreparedResourceUsage,
@@ -57,6 +57,7 @@ pub struct CompletedFluidStudy {
 }
 
 pub struct FluidStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: FluidStudyPlanningPolicy,
     pub product: FluidStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -73,12 +74,8 @@ pub enum FluidStudyPhase {
     AwaitingSolve,
     ReadyForFieldRecovery,
     AwaitingFieldRecovery,
-    ReadyForObservationFanout,
-    AwaitingObservationPartitions,
-    ReadyForObservationReduction { ordinal: usize },
-    AwaitingObservationReduction { ordinal: usize },
-    ReadyForObservationAssembly,
-    AwaitingObservationAssembly,
+    ReadyForObservations,
+    AwaitingObservation,
     ReadyForAccuracy,
     AwaitingAccuracy,
     ReadyForState { ordinal: usize },
@@ -100,7 +97,7 @@ pub struct FluidStudyCoordinator {
     tail: Option<SteadyStudyTail>,
     recovery_task: Option<crate::PreparedFluidFieldRecovery>,
     fields: Option<crate::ImportedRecoveredFields>,
-    observation_state: observations::FluidObservations,
+    observation_state: crate::sampled_history_observations::SampledHistoryWorkflow,
     usage: Option<PreparedResourceUsage>,
 }
 
@@ -137,7 +134,7 @@ impl FluidStudyCoordinator {
             tail: None,
             recovery_task: None,
             fields: None,
-            observation_state: observations::FluidObservations::default(),
+            observation_state: crate::sampled_history_observations::SampledHistoryWorkflow::default(),
             usage: None,
         })
     }
@@ -145,6 +142,7 @@ impl FluidStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedFluidSteadyTask> {
         self.require(FluidStudyPhase::ReadyForSolve)?;
         let task = prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+            local_execution: self.preparation.local_execution,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -312,6 +310,7 @@ impl FluidStudyCoordinator {
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedFluidStudy {
             replay: completion::FluidStudyReplayContext {
+                local_execution: self.preparation.local_execution,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,
@@ -325,8 +324,7 @@ impl FluidStudyCoordinator {
             workload,
             result: self.result.expect("completed solve"),
             fields: self.fields.expect("completed retained field publication"),
-            observations: self.observation_state.completed,
-            observation_catalog: self.observation_state.catalog,
+            observations: self.observation_state.into_completed(),
             accuracy: tail.accuracy.expect("completed accuracy"),
             states: tail.states,
             baseline_usage: tail.baseline.expect("frozen baseline"),
@@ -352,13 +350,8 @@ impl FluidStudyCoordinator {
     pub fn fields(&self) -> Option<&crate::ImportedRecoveredFields> {
         self.fields.as_ref()
     }
-    pub fn observations(&self) -> Option<&crate::ImportedObservations> {
-        self.observation_state.completed.as_ref()
-    }
-    pub fn observation_catalog(
-        &self,
-    ) -> Option<&runmat_analysis_fea::results::observation::ObservationPublicationCatalog> {
-        self.observation_state.catalog.as_ref()
+    pub fn observations(&self) -> &crate::CompletedSampledObservations {
+        self.observation_state.completed()
     }
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.tail.as_ref().and_then(|tail| tail.accuracy.as_ref())

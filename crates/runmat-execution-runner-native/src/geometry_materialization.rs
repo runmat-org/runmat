@@ -13,3 +13,8 @@ pub fn execute_geometry_materialization_program_request<
     );
     runmat_analysis_execution::execute_geometry_materialization_program_request(request, store, limits, platform)
 }
+
+#[cfg(all(test, feature = "occt-native"))]
+mod geometry_materialization_tests;
+#[cfg(all(test, feature = "occt-native"))]
+mod geometry_sweep_tests;

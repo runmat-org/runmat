@@ -32,6 +32,23 @@ mod cantilever_stiffness;
 #[path = "qualification_tests/interface.rs"]
 mod interface;
 
+#[path = "qualification_tests/elastic_static_path.rs"]
+mod elastic_static_path;
+
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: The elastic rigidity path (no global factor, AMG-PCG, true-residual acceptance) matches the proving factorization's displacement to 1e-6 on a structured cantilever.
+#[test]
+fn elastic_rigidity_static_path_agrees_with_the_proving_factorization() {
+    elastic_static_path::qualify();
+}
+
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: The planner selects the elastic rigidity path exactly when the effective ceiling, min(authored, machine), lies below the proving factorization's plan; recorded and direct requests keep their path.
+#[test]
+fn effective_ceiling_selects_the_static_solve_path() {
+    elastic_static_path::ceiling_selects_the_static_path();
+}
+
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();
@@ -44,7 +61,7 @@ mod heterogeneous;
 #[path = "qualification_tests/manufactured.rs"]
 mod manufactured;
 #[path = "qualification_tests/mesh.rs"]
-mod mesh;
+pub(crate) mod mesh;
 use mesh::{entity, structured_cantilever};
 
 #[test]

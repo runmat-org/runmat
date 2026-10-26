@@ -12,12 +12,8 @@ use crate::commands::job::secret::SavedOutputIntent;
 use crate::commands::job::submit::{PreparedRemoteExecution, RemoteSubmissionOptions};
 use crate::presentation;
 
-use super::preparation::{
-    ensure_remote_structural, prepare_study, require_remote_root, FeaComputeAllocation,
-};
-use super::result_presentation::{
-    completed_summary, print_completed_fea_result, print_sweep_result,
-};
+use super::preparation::{portable_root, prepare_study, FeaComputeAllocation};
+use super::result_presentation::{print_completed_fea_result, print_fea_sweep_result};
 use super::source::NativeCheckedFeaSource;
 
 mod remote_study;
@@ -71,16 +67,20 @@ async fn execute_study(
             )
             .await
             .map_err(anyhow::Error::msg)?;
-            let runmat_execution_runner_native::LocalFeaExecution::Study(completed) = completed
-            else {
-                bail!("selected study resolved to a sweep during native execution");
-            };
-            print_completed_fea_result(
-                &completed.case_id,
-                &completed.result,
-                &completed.publication,
-                json,
-            )
+            match completed {
+                runmat_execution_runner_native::LocalFeaExecution::Study(completed) => {
+                    print_completed_fea_result(
+                        &completed.case_id,
+                        &completed.result,
+                        &completed.publication,
+                        json,
+                    )
+                }
+                // A multi-frequency harmonic study runs one case per frequency.
+                runmat_execution_runner_native::LocalFeaExecution::Sweep { sweep_id, cases } => {
+                    print_local_sweep(&sweep_id, cases, json)
+                }
+            }
         }
         ExecutionTarget::Remote(target) => {
             execute_study_remotely(
@@ -131,11 +131,7 @@ async fn execute_sweep(
             else {
                 bail!("selected sweep resolved to a study during native execution");
             };
-            let summaries = completed
-                .iter()
-                .map(|case| completed_summary(&case.case_id, &case.result, &case.publication))
-                .collect::<Result<Vec<_>>>()?;
-            print_sweep_result(&sweep.sweep.sweep_id, &summaries, json)
+            print_local_sweep(&sweep.sweep.sweep_id, completed, json)
         }
         ExecutionTarget::Remote(target) => {
             execute_sweep_remotely(
@@ -152,6 +148,37 @@ async fn execute_sweep(
     }
 }
 
+/// Print locally executed cases, each with its own terminal status, in authored order.
+fn print_local_sweep(
+    sweep_id: &str,
+    completed: Vec<runmat_execution_runner_native::LocalSweepCase>,
+    json: bool,
+) -> Result<()> {
+    let case_ids = completed
+        .iter()
+        .map(|case| case.case_id.clone())
+        .collect::<Vec<_>>();
+    let materialized = super::remote::MaterializedFeaSweep {
+        entries: completed
+            .into_iter()
+            .enumerate()
+            .map(|(study_index, case)| super::remote::MaterializedFeaSweepEntry {
+                study_index,
+                terminal: match case.outcome {
+                    Ok(completed) => super::remote::MaterializedFeaSweepTerminal::Succeeded(
+                        Box::new(super::remote::MaterializedFeaStudy {
+                            result: completed.result,
+                            publication: completed.publication,
+                        }),
+                    ),
+                    Err(message) => super::remote::MaterializedFeaSweepTerminal::Failed(message),
+                },
+            })
+            .collect(),
+    };
+    print_fea_sweep_result(sweep_id, &case_ids, &materialized, json)
+}
+
 async fn execute_sweep_remotely(
     source: &NativeCheckedFeaSource,
     sweep: ResolvedAnalysisSweep,
@@ -161,7 +188,6 @@ async fn execute_sweep_remotely(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
-    ensure_remote_structural(&sweep.study.study.sequence)?;
     let frozen = source
         .frozen_project
         .as_ref()
@@ -291,7 +317,7 @@ async fn prepare_sweep_root(
             config,
         )
         .await?;
-        studies.push(require_remote_root(prepared.root)?);
+        studies.push(portable_root(prepared.root)?);
     }
     let revision = studies
         .first()

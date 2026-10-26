@@ -81,7 +81,9 @@ pub(super) fn required_source_indices(
                     .ok_or(ObservationError::Unsupported(
                         "boundary observations require admitted solid topology",
                     ))?;
-            let mut nodes = BTreeSet::new();
+            // A nodal field is read at the face nodes, an element field in the face's owner.
+            let element_field = observation.spec.source_location == FieldLocation::Element;
+            let mut entities = BTreeSet::new();
             for index in face_indices {
                 let face =
                     projection
@@ -90,9 +92,13 @@ pub(super) fn required_source_indices(
                         .ok_or(ObservationError::Identity(
                             "observation partition exceeds boundary-face topology",
                         ))?;
-                nodes.extend(face.node_indices.iter().copied());
+                if element_field {
+                    entities.extend(face.adjacent_element_indices.iter().copied());
+                } else {
+                    entities.extend(face.node_indices.iter().copied());
+                }
             }
-            nodes.into_iter().collect()
+            entities.into_iter().collect()
         }
     };
     if indices.is_empty() {
@@ -308,6 +314,16 @@ fn project_observation_value(
                     .chunks_exact(2)
                     .map(|pair| pair[1].atan2(pair[0]))
                     .collect(),
+                // Peak phasor to RMS, dB re 20 uPa. Zero pressure has no finite level.
+                ComplexRepresentation::SoundPressureLevel => value
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        20.0 * (pair[0].hypot(pair[1])
+                            / (std::f64::consts::SQRT_2
+                                * runmat_analysis_core::SOUND_PRESSURE_LEVEL_REFERENCE_PA))
+                            .log10()
+                    })
+                    .collect(),
                 ComplexRepresentation::Complex => value.to_vec(),
             }
         }
@@ -398,6 +414,40 @@ pub(super) fn weighted_boundary_contribution(
         let face = projection.boundary_faces.get(face_index).ok_or_else(|| {
             ObservationError::Invalid("resolved boundary-face index is out of bounds".into())
         })?;
+        if observation.spec.source_location == FieldLocation::Element {
+            // The owner element's value over the whole face: a volume-averaged field has one
+            // value per element, so the face integral is exact for that representation.
+            let [owner] = face.adjacent_element_indices.as_slice() else {
+                return Err(ObservationError::Unsupported(
+                    "element fields on a boundary need faces with one owning element",
+                ));
+            };
+            let value = field.value(*owner).ok_or(ObservationError::Identity(
+                "observation source partition is missing the face owner's element value",
+            ))?;
+            let projected = project_observation_value(field, value, observation)?;
+            let mut area_vector = [0.0; 3];
+            let mut area = 0.0;
+            let mut centroid = [0.0; 3];
+            projection.visit_boundary_quadrature(face, |point| {
+                for k in 0..3 {
+                    area_vector[k] += point.area_vector_weight_m2[k];
+                    centroid[k] += point.position_m[k] * point.area_weight_m2;
+                }
+                area += point.area_weight_m2;
+            })?;
+            let centroid = centroid.map(|x| x / area);
+            accumulate_boundary_reduction(
+                &mut accumulator,
+                observation,
+                operation,
+                &projected,
+                centroid,
+                area_vector,
+                area,
+            )?;
+            continue;
+        }
         let mut component_error = None;
         projection.visit_boundary_quadrature(face, |point| {
             match interpolate_and_project(
@@ -620,6 +670,21 @@ fn accumulate_boundary_reduction(
 ) -> Result<(), ObservationError> {
     match operation {
         SpatialReduction::EuclideanNorm => accumulator.add_norm(projected, area_weight_m2),
+        SpatialReduction::NormalFlux => {
+            let [x, y, z] = projected else {
+                return Err(ObservationError::Invalid(
+                    "a normal flux reduces a real three-component vector".into(),
+                ));
+            };
+            if area_weight_m2 <= 0.0 {
+                return Err(ObservationError::Invalid("flux face has no area".into()));
+            }
+            let normal_component = (x * area_vector_weight_m2[0]
+                + y * area_vector_weight_m2[1]
+                + z * area_vector_weight_m2[2])
+                / area_weight_m2;
+            accumulator.add(&[normal_component], area_weight_m2)
+        }
         SpatialReduction::Resultant | SpatialReduction::Moment { .. } => {
             let force = boundary_force_components(
                 observation,

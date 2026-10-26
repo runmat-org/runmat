@@ -84,6 +84,9 @@ impl ObservationSpec {
                 ),
             );
         }
+        if self.complex_representation == ComplexRepresentation::SoundPressureLevel {
+            return ObservationResultQuantity::Physical(ObservationQuantity::SoundPressureLevel);
+        }
         let quantity = if self.component == ObservationComponent::VonMises {
             ObservationQuantity::VonMisesStress
         } else {
@@ -111,7 +114,8 @@ impl ObservationSpec {
             Some(
                 SpatialReduction::EuclideanNorm
                 | SpatialReduction::Minimum
-                | SpatialReduction::Maximum,
+                | SpatialReduction::Maximum
+                | SpatialReduction::NormalFlux,
             ) => ObservationValueShape::Scalar,
             Some(SpatialReduction::Resultant | SpatialReduction::Moment { .. }) => {
                 ObservationValueShape::Vector3
@@ -126,7 +130,10 @@ impl ObservationSpec {
     }
 
     pub fn result_descriptor(&self) -> Option<runmat_types::physical::DynamicDimension> {
-        if self.complex_representation == ComplexRepresentation::PhaseRadians {
+        if matches!(
+            self.complex_representation,
+            ComplexRepresentation::PhaseRadians | ComplexRepresentation::SoundPressureLevel
+        ) {
             return Some(runmat_types::physical::DynamicDimension::quantity_type(
                 runmat_types::physical::QuantityKind::ComplexPhase,
             ));
@@ -138,7 +145,7 @@ impl ObservationSpec {
             .map_or(SpatialReduction::None, |reduction| reduction.spatial);
         let measure = self.target.measure_dimension();
         let spatial_dimension = match spatial {
-            SpatialReduction::Integral => source.multiply(measure?.into()),
+            SpatialReduction::Integral | SpatialReduction::NormalFlux => source.multiply(measure?.into()),
             SpatialReduction::Resultant => {
                 if matches!(
                     self.quantity,
@@ -307,7 +314,13 @@ pub enum ComplexRepresentation {
     Magnitude,
     PhaseRadians,
     Complex,
+    /// Sound pressure level in dB re 20 uPa of a peak pressure phasor:
+    /// 20 log10(|p| / (sqrt(2) * 20e-6 Pa)), i.e. referred to the RMS pressure.
+    SoundPressureLevel,
 }
+
+/// Reference pressure of `ComplexRepresentation::SoundPressureLevel` (air, 20 uPa).
+pub const SOUND_PRESSURE_LEVEL_REFERENCE_PA: f64 = 20.0e-6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -390,6 +403,8 @@ pub enum SpatialReduction {
     Maximum,
     Resultant,
     Moment { about: Position },
+    /// Flux of a vector field through a face region along its outward normal, ∫ v·n dA.
+    NormalFlux,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

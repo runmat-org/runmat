@@ -14,7 +14,7 @@ fn solve_duct(
         slab_mesh(cells)
     };
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![frequency]);
     velocity_source(&mut model, -1.0 / 6.0, -0.4 / 6.0);
     // The shared source is constant over this extended frequency schedule.
@@ -29,7 +29,7 @@ fn solve_duct(
     }
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "termination".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: if matched {
             BoundaryOperator::AcousticImpedance {
                 impedance: SpecificAcousticImpedance::new(6.0),
@@ -44,11 +44,8 @@ fn solve_duct(
         "acoustic",
         Frequency::new(frequency),
         AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
-            restart: 128,
-            maximum_iterations: 8192,
+            ..Default::default()
         },
         1e-8,
     )
@@ -74,6 +71,9 @@ fn pressure_error(
     (error / scale).sqrt()
 }
 
+// witness: FEA-ACOUSTIC-NUMERICS-001/duct @ acoustic_harmonic/tet10/numerical_kernel;
+//   boundary: Tet10 slab at two frequencies, three refinements; exact traveling-wave references,
+//   not all acoustic geometries.
 #[test]
 fn tet10_traveling_wave_phase_pressure_velocity_and_power_converge() {
     for frequency in [0.2, 0.5] {
@@ -137,6 +137,9 @@ fn tet10_traveling_wave_phase_pressure_velocity_and_power_converge() {
     }
 }
 
+// witness: FEA-ACOUSTIC-NUMERICS-001/cavity @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence;
+//   no complete multidimensional modal-spectrum credit.
 #[test]
 fn tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance() {
     // Unit cube, rigid side/right walls, prescribed outward v_n=-(1+.4i)/6 at x=0.

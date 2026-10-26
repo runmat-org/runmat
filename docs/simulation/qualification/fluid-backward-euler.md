@@ -60,14 +60,14 @@ checked on every cell and all three axes against the analytic cell integral.
 
 ## Completion boundary
 
-This is a numerical interval foundation, not a production transient study or an
+This is a numerical interval foundation, not a complete transient study or an
 advertised native transient task. The existing steady authored/native/publication
 path still uses its original steady equations and mandatory accuracy gate.
 
 Shared signals, initial-state authority, time schedule and discontinuity semantics,
 admitted temporal task blocks, full cold checkpoint lineage, cumulative work,
 original histories, observations, mandatory time/spatial accuracy and atomic
-publication must be connected before transient production qualification. Existing
+publication must be connected before transient qualification. Existing
 constant-source admission remains explicit; no family-private time profile,
 scheduler or kernel callback is introduced. Transient vortex, cavity, backward
 step, wider spatial/time and all supported execution evidence remain open.

@@ -114,6 +114,24 @@ pub struct ProcedureStep {
 pub enum ProcedureSettings {
     None,
     StructuralRandomResponse(StructuralRandomResponseSettings),
+    StructuralNonlinear(StructuralNonlinearSettings),
+}
+
+/// Kinematic description of a structural nonlinear step. Small strain keeps the reference
+/// configuration for strain and equilibrium; large deformation is the total Lagrangian form
+/// (Green-Lagrange strain, second Piola-Kirchhoff stress, consistent material plus geometric
+/// tangent) for large displacement and large rotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralKinematics {
+    SmallStrain,
+    LargeDeformation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralNonlinearSettings {
+    pub kinematics: StructuralKinematics,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -124,6 +142,14 @@ pub struct StructuralRandomResponseSettings {
 }
 
 impl ProcedureStep {
+    /// Kinematics of a structural nonlinear step; every other step is small strain.
+    pub fn structural_kinematics(&self) -> StructuralKinematics {
+        match self.settings {
+            ProcedureSettings::StructuralNonlinear(settings) => settings.kinematics,
+            _ => StructuralKinematics::SmallStrain,
+        }
+    }
+
     /// Resolves whether an authored model object participates in this step.
     ///
     /// Empty activation inventories retain the concise single-step convention in which authored
@@ -215,6 +241,9 @@ pub enum StateUse {
     ModalBasis,
     CoupledInterface,
     Restart,
+    /// An upstream electromagnetic state whose (cycle-averaged) Joule loss density is the
+    /// consumer's volumetric heat source.
+    HeatSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -250,6 +279,10 @@ pub enum StateKind {
     ElectromagneticStatic,
     ElectromagneticComplex,
     AcousticComplex,
+    /// Cavity pressure mode shapes and their natural frequencies.
+    AcousticModes,
+    /// Real time-domain pressure field (and its rate) at the end of a transient.
+    AcousticPressure,
     Fluid,
     MovingMesh,
     ModalBasis,
@@ -337,7 +370,7 @@ pub enum RestartPolicy {
 }
 
 impl ProcedureStep {
-    pub fn experimental(
+    pub fn new(
         step_id: impl Into<String>,
         family: PhysicsFamily,
         procedure: AnalysisProcedure,
@@ -347,7 +380,7 @@ impl ProcedureStep {
     ) -> Self {
         let step_id = step_id.into();
         Self {
-            accuracy: AccuracyPlan::experimental_baseline(format!("{step_id}.accuracy")),
+            accuracy: AccuracyPlan::baseline(format!("{step_id}.accuracy")),
             step_id: ProcedureStepId(step_id),
             family,
             procedure,
@@ -364,7 +397,7 @@ impl ProcedureStep {
     }
 
     pub fn structural_static(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::Static,
@@ -395,7 +428,7 @@ impl ProcedureStep {
     }
 
     pub fn structural_modal(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::ModalExtraction,
@@ -410,7 +443,7 @@ impl ProcedureStep {
         producer_step: impl Into<String>,
         state_id: impl Into<String>,
     ) -> Self {
-        let mut step = Self::experimental(
+        let mut step = Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::EigenvalueBuckling,
@@ -441,7 +474,7 @@ impl ProcedureStep {
         producer_step: impl Into<String>,
         state_id: impl Into<String>,
     ) -> Self {
-        let mut step = Self::experimental(
+        let mut step = Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::ModalResponseSpectrum,
@@ -466,7 +499,7 @@ impl ProcedureStep {
         producer_step: impl Into<String>,
         state_id: impl Into<String>,
     ) -> Self {
-        let mut step = Self::experimental(
+        let mut step = Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::RandomResponse,
@@ -485,7 +518,7 @@ impl ProcedureStep {
     }
 
     pub fn structural_transient(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::TransientResponse,
@@ -505,7 +538,7 @@ impl ProcedureStep {
     }
 
     pub fn structural_harmonic(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::HarmonicResponse,
@@ -552,7 +585,7 @@ impl ProcedureStep {
     }
 
     pub fn thermal_transient(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Thermal,
             AnalysisProcedure::TransientResponse,
@@ -568,7 +601,7 @@ impl ProcedureStep {
     }
 
     pub fn thermal_steady(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Thermal,
             AnalysisProcedure::Static,
@@ -579,7 +612,7 @@ impl ProcedureStep {
     }
 
     pub fn structural_nonlinear(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Structural,
             AnalysisProcedure::Nonlinear,
@@ -596,8 +629,17 @@ impl ProcedureStep {
         )
     }
 
+    pub fn structural_nonlinear_with(
+        step_id: impl Into<String>,
+        settings: StructuralNonlinearSettings,
+    ) -> Self {
+        let mut step = Self::structural_nonlinear(step_id);
+        step.settings = ProcedureSettings::StructuralNonlinear(settings);
+        step
+    }
+
     pub fn fluid_static(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Fluid,
             AnalysisProcedure::Static,
@@ -608,7 +650,7 @@ impl ProcedureStep {
     }
 
     pub fn acoustic_harmonic(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Acoustic,
             AnalysisProcedure::HarmonicResponse,
@@ -618,8 +660,39 @@ impl ProcedureStep {
         )
     }
 
+    pub fn acoustic_modal(step_id: impl Into<String>, requested_count: usize) -> Self {
+        Self::new(
+            step_id,
+            PhysicsFamily::Acoustic,
+            AnalysisProcedure::ModalExtraction,
+            SolutionSpace::Direct,
+            IndependentDomain::Eigenvalue { requested_count },
+            vec![state("acoustic_modes", StateKind::AcousticModes)],
+        )
+    }
+
+    pub fn acoustic_transient(
+        step_id: impl Into<String>,
+        end: f64,
+        interval_count: usize,
+    ) -> Self {
+        Self::new(
+            step_id,
+            PhysicsFamily::Acoustic,
+            AnalysisProcedure::TransientResponse,
+            SolutionSpace::Direct,
+            IndependentDomain::TimeSeconds {
+                origin: 0.0,
+                start: 0.0,
+                end,
+                interval_count,
+            },
+            vec![state("acoustic_pressure", StateKind::AcousticPressure)],
+        )
+    }
+
     pub fn fluid_transient(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Fluid,
             AnalysisProcedure::TransientResponse,
@@ -652,7 +725,7 @@ impl ProcedureStep {
             },
             _ => IndependentDomain::Static,
         };
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Coupled(family),
             procedure,

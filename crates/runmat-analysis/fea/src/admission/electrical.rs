@@ -1,9 +1,8 @@
 use runmat_analysis_core::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
-    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization,
-    FormulationRequirement, PhysicsFamily, RecoveryImplementation, SolutionSpace,
-    SourceImplementation, SpatialOperatorImplementation, StaticElectricalEquation,
-    TemporalImplementation, TopologyImplementation,
+    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization, PhysicsFamily,
+    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
+    StaticElectricalEquation, TemporalImplementation, TopologyImplementation,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
@@ -12,18 +11,16 @@ use crate::contracts::FeaRunError;
 use crate::physics::electrical::CanonicalElectricalSource;
 
 /// Admit canonical scalar potential FEM, with equation and source kind chosen explicitly.
-/// This is experimental identity admission, not model validation or production qualification.
+/// This is identity admission, not model validation.
 pub fn admit_canonical_electrical_static(
     equation: StaticElectricalEquation,
     source: CanonicalElectricalSource,
     mesh: &SolverMeshArtifact,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     admit_formulation(FormulationAdmissionRequest {
         family: PhysicsFamily::Electromagnetic,
         procedure: AnalysisProcedure::Static,
         solution_space: SolutionSpace::Direct,
-        requirement,
         realization: realization(equation, mesh.resolved_request.element_order, source),
     })
     .map(|receipt| receipt.into_identity())
@@ -43,11 +40,17 @@ pub(super) fn registered_realizations() -> Vec<ExactFormulationRealization> {
                 [
                     CanonicalElectricalSource::SourceFree,
                     CanonicalElectricalSource::VolumeCharge,
+                    CanonicalElectricalSource::BoundaryCurrent,
                 ]
                 .into_iter()
-                .filter(move |source| {
-                    equation == StaticElectricalEquation::Electrostatics
-                        || *source == CanonicalElectricalSource::SourceFree
+                .filter(move |source| match source {
+                    CanonicalElectricalSource::SourceFree => true,
+                    CanonicalElectricalSource::VolumeCharge => {
+                        equation == StaticElectricalEquation::Electrostatics
+                    }
+                    CanonicalElectricalSource::BoundaryCurrent => {
+                        equation == StaticElectricalEquation::SteadyConduction
+                    }
                 })
                 .map(move |source| realization(equation, order, source))
             })
@@ -86,6 +89,9 @@ pub(crate) fn realization(
                 CanonicalElectricalSource::SourceFree => SourceImplementation::NotApplicable,
                 CanonicalElectricalSource::VolumeCharge => {
                     SourceImplementation::CanonicalVolumeProjection
+                }
+                CanonicalElectricalSource::BoundaryCurrent => {
+                    SourceImplementation::CanonicalBoundaryProjection
                 }
             }],
         }],

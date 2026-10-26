@@ -4,7 +4,7 @@ use runmat_analysis_fea::{
     execution::MagnetostaticWorkload,
     fixtures::{fixture_model, FixtureId},
 };
-use runmat_execution::{ProgramEnvironment, ProgramRevision};
+use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{
     fixtures::{quadratic_slab_mesh, slab_mesh},
@@ -50,7 +50,7 @@ pub(super) fn task(
             persistence: StatePersistence::Canonical,
         })
         .collect();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
@@ -65,7 +65,7 @@ pub(super) fn task(
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: boundary.into(),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(boundary),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
                 },
             }));
     }
@@ -74,7 +74,7 @@ pub(super) fn task(
         .push(AnalysisConstraint::Magnetic(MagneticConstraint {
             constraint_id: "gauge".into(),
             kind: MagneticConstraintKind::CoulombGauge {
-                target: RegionTarget::volume("slab"),
+                target: RegionTarget::volume(runmat_meshing_core::fixtures::fixture_solid("slab")),
             },
         }));
     model
@@ -123,7 +123,6 @@ pub(super) fn task(
     let workload = MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     };
     let mesh = match order {
@@ -132,12 +131,15 @@ pub(super) fn task(
     };
     let d = Digest::sha256(b"native magnetic fixture");
     let prepared = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: d,
         frozen_project_digest: None,
+        // The process conformance harness runs this task on native workers, whose host
+        // identity is this binary's program environment; the fixture uses the same one.
         program_revision: ProgramRevision::new(
             d,
             d,
-            ProgramEnvironment::new(1, 1, d, d, "matlab").unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap(),
         artifact_access: ArtifactAccess {

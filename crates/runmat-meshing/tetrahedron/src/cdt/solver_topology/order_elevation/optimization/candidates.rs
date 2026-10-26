@@ -112,11 +112,7 @@ mod tests {
     }
 
     fn face() -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "face:test".into(),
-            assembly_path: Vec::new(),
-        }
+        PersistentEntityId::new(PersistentEntityKind::Face, "face:test".into(), Vec::new())
     }
 
     #[test]

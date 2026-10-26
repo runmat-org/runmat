@@ -98,6 +98,24 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         .zip(mixed_charts.charts[0].pslg.segments.iter().cycle().skip(1))
         .all(|(left, right)| left.vertex_indices[1] == right.vertex_indices[0]));
 
+    // The closing node's two pcurve images differ by more than roundoff (a vertex gap of a few
+    // picoradians, as on a trimmed sphere); the loop still closes with winding zero.
+    let mut gapped = source.clone();
+    gapped.outer_loop.segments[3].node_uv[1][0] += 5.0e-12;
+    let gapped_charts = build_exact_face_charts(
+        &gapped,
+        &topology,
+        &evaluator,
+        &Control,
+        ExactFaceChartOptions::default(),
+    )
+    .unwrap();
+    let gapped_loop = &gapped_charts.charts[0].boundary.outer_loop.segments;
+    assert_eq!(
+        gapped_loop.last().unwrap().node_uv[1],
+        gapped_loop[0].node_uv[0]
+    );
+
     let winding = boundary(
         &topology,
         [
@@ -211,10 +229,12 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     )
     .unwrap();
     let metric_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = SurfaceQualityTargets {
         minimum_metric_edge_length: 0.001,
@@ -950,10 +970,12 @@ fn singular_spherical_wedge_uses_an_exact_bounded_polar_chart() {
     )
     .unwrap();
     let metric_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 1.3,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let geometry = crate::evaluate_exact_face_geometry_in_parameterization(
         &domains[0].trimmed,
@@ -1134,11 +1156,7 @@ fn midpoint(endpoints: [[f64; 2]; 2]) -> [f64; 2] {
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, source_topology_id.to_owned(), Vec::new())
 }
 
 struct Control;

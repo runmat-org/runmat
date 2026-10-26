@@ -156,7 +156,7 @@ impl DenseReferenceSystem {
             .collect();
         let spectral_density = excitation.resolved_spectral_density().unwrap()[0]
             .values
-            .iter()
+            .canonical_values().iter()
             .map(|value| Complex::new(value.real, value.imaginary))
             .collect();
         Self {

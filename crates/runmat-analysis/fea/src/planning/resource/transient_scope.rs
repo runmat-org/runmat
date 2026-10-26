@@ -102,6 +102,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
     prepared: &PreparedTransientPreassembly,
     prepared_inputs: Option<PreparedInputResourceFacts>,
     output_set: Option<PreparedOutputSetResourceFacts>,
+    local_execution: super::LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
@@ -217,7 +218,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         .unwrap_or(0);
     let encoded_inputs = add(input_bytes, modal_input_bytes, "scope encoded inputs")?;
     let decoded_inputs =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
             encoded_inputs,
             3,
         )
@@ -253,7 +254,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         "transient scope output closure",
     )?;
     let scope_construction_bytes =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             scope_payload_bytes,
             1,
         )
@@ -266,17 +267,19 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         transport_closure_bytes_upper_bound: ByteCount(scope_transport_bytes),
         construction_resident_bytes_admission_budget: ByteCount(scope_construction_bytes),
     };
-    let output_set = match output_set {
-        Some(facts) if facts.encoded_bytes_upper_bound.0 >= scope_payload_bytes => facts,
-        Some(_) => {
-            return Err(ResourcePlanningError::Invalid(
-                "transient scope output set is smaller than the planned scope payload".into(),
-            ))
-        }
-        None => PreparedOutputSetResourceFacts {
-            encoded_bytes_upper_bound: ByteCount(scope_payload_bytes),
-        },
-    };
+    // The output set is the one root manifest listing this phase's output roots. Its bound is
+    // the root schema bound, not the numerical payload bound carried by the prepared output.
+    let output_set = output_set.unwrap_or(PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: ByteCount(crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES),
+    });
+    if output_set.encoded_bytes_upper_bound.0 == 0
+        || output_set.encoded_bytes_upper_bound.0
+            > crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "transient scope output set is outside the output-set root schema bound".into(),
+        ));
+    }
     let phase_bytes = add(
         add(
             schedule_bytes,
@@ -348,16 +351,12 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
                         collective_count: Count(0),
                     },
                     publication: CheckpointArtifactPolicy {
-                        // The bounded output set accounts for the scope payload itself.
-                        result_artifact_bytes: ByteCount(
-                            crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
-                        ),
+                        // The scope payload and its manifest; the output-set root is separate.
+                        result_artifact_bytes: ByteCount(scope_transport_bytes),
                         checkpoint_bytes: ByteCount(0),
                         artifact_overhead_bytes: ByteCount(0),
                         relay_bytes: ByteCount(0),
-                        result_egress_bytes: ByteCount(
-                            crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
-                        ),
+                        result_egress_bytes: ByteCount(scope_transport_bytes),
                         checkpoint_egress_bytes: ByteCount(0),
                     },
                     partitioning: PartitioningPolicy::Monolithic,
@@ -373,7 +372,9 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         ),
         output_set: Some(output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1_000,
+            cpu_millicores: local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
             maximum_wall_milliseconds: prepared
                 .execution_step
                 .accuracy

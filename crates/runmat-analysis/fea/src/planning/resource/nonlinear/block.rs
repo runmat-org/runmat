@@ -20,7 +20,13 @@ pub(in crate::planning::resource) fn derive(
     mesh: &SolverMeshArtifact,
     output_limit: usize,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
-    derive_for(workload, mesh, output_limit, false)
+    derive_for(
+        workload,
+        mesh,
+        output_limit,
+        false,
+        LocalExecutionPlan::serial(),
+    )
 }
 
 pub(in crate::planning::resource) fn derive_recovery(
@@ -28,7 +34,13 @@ pub(in crate::planning::resource) fn derive_recovery(
     mesh: &SolverMeshArtifact,
     output_limit: usize,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
-    derive_for(workload, mesh, output_limit, true)
+    derive_for(
+        workload,
+        mesh,
+        output_limit,
+        true,
+        LocalExecutionPlan::serial(),
+    )
 }
 
 fn derive_for(
@@ -36,6 +48,7 @@ fn derive_for(
     mesh: &SolverMeshArtifact,
     output_limit: usize,
     recovery: bool,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
     let invalid = |e: &dyn std::fmt::Display| ResourcePlanningError::Invalid(e.to_string());
     workload.validate().map_err(|e| invalid(&e))?;
@@ -59,13 +72,13 @@ fn derive_for(
             model: &workload.model,
             step,
             backend: crate::ComputeBackend::Cpu,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             observation_execution: ObservationExecutionPolicy::serial(),
             mesh: Some(mesh),
             constraints: &constraints,
             observations: &observations,
             accelerator_requests: &[],
-            local_execution: LocalExecutionPlan::serial(),
+            local_execution,
             prepared_inputs: None,
         },
         &workload.controls,
@@ -100,6 +113,24 @@ fn payload_bound(
         .ok_or(ResourcePlanningError::Overflow("nonlinear block payload"))
 }
 
+/// Construction residency of an encoded block artifact beyond its typed contents. The typed
+/// history is already charged to the nonlinear pipeline's persistent storage. The direct
+/// encoder reserves the output once and holds out-of-order fields in separate buffers, never a
+/// value tree: at most the reserved output plus held copies of the same bytes, plus sorted-map
+/// metadata and fixed codec state.
+pub fn nonlinear_solid_block_output_construction_bytes(
+    encoded_bytes: u64,
+) -> Result<u64, ResourcePlanningError> {
+    encoded_bytes
+        .checked_mul(2)
+        .and_then(|bytes| {
+            bytes.checked_add(
+                2 * runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+            )
+        })
+        .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))
+}
+
 pub fn nonlinear_solid_block_payload_bytes_upper_bound(
     workload: &NonlinearSolidWorkload,
     mesh: &SolverMeshArtifact,
@@ -129,16 +160,18 @@ pub fn build_nonlinear_solid_block_resource_plan(
             predecessor,
         )
         .map_err(|e| invalid(&e))?;
-    let mut input = derive(workload, mesh, request.accepted_block_limit)?;
+    let mut input = derive_for(
+        workload,
+        mesh,
+        request.accepted_block_limit,
+        false,
+        prepared.local_execution,
+    )?;
     let bytes = payload_bound(&input, request)?;
-    let materialization =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            bytes, 1,
-        )
-        .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))?;
+    let materialization = nonlinear_solid_block_output_construction_bytes(bytes)?;
     let receipt_bytes = crate::execution::NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES;
     let receipt_materialization =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             receipt_bytes,
             1,
         )

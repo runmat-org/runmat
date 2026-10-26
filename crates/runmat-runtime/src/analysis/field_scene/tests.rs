@@ -235,3 +235,88 @@ fn element_colours_follow_owner_indices_without_nodal_smoothing() {
     assert_eq!(surface.vertices[1].position, surface.vertices[3].position);
     assert_ne!(surface.vertices[1].color, surface.vertices[3].color);
 }
+
+/// Closed unit-cube surface, `n` x `n` quads per face, wound outward.
+fn dense_cube_topology(n: usize) -> AnalysisRenderTopology {
+    let mut vertices = Vec::new();
+    let mut triangles = Vec::new();
+    let mut index = std::collections::HashMap::new();
+    let mut vertex = |p: [f64; 3], vertices: &mut Vec<[f64; 3]>| -> u32 {
+        let key = p.map(|v| (v * 1.0e6).round() as i64);
+        *index.entry(key).or_insert_with(|| {
+            vertices.push(p);
+            (vertices.len() - 1) as u32
+        })
+    };
+    for axis in 0..3 {
+        for side in [0.0, 1.0] {
+            for i in 0..n {
+                for j in 0..n {
+                    let point = |a: usize, b: usize| {
+                        let mut p = [0.0; 3];
+                        p[axis] = side;
+                        p[(axis + 1) % 3] = a as f64 / n as f64;
+                        p[(axis + 2) % 3] = b as f64 / n as f64;
+                        p
+                    };
+                    let q = [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)]
+                        .map(|p| vertex(p, &mut vertices));
+                    // (axis+1, axis+2) is right-handed about +axis; flip on the low side.
+                    if side == 1.0 {
+                        triangles.push([q[0], q[1], q[2]]);
+                        triangles.push([q[0], q[2], q[3]]);
+                    } else {
+                        triangles.push([q[0], q[2], q[1]]);
+                        triangles.push([q[0], q[3], q[2]]);
+                    }
+                }
+            }
+        }
+    }
+    let vertex_count = vertices.len();
+    let triangle_count = triangles.len();
+    AnalysisRenderTopology {
+        schema_version: "test".into(),
+        source: AnalysisRenderTopologySource::AnalysisMesh,
+        volume_element_count: 1,
+        meshes: vec![AnalysisRenderMesh {
+            mesh_id: "cube".into(),
+            vertices,
+            triangles,
+            regions: vec![],
+            vertex_volume_node_indices: (0..vertex_count).map(Some).collect(),
+            triangle_volume_element_indices: vec![Some(0); triangle_count],
+        }],
+    }
+}
+
+// witness: FEA-STRUCTURAL-PUBLIC-001/result_publication_defects @
+//   linear_structural/tet10/numerical_kernel; coverage: partial;
+//   boundary: a dense poster scene draws only its boundary triangles and, by default, feature
+//   edges (the cube's 12 creases) instead of the full mesh wireframe; rendering itself is not
+//   covered.
+#[test]
+fn dense_poster_scene_draws_boundary_triangles_and_feature_edges_only() {
+    let n = 50;
+    let topology = dense_cube_topology(n);
+    let (scene, _) =
+        scene_from_topology("run", &topology, None, None, "undeformed", 1.0, false).unwrap();
+    let triangles = scene
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.render_data.pipeline_type == PipelineType::Triangles)
+        .map(|chunk| chunk.triangle_count())
+        .sum::<usize>();
+    assert_eq!(triangles, 12 * n * n);
+    assert!(triangles > FULL_MESH_EDGE_TRIANGLE_LIMIT);
+    let lines = scene
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.render_data.pipeline_type == PipelineType::Lines)
+        .collect::<Vec<_>>();
+    assert!(lines
+        .iter()
+        .all(|chunk| chunk.label.as_deref() == Some("Feature edges")));
+    let segments = lines.iter().map(|chunk| chunk.vertices.len() / 2).sum::<usize>();
+    assert_eq!(segments, 12 * n, "only the cube's 12 crease edges are drawn");
+}

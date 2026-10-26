@@ -57,6 +57,7 @@ pub struct CompletedMaxwellStudy {
 }
 
 pub struct MaxwellStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: MaxwellStudyPlanningPolicy,
     pub product: MaxwellStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -141,6 +142,7 @@ impl MaxwellStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedMaxwellHarmonicTask> {
         self.require(MaxwellStudyPhase::ReadyForSolve)?;
         let task = prepare_maxwell_harmonic_task(MaxwellHarmonicTaskPreparation {
+            local_execution: self.preparation.local_execution,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -308,6 +310,7 @@ impl MaxwellStudyCoordinator {
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedMaxwellStudy {
             replay: completion::MaxwellStudyReplayContext {
+                local_execution: self.preparation.local_execution,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,

@@ -35,8 +35,6 @@ pub(super) fn write_authored_project(root: &std::path::Path, case: Case) {
     std::fs::write(root.join("src/heated.fea"), case.source()).unwrap();
     std::fs::create_dir_all(root.join("src/geometry")).unwrap();
     std::fs::write(root.join("src/geometry/box.brep"), BOX).unwrap();
-    std::fs::create_dir_all(root.join("src/geometry/.runmat/geometry")).unwrap();
-    std::fs::write(root.join("src/geometry/.runmat/geometry/box.brep.json"), include_bytes!("../../../../../docs/simulation/examples/geometry/.runmat/geometry/box.brep.json")).unwrap();
 }
 
 pub(super) fn prepare_authored_root(
@@ -49,7 +47,7 @@ pub(super) fn prepare_authored_root(
     let checked = runmat_runtime::analysis::check_fea_path_in_root(root, &path).unwrap();
     assert!(checked.is_valid(), "{:#?}", checked.diagnostics);
     let resolved = checked
-        .resolve_study("project/src/heated.fea", "heated_modes")
+        .resolve_study("src/heated.fea", "heated_modes")
         .unwrap();
     let realized = resolved
         .study
@@ -91,7 +89,6 @@ pub(super) fn prepare_authored_root(
     .unwrap();
     let planning = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
-        formulation_requirement: realized.formulation_requirement,
         numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
     };
     crate::prepare_structural_study_root(crate::StructuralStudyRootPreparation {
@@ -101,7 +98,7 @@ pub(super) fn prepare_authored_root(
         authored_study_digest,
         study: realized,
         materials: resolved.material_catalog,
-        planning,
+        planning: crate::StudyRootPlanning::Structural(planning),
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
@@ -124,7 +121,7 @@ fn authored_matrix_variants_typecheck_with_explicit_physical_loads() {
         .unwrap();
         assert!(checked.is_valid(), "{case:?}: {:#?}", checked.diagnostics);
         let resolved = checked
-            .resolve_study("project/src/heated.fea", "heated_modes")
+            .resolve_study("src/heated.fea", "heated_modes")
             .unwrap();
         let realized = resolved
             .study

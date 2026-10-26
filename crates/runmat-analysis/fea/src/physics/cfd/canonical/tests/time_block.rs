@@ -26,6 +26,10 @@ fn block_model(f: &fixture::Fixture) -> AnalysisModel {
     workload.model
 }
 
+// witness: FEA-FLUID-TRANSIENT-001/history @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel;
+//   boundary: Original acceleration history and split replay; chronology/tamper/budget/cancel
+//   checks, no native process credit.
 #[test]
 fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
     let start = [0.001, 0.002, -0.001];
@@ -78,8 +82,15 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
         &[0., 0.09999999999999999, 0.19999999999999998, 0.3]
     );
     let result = full.execute().unwrap();
-    for (index, r) in result.original_results().iter().enumerate() {
-        let t = full.schedule().points_s()[index + 1];
+    // Without sampled outputs the block retains its terminal and that interval's predecessor;
+    // every interval keeps its evidence.
+    assert_eq!(result.intervals().len(), 3);
+    assert_eq!(
+        result.retained_results().iter().map(|(o, _)| *o).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    for (ordinal, r) in result.retained_results() {
+        let t = full.schedule().points_s()[ordinal + 1];
         let expected: [f64; 3] = std::array::from_fn(|k| start[k] + t * acceleration[k]);
         for v in r.velocity_m_per_s.canonical_values() {
             assert!(norm(sub(*v, expected)) < 1e-8);
@@ -119,13 +130,14 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
     .unwrap();
     let resumed = latter.execute().unwrap();
     latter.recover(&resumed).unwrap();
-    assert_eq!(resumed.original_results(), &result.original_results()[1..]);
+    assert_eq!(resumed.intervals(), &result.intervals()[1..]);
+    assert_eq!(resumed.terminal(), result.terminal());
     let mut tampered = serde_json::to_value(&cold).unwrap();
-    tampered["original"][1]["pressure_reference_pa"][0] = serde_json::json!(2.);
+    tampered["retained"][1][1]["pressure_reference_pa"][0] = serde_json::json!(2.);
     let tampered: FluidTransientBlockResult = serde_json::from_value(tampered).unwrap();
     assert!(full.recover(&tampered).is_err());
     let mut reordered = serde_json::to_value(&cold).unwrap();
-    reordered["original"].as_array_mut().unwrap().swap(0, 1);
+    reordered["retained"].as_array_mut().unwrap().swap(0, 1);
     assert!(full
         .recover(&serde_json::from_value(reordered).unwrap())
         .is_err());
@@ -303,7 +315,8 @@ fn gauge_jump_arrival_and_requested_time_survive_original_field_blocks() {
         Some(SignalSampleApproach::RightLimit)
     );
     let result = block.execute().unwrap();
-    for (i, r) in result.original_results().iter().enumerate() {
+    for (i, r) in result.retained_results() {
+        let i = *i;
         for v in r.velocity_m_per_s.canonical_values() {
             assert!(norm(sub(*v, velocity)) < 1e-8);
         }
@@ -336,7 +349,8 @@ fn gauge_jump_arrival_and_requested_time_survive_original_field_blocks() {
     .unwrap()
     .execute()
     .unwrap();
-    assert_eq!(resumed.original_results(), &result.original_results()[2..]);
+    assert_eq!(resumed.intervals(), &result.intervals()[2..]);
+    assert_eq!(resumed.terminal(), result.terminal());
     model.sequence.steps[0].accuracy.resources.maximum_samples = 5;
     assert!(FluidTransientBlock::prepare(&model, &step_id, f.input(), initial, 0..5).is_err());
 }

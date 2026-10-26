@@ -85,8 +85,8 @@ fn native_retained_joule_source_executes_only_thermal_and_cold_imports_both_orde
             import_thermal_completion(&cold, response, accounting, &task, policy(1024)).unwrap();
         let manifest = &imported.result.manifest;
         assert_eq!(manifest.source_workload, bound.identity().unwrap());
-        assert!((manifest.energy_balances[0].applied_power_w - 12.0).abs() < 1e-8);
-        assert!((manifest.energy_balances[0].prescribed_boundary_power_w - 12.0).abs() < 1e-8);
+        assert!((manifest.energy_balances[0].applied_power_w - runmat_types::physical::Quantity::new(12.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
+        assert!((manifest.energy_balances[0].prescribed_boundary_power_w - runmat_types::physical::Quantity::new(12.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
         let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
         let temperature = &manifest.fields[0][0];
         let mut values = Vec::new();

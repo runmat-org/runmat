@@ -36,6 +36,7 @@ pub(super) fn complete_profile(
         source.topology.faces.len(),
         authorities,
         1,
+        1,
     );
     Ok(runmat_canonical_codec::profile_serialized(
         &Data {

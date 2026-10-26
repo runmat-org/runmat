@@ -90,7 +90,6 @@ pub(super) fn fixture() -> (
         FluidTransientWorkload {
             model,
             step_id: ProcedureStepId("advance".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             policy: steady.policy,
             geometry_policy: steady.geometry_policy,
             initial_fields: Vec::new(),
@@ -124,8 +123,12 @@ pub(super) async fn run() {
     assert_eq!(checkpoint.next_interval(), 3);
     assert_eq!(checkpoint.next_output_ordinal(), 3);
     assert_eq!(
-        checkpoint.original_results().collect::<Vec<_>>(),
-        full.original_results().collect::<Vec<_>>()
+        checkpoint.intervals().collect::<Vec<_>>(),
+        full.intervals().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        checkpoint.retained_results().last(),
+        full.retained_results().last()
     );
     // Independent accelerating-flow and affine-pressure references at every original sample.
     let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
@@ -134,23 +137,24 @@ pub(super) async fn run() {
         workload.geometry_policy,
     )
     .unwrap();
-    for (ordinal, result) in checkpoint.original_results().enumerate() {
+    for (ordinal, result) in checkpoint.retained_results() {
+        let ordinal = *ordinal;
         let time = 0.3 * ((ordinal + 1) as f64 / 3.);
         assert!(result
             .velocity_m_per_s
-            .iter()
+            .canonical_values().iter()
             .all(|u| (u[0] - (0.001 + 0.01 * time)).abs() < 1e-8
                 && u[1].abs() < 1e-8
                 && u[2].abs() < 1e-8));
-        assert!(result.pressure_reference_pa.iter().all(|p| *p == 1e12));
-        for (cell, fluctuation) in topology.cells.iter().zip(&result.pressure_fluctuation_pa) {
+        assert!(result.pressure_reference_pa.canonical_values().iter().all(|p| *p == 1e12));
+        for (cell, fluctuation) in topology.cells.iter().zip(result.pressure_fluctuation_pa.canonical_values()) {
             assert!((fluctuation + 0.01 * (cell.centroid_m[0] - 1.)).abs() < 2e-7);
         }
         // Reported absolute pressure cannot reproduce the original low-order bits.
         assert!(result
             .pressure_pa
-            .iter()
-            .zip(&result.pressure_fluctuation_pa)
+            .canonical_values().iter()
+            .zip(result.pressure_fluctuation_pa.canonical_values())
             .any(|(absolute, fluctuation)| absolute - 1e12 != *fluctuation));
     }
     let wall = attempts
@@ -195,6 +199,7 @@ pub(super) async fn run_block(
         end_interval,
     };
     let task = prepare_fluid_transient_task(FluidTransientTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest("original-scheduled-fluid"),
         frozen_project_digest: None,
         program_revision: revision(),
@@ -251,6 +256,7 @@ pub(super) async fn run_block(
     // A valid output from another interval request is still foreign to this exact task.
     let foreign_end = if end_interval == 3 { 2 } else { 3 };
     let foreign = prepare_fluid_transient_task(FluidTransientTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest("original-scheduled-fluid"),
         frozen_project_digest: None,
         program_revision: revision(),

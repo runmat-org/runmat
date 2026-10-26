@@ -5,7 +5,7 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 
 pub(super) fn target(ids: Vec<StableDigest>) -> ResolvedConstraintTarget {
     ResolvedConstraintTarget {
-        authored: RegionTarget::boundary("pair"),
+        authored: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("pair")),
         matched_entities: Vec::new(),
         matched_node_identities: ids,
         selection_digest: Digest::sha256("pair"),
@@ -135,7 +135,7 @@ fn nonconformal_quadratic_pairing_preserves_full_surface_trace_and_row_identity(
     >::new([0.3, 0.5, 0.01]);
     let primary = super::super::target::resolve_nodal_target(
         &mesh,
-        &RegionTarget::boundary("face:0"),
+        &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
         "trace",
     )
     .unwrap();

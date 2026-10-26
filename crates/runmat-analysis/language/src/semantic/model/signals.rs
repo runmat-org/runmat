@@ -100,12 +100,14 @@ fn signal(
     if waveform {
         return waveform::lower(declaration, id, domain, body, kind, wrap, diagnostics);
     }
-    constant_signal(declaration, id, domain, body, kind, wrap, diagnostics)
+    constant_signal(declaration, id, quantity, domain, body, kind, wrap, diagnostics)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn constant_signal(
     declaration: &CheckedFeaDeclaration,
     id: &str,
+    quantity: &str,
     domain: &str,
     body: &[CheckedFeaStatement],
     kind: runmat_types::physical::QuantityKind,
@@ -125,6 +127,7 @@ fn constant_signal(
     }
     validate_assignments(declaration, body, &["value", "frame"], diagnostics);
     let expression = required_assignment(declaration, body, "value", diagnostics)?;
+    authored_unit_matches(declaration, quantity, expression, kind.dimension(), diagnostics)?;
     let raw = signal_value(declaration, expression, kind, diagnostics)?;
     let frame = optional_frame(declaration, body, raw.is_vector(), diagnostics)?;
     Some(wrap(signal_contract(
@@ -238,6 +241,7 @@ pub(super) fn constant_from_expression(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
     let (kind, wrap) = signal_kind(declaration, quantity, diagnostics)?;
+    authored_unit_matches(declaration, quantity, value, kind.dimension(), diagnostics)?;
     let raw = signal_value(declaration, value, kind, diagnostics)?;
     let frame = raw.is_vector().then_some(CoordinateFrame::Global);
     Some(wrap(signal_contract(
@@ -266,6 +270,16 @@ pub(super) fn parameterized_from_expression(
 
 pub(super) fn depends_on_model_input(value: &CheckedExpression) -> bool {
     parameterized::depends_on_model_input(value)
+}
+
+/// Lower pure arithmetic over numeric model inputs whose result has the checked value type.
+pub(super) fn model_input_expression(
+    declaration: &CheckedFeaDeclaration,
+    value: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<runmat_analysis_core::AuthoredNumericExpression> {
+    let expected = super::super::input::authored_type(&value.value_type)?;
+    parameterized::expression(declaration, value, expected, diagnostics)
 }
 
 fn signal_contract(
@@ -311,6 +325,10 @@ pub(super) fn signal_value(
     kind: runmat_types::physical::QuantityKind,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<SignalValue<f64>> {
+    if value.value_type == FeaType::Error {
+        // The expression checker already reported why this value has no type.
+        return None;
+    }
     if value.validate_quantity_kind(kind).is_err() {
         diagnostic(declaration, value.span, "absolute temperatures and temperature differences must use their respective units and arithmetic", diagnostics);
         return None;
@@ -434,6 +452,34 @@ fn frame(
             None
         }
     }
+}
+
+/// Rejects a quantity whose authored unit measures something other than the signal's quantity,
+/// naming what was expected and what was found at the authored value.
+fn authored_unit_matches(
+    declaration: &CheckedFeaDeclaration,
+    quantity: &str,
+    value: &CheckedExpression,
+    dimension: runmat_types::PhysicalDimension,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<()> {
+    let Some((message, label)) = crate::semantic::units::unit_mismatch(quantity, value, dimension)
+    else {
+        return Some(());
+    };
+    diagnostics.push(
+        crate::FeaDiagnostic::error(
+            "fea.semantic.model",
+            message,
+            crate::FeaDiagnosticPhase::Lowering,
+            Some(crate::FeaDiagnosticLocation {
+                path: declaration.module.clone(),
+                span: value.span,
+            }),
+        )
+        .with_label(label),
+    );
+    None
 }
 
 fn invalid_signal_value(

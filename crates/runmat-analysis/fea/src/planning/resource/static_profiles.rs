@@ -23,8 +23,9 @@ pub fn projected_canonical_output_resource_facts(
     let closure = encoded_payload_bytes_upper_bound
         .checked_add(ANALYSIS_MANIFEST_MAX_ENCODED_BYTES)
         .ok_or(ResourcePlanningError::Overflow("canonical output closure"))?;
+    // Outputs are encoded directly from their owned typed values, never through a value tree.
     let construction =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             encoded_payload_bytes_upper_bound,
             1,
         )
@@ -40,8 +41,10 @@ pub fn projected_canonical_output_resource_facts(
 }
 
 /// A domain-owned structural profile replaces the unknown-shape multiplier.
-/// Transport and manifest allowances stay identical to ordinary output planning.
-pub(super) fn profiled_canonical_output_resource_facts(
+/// Transport and manifest allowances stay identical to ordinary output planning. Construction
+/// holds the owned typed state (the profile's materialization estimate) and must also cover
+/// direct canonical encoding of that state, whichever is larger.
+pub fn profiled_canonical_output_resource_facts(
     profile: runmat_canonical_codec::SerializedCanonicalProfile,
 ) -> Result<PreparedOutputResourceFacts, ResourcePlanningError> {
     let encoded = profile.encoded_bytes_upper_bound;
@@ -53,8 +56,12 @@ pub(super) fn profiled_canonical_output_resource_facts(
     let closure = encoded
         .checked_add(ANALYSIS_MANIFEST_MAX_ENCODED_BYTES)
         .ok_or(ResourcePlanningError::Overflow("profiled output closure"))?;
+    let encoding =
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(encoded, 1)
+            .ok_or(ResourcePlanningError::Overflow("profiled output encoding"))?;
     let construction = profile
         .materialization_resident_bytes_estimate
+        .max(encoding)
         .checked_add(closure)
         .ok_or(ResourcePlanningError::Overflow(
             "profiled output construction",

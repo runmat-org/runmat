@@ -8,21 +8,22 @@ use crate::{
     },
 };
 use runmat_analysis_core::{
-    validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation,
-    FormulationRequirement, Frequency, PhysicsFamily, ProcedureStep, ProcedureStepId,
-    SourceImplementation, StateCompleteness, StateKind,
+    validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation, Frequency,
+    PhysicsFamily, ProcedureStep, ProcedureStepId, SourceImplementation, StateCompleteness,
+    StateKind,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 mod fields;
+pub use fields::{acoustic_native_field_definitions, ACOUSTIC_INTENSITY_FIELD_ID};
 pub(in crate::execution) use fields::{
     native_acoustic_entity_counts, native_acoustic_field_definition, native_acoustic_field_plan,
 };
 mod publication;
 mod result;
-pub use result::AcousticHarmonicSolverResult;
+pub use result::{AcousticHarmonicResultSummary, AcousticHarmonicSolverResult};
 mod receipt;
 pub use receipt::{
     AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
@@ -30,7 +31,10 @@ pub use receipt::{
 mod sweep;
 pub use sweep::{AcousticFrequencyResult, AcousticFrequencyWorkload};
 mod frequency_assembly;
-pub use frequency_assembly::{assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput};
+pub use frequency_assembly::{
+    assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput,
+    AcousticFrequencyAssemblyRequest,
+};
 #[cfg(test)]
 pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";
@@ -42,7 +46,6 @@ pub struct AcousticHarmonicWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub frequency: Frequency,
-    pub formulation_requirement: FormulationRequirement,
     pub solver: AcousticHarmonicPolicy,
     pub power_balance_relative_tolerance: f64,
 }
@@ -73,9 +76,8 @@ impl AcousticHarmonicWorkload {
                 output.kind != StateKind::AcousticComplex
                     || output.completeness != StateCompleteness::Complete
             })
-            || !step.observations.is_empty()
         {
-            return Err(invalid("canonical acoustic workload requires a unique standalone step with complete acoustic-complex outputs and without lifecycle activations or observations"));
+            return Err(invalid("canonical acoustic workload requires a unique standalone step with complete acoustic-complex outputs and without lifecycle activations"));
         }
         if !self.power_balance_relative_tolerance.is_finite()
             || self.power_balance_relative_tolerance <= 0.0
@@ -118,13 +120,12 @@ impl AcousticHarmonicWorkload {
             Some(mesh),
             SourceImplementation::CanonicalBoundaryProjection,
             BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            self.formulation_requirement,
         )
         .map_err(invalid)?;
         validate_solver_formulation_compatibility(
             &identity,
-            SolverMethod::AcousticCanonicalHelmholtzGmres,
-            self.solver.preconditioner,
+            SolverMethod::AcousticCanonicalHelmholtzCertifiedLu,
+            crate::contracts::SolverPreconditioner::None,
         )
         .map_err(invalid)?;
         Ok(identity)

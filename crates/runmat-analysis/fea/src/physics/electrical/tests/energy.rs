@@ -22,6 +22,7 @@ fn original_electrical_operators_have_verified_anchored_local_energy_bounds() {
                     projection,
                     &properties,
                     equation,
+                    None,
                 )
                 .unwrap();
                 let scale = assembly

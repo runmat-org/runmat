@@ -14,11 +14,7 @@ fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
 }
 
 fn region(id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: id.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, id.to_owned(), Vec::new())
 }
 
 fn bipyramid() -> DelaunayVolumeTopology {

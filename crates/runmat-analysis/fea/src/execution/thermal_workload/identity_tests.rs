@@ -2,15 +2,19 @@ use super::*;
 
 #[test]
 fn solver_identity_views_keep_original_canonical_bytes() {
-    // Captured from the pre-change copied-vector implementation in legacy job49378.
+    // Captured from the pre-change copied-vector implementation in legacy job49378. Model rows
+    // re-captured for two input changes: fixture targets moved to canonical persistent-entity
+    // selectors, and model `units` became the runmat-types `CoordinateUnits` (serialized as its
+    // unit definition instead of the name "meter"). With both reverted the contract bytes match
+    // the earlier captures.
     let expected = [
         [
-            "sha256:8b89568d3841c1ce441c78e479e5adf2213566efc0f2886ec0a6f29d4ba2c961",
+            "sha256:17749beb8f15952e933c3b2ea7b2a3d069eb3f8731c9f1b4eba1e16311964acc",
             "sha256:0676503e55e3f8a763a4def7460a29d3a17a1434c8de6a7b36f7e50e67904b35",
             "sha256:d5ae2437c81fe4537d9c33465801af6d0ca3c926c3ac2225e333430a2383edb6",
         ],
         [
-            "sha256:7270d4cc04253625b90b8e85fc75e6a142f445b6248a357b6a89221c0d56fef1",
+            "sha256:7466801c231a011d3fe32c7b5fbfba3b496e6a1fe30084b6d486316258aaf606",
             "sha256:5bdbb13137dc2ddcfae602095d70aba8237a6fbde9d5995a25dda7f0a446f435",
             "sha256:88d6d35a5c8efc3ea43077b8218f479e9dc4a168adca2b395e4f8d671f328b69",
         ],
@@ -97,7 +101,6 @@ fn original_source_identity_binding_fits_codec_reservation_and_rejects_short_cap
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
         initial_fields: vec![],

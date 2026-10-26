@@ -1,20 +1,8 @@
 //! Isoparametric Tet10 geometry, gradients, and whole-element Jacobian admission.
 
-use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
-
-use super::{
-    jacobian_certificate::{certify_positive_jacobian, CertificateFailure},
-    tetrahedron10::{
-        Tetrahedron10ElementError, Tetrahedron10ElementGeometry, TETRAHEDRON10_ELEMENT_NODE_COUNT,
-    },
+use super::tetrahedron10::{
+    Tetrahedron10ElementError, Tetrahedron10ElementGeometry, TETRAHEDRON10_ELEMENT_NODE_COUNT,
 };
-
-const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
-    [-1.0, -1.0, -1.0],
-    [1.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0],
-    [0.0, 0.0, 1.0],
-];
 
 pub(super) fn physical_shape_gradients_and_measure(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
@@ -35,18 +23,7 @@ pub(super) fn physical_shape_gradients_and_measure(
 pub(super) fn reference_shape_gradients(
     barycentric: [f64; 4],
 ) -> [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
-    let mut gradients = [[0.0; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT];
-    for node in 0..4 {
-        let factor = 4.0 * barycentric[node] - 1.0;
-        gradients[node] = BARYCENTRIC_DERIVATIVES[node].map(|derivative| factor * derivative);
-    }
-    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
-        gradients[4 + local_edge] = std::array::from_fn(|axis| {
-            4.0 * (barycentric[right] * BARYCENTRIC_DERIVATIVES[left][axis]
-                + barycentric[left] * BARYCENTRIC_DERIVATIVES[right][axis])
-        });
-    }
-    gradients
+    runmat_meshing_core::tetrahedron10_reference_gradients(barycentric)
 }
 
 pub(super) fn jacobian_determinant(
@@ -119,32 +96,25 @@ fn jacobian(
 }
 
 pub(crate) fn is_affine(geometry: Tetrahedron10ElementGeometry) -> bool {
-    TETRAHEDRON_MIDSIDE_EDGE_CORNERS
-        .iter()
-        .enumerate()
-        .all(|(edge, [left, right])| {
-            (0..3).all(|axis| {
-                geometry.nodes_m[4 + edge][axis]
-                    == 0.5 * (geometry.nodes_m[*left][axis] + geometry.nodes_m[*right][axis])
-            })
-        })
+    runmat_meshing_core::tetrahedron10_is_affine(&geometry.nodes_m)
 }
 
+/// Admits the element by the shared Tet10 validity rule's Jacobian margin
+/// (`runmat_meshing_core::tetrahedron10_jacobian_margin`), the same margin the mesher certifies.
 pub(super) fn validate_nodes(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 ) -> Result<(), Tetrahedron10ElementError> {
     if !nodes_m.iter().flatten().all(|value| value.is_finite()) {
         return Err(Tetrahedron10ElementError::NonFiniteCoordinate);
     }
-    let vertex_jacobians = std::array::from_fn(|vertex| {
-        let mut barycentric = [0.0; 4];
-        barycentric[vertex] = 1.0;
-        jacobian(nodes_m, reference_shape_gradients(barycentric))
-    });
-    certify_positive_jacobian(vertex_jacobians).map_err(|failure| match failure {
-        CertificateFailure::InvertedOrDegenerate => Tetrahedron10ElementError::DegenerateOrInverted,
-        CertificateFailure::Inconclusive => Tetrahedron10ElementError::UncertifiedJacobian,
-    })
+    match runmat_meshing_core::tetrahedron10_jacobian_margin(&nodes_m) {
+        None => Err(Tetrahedron10ElementError::DegenerateOrInverted),
+        Some(margin) if margin.is_valid() => Ok(()),
+        Some(margin) if margin.minimum_jacobian_lower_bound <= 0.0 => {
+            Err(Tetrahedron10ElementError::DegenerateOrInverted)
+        }
+        Some(_) => Err(Tetrahedron10ElementError::UncertifiedJacobian),
+    }
 }
 
 fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {

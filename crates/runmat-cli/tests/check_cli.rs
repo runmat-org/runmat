@@ -99,6 +99,9 @@ fn fea_plan(temp: &TempDir, path: &str) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+/// A rerun is a new attempt of the same definition: identical definition, mesh and inventory,
+/// distinct attempt run ids, the same definition run ids, and the definition run id resolves to
+/// the latest attempt.
 fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
     let repeated = runmat_from_repository(temp, &["run", path, "--json"]);
     assert!(
@@ -114,24 +117,54 @@ fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
         "nodes",
         "elements",
         "boundary_faces",
-        "step_run_ids",
+        "definition_run_ids",
     ] {
         assert_eq!(
             repeated[field], first[field],
             "{path} changed verified result field `{field}` on repeat"
         );
     }
+    assert_ne!(
+        repeated["step_run_ids"], first["step_run_ids"],
+        "{path} reused an earlier attempt instead of publishing a fresh one"
+    );
+    let latest = repeated["step_run_ids"][0].as_str().expect("latest attempt id");
+    let definition = repeated["definition_run_ids"][0]
+        .as_str()
+        .expect("definition run id");
+    let script_path = temp.path().join("latest-attempt.m");
+    fs::write(
+        &script_path,
+        format!("r = fea.results(\"{definition}\");\ndisp(r.run_id);\n"),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "latest-attempt query failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(latest),
+        "definition run id did not resolve to the latest attempt `{latest}`"
+    );
 }
 
 #[test]
 fn canonical_fea_documentation_examples_check_cleanly() {
     let temp = TempDir::new().unwrap();
     for name in [
-        "structural-static-experimental.fea",
-        "structural-transient-experimental.fea",
-        "modal-response-spectrum-experimental.fea",
-        "modal-random-response-experimental.fea",
-        "acoustic-production-rejected.fea",
+        "structural-static.fea",
+        "structural-transient.fea",
+        "modal-response-spectrum.fea",
+        "modal-random-response.fea",
+        "acoustic-cavity-harmonic.fea",
+        "acoustic-duct-modes.fea",
+        "acoustic-duct-pulse.fea",
     ] {
         let path = format!("docs/simulation/examples/{name}");
         assert_fea_checks(&temp, &path);
@@ -153,8 +186,8 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
 
     let cases = [
         Expected {
-            file: "structural-static-experimental.fea",
-            root: "structural_static_experimental",
+            file: "structural-static.fea",
+            root: "structural_static",
             model: "loaded_bracket",
             steps: &[("static", "static")],
             outputs: &["displacement", "von_mises"],
@@ -163,8 +196,8 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
             random_excitations: 0,
         },
         Expected {
-            file: "structural-transient-experimental.fea",
-            root: "structural_transient_experimental",
+            file: "structural-transient.fea",
+            root: "structural_transient",
             model: "impulsive_bracket",
             steps: &[("response", "transient_response")],
             outputs: &["displacement"],
@@ -173,8 +206,8 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
             random_excitations: 0,
         },
         Expected {
-            file: "modal-response-spectrum-experimental.fea",
-            root: "modal_response_spectrum_experimental",
+            file: "modal-response-spectrum.fea",
+            root: "modal_response_spectrum",
             model: "launch_bracket",
             steps: &[
                 ("modes", "modal_extraction"),
@@ -186,8 +219,8 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
             random_excitations: 0,
         },
         Expected {
-            file: "modal-random-response-experimental.fea",
-            root: "modal_random_response_experimental",
+            file: "modal-random-response.fea",
+            root: "modal_random_response",
             model: "random_environment",
             steps: &[
                 ("modes", "modal_extraction"),
@@ -199,8 +232,8 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
             random_excitations: 1,
         },
         Expected {
-            file: "acoustic-production-rejected.fea",
-            root: "acoustic_production_rejected",
+            file: "acoustic-cavity-harmonic.fea",
+            root: "acoustic_cavity_harmonic",
             model: "cavity",
             steps: &[("harmonic", "harmonic_response")],
             outputs: &["pressure"],
@@ -265,10 +298,14 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
     }
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The structural static STEP documentation example runs from the CLI and publishes
+//   fields; the other examples are separate cases.
 #[test]
 fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/simulation/examples/structural-static-experimental.fea";
+    let path = "docs/simulation/examples/structural-static.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
         output.status.success(),
@@ -277,7 +314,7 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(payload["root_id"], "structural_static_experimental");
+    assert_eq!(payload["root_id"], "structural_static");
     assert_eq!(payload["procedure"], "structural_linear_sequence");
     let manifest_path = payload["result_manifest_artifact_path"]
         .as_str()
@@ -334,9 +371,10 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         manifest["solver_mesh_digest"]
     );
     assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
-    assert_eq!(mesh.topology.nodes.len(), 168);
-    assert_eq!(mesh.topology.volume_elements.len(), 292);
-    assert_eq!(mesh.topology.boundary_faces.len(), 320);
+    // Golden counts of the current mesher for this example (deterministic across runs).
+    assert_eq!(mesh.topology.nodes.len(), 778);
+    assert_eq!(mesh.topology.volume_elements.len(), 2156);
+    assert_eq!(mesh.topology.boundary_faces.len(), 1328);
 
     let model: AnalysisModel =
         serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
@@ -411,10 +449,13 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     assert!(stdout.contains("von_mises"));
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The response-spectrum documentation example runs its two-step study.
 #[test]
 fn response_spectrum_documentation_example_runs_its_two_step_study() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/simulation/examples/modal-response-spectrum-experimental.fea";
+    let path = "docs/simulation/examples/modal-response-spectrum.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
         output.status.success(),
@@ -423,7 +464,7 @@ fn response_spectrum_documentation_example_runs_its_two_step_study() {
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(payload["root_id"], "modal_response_spectrum_experimental");
+    assert_eq!(payload["root_id"], "modal_response_spectrum");
     assert_eq!(payload["procedure"], "structural_modal_response_spectrum");
     let step_run_ids = payload["step_run_ids"]
         .as_array()
@@ -471,8 +512,7 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
         "function y = design_input(frequency, scale)\narguments\n    frequency (:,1) double\n    scale (1,1) double\nend\ny = scale .* (1 + 0 .* frequency);\nend\n",
     )
     .unwrap();
-    let source =
-        repository.join("docs/simulation/examples/modal-response-spectrum-experimental.fea");
+    let source = repository.join("docs/simulation/examples/modal-response-spectrum.fea");
     fs::create_dir_all(temp.path().join("geometry")).unwrap();
     fs::copy(
         repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),
@@ -505,7 +545,7 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
     );
     assert_eq!(
         serde_json::from_slice::<Value>(&run.stdout).unwrap()["root_id"],
-        "modal_response_spectrum_experimental"
+        "modal_response_spectrum"
     );
     assert_eq!(
         serde_json::from_slice::<Value>(&run.stdout).unwrap()["procedure"],
@@ -513,10 +553,13 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
     );
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The random-response documentation example runs and exposes paged statistical fields.
 #[test]
 fn random_response_documentation_example_exposes_paged_statistical_fields() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/simulation/examples/modal-random-response-experimental.fea";
+    let path = "docs/simulation/examples/modal-random-response.fea";
     let run = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
         run.status.success(),
@@ -570,7 +613,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
         "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (1,1) double\nend\ny = magnitude .* (1 + 0 .* t);\nend\n",
     )
     .unwrap();
-    let fixture = repository.join("docs/simulation/examples/structural-transient-experimental.fea");
+    let fixture = repository.join("docs/simulation/examples/structural-transient.fea");
     fs::create_dir_all(temp.path().join("geometry")).unwrap();
     fs::copy(
         repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),
@@ -607,27 +650,34 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(payload["root_id"], "structural_transient_experimental");
+    assert_eq!(payload["root_id"], "structural_transient");
     assert_eq!(payload["procedure"], "structural_transient");
     assert!(payload["study_definition_digest"].as_str().is_some());
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The acoustic cavity harmonic example runs its frequency sweep to a completed,
+//   numerically acceptable run.
 #[test]
-fn production_example_rejects_an_unqualified_formulation() {
+fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/simulation/examples/acoustic-production-rejected.fea";
+    let path = "docs/simulation/examples/acoustic-cavity-harmonic.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
-
     assert!(
-        !output.status.success(),
-        "{path} must reject its explicit Production requirement"
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY"),
-        "unexpected rejection for {path}:\nstdout={}\nstderr={stderr}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["root_id"], "acoustic_cavity_harmonic");
+    let manifest_path = payload["result_manifest_artifact_path"]
+        .as_str()
+        .expect("acoustic study manifest path");
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["public_run"]["run_status"], "completed");
+    assert_eq!(manifest["public_run"]["numerically_acceptable"], true);
 }
 
 #[test]
@@ -881,4 +931,141 @@ fn strip_ansi(bytes: &[u8]) -> Vec<u8> {
         }
     }
     output
+}
+
+/// The homepage "Physics simulation as code" figure: `runmat check cantilever.fea` on the
+/// cantilever-static study with the traction authored in N and no `load_case` line.
+// witness: FEA-PUBLIC-LANGUAGE-001/located_diagnostics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Checking a study with a force given as a traction prints error[fea.semantic.model],
+//   the file:line:col arrow, the source line, a caret underline labeled with the expected unit (Pa)
+//   and the checked summary, with no cascade error; leading-indent trimming and the JSON form are
+//   not asserted here.
+// witness: FEA-PUBLIC-LANGUAGE-001/default_load_case @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: The same file with the unit corrected and no load_case checks cleanly, so the load
+//   joins the default case; multiple loads with an explicit case set are not compared.
+#[test]
+fn fea_check_prints_located_diagnostics_like_m_files() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::create_dir_all(temp.path().join("geometry")).unwrap();
+    fs::copy(
+        repository.join("docs/simulation/examples/geometry/cantilever.step"),
+        temp.path().join("geometry/cantilever.step"),
+    )
+    .unwrap();
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/home_study_check/cantilever.fea"),
+    )
+    .unwrap();
+    fs::write(temp.path().join("cantilever.fea"), &source).unwrap();
+
+    let output = runmat_with_env(
+        &temp,
+        &["check", "cantilever.fea"],
+        &[
+            ("NO_COLOR", "1"),
+            ("RUNMAT_PACKAGE_CACHE_DIR", &temp.path().join("cache").to_string_lossy()),
+        ],
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&strip_ansi(&output.stdout)),
+        concat!(
+            "error[fea.semantic.model]: traction must be force per area, found N\n",
+            " --> cantilever.fea:28:48\n",
+            "   |\n",
+            "28 | traction on geometry.beam.region.tip = [0, 0, -100000] N\n",
+            "   |                                        ^^^^^^^^^^^^^^^^^ expected Pa\n",
+            "checked cantilever.fea: 1 error(s), 0 warning(s)\n",
+        ),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // With the unit corrected, the same file checks cleanly: the load joins the default case.
+    fs::write(
+        temp.path().join("cantilever.fea"),
+        source.replace("-100000] N", "-100000] Pa"),
+    )
+    .unwrap();
+    let output = runmat_with_env(
+        &temp,
+        &["check", "cantilever.fea"],
+        &[
+            ("NO_COLOR", "1"),
+            ("RUNMAT_PACKAGE_CACHE_DIR", &temp.path().join("cache").to_string_lossy()),
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&strip_ansi(&output.stdout)),
+        "checked cantilever.fea: 0 error(s), 0 warning(s)\n"
+    );
+}
+
+// witness: FEA-SHARED-EXECUTION-001/logical_study_identity @
+//   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
+//   boundary: Two executions of one random-response study from a script keep one definition run
+//   id, publish distinct attempts, and the definition id resolves to the latest attempt. Remote
+//   placement and retry attempts inside one execution are not exercised.
+#[test]
+fn a_script_running_the_same_study_twice_publishes_two_attempts() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let study = repository.join("docs/simulation/examples/modal-random-response.fea");
+    let script_path = temp.path().join("twice.m");
+    fs::write(
+        &script_path,
+        format!(
+            "first = fea.stepResult(fea.run(\"{0}\"), \"random_response\");\nsecond = fea.stepResult(fea.run(\"{0}\"), \"random_response\");\ndisp(first.run_id);\ndisp(second.run_id);\n",
+            study.display()
+        ),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "running a study twice failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let ids = stdout
+        .split_whitespace()
+        .filter(|token| token.starts_with("run_remote_"))
+        .collect::<Vec<_>>();
+    let [first, second] = ids.as_slice() else {
+        panic!("expected two attempt run ids, got {stdout}");
+    };
+    assert_ne!(first, second, "the second run reused the first attempt");
+    let (definition, _) = second.rsplit_once('_').expect("attempt run id");
+    assert_eq!(
+        first.rsplit_once('_').map(|(definition, _)| definition),
+        Some(definition)
+    );
+    let query = temp.path().join("latest.m");
+    fs::write(
+        &query,
+        format!("r = fea.results(\"{definition}\");\ndisp(r.run_id);\n"),
+    )
+    .unwrap();
+    let output = runmat_from_repository(&temp, &["run", query.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "latest-attempt query failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(second),
+        "latest attempt of {definition} is not {second}:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

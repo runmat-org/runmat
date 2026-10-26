@@ -82,6 +82,7 @@ pub(super) fn validate(
         | AccuracySourceKind::Thermal
         | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
+        | AccuracySourceKind::AcousticResponse
         | AccuracySourceKind::ElectricalStatic => {
             return Err(AnalysisBridgeError::Identity(
                 "nonstructural source used structural context",
@@ -178,6 +179,7 @@ pub(super) fn validate(
         | AccuracySourceKind::Thermal
         | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
+        | AccuracySourceKind::AcousticResponse
         | AccuracySourceKind::ElectricalStatic => {
             unreachable!("rejected above")
         }
@@ -193,14 +195,12 @@ fn validate_authored(
     source.validate()?;
     let model = source.model();
     let step = source.procedure_step()?;
-    let formulation = source.formulation_requirement();
     let producer = StepIdentity::from_solver_contract(
         SequenceIdentity::from_solver_contract(&model.sequence)?,
         step,
     )?;
     if producer != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != formulation
         || observations.is_some() == step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(
@@ -213,10 +213,15 @@ fn validate_authored(
             request.source_kind,
             request.source_result,
         )?;
-        catalog.validate_for(
-            step,
-            ObservationHistorySourceContext::Structural { source, mesh },
-        )?;
+        // Statistical steps publish through the family-neutral native mesh catalog.
+        let context = match (catalog.source().source(), mesh) {
+            (
+                runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery { .. },
+                Some(mesh),
+            ) => ObservationHistorySourceContext::VolumeMesh { mesh },
+            _ => ObservationHistorySourceContext::Structural { source, mesh },
+        };
+        catalog.validate_for(step, context)?;
     }
     Ok(())
 }

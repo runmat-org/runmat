@@ -6,7 +6,6 @@ mod completion;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use runmat_execution::identity::ArtifactId;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{ArtifactResult, LogicalObject};
@@ -114,25 +113,16 @@ impl NativeExactMeshingExecutor<'_> {
             };
         let submission = build_task_submission(
             stage.host(),
-            &program.arguments,
+            &program,
             BTreeSet::new(),
             &MeshingExecutionContext {
                 scope_id: self.session.scope_id(),
                 pool_id: self.session.pool_id(),
-                program_artifact_id: ArtifactId::derive(&[program.artifact.id.0.bytes()]),
-                host: crate::program_host::program_host(
-                    &program,
-                    crate::program_host::local_trust(),
-                )
-                .map_err(stage_error)?,
+                permitted_trust_tiers: BTreeSet::from([
+                    runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                ]),
                 artifact_access: stage.host().artifact_access.clone(),
-                cpu_millicores: if stage.host().workload.stage
-                    == runmat_meshing_core::MeshingStageKind::Tetrahedralization
-                {
-                    self.policy.cpu_millicores
-                } else {
-                    self.policy.cpu_millicores.min(1_000)
-                },
+                cpu_millicores: stage_cpu_millicores(self.policy.cpu_millicores, stage.host()),
                 maximum_egress_bytes: self.policy.maximum_egress_bytes,
                 maximum_relay_bytes: self.policy.maximum_relay_bytes,
                 deadline_unix_millis: self.policy.deadline_unix_millis,
@@ -326,6 +316,23 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
             .map(|value| value.expect("every submitted stage completed"))
             .collect())
     }
+}
+
+/// CPU reservation for one meshing stage. Only tetrahedralization runs a
+/// parallel pool, and each pool thread needs its stack inside the stage's
+/// memory reservation, so the thread count never exceeds what memory admits.
+pub(crate) fn stage_cpu_millicores(
+    policy_cpu_millicores: u32,
+    host: &runmat_meshing_execution::MeshingHostWorkload,
+) -> u32 {
+    if host.workload.stage != runmat_meshing_core::MeshingStageKind::Tetrahedralization {
+        return policy_cpu_millicores.min(1_000);
+    }
+    let memory_threads = host.ceilings.maximum_memory_bytes
+        / runmat_cpu_execution::WORKER_STACK_BYTES;
+    let memory_millicores = u32::try_from(memory_threads.max(1).saturating_mul(1_000))
+        .unwrap_or(u32::MAX);
+    policy_cpu_millicores.min(memory_millicores)
 }
 
 fn stage_error(error: impl std::fmt::Display) -> MeshingStageExecutionError {

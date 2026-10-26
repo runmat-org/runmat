@@ -136,12 +136,12 @@ pub(crate) fn envelope(analysis: &AnalysisStore) -> ExecutableUnitEnvelope {
         ExecutableUnitManifest {
             schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: ExecutableIdentity {
+                declaration_class: None,
                 program: revision(),
                 root_package: callable().owner_identity,
                 entrypoint: "pulse".into(),
                 entrypoint_function: Some(ProgramFunctionId(7)),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
-                declaration_class: None,
                 source_digest: Digest::sha256("executable-source"),
             },
             revisions: ExecutableComponentRevisions {

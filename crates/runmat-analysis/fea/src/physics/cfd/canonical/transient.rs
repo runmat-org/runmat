@@ -51,10 +51,20 @@ impl CanonicalFluidResult {
     }
 }
 
+/// Arbitrary Lagrangian–Eulerian interval data: the departure cell volumes and the volume each
+/// face sweeps over the interval (divided by its duration, outward from the face owner). The
+/// geometric conservation law V_new − V_old = Δt Σ w holds cell by cell.
+#[derive(Clone, Copy)]
+pub struct CanonicalFluidMeshMotion<'a> {
+    pub previous_volume_m3: &'a [f64],
+    pub face_mesh_flux_m3_per_s: &'a [f64],
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct TimeDerivative<'a> {
     pub previous_velocity: &'a [V],
     pub duration_s: f64,
+    pub motion: Option<CanonicalFluidMeshMotion<'a>>,
 }
 impl TimeDerivative<'_> {
     pub fn coefficient(self, p: &CanonicalFluidProblem<'_>, cell: usize) -> Result<f64, Error> {
@@ -64,10 +74,33 @@ impl TimeDerivative<'_> {
         }
         Ok(value)
     }
+    /// Departure inertia ρ V_old / Δt: the arrival volume on a fixed mesh.
+    pub fn previous_coefficient(
+        self,
+        p: &CanonicalFluidProblem<'_>,
+        cell: usize,
+    ) -> Result<f64, Error> {
+        let Some(motion) = self.motion else {
+            return self.coefficient(p, cell);
+        };
+        let value = (p.density * motion.previous_volume_m3[cell]) / self.duration_s;
+        if !value.is_finite() || value <= 0.0 {
+            return Err(Error::Invalid("finite positive departure cell inertia"));
+        }
+        Ok(value)
+    }
+    /// Mesh volume flux of a face; zero on a fixed mesh.
+    pub fn mesh_flux(self, face: usize) -> f64 {
+        self.motion
+            .map_or(0.0, |motion| motion.face_mesh_flux_m3_per_s[face])
+    }
     pub fn force(self, p: &CanonicalFluidProblem<'_>, cell: usize, current: V) -> Result<V, Error> {
-        let value = scale(
-            sub(current, self.previous_velocity[cell]),
-            self.coefficient(p, cell)?,
+        let value = sub(
+            scale(current, self.coefficient(p, cell)?),
+            scale(
+                self.previous_velocity[cell],
+                self.previous_coefficient(p, cell)?,
+            ),
         );
         if value.iter().any(|x| !x.is_finite()) {
             return Err(Error::Invalid("nonfinite original transient inertia"));
@@ -152,6 +185,7 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
         let derivative = TimeDerivative {
             previous_velocity: previous.velocity_m_per_s.canonical_values(),
             duration_s,
+            motion: None,
         };
         for cell in 0..n {
             derivative.coefficient(self, cell)?;
@@ -177,6 +211,80 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
         })
     }
 }
+impl<'mesh> CanonicalFluidProblem<'mesh> {
+    /// One backward-Euler interval on a moving mesh. `self` is prepared on the arrival
+    /// configuration; `previous` holds the departure fields in the same cell and face order,
+    /// and `motion` the departure volumes and swept face fluxes, which must satisfy the
+    /// geometric conservation law in every cell.
+    pub fn prepare_backward_euler_moving<'p, 'state>(
+        &'p self,
+        start_time_s: f64,
+        end_time_s: f64,
+        previous: CanonicalFluidFields<'state>,
+        motion: CanonicalFluidMeshMotion<'state>,
+    ) -> Result<CanonicalFluidBackwardEulerStep<'p, 'mesh, 'state>, Error> {
+        let n = self.topology.cells.len();
+        if motion.previous_volume_m3.len() != n
+            || motion.face_mesh_flux_m3_per_s.len() != self.topology.faces.len()
+            || motion
+                .previous_volume_m3
+                .iter()
+                .chain(motion.face_mesh_flux_m3_per_s)
+                .any(|v| !v.is_finite())
+            || motion.previous_volume_m3.iter().any(|v| *v <= 0.0)
+        {
+            return Err(Error::Invalid("moving-mesh interval inventory"));
+        }
+        let duration = end_time_s - start_time_s;
+        let mut swept = vec![0.0; n];
+        for (i, face) in self.topology.faces.iter().enumerate() {
+            swept[face.owner] += motion.face_mesh_flux_m3_per_s[i];
+            if let Some(neighbor) = face.neighbor {
+                swept[neighbor] -= motion.face_mesh_flux_m3_per_s[i];
+            }
+        }
+        for (c, cell) in self.topology.cells.iter().enumerate() {
+            let change = cell.volume_m3 - motion.previous_volume_m3[c];
+            if (change - duration * swept[c]).abs() > 1e-9 * cell.volume_m3 {
+                return Err(Error::Invalid(
+                    "moving mesh violates the geometric conservation law",
+                ));
+            }
+        }
+        let mut step = self.prepare_backward_euler(start_time_s, end_time_s, previous)?;
+        step.derivative.motion = Some(motion);
+        step.numerical_input_identity = identity(
+            "fea-fluid-moving-mesh-interval/v1",
+            &(
+                step.numerical_input_identity,
+                motion.previous_volume_m3,
+                motion.face_mesh_flux_m3_per_s,
+            ),
+        )?;
+        Ok(step)
+    }
+
+    /// Wall velocities of a moving structure on faces whose authored law is a wall: the
+    /// prescribed value of each listed face becomes the wall's own velocity. Only a
+    /// moving-mesh interval admits normal wall motion, since its face fluxes sweep the wall.
+    pub fn with_wall_velocities(mut self, walls: &[(usize, [f64; 3])]) -> Result<Self, Error> {
+        for &(face, velocity) in walls {
+            if velocity.iter().any(|v| !v.is_finite()) {
+                return Err(Error::Invalid("wall velocity"));
+            }
+            match self.boundaries.get_mut(face) {
+                Some(super::boundary::FaceBoundary::Velocity { value, .. }) => *value = velocity,
+                _ => return Err(Error::Invalid("wall velocity off a velocity wall face")),
+            }
+        }
+        self.numerical_input_identity = identity(
+            "fea-fluid-structure-wall-velocity/v1",
+            &(self.numerical_input_identity, walls),
+        )?;
+        Ok(self)
+    }
+}
+
 impl CanonicalFluidBackwardEulerStep<'_, '_, '_> {
     pub fn reservation(&self) -> CanonicalFluidReservation {
         self.reservation

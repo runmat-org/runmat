@@ -15,12 +15,11 @@ pub mod triangulation;
 mod tests;
 
 use class_registration::*;
-pub(crate) use conversion::geometry_asset_from_value_with_builtin;
 use conversion::*;
-pub use display::{
-    geometry_mesh_method_builtin, GEOMETRY_MESH_METHOD_DESCRIPTOR,
-    GEOMETRY_MESH_METHOD_INTEGER_AUDIT,
+pub(crate) use conversion::{
+    geometry_asset_from_value_with_builtin, geometry_asset_from_value_with_error,
 };
+pub use display::geometry_mesh_method_builtin;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use entrypoints::{
     __runmat_wasm_register_builtin_geometry_inspect_builtin,

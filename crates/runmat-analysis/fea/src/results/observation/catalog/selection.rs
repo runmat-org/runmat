@@ -12,10 +12,11 @@ mod tests;
 /// selects exactly one authored source sample. This is not a partition or CPU coordinate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObservationSelectionCoordinate {
-    FiniteVolumeRecovery,
     SampledRecovery,
     StructuralRecovery,
     ThermalSample { ordinal: usize },
+    /// Native canonical-mesh fields; the selection's projection digest is the plan topology.
+    VolumeMeshRecovery,
 }
 
 impl ObservationFieldCatalog {
@@ -31,19 +32,6 @@ impl ObservationFieldCatalog {
         plan.validate_identity().map_err(invalid)?;
         let selected = self.canonical_selected_fields(plan, coordinate)?;
         match (&self.source, coordinate) {
-            (
-                ObservationFieldCatalogSource::FiniteVolumeRecovery {
-                    recovery_request,
-                    manifest,
-                    layout,
-                },
-                ObservationSelectionCoordinate::FiniteVolumeRecovery,
-            ) => ObservationFieldSelection::finite_volume_recovery(
-                recovery_request,
-                manifest,
-                layout,
-                selected,
-            ),
             (
                 ObservationFieldCatalogSource::SampledRecovery {
                     recovery_request,
@@ -64,6 +52,19 @@ impl ObservationFieldCatalog {
                 },
                 ObservationSelectionCoordinate::StructuralRecovery,
             ) => ObservationFieldSelection::structural(recovery_request, manifest, selected),
+            (
+                ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    manifest,
+                    ..
+                },
+                ObservationSelectionCoordinate::VolumeMeshRecovery,
+            ) => ObservationFieldSelection::volume_mesh_recovery(
+                recovery_request,
+                manifest,
+                plan.topology_digest,
+                selected,
+            ),
             (
                 ObservationFieldCatalogSource::Thermal { manifest },
                 ObservationSelectionCoordinate::ThermalSample { ordinal },
@@ -91,14 +92,14 @@ impl ObservationFieldCatalog {
         selection: &ObservationFieldSelection,
     ) -> AnalysisExecutionResult<()> {
         let coordinate = match selection.source() {
-            ObservationFieldSource::FiniteVolumeRecovery { .. } => {
-                ObservationSelectionCoordinate::FiniteVolumeRecovery
-            }
             ObservationFieldSource::SampledRecovery { .. } => {
                 ObservationSelectionCoordinate::SampledRecovery
             }
             ObservationFieldSource::StructuralRecovery { .. } => {
                 ObservationSelectionCoordinate::StructuralRecovery
+            }
+            ObservationFieldSource::VolumeMeshRecovery { .. } => {
+                ObservationSelectionCoordinate::VolumeMeshRecovery
             }
             ObservationFieldSource::ThermalResult { sample_ordinal, .. } => {
                 ObservationSelectionCoordinate::ThermalSample {
@@ -129,16 +130,16 @@ impl ObservationFieldCatalog {
     ) -> AnalysisExecutionResult<Vec<RecoveredFieldIdentity>> {
         let entries: &[_] = match (&self.source, coordinate) {
             (
-                ObservationFieldCatalogSource::FiniteVolumeRecovery { manifest, .. },
-                ObservationSelectionCoordinate::FiniteVolumeRecovery,
-            ) => &manifest.fields,
-            (
                 ObservationFieldCatalogSource::SampledRecovery { manifest, .. },
                 ObservationSelectionCoordinate::SampledRecovery,
             ) => &manifest.fields,
             (
                 ObservationFieldCatalogSource::Structural { manifest, .. },
                 ObservationSelectionCoordinate::StructuralRecovery,
+            ) => &manifest.fields,
+            (
+                ObservationFieldCatalogSource::VolumeMeshRecovery { manifest, .. },
+                ObservationSelectionCoordinate::VolumeMeshRecovery,
             ) => &manifest.fields,
             (
                 ObservationFieldCatalogSource::Thermal { manifest },

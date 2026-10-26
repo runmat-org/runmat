@@ -154,6 +154,10 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
     assert_eq!(report.metric_evaluation_count, evaluation_count);
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/curve_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A nonperiodic closed face with distinct pcurve endpoints is rejected; tiny edges and
+//   periodic curves are separate cases.
 #[test]
 fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
     let (document, topology, mut registry) = runmat_geometry_fixtures::exact_circle();
@@ -306,6 +310,9 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     );
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/curve_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Constructive curve discretization fails at its hard node limit.
 #[test]
 fn constructive_curve_discretization_fails_at_its_hard_node_limit() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
@@ -620,6 +627,7 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
     let (_, base, _) = runmat_geometry_fixtures::exact_circle();
     let topology = repeated_circle_topology(&base, 2);
     let request = runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -630,6 +638,7 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
             },
             metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(0.1).unwrap(),
         }],
+        cells_across_gap: None,
     };
     let metric = ResolvedCurveMetricField::new(&topology, &request).unwrap();
     let evaluation = metric
@@ -664,10 +673,12 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
     let evaluator =
         runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
     let request = runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.3,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = runmat_meshing_core::CurveQualityTargets {
         maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.001),
@@ -922,6 +933,7 @@ fn resolved_metric_request(
 ) -> runmat_meshing_core::MetricFieldRequest {
     let unit = runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap();
     runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.3,
@@ -955,6 +967,7 @@ fn resolved_metric_request(
                 metric: unit,
             },
         ],
+        cells_across_gap: None,
     }
 }
 

@@ -15,7 +15,7 @@ pub(super) fn failure(
             severity: FeaDiagnosticSeverity::Error,
             message: error.to_string(),
         }],
-        solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+        solver_method: SolverMethod::ShiftInvertBlockLanczos,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
@@ -49,7 +49,7 @@ mod tests {
             &model,
             &excitation,
             None,
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let diagonal = |role, values: [f64; 6]| {

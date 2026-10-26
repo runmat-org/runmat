@@ -349,11 +349,7 @@ where
         }
         _ => None,
     };
-    let region_evidence = ImportedRegionEvidence {
-        named,
-        topology: &geometry.topology,
-        revision_map: geometry.healing_report.as_ref().map(|r| &r.revision_map),
-    };
+    let region_evidence = ImportedRegionEvidence { named, imported: &geometry };
     let regions = resolve_geometry_regions_with_generated_outputs(
         &request.definition,
         &geometry.topology,
@@ -453,8 +449,8 @@ where
 
     struct ImportedRegionEvidence<'a> {
         named: Option<&'a runmat_geometry_core::GeometryNamedSelections>,
-        topology: &'a runmat_geometry_core::ExactBRepTopology,
-        revision_map: Option<&'a runmat_geometry_core::GeometryRevisionMap>,
+        /// The exact import, whose authored CAD names and presentation layers select regions.
+        imported: &'a runmat_geometry_io::ImportedExactCad,
     }
 
     impl GeometryRegionEvidence for ImportedRegionEvidence<'_> {
@@ -465,22 +461,24 @@ where
             role: runmat_geometry_core::GeometryRegionRole,
             name: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            let metadata = self.named.ok_or_else(|| format!("Named selection `{name}` is not saved for this CAD asset. Select its geometry and save the selection before continuing."))?;
-            let id = metadata.selection(name, role).map_err(|e| e.to_string())?;
-            runmat_geometry_ops::resolve_persistent_region_selection(
-                self.topology,
-                role,
-                id,
-                self.revision_map,
-            )
-            .map_err(|e| e.to_string())
+            if let Some(metadata) = self.named.filter(|metadata| metadata.regions.iter().any(|region| region.region_id == name)) {
+                let id = metadata.selection(name, role).map_err(|e| e.to_string())?;
+                return runmat_geometry_ops::resolve_persistent_region_selection(
+                    &self.imported.topology,
+                    role,
+                    id,
+                    self.imported.healing_report.as_ref().map(|r| &r.revision_map),
+                )
+                .map_err(|e| e.to_string());
+            }
+            self.imported.entities_named(role, name)
         }
         fn by_tag(
             &self,
-            _role: runmat_geometry_core::GeometryRegionRole,
-            _tag: &str,
+            role: runmat_geometry_core::GeometryRegionRole,
+            tag: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            Err("tagged CAD evidence is unavailable until AP242 admission".into())
+            self.imported.entities_tagged(role, tag)
         }
         fn generated_output(
             &self,
@@ -498,8 +496,3 @@ fn failure(message: impl Into<String>) -> ProgramExecutionResponse {
         message: message.into(),
     }
 }
-
-#[cfg(all(test, feature = "occt-native"))]
-mod geometry_materialization_tests;
-#[cfg(all(test, feature = "occt-native"))]
-mod geometry_sweep_tests;

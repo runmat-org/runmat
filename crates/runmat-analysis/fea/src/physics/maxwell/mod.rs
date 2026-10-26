@@ -1,40 +1,46 @@
-//! Experimental continuum electric-phasor curl-curl formulation, exp(+i ω t).
+//! Harmonic electromagnetic field formulation in E (equivalently A = E/(-i omega) in the
+//! temporal gauge), exp(+i omega t):
 //!
-//! curl(μ⁻¹ curl E) − ω² ε E + i ω σ E = −i ω J, with full-exterior
-//! homogeneous PEC (n × E = 0). Six first-kind lowest-order Nédélec corner
-//! edges per affine Tet4/Tet10; Tet10 geometry is NOT quadratic electric-field
-//! approximation. No gauge, graph surrogate, numerical damping or static limit.
+//! curl(μ⁻¹ curl E) − ω² ε E + i ω σ E = −i ω J,
 //!
-//! The initial uniqueness envelope requires strictly positive conductivity in
-//! EVERY element. Nonnegative conductivity is a valid physical law, but zero-loss
-//! regions/lossless cavity resonances remain unsupported until independent
-//! nonresonance/coercivity authority exists. A small GMRES residual alone does
-//! not prove uniqueness. Lossless cavities/waveguides are not discarded scope.
-//!
-//! This numerical owner does not qualify authored/native lifecycle, production,
-//! resource admission, sweeps, transient Maxwell, open boundaries or restart.
+//! with lowest-order first-kind Nédélec corner edges per affine Tet4/Tet10 (Tet10 geometry is
+//! not a quadratic field approximation). Boundary conditions: tangential E = 0 on grounded
+//! exterior faces (`magnetic.vector_potential_ground`, perfect conductors) and the natural
+//! condition n × H = 0 on every other exterior face. Sources: impressed volume current
+//! density and terminal-driven solid conductors (current or voltage drive, see `drive`).
+//! Conductivity, permittivity and permeability are per element; zero conductivity is
+//! admitted (the operator keeps −ω²ε), so air and insulators need no artificial loss.
+//! The augmented complex system is factored by sparse LU (`solve::sparse_direct`); acceptance
+//! measures the original equations' residual, the complex Poynting balance and weak charge
+//! continuity. No gauge, graph surrogate, numerical damping or static limit is added.
 //! Weak-form reference: https://aurora-multiphysics.github.io/apollo/frequency_domain/ComplexMaxwell.html
 //! Basis/source reference: https://mfem.org/maxwell-notes/
-mod assembly;
 mod authored;
 mod complex;
 mod continuity;
+mod drive;
 mod geometry;
 mod input;
 mod plan;
-mod recovery;
-mod retained_consistency;
-pub(crate) use retained_consistency::validate_retained_consistency;
 pub(crate) mod resources;
 mod response;
+mod system;
+pub(crate) use system::validate_retained_consistency;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
-pub use authored::{compile_canonical_input, solve_canonical_harmonic, validate_canonical_input};
+pub use authored::{
+    compile_canonical_input, grounded_face_identities, harmonic_frequencies,
+    solve_canonical_harmonic, validate_canonical_input,
+};
 pub use complex::{ComplexPhasor, ComplexVector3};
-pub use input::{MaxwellCurrentSample, MaxwellInput, MaxwellVolumeData};
+pub use input::{
+    MaxwellCurrentSample, MaxwellDriveExcitation, MaxwellElementVector, MaxwellInput,
+    MaxwellTerminalDrive, MaxwellVolumeData,
+};
 pub use plan::MaxwellSystemPlan;
 pub use response::{MaxwellFieldSample, MaxwellResponse};
+pub use system::MaxwellDriveResponse;
 use runmat_meshing_core::SolverMeshArtifact;
 use thiserror::Error;
 
@@ -52,35 +58,24 @@ pub enum MaxwellError {
     NotConverged(String),
 }
 
-/// Solve peak electric phasors with SI material coefficients and frozen source
-/// values at every canonical Keast15 sample. No user callback executes here.
-/// Tangential boundary E is exactly zero; no other field components are grounded.
-pub fn solve_full_pec_volume(
+/// Solve one frequency of a compiled harmonic input.
+pub fn solve(
     mesh: &SolverMeshArtifact,
     input: &MaxwellInput,
     residual_target: f64,
 ) -> Result<MaxwellResponse, MaxwellError> {
-    let plan = MaxwellSystemPlan::derive(mesh)?;
-    solve_full_pec_volume_with_plan(mesh, input, residual_target, &plan)
+    let plan = MaxwellSystemPlan::derive(mesh, &input.grounded_faces)?;
+    solve_with_plan(mesh, input, residual_target, &plan)
 }
 
-/// Same physical solve with exact precomputed sparse support; the plan is checked
-/// against canonical topology before quadrature, not trusted as solver evidence.
-pub fn solve_full_pec_volume_with_plan(
+/// Same solve with a precomputed plan; the plan is re-derived and compared, never trusted.
+pub fn solve_with_plan(
     mesh: &SolverMeshArtifact,
     input: &MaxwellInput,
     residual_target: f64,
     plan: &MaxwellSystemPlan,
 ) -> Result<MaxwellResponse, MaxwellError> {
-    if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
-        return Err(MaxwellError::InvalidInput(
-            "relative residual target".into(),
-        ));
-    }
-    response::solve(
-        assembly::MaxwellAssembly::assemble(mesh, input, plan)?,
-        residual_target,
-    )
+    system::solve(mesh, input, residual_target, plan)
 }
 
 fn invalid(error: impl std::fmt::Display) -> MaxwellError {
@@ -89,6 +84,4 @@ fn invalid(error: impl std::fmt::Display) -> MaxwellError {
 fn topology(error: impl std::fmt::Display) -> MaxwellError {
     MaxwellError::Topology(error.to_string())
 }
-fn operator(error: impl std::fmt::Display) -> MaxwellError {
-    MaxwellError::Operator(error.to_string())
-}
+

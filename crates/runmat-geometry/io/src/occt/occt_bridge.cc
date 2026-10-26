@@ -1,6 +1,8 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "exact_assembly.hxx"
 #include "exact_healing.hxx"
+#include "exact_shared_interfaces.hxx"
+#include "exact_names.hxx"
 #include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
@@ -27,7 +29,17 @@
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
+#include <ShapeAnalysis_Edge.hxx>
+#include <TopoDS_Compound.hxx>
+#include <StepShape_AdvancedFace.hxx>
+#include <TransferBRep.hxx>
+#include <XSControl_TransferReader.hxx>
+#include <Transfer_TransientProcess.hxx>
+#include <Interface_InterfaceModel.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <StepData_StepModel.hxx>
+#include <XSControl_Reader.hxx>
+#include <XSControl_WorkSession.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPConstruct_UnitContext.hxx>
 #include <StepData_Factors.hxx>
@@ -83,6 +95,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -294,6 +307,69 @@ CadDocument finish_xcaf_document(CadDocument result) {
   return result;
 }
 
+// OCCT's sub-shape name reading misses faces of a solid's inner shells (BREP_WITH_VOIDS cavities,
+// such as an electrode cavity in an insulator). Every named ADVANCED_FACE in the file is mapped
+// through the transfer result to its kernel face and labeled in the part that owns it, unless
+// OCCT already labeled it.
+static void label_named_step_faces(const Handle(XSControl_WorkSession)& session, CadDocument& document) {
+  if (session.IsNull() || !document.has_xcaf || document.shape_tool.IsNull()) {
+    return;
+  }
+  const Handle(Interface_InterfaceModel) model = session->Model();
+  const Handle(XSControl_TransferReader) transfer = session->TransferReader();
+  if (model.IsNull() || transfer.IsNull()) {
+    return;
+  }
+  std::vector<std::pair<TopoDS_Shape, std::string>> named;
+  for (Standard_Integer index = 1; index <= model->NbEntities(); ++index) {
+    const Handle(StepShape_AdvancedFace) face =
+        Handle(StepShape_AdvancedFace)::DownCast(model->Value(index));
+    if (face.IsNull() || face->Name().IsNull() || face->Name()->Length() == 0) {
+      continue;
+    }
+    const TopoDS_Shape shape = TransferBRep::ShapeResult(transfer->TransientProcess(), face);
+    if (shape.IsNull() || shape.ShapeType() != TopAbs_FACE) {
+      continue;
+    }
+    named.emplace_back(shape, std::string(face->Name()->ToCString()));
+  }
+  if (named.empty()) {
+    return;
+  }
+  TDF_LabelSequence labels;
+  document.shape_tool->GetShapes(labels);
+  for (Standard_Integer index = 1; index <= labels.Length(); ++index) {
+    const TDF_Label& definition = labels.Value(index);
+    if (!XCAFDoc_ShapeTool::IsSimpleShape(definition)) {
+      continue;
+    }
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(XCAFDoc_ShapeTool::GetShape(definition), TopAbs_FACE, faces);
+    std::unordered_map<const TopoDS_TShape*, Standard_Integer> by_tshape;
+    for (Standard_Integer face = 1; face <= faces.Extent(); ++face) {
+      by_tshape.emplace(faces(face).TShape().get(), face);
+    }
+    for (const auto& [shape, name] : named) {
+      const auto found = by_tshape.find(shape.TShape().get());
+      if (found == by_tshape.end()) {
+        continue;
+      }
+      const TopoDS_Shape& face = faces(found->second);
+      TDF_Label existing;
+      if (document.shape_tool->FindSubShape(definition, face, existing) &&
+          !exact_label_name(existing).empty()) {
+        continue;
+      }
+      const TDF_Label label = existing.IsNull()
+                                  ? document.shape_tool->AddSubShape(definition, face)
+                                  : existing;
+      if (!label.IsNull()) {
+        TDataStd_Name::Set(label, TCollection_ExtendedString(name.c_str(), Standard_True));
+      }
+    }
+  }
+}
+
 // Inspect the reader's source entities before transfer. The destination document
 // unit is a separate preference and is never evidence of a file declaration.
 void verify_step_source_units(const STEPControl_Reader& reader,
@@ -352,6 +428,15 @@ CadDocument read_step_shape(const std::string& path,
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT STEP reader did not return IFSelect_RetDone");
   }
+  // CAD tools write face and body names on STEP representation items. OCCT reads them into
+  // XCAF sub-shape labels only when the model asks for it; set it on this file's model so
+  // `select name` resolves authored face names without touching process-global settings.
+  Handle(StepData_StepModel) step_model =
+      Handle(StepData_StepModel)::DownCast(reader.Reader().WS()->Model());
+  if (step_model.IsNull()) {
+    throw std::runtime_error("OCCT STEP reader produced no STEP model");
+  }
+  step_model->InternalParameters.ReadSubshapeNames = true;
   verify_step_source_units(reader.Reader(), bytes, options);
   // STEP declares physical units. Exact imports request a stable millimetre
   // kernel representation to preserve tolerance-scale features; preview imports
@@ -373,7 +458,9 @@ CadDocument read_step_shape(const std::string& path,
     throw std::runtime_error("OCCT STEP XCAF transfer failed");
   }
   check_cancelled(options);
-  return finish_xcaf_document(std::move(result));
+  CadDocument finished = finish_xcaf_document(std::move(result));
+  label_named_step_faces(reader.Reader().WS(), finished);
+  return finished;
 }
 
 CadDocument read_iges_shape(const std::string& path,
@@ -397,6 +484,13 @@ CadDocument read_iges_shape(const std::string& path,
     throw std::runtime_error(
         "OCCT IGES reader did not return IFSelect_RetDone (status " +
         std::to_string(static_cast<int>(status)) + ")");
+  }
+  // IGES declares physical units like STEP. Exact imports request the stable
+  // millimetre kernel representation; preview imports request the asset's
+  // coordinate unit so the reported unit matches the coordinates.
+  if (!std::isfinite(options.step_coordinate_unit_m) ||
+      options.step_coordinate_unit_m <= 0.0) {
+    throw std::runtime_error("IGES transfer requires a finite positive length unit");
   }
   CadDocument result;
   result.document = new_xcaf_document();
@@ -1079,6 +1173,130 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   return result;
 }
 
+// Exports often carry construction geometry beside a part's solids: PMI leader curves,
+// supplemental wireframe and points that bound no face. It is not part of the analysis model,
+// and its curves would be meshed and sized against the real edges, so a part that has faces
+// keeps only its solids, shells and faces. A wireframe-only part is left unchanged.
+static TopoDS_Shape without_free_wireframe(const TopoDS_Shape& shape, bool& changed) {
+  if (shape.ShapeType() != TopAbs_COMPOUND) {
+    return shape;
+  }
+  BRep_Builder builder;
+  TopoDS_Compound result;
+  builder.MakeCompound(result);
+  bool empty = true;
+  for (TopoDS_Iterator children(shape); children.More(); children.Next()) {
+    const TopoDS_Shape& child = children.Value();
+    switch (child.ShapeType()) {
+      case TopAbs_EDGE:
+      case TopAbs_WIRE:
+      case TopAbs_VERTEX:
+        changed = true;
+        continue;
+      case TopAbs_COMPOUND: {
+        const TopoDS_Shape kept = without_free_wireframe(child, changed);
+        if (!TopExp_Explorer(kept, TopAbs_FACE).More()) {
+          changed = true;
+          continue;
+        }
+        builder.Add(result, kept);
+        break;
+      }
+      default:
+        builder.Add(result, child);
+        break;
+    }
+    empty = false;
+  }
+  if (empty) {
+    return shape;
+  }
+  result.Location(TopLoc_Location());
+  return result;
+}
+
+static void strip_free_wireframe(CadDocument& document) {
+  if (!TopExp_Explorer(document.shape, TopAbs_FACE).More()) {
+    return;
+  }
+  if (!document.has_xcaf || document.shape_tool.IsNull()) {
+    bool changed = false;
+    TopoDS_Shape stripped = without_free_wireframe(document.shape, changed);
+    if (changed) {
+      document.shape = stripped;
+    }
+    return;
+  }
+  TDF_LabelSequence labels;
+  document.shape_tool->GetShapes(labels);
+  bool any = false;
+  for (Standard_Integer index = 1; index <= labels.Length(); ++index) {
+    const TDF_Label& label = labels.Value(index);
+    if (!XCAFDoc_ShapeTool::IsSimpleShape(label)) {
+      continue;
+    }
+    TopoDS_Shape shape = XCAFDoc_ShapeTool::GetShape(label);
+    bool changed = false;
+    TopoDS_Shape stripped;
+    if (!TopExp_Explorer(shape, TopAbs_FACE).More()) {
+      // A part holding only construction geometry contributes nothing to the model.
+      TopoDS_Compound empty;
+      BRep_Builder().MakeCompound(empty);
+      stripped = empty;
+      changed = !shape.IsNull();
+    } else {
+      stripped = without_free_wireframe(shape, changed);
+    }
+    if (changed) {
+      document.shape_tool->SetShape(label, stripped);
+      any = true;
+    }
+  }
+  if (any) {
+    document.shape_tool->UpdateAssemblies();
+    TDF_LabelSequence free_shapes;
+    document.shape_tool->GetFreeShapes(free_shapes);
+    document.shape = XCAFDoc_ShapeTool::GetOneShape(free_shapes);
+  }
+}
+
+// Edge tolerances written by CAD exporters bound the gap between an edge's 3D curve and its
+// pcurves only at the writer's control points (OCCT checks 23), and exports often understate it.
+// RunMat's curve, surface and validation stages rely on the edge tolerance continuously, so each
+// understated tolerance is raised to the gap measured at dense control points plus a 5% margin,
+// as OCCT's own shape healing does. Gaps above ten times the written tolerance are real defects
+// and are left for validation to report.
+static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const OcctImportOptions& options) {
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  ShapeAnalysis_Edge analysis;
+  BRep_Builder builder;
+  for (Standard_Integer index = 1; index <= edges.Extent(); ++index) {
+    if ((index & 63) == 0) {
+      check_cancelled(options);
+    }
+    const TopoDS_Edge& edge = TopoDS::Edge(edges(index));
+    if (BRep_Tool::Degenerated(edge)) {
+      continue;
+    }
+    Standard_Real deviation = 0.0;
+    analysis.CheckSameParameter(edge, deviation, 101);
+    const double written = BRep_Tool::Tolerance(edge);
+    const double required = deviation * 1.05;
+    if (!std::isfinite(required) || required <= written || deviation > 10.0 * written) {
+      continue;
+    }
+    builder.UpdateEdge(edge, required);
+    for (TopoDS_Iterator vertices(edge, Standard_False, Standard_False); vertices.More();
+         vertices.Next()) {
+      if (vertices.Value().ShapeType() == TopAbs_VERTEX &&
+          BRep_Tool::Tolerance(TopoDS::Vertex(vertices.Value())) < required) {
+        builder.UpdateVertex(TopoDS::Vertex(vertices.Value()), required);
+      }
+    }
+  }
+}
+
 OcctExactShapePayload import_exact_cad_bytes(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
@@ -1095,6 +1313,9 @@ OcctExactShapePayload import_exact_cad_bytes(
   // Polygonal data is a derived display cache. Removing it before serialization ensures the
   // representation consumed by exact evaluators cannot accidentally carry tessellation authority.
   BRepTools::Clean(document.shape);
+  check_cancelled(options);
+  strip_free_wireframe(document);
+  admit_measured_edge_tolerances(document.shape, options);
   check_cancelled(options);
 
   std::array<std::uint8_t, 32> original_geometry_digest{};
@@ -1229,6 +1450,18 @@ OcctExactShapePayload import_exact_cad_bytes(
     check_cancelled(options);
   }
 
+  // Shared interfaces replace the part structure with one compound of placed solids whose
+  // coincident faces are shared; names travel with the kernel shapes instead of XCAF labels.
+  std::optional<ExactNameTable> shared_names;
+  if (options.share_interfaces) {
+    ExactSharedInterfaces shared = share_exact_interfaces(
+        document.shape, document.shape_tool, document.has_xcaf, options);
+    document.shape = shared.shape;
+    shared_names.emplace(std::move(shared.names));
+    BRepTools::Clean(document.shape);
+    check_cancelled(options);
+  }
+
   const std::string representation = serialize_exact_shape(document.shape, options);
   if (static_cast<std::uint64_t>(representation.size()) >
       options.max_exact_representation_bytes) {
@@ -1323,8 +1556,9 @@ OcctExactShapePayload import_exact_cad_bytes(
   append_exact_occurrences(result,
                            document.shape,
                            document.shape_tool,
-                           document.has_xcaf,
+                           document.has_xcaf && !shared_names.has_value(),
                            representation,
+                           shared_names.has_value() ? &*shared_names : nullptr,
                            options);
   const std::uint64_t projected_entity_count =
       static_cast<std::uint64_t>(result.occurrences.size()) +

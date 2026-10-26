@@ -18,6 +18,7 @@ sysinfo = { version = "0.30", default-features = false }
 runmat-cpu-execution = { workspace = true }
 runmat-analysis-core = { workspace = true }
 runmat-analysis-execution = { workspace = true }
+runmat-analysis-distributed = { workspace = true }
 runmat-analysis-fea = { workspace = true }
 runmat-analysis-language = { workspace = true }
 runmat-accelerate-api = { workspace = true }

@@ -82,7 +82,8 @@ fn prepared_commit_rederives_phase_budget_before_any_backend_visibility() {
                 &prepared.observations,
                 prepared.maximum_bytes,
             )
-            .unwrap();
+            .unwrap()
+            .total;
         prepared.maximum_bytes = required - 1;
         assert!(matches!(
             store.commit_publication(prepared).unwrap_err(),
@@ -110,14 +111,19 @@ fn manifest_preparation_freezes_original_inventory_before_projecting_copies() {
         .unwrap_err()
         .to_string()
         .contains("inventory is frozen"));
-    assert_eq!(builder.store.list_runs().unwrap().len(), 1);
-    assert!(builder.store.load_run(&late.run_id).unwrap().is_none());
+    assert_eq!(builder.store.runs.read().unwrap().len(), 1);
+    assert!(!builder.store.runs.read().unwrap().contains_key(&late.run_id));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A 4096-byte preparation fixture accumulates two reservations and rejects a third
+//   without changing the retained allowance or staging a run. It does not establish typed-input
+//   accounting correctness, measured phase peak, scalable growth or complete-study admission.
 #[test]
 fn preparation_reservations_accumulate_and_failed_growth_preserves_the_allowance() {
     let input = vec![17u8; 4096];
-    let one = super::super::resident(&input, 128 << 20).unwrap() * 2;
+    let one = super::super::typed_resident(&input, 128 << 20).unwrap() * 2;
     let mut builder =
         AnalysisPublicationBuilder::new(Digest::sha256(b"preparation-growth"), one * 2).unwrap();
     builder.admit_preparation(&input).unwrap();
@@ -264,16 +270,8 @@ fn cached_assessment_metadata_cannot_reuse_the_staged_inventory_allowance() {
         .unwrap()
         .unwrap();
     assert_eq!(retry.observation_scalars, first.observation_scalars);
-    assert_eq!(
-        builder
-            .store
-            .load_run(&original.run_id)
-            .unwrap()
-            .unwrap()
-            .run
-            .fields,
-        original.run.fields
-    );
+    // Staging retains the record; its field chunks were streamed to the spill area.
+    assert!(builder.store.runs.read().unwrap().contains_key(&original.run_id));
 }
 
 #[test]
@@ -304,5 +302,5 @@ fn assessment_phase_requires_frozen_inventory_and_subtracts_original_retention()
     foreign.run_id = "late-assessment-child".into();
     assert!(builder.stage_run(&foreign).is_err());
     assert_eq!(builder.assessment_workspace_limit().unwrap(), available);
-    assert_eq!(builder.store.list_runs().unwrap().len(), 1);
+    assert_eq!(builder.store.runs.read().unwrap().len(), 1);
 }

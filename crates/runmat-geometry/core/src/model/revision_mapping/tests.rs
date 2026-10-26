@@ -2,11 +2,7 @@ use super::*;
 use crate::{GeometryDigest, PersistentEntityKind};
 
 fn entity(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 fn map() -> GeometryRevisionMap {
@@ -191,7 +187,7 @@ fn region_remapping_is_atomic_and_rejects_deleted_or_unmapped_selections() {
     use crate::{GeometryRegionRole, ResolvedGeometryRegion, ResolvedGeometryRegions};
     let mut topology = crate::model::exact_topology_tests::topology();
     let source = topology.faces[0].id.clone();
-    let target = PersistentEntityId { source_topology_id: "reexported-face".into(), ..source.clone() };
+    let target = PersistentEntityId::new(source.kind, "reexported-face".into(), source.assembly_path.clone());
     topology.faces[0].id = target.clone();
     let regions = ResolvedGeometryRegions::from([("support".into(), ResolvedGeometryRegion {
         role: GeometryRegionRole::Face, entity_ids: vec![source.clone()],
@@ -217,7 +213,7 @@ fn region_remapping_never_picks_one_split_target_or_accepts_absent_targets() {
     use crate::{GeometryRegionRole, ResolvedGeometryRegion, ResolvedGeometryRegions};
     let topology = crate::model::exact_topology_tests::topology();
     let source = topology.faces[0].id.clone();
-    let other = PersistentEntityId { source_topology_id: "new-face".into(), ..source.clone() };
+    let other = PersistentEntityId::new(source.kind, "new-face".into(), source.assembly_path.clone());
     let regions = ResolvedGeometryRegions::from([("load".into(), ResolvedGeometryRegion {
         role: GeometryRegionRole::Face, entity_ids: vec![source.clone()],
     })]);
@@ -236,27 +232,11 @@ fn authored_canonical_selector_rebinds_through_the_same_revision_map() {
     use crate::GeometryRegionRole;
     let mut topology = crate::model::exact_topology_tests::topology();
     let source = topology.faces[0].id.clone();
-    let target = PersistentEntityId { source_topology_id: "reexported-face".into(), ..source.clone() };
+    let target = PersistentEntityId::new(source.kind, "reexported-face".into(), source.assembly_path.clone());
     topology.faces[0].id = target.clone();
     let mut transition = map();
     transition.operations = vec![GeometryRevisionOperation::Replace { source: source.clone(), target: target.clone() }];
     assert_eq!(transition.remap_selection_id(&source.analysis_selection_id().unwrap(), GeometryRegionRole::Face, &topology).unwrap(), target.analysis_selection_id().unwrap());
     assert!(transition.remap_selection_id(&source.source_topology_id, GeometryRegionRole::Face, &topology).is_err());
     assert!(transition.remap_selection_id(&source.analysis_selection_id().unwrap(), GeometryRegionRole::Solid, &topology).is_err());
-}
-
-#[test]
-fn named_selection_metadata_reattaches_atomically_with_existing_revision_evidence() {
-    use crate::{GeometryNamedSelections,GeometryRegionDefinition,GeometryRegionRole,GeometryRegionSelector,GeometryRegionCardinality};
-    let mut topology=crate::model::exact_topology_tests::topology();
-    let source=topology.faces[0].id.clone();
-    let target=PersistentEntityId {source_topology_id:"reexported-face".into(),..source.clone()};
-    topology.faces[0].id=target.clone();
-    let data=GeometryNamedSelections {schema_version:1,source_digest:GeometryDigest::from_bytes([1;32]),regions:vec![GeometryRegionDefinition {region_id:"mount".into(),role:GeometryRegionRole::Face,selector:GeometryRegionSelector::PersistentId(source.analysis_selection_id().unwrap()),cardinality:GeometryRegionCardinality::ExactlyOne}]};
-    let before=data.clone();let mut transition=map();
-    transition.operations=vec![GeometryRevisionOperation::Replace{source:source.clone(),target:target.clone()}];
-    let rebound=data.reattach(&transition,&topology,GeometryDigest::from_bytes([2;32])).unwrap();
-    assert_eq!(data,before);assert_eq!(rebound.selection("mount",GeometryRegionRole::Face).unwrap(),target.analysis_selection_id().unwrap());
-    transition.operations=vec![GeometryRevisionOperation::Delete{source}];
-    assert!(data.reattach(&transition,&topology,GeometryDigest::from_bytes([2;32])).is_err());assert_eq!(data,before);
 }

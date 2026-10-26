@@ -7,7 +7,8 @@ use crate::class_registry::declaration::{
 };
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
-const DIRECTION_CLASS: &str = "fea.Direction";
+const DIRECTION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_DIRECTION_CLASS.display_name();
 const DIRECTION_FIELDS: &[&str] = &["components"];
 #[runtime_builtin(
     name = "fea.Direction.vector",
@@ -19,6 +20,10 @@ pub async fn direction_vector_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     components: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_DIRECTION_VECTOR_DESCRIPTOR,
+        "fea.Direction.vector",
+    )?;
     let components = finite_numeric_vector3("fea.Direction.vector", &components, "components")?;
     let norm = components
         .iter()
@@ -46,7 +51,10 @@ pub(crate) fn direction_from_value(
             format!("expected {DIRECTION_CLASS}"),
         ));
     };
-    if object.class_name().display_name() != DIRECTION_CLASS {
+    if !object
+        .class_name()
+        .is(runmat_builtins::fea_contract::model_types::classes::FEA_DIRECTION_CLASS)
+    {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

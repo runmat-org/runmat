@@ -70,8 +70,7 @@ Issue codes describe authoring problems found during validation. Operation error
 
 Every successful run stores an `AnalysisRunResult`. A successful operation can still produce a degraded or rejected result. The result carries:
 
-- canonical physics-family, procedure, solution-space, formulation, maturity, and fallback-policy
-  identity,
+- canonical physics-family, procedure, solution-space, and exact formulation-realization identity,
 - `model_validity`,
 - `solver_convergence`,
 - `result_quality`,
@@ -83,7 +82,7 @@ Every successful run stores an `AnalysisRunResult`. A successful operation can s
   method, preconditioner, and typed fallback events,
 - domain payloads where applicable.
 
-Those fields explain what happened in the run. They do not, by themselves, prove that a physics family is validated for production use.
+Those fields explain what happened in the run. They do not, by themselves, prove that a physics family is validated for a given use.
 
 ## Artifact Roots
 
@@ -116,7 +115,7 @@ results = fea.results(stepRun.run_id);
 stress = fea.field(results, fea.StructuralField.vonMises());
 ```
 
-`fea.results(...)` can include or omit fields, diagnostics, modal results, transient snapshots, nonlinear results, and electromagnetic payloads through Name/Value options. `fea.compare(baselineRunId, candidateRunId)` compares two persisted runs. `fea.trends("WindowSize", 16)` summarizes recent persisted runs from the artifact store.
+`fea.results(...)` can include or omit fields, field values, diagnostics, modal results, transient snapshots, and nonlinear results through Name/Value options (`IncludeFields`, `IncludeFieldValues`, `IncludeDiagnostics`, `DiagnosticCodes`, `IncludeModalResults`, `ModeIndices`, `IncludeTransientResults`, `TransientSnapshotIndices`, and `IncludeNonlinearResults`). `fea.compare(baselineRunId, candidateRunId)` compares two persisted runs. `fea.trends("WindowSize", 16)` summarizes recent persisted runs from the artifact store.
 
 ## Governance Inputs
 

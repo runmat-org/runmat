@@ -174,7 +174,7 @@ fn complete_summaries_match_for_affine_constraints() {
             y_axis: [-c, c, 0.0],
         }),
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("free_vertex_y_support"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("free_vertex_y_support")),
             translations: vec![TranslationDofValue {
                 dof: StructuralTranslationDof::Ux,
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -212,7 +212,7 @@ fn complete_summaries_match_for_prescribed_motion_constraint_channel() {
         constraint_id: "moving-root-x".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
-            target: RegionTarget::boundary("root"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
             translations: vec![TranslationDofMotion {
                 dof: StructuralTranslationDof::Ux,
                 history: StructuralKinematicHistory::AccelerationDriven {
@@ -230,7 +230,7 @@ fn complete_summaries_match_for_prescribed_motion_constraint_channel() {
     };
     root.constraint_id = "fixed-root-yz".into();
     root.kind = StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-        target: RegionTarget::boundary("root"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
         translations: [StructuralTranslationDof::Uy, StructuralTranslationDof::Uz]
             .into_iter()
             .map(|dof| TranslationDofValue {

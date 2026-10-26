@@ -8,7 +8,10 @@ use crate::{
         ThermalEnergyBalance, ThermalProcedureControl, ThermalSolveOptions,
     },
     excitation::{realize_step_excitations, ExcitationSamplePoint},
-    physics::thermal::{assembly::assemble as assemble_thermal_operator, initial_state},
+    physics::{
+        scalar_constraints::ScalarNodeRelation,
+        thermal::{assembly::assemble as assemble_thermal_operator, initial_state},
+    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{
         backend::{
@@ -22,6 +25,8 @@ use crate::{
 type ThermalDeparture =
     runmat_types::physical::Quantity<runmat_types::physical::kind::TemperatureDifference, Vec<f64>>;
 type ThermalSolveResult = LinearSolveResult<ThermalDeparture>;
+type ThermalSystem =
+    crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>;
 mod backend_evidence;
 mod residual;
 use residual::linear_residual;
@@ -29,6 +34,10 @@ mod diagnostics;
 mod nonlinear;
 mod snapshots;
 mod transient;
+#[cfg(test)]
+mod relation_tests;
+#[cfg(test)]
+mod interface_tests;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
 use snapshots::{scalar_snapshots, vector_snapshots};
 use transient::{solve_transient, TransientSolveInput};
@@ -46,7 +55,6 @@ pub(super) fn run(
         model,
         &thermal_step.step_id,
         backend,
-        options.formulation_requirement,
         options.procedure,
         options.residual_target,
         &options.initial_fields,
@@ -180,10 +188,30 @@ pub(super) fn run(
         outcome.device_apply_count as f64 / outcome.device_apply_attempt_count as f64
     };
     let time_points_s = outcome.time_points_s;
-    let temperature_snapshots = scalar_snapshots(
-        outcome.recovered.temperatures,
-        fea_thermal_temperature_field_id,
+    // Projection nodes are the mesh nodes, then the second-side nodes of conductance interfaces.
+    let dofs = &initial_assembly.dofs;
+    let mut interface_temperatures = Vec::new();
+    let mut nodal_temperatures = Vec::with_capacity(outcome.recovered.temperatures.len());
+    for values in outcome.recovered.temperatures {
+        let (nodal, second) = dofs
+            .split(&values)
+            .map_err(|error| FeaRunError::Solve(error))?;
+        nodal_temperatures.push(nodal);
+        if !dofs.is_nodal() {
+            interface_temperatures.push(second.into_iter().map(|(_, value)| value).collect());
+        }
+    }
+    let temperature_snapshots =
+        scalar_snapshots(nodal_temperatures, fea_thermal_temperature_field_id);
+    let interface_temperature_snapshots = scalar_snapshots(
+        interface_temperatures,
+        crate::contracts::fea_thermal_interface_temperature_field_id,
     );
+    let interface_node_ids = dofs
+        .second()
+        .iter()
+        .map(|&(node, _)| initial_assembly.projection.nodes[node].node_id)
+        .collect();
     let temperature_gradient_snapshots = vector_snapshots(
         outcome.recovered.gradients,
         fea_thermal_temperature_gradient_field_id,
@@ -242,6 +270,8 @@ pub(super) fn run(
             .collect(),
         time_points_s,
         temperature_snapshots,
+        interface_node_ids,
+        interface_temperature_snapshots,
         temperature_gradient_snapshots,
         heat_flux_snapshots,
         energy_storage_rate_snapshots,
@@ -328,7 +358,11 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             .map(|(value, reference)| value - reference)
             .collect::<Vec<_>>()
     });
-    let solve = solve_checked(
+    let relations = crate::physics::scalar_constraints::about_reference(
+        &assembly.relations,
+        &reference_temperature_k,
+    );
+    let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
         algebra,
@@ -337,26 +371,69 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             .map(runmat_types::physical::Quantity::new),
         &facts.operators,
         residual_target,
+        None,
+        &relations,
     )?;
-    // Numerical preparation is complete. Release the guess, constraint mask and
-    // zero damping carrier before allocating the complete recovered fields.
     drop(initial_increment);
-    drop(operator);
-    let mut solve = solve.try_map_solution(|departure| {
-        let mut values = departure.into_canonical_values();
-        for ((temperature, prescribed), reference) in values
-            .iter_mut()
+    // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
+    // round trip when their magnitude differs greatly from the reference.
+    let absolute = |increment: &[f64]| {
+        increment
+            .iter()
             .zip(assembly.prescribed_temperature_k.canonical_values())
             .zip(&reference_temperature_k)
-        {
-            *temperature = prescribed.unwrap_or(*temperature + reference);
-        }
+            .map(|((value, prescribed), reference)| prescribed.unwrap_or(value + reference))
+            .collect::<Vec<_>>()
+    };
+    let recover_balance = |temperature: &[f64]| {
+        assembly
+            .energy_balance(model, sample, temperature, temperature, 1.0, 0.0)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))
+    };
+    let mut temperature = absolute(solve.solution.canonical_values());
+    let mut energy_balance = recover_balance(&temperature)?;
+    let mut accelerator_evidence = Vec::new();
+    if energy_balance.relative_residual > residual_target {
+        // The same single bounded refinement as each transient step: the linear stopping
+        // criterion alone does not bound the global signed power residual.
+        let target =
+            energy_refinement_target(&operator, algebra, &solve, &energy_balance, residual_target);
+        let mut refined = solve_refinement(
+            &operator,
+            requested_solver_backend,
+            algebra,
+            &solve.solution,
+            &facts.operators,
+            target,
+            None,
+            &relations,
+        )?;
+        backend_evidence::retain(
+            &mut accelerator_evidence,
+            &mut solve.accelerator_evidence,
+            &facts.metadata.backend_evidence,
+        )?;
+        refined.host_sync_count = refined.host_sync_count.saturating_add(solve.host_sync_count);
+        refined.device_apply_k_count = refined
+            .device_apply_k_count
+            .saturating_add(solve.device_apply_k_count);
+        refined.device_apply_k_attempt_count = refined
+            .device_apply_k_attempt_count
+            .saturating_add(solve.device_apply_k_attempt_count);
+        temperature = absolute(refined.solution.canonical_values());
+        energy_balance = recover_balance(&temperature)?;
+        solve = refined;
+    }
+    // Numerical preparation is complete. Release the constraint mask and zero damping
+    // carrier before allocating the complete recovered fields.
+    drop(operator);
+    drop(reference_temperature_k);
+    let mut solve = solve.try_map_solution(|_departure| {
         runmat_types::physical::Quantity::<runmat_types::physical::kind::Temperature, _>::try_new(
-            values,
+            temperature,
         )
         .map_err(|error| FeaRunError::Solve(error.to_string()))
     })?;
-    drop(reference_temperature_k);
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(
         assembly,
@@ -366,17 +443,6 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         0.0,
         &mut recovered,
     )?;
-    let energy_balance = assembly
-        .energy_balance(
-            model,
-            sample,
-            solve.solution.canonical_values(),
-            solve.solution.canonical_values(),
-            1.0,
-            0.0,
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let mut accelerator_evidence = Vec::new();
     backend_evidence::retain(
         &mut accelerator_evidence,
         &mut solve.accelerator_evidence,
@@ -397,10 +463,75 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     })
 }
 
-fn solve_checked(
-    operator: &crate::algebra::PhysicalScalarSystem<
-        runmat_types::physical::kind::TemperatureDifference,
-    >,
+/// Solver tolerance for one bounded refinement after the recovered global balance missed the
+/// retained target. |sum r_i| <= sqrt(N) ||r||_2, so the measured physical power scale is
+/// translated to the shared solver's RHS-relative criterion, reserving half the power budget for
+/// assembly/recovery roundoff. Shared preparation owns prescribed-temperature lifting; this
+/// matches PCG's normalization (initial residual when the lifted RHS is exactly zero). Retained
+/// physical acceptance stays authoritative and is never rewritten.
+fn energy_refinement_target(
+    operator: &ThermalSystem,
+    algebra: &dyn LinearAlgebraBackend,
+    solve: &ThermalSolveResult,
+    balance: &ThermalEnergyBalance,
+    residual_target: f64,
+) -> f64 {
+    let lifted_rhs = operator.linear_rhs();
+    let lifted_norm = algebra.dot(&lifted_rhs, &lifted_rhs).sqrt();
+    drop(lifted_rhs);
+    let reference_norm = if lifted_norm > 0.0 {
+        lifted_norm
+    } else {
+        solve.residual_norm
+    };
+    (0.5 * residual_target * balance.scale.maximum().canonical_value()
+        / ((operator.dof_count() as f64).sqrt() * reference_norm))
+        .min(residual_target)
+}
+
+/// The bounded energy refinement starting from an accepted solve. Its linear tolerance can lie
+/// below what floating point reaches on an ill-conditioned operator; conjugate gradients only
+/// lower the energy-norm error from the accepted start, so the last iterate is kept and the
+/// recovered energy balance, not the refinement's own stopping test, decides acceptance.
+pub(super) fn solve_refinement(
+    operator: &ThermalSystem,
+    requested_solver_backend: LinearAlgebraBackendKind,
+    algebra: &dyn LinearAlgebraBackend,
+    initial_guess: &ThermalDeparture,
+    facts: &crate::planning::resource::ThermalOperatorResourceFacts,
+    residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+    relations: &[ScalarNodeRelation],
+) -> Result<ThermalSolveResult, FeaRunError> {
+    match solve_unchecked(
+        operator,
+        requested_solver_backend,
+        algebra,
+        Some(runmat_types::physical::Quantity::new(
+            initial_guess.canonical_values().as_slice(),
+        )),
+        facts,
+        residual_target,
+        preparation,
+        relations,
+    )? {
+        solve
+            if solve
+                .solution
+                .canonical_values()
+                .iter()
+                .all(|value| value.is_finite()) =>
+        {
+            Ok(solve)
+        }
+        _ => Err(FeaRunError::Assembly(
+            "thermal energy refinement produced a non-finite temperature".into(),
+        )),
+    }
+}
+
+pub(super) fn solve_checked(
+    operator: &ThermalSystem,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<
@@ -411,6 +542,43 @@ fn solve_checked(
     >,
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+    relations: &[ScalarNodeRelation],
+) -> Result<ThermalSolveResult, FeaRunError> {
+    let solve = solve_unchecked(
+        operator,
+        requested_solver_backend,
+        algebra,
+        initial_guess,
+        facts,
+        residual_target,
+        preparation,
+        relations,
+    )?;
+    if solve.converged {
+        Ok(solve)
+    } else {
+        Err(FeaRunError::Assembly(format!(
+            "physical thermal solve did not converge: residual_norm={}",
+            solve.residual_norm
+        )))
+    }
+}
+
+fn solve_unchecked(
+    operator: &ThermalSystem,
+    requested_solver_backend: LinearAlgebraBackendKind,
+    algebra: &dyn LinearAlgebraBackend,
+    initial_guess: Option<
+        runmat_types::physical::Quantity<
+            runmat_types::physical::kind::TemperatureDifference,
+            &[f64],
+        >,
+    >,
+    facts: &crate::planning::resource::ThermalOperatorResourceFacts,
+    residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+    relations: &[ScalarNodeRelation],
 ) -> Result<ThermalSolveResult, FeaRunError> {
     for matrix in [
         operator.operators().stiffness(),
@@ -437,11 +605,22 @@ fn solve_checked(
         Some(facts.solver_admission()),
     );
     settings.relative_tolerance = settings.relative_tolerance.min(residual_target);
+    if !relations.is_empty() {
+        let related = operator.with_canonical_system(|numerical| {
+            solve_related(numerical, settings.relative_tolerance, relations)
+        })?;
+        return operator
+            .admit_solution(related)
+            .map_err(|error| FeaRunError::Solve(error.into()));
+    }
+    // Reused preparation keeps the proving Cholesky factor across solves with an unchanged
+    // operator (fixed-step transients, refinement re-solves).
+    settings.preparation = preparation;
     let solve = operator
         .with_canonical_system(|numerical| {
             solve_operator_system_scoped(
                 numerical,
-                SpdPreconditionerKind::Jacobi,
+                SpdPreconditionerKind::Auto,
                 requested_solver_backend,
                 algebra,
                 initial_guess.map(|quantity| quantity.canonical_value()),
@@ -449,16 +628,50 @@ fn solve_checked(
             )
         })
         .map_err(|error| FeaRunError::Solve(error.to_string()))?;
-    if solve.converged {
-        operator
+    operator
             .admit_solution(solve)
             .map_err(|error| FeaRunError::Solve(error.into()))
-    } else {
-        Err(FeaRunError::Assembly(format!(
-            "physical thermal solve did not converge: residual_norm={}",
-            solve.residual_norm
-        )))
-    }
+}
+
+/// Tie, periodic and jump relations eliminate secondary nodes (Galerkin reduction) and solve
+/// the reduced system with the shared sparse direct solver.
+fn solve_related(
+    operator: &crate::algebra::AssembledRealSystem,
+    relative_tolerance: f64,
+    relations: &[ScalarNodeRelation],
+) -> Result<LinearSolveResult, FeaRunError> {
+    let load = operator.load();
+    let known = operator
+        .constrained_dofs()
+        .iter()
+        .zip(load)
+        .map(|(&constrained, &value)| constrained.then_some(value))
+        .collect::<Vec<_>>();
+    let reduced = crate::physics::scalar_constraints::solve(
+        operator.operators().stiffness(),
+        load,
+        &known,
+        relations,
+        relative_tolerance,
+        crate::solve::preconditioner::SpdPreconditionerKind::Auto,
+    )
+    .map_err(FeaRunError::Solve)?;
+    Ok(LinearSolveResult {
+        spectral_estimate: None,
+        iterations: reduced.iterations,
+        residual_norm: reduced.relative_residual * rhs_norm(load),
+        relative_residual: Some(reduced.relative_residual),
+        converged: true,
+        host_sync_count: 0,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: reduced.solution,
+        solver_method: reduced.method,
+        preconditioner: reduced.preconditioner,
+        diagnostics: Vec::new(),
+    })
 }
 
 fn rhs_norm(rhs: &[f64]) -> f64 {

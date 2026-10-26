@@ -118,9 +118,15 @@ fn session_surface_bounds_preserve_trim_admission_and_original_geometry() {
             );
             // Independent inverse projection uses the bounded face adaptor.
             let projected =
-                ExactSurfaceEvaluator::closest_point(&cold, id, expected.point_m, 1e-8, &Unlimited)
+                ExactSurfaceEvaluator::closest_point(
+                    &cold,
+                    id,
+                    expected.point_m,
+                    runmat_types::physical::Length::new(1e-8),
+                    &Unlimited,
+                )
                     .unwrap();
-            assert!(projected.distance_m < 1e-8, "{name}");
+            assert!(projected.distance_m.canonical_value() < 1e-8, "{name}");
             for axis in 0..2 {
                 let mut outside = uv;
                 if let Some(period) = periods[axis] {
@@ -128,8 +134,9 @@ fn session_surface_bounds_preserve_trim_admission_and_original_geometry() {
                     let wrapped =
                         ExactSurfaceEvaluator::point(&cold, id, outside, &Unlimited).unwrap();
                     assert!(wrapped
+                        .canonical_value()
                         .into_iter()
-                        .zip(expected.point_m)
+                        .zip(expected.point_m.canonical_value())
                         .all(|(a, b)| (a - b).abs() < 1e-8));
                 } else {
                     outside[axis] =

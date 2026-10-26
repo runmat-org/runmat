@@ -18,20 +18,20 @@ pub(super) async fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
     mut observations: Vec<runmat_meshing_core::MeshingStageEvidence>,
     started: Instant,
 ) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
-    let volume = execute(
-        executor,
-        &planner.tetrahedralization(surface_root.clone())?,
-        run,
-        &mut observations,
-    )
-    .await?;
-    let projection = execute(
-        executor,
-        &planner.solver_projection(surface_root, volume.root)?,
-        run,
-        &mut observations,
-    )
-    .await?;
+    let projection_stage = if run.request.dimension.is_solid() {
+        let volume = execute(
+            executor,
+            &planner.tetrahedralization(surface_root.clone())?,
+            run,
+            &mut observations,
+        )
+        .await?;
+        planner.solver_projection(surface_root, volume.root)?
+    } else {
+        // Shell and beam meshes stop at the exact surface; no volume is generated.
+        planner.surface_solver_projection(surface_root)?
+    };
+    let projection = execute(executor, &projection_stage, run, &mut observations).await?;
     let projection_root = projection.root;
     let validation = execute(
         executor,
@@ -55,9 +55,21 @@ pub(super) async fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
         observations,
         MeshingEvidenceContext {
             platform: run.evidence.platform.clone(),
-            sizing: run.evidence.sizing.clone(),
+            sizing: {
+                let (_, applied) = run
+                    .request
+                    .resolve_size_controls(
+                        &run.named_regions,
+                        &run.geometry.geometry_objects().topology,
+                    )
+                    .map_err(|error| ExactMeshingDagRunError::Invalid(error.to_string()))?;
+                let mut sizing = run.evidence.sizing.clone();
+                sizing.extend(runmat_meshing_core::size_control_evidence(&artifact, &applied));
+                sizing
+            },
             cache_admission: run.evidence.cache_admission,
             wall_time_ms,
+            ceilings: run.ceilings,
         },
     )?;
     let evidence_input = prepare_evidence_input(

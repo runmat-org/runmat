@@ -131,6 +131,10 @@ pub async fn contact_interface_frictionless_builtin(
     primary: Value,
     secondary: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_CONTACT_INTERFACE_FRICTIONLESS_DESCRIPTOR,
+        "fea.ContactInterface.frictionless",
+    )?;
     bound_interface(
         "fea.ContactInterface.frictionless",
         FEA_CONTACT_INTERFACE_CLASS,
@@ -154,6 +158,10 @@ pub async fn contact_interface_coulomb_builtin(
     secondary: Value,
     friction: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_CONTACT_INTERFACE_COULOMB_DESCRIPTOR,
+        "fea.ContactInterface.coulomb",
+    )?;
     let friction = FrictionCoefficient::new(positive_quantity_scalar(
         "fea.ContactInterface.coulomb",
         &friction,
@@ -184,6 +192,10 @@ pub async fn fluid_structure_interface_builtin(
     fluid_region: Value,
     structure_region: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_FLUID_STRUCTURE_INTERFACE_NO_SLIP_DESCRIPTOR,
+        "fea.FluidStructureInterface.noSlip",
+    )?;
     bound_interface(
         "fea.FluidStructureInterface.noSlip",
         FEA_FLUID_STRUCTURE_INTERFACE_CLASS,
@@ -206,6 +218,10 @@ pub async fn conjugate_heat_transfer_interface_perfect_builtin(
     fluid_region: Value,
     solid_region: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_PERFECT_DESCRIPTOR,
+        "fea.ConjugateHeatTransferInterface.perfect",
+    )?;
     bound_interface(
         "fea.ConjugateHeatTransferInterface.perfect",
         FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS,
@@ -229,6 +245,10 @@ pub async fn conjugate_heat_transfer_interface_conductance_builtin(
     solid_region: Value,
     conductance: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CONDUCTANCE_DESCRIPTOR,
+        "fea.ConjugateHeatTransferInterface.conductance",
+    )?;
     let conductance = HeatTransferCoefficient::new(positive_quantity_scalar(
         "fea.ConjugateHeatTransferInterface.conductance",
         &conductance,
@@ -258,6 +278,10 @@ pub async fn conjugate_heat_transfer_interface_resistance_builtin(
     solid_region: Value,
     resistance: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_RESISTANCE_DESCRIPTOR,
+        "fea.ConjugateHeatTransferInterface.resistance",
+    )?;
     let resistance = ThermalContactResistance::new(positive_quantity_scalar(
         "fea.ConjugateHeatTransferInterface.resistance",
         &resistance,

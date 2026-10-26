@@ -63,7 +63,15 @@ impl RandomResponsePlan {
 
         let mut captured_mass = vec![0.0; directions.len()];
         let mut participation_by_mode_channel = Vec::new();
+        // Truncation never splits a repeated-frequency cluster: any orthonormal basis of a
+        // degenerate eigenspace must give the same response.
+        let mut closing_cluster: Option<f64> = None;
         for mode in basis.modes() {
+            if let Some(frequency) = closing_cluster {
+                if (mode.frequency_hz() - frequency).abs() > 1.0e-8 * frequency {
+                    break;
+                }
+            }
             if !mode.frequency_hz().is_finite() || mode.frequency_hz() <= 0.0 {
                 return Err(FeaRunError::Solve(
                     "random response requires strictly positive selected modal frequencies".into(),
@@ -90,7 +98,7 @@ impl RandomResponsePlan {
                     captured / total + 64.0 * f64::EPSILON >= policy.minimum_cumulative_mass_ratio
                 })
             {
-                break;
+                closing_cluster.get_or_insert(mode.frequency_hz());
             }
         }
         if participation_by_mode_channel.is_empty() {

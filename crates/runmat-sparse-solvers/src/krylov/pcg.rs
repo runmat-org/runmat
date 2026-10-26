@@ -40,6 +40,26 @@ pub struct PcgWork<'a, T> {
     pub direction: &'a mut [T],
     pub intermediate: Option<&'a mut [T]>,
     pub residual_norms: &'a mut [f64],
+    /// Receives the CG coefficients of the final Lanczos segment when present.
+    pub coefficients: Option<&'a mut PcgCoefficients>,
+}
+
+/// The CG coefficients of the current Lanczos segment, from the start or the last reliable
+/// residual restart: `α_j = ρ_j / ⟨p_j, A p_j⟩` and `β_j = ρ_{j+1} / ρ_j`. They define the
+/// Lanczos tridiagonal of the preconditioned operator `M⁻¹A` (see [`super::lanczos`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PcgCoefficients {
+    pub alpha: Vec<f64>,
+    pub beta: Vec<f64>,
+    /// Flexible mode: β is Polak–Ribière, so the tridiagonal is only approximately Lanczos.
+    pub flexible: bool,
+}
+
+impl PcgCoefficients {
+    fn restart(&mut self) {
+        self.alpha.clear();
+        self.beta.clear();
+    }
 }
 #[derive(Clone, Copy)]
 pub struct PcgParameters {
@@ -77,6 +97,43 @@ pub trait PcgOperations<T>: Control {
         input: &[T],
         output: &mut [T],
     ) -> impl std::future::Future<Output = Result<ApplyStatus, Self::Error>>;
+
+    // Optional native vector kernels (see `gmres::GmresOperations`): `None`/`false` (the
+    // default) selects the portable kernels; native answers are identical on every rank.
+
+    /// `(Re Σ conj(l)r, Im Σ conj(l)r, Σ |conj(l)r|)`; `None` also when a native sum is not
+    /// finite and safely above underflow.
+    fn native_dot(&mut self, _left: &[T], _right: &[T]) -> Option<(f64, f64, f64)> {
+        None
+    }
+    /// `x += α p; r −= α q`, returning whether any entry of `x` changed.
+    fn native_step(
+        &mut self,
+        _x: &mut [T],
+        _residual: &mut [T],
+        _direction: &[T],
+        _product: &[T],
+        _alpha: f64,
+    ) -> Option<bool> {
+        None
+    }
+    /// `p = s + β p`; `false` leaves `p` untouched.
+    fn native_direction(&mut self, _direction: &mut [T], _source: &[T], _beta: f64) -> bool {
+        false
+    }
+    /// `residual = rhs − product`; `false` selects the portable loop.
+    fn native_residual(&mut self, _rhs: &[T], _product: &[T], _residual: &mut [T]) -> bool {
+        false
+    }
+}
+
+/// Iteration variant of the one PCG recurrence.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PcgMode {
+    /// Flexible CG (Polak–Ribière β, FCG(1)): valid when the preconditioner varies between
+    /// applications (an inner iterative solve or a reduced-precision cycle). Needs one extra
+    /// vector (`flexible_previous`) holding the previous residual.
+    pub flexible: bool,
 }
 
 /// The state is consumed on error. Each emitted A/M1/M2 request is applied
@@ -89,6 +146,35 @@ pub async fn solve<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T
     operation_scratch: &mut [T],
     operations: &mut O,
 ) -> Result<PcgOutcome, KrylovFailure<O::Error>> {
+    solve_with::<T, A, O>(
+        rhs,
+        initial,
+        parameters,
+        PcgMode::default(),
+        work,
+        &mut [],
+        operation_scratch,
+        operations,
+    )
+    .await
+}
+
+/// PCG in the selected [`PcgMode`]; `flexible_previous` has `rhs.len()` entries when flexible
+/// and may be empty otherwise.
+#[allow(clippy::too_many_arguments)]
+pub async fn solve_with<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T>>(
+    rhs: &'a [T],
+    initial: Option<&[T]>,
+    parameters: PcgParameters,
+    mode: PcgMode,
+    work: PcgWork<'a, T>,
+    flexible_previous: &'a mut [T],
+    operation_scratch: &mut [T],
+    operations: &mut O,
+) -> Result<PcgOutcome, KrylovFailure<O::Error>> {
+    if mode.flexible && flexible_previous.len() != rhs.len() {
+        return Err(KrylovFailure::Invalid("flexible PCG previous-residual extent differs from b"));
+    }
     PcgGeometry::checked(
         rhs.len(),
         parameters.maximum_iterations,
@@ -112,6 +198,7 @@ pub async fn solve<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperations<T
         parameters.maximum_iterations,
         work,
         parameters.preconditioners,
+        mode.flexible.then_some(flexible_previous),
         operations,
     )
     .await?;

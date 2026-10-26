@@ -16,11 +16,7 @@ fn fixture() -> DelaunayVolumeTopology {
         DelaunayVolumeNode::explicit(StableDigest::from_bytes([(index + 1) as u8; 32]), point)
     })
     .collect();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".into(),
-        assembly_path: vec![],
-    };
+    let region = PersistentEntityId::new(PersistentEntityKind::Region, "solid".into(), vec![]);
     build_delaunay_volume_topology_with_regions(
         nodes,
         vec![([0, 1, 2, 3], Some(region)), ([1, 4, 2, 3], None)],
@@ -44,6 +40,13 @@ fn reference_accepts(topology: &DelaunayVolumeTopology) -> bool {
     .is_ok_and(|rebuilt| rebuilt == *topology)
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Borrowed verification matches independent complete reconstruction on an assigned and
+//   unassigned two-cell mesh. Twenty deliberately corrupted node, cell, orientation, neighbor,
+//   boundary, vertex-star and region-incidence records reject under both validators. Compact face
+//   scratch replaces a second complete mesh. This component family does not establish arbitrary
+//   assembly scaling, native peak memory or complete quality convergence.
 #[test]
 fn borrowed_validation_matches_independent_reconstruction_and_rejects_tampering() {
     let base = fixture();

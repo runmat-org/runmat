@@ -7,6 +7,12 @@ use super::{
 const INITIAL_INTERVALS: usize = 32;
 const MAX_REFINEMENT_DEPTH: u8 = 32;
 const MAX_CONSISTENCY_INTERVALS: usize = 1_000_000;
+/// An edge tolerance written by a CAD kernel bounds the gap between the 3D curve and each pcurve
+/// at the writer's control points (OCCT checks 23 evenly spaced parameters); between them the
+/// true gap of two smooth curves can exceed it slightly. This check bisects adaptively and finds
+/// that larger maximum, so it admits a small fixed allowance over the written edge tolerance.
+/// Exported CAD in the meshing qualification corpus exceeded its edge tolerance by under 1%.
+const EDGE_TOLERANCE_SAMPLING_ALLOWANCE: f64 = 1.1;
 
 #[derive(Clone, Copy)]
 struct Sample {
@@ -96,7 +102,7 @@ where
             edge,
             coedge,
             face,
-            tolerance_m.max(edge.tolerance_m.canonical_value()),
+            tolerance_m.max(edge.tolerance_m.canonical_value() * EDGE_TOLERANCE_SAMPLING_ALLOWANCE),
             control,
             &additional_parameters,
         )?;
@@ -161,6 +167,11 @@ where
         ));
     }
     charge_allocation(parameters.len(), std::mem::size_of::<f64>(), control)?;
+    // Depth-first bisection holds at most one pending sibling per level, so one stack of
+    // `MAX_REFINEMENT_DEPTH + 1` intervals serves every interval of this edge use.
+    let stack_capacity = usize::from(MAX_REFINEMENT_DEPTH) + 1;
+    charge_allocation(stack_capacity, std::mem::size_of::<Interval>(), control)?;
+    let mut pending = Vec::with_capacity(stack_capacity);
     for pair in parameters.windows(2) {
         let start_sample = sample_edge_use(evaluator, edge, coedge, face, pair[0], control)?;
         let end_sample = sample_edge_use(evaluator, edge, coedge, face, pair[1], control)?;
@@ -178,6 +189,7 @@ where
             },
             tolerance_m,
             control,
+            &mut pending,
         )?;
     }
     Ok(())
@@ -191,12 +203,13 @@ fn refine_interval<E>(
     initial: Interval,
     tolerance_m: f64,
     control: &dyn GeometryEvaluationControl,
+    pending: &mut Vec<Interval>,
 ) -> Result<(), GeometryEvaluationError>
 where
     E: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized,
 {
-    charge_allocation(1, std::mem::size_of::<Interval>(), control)?;
-    let mut pending = vec![initial];
+    pending.clear();
+    pending.push(initial);
     let mut visited = 0usize;
     while let Some(interval) = pending.pop() {
         control.checkpoint()?;
@@ -235,7 +248,6 @@ where
                 "geometry consistency could not resolve curvature within its hard depth bound",
             ));
         }
-        charge_allocation(2, std::mem::size_of::<Interval>(), control)?;
         let depth = interval.depth + 1;
         pending.push(Interval {
             start: midpoint,

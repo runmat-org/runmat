@@ -33,6 +33,22 @@ fn realize_thermo_mechanical_context(
     let Some(domain) = model.thermo_mechanical.as_ref() else {
         return Ok(None);
     };
+    // A declared domain alone couples nothing: structural-only studies may share the model.
+    // The prescribed-profile coupling belongs to thermomechanical steps that do not consume a
+    // solved thermal state; solved-state preloads receive their temperatures explicitly.
+    let prescribed_profile_step = model.sequence.steps.iter().any(|step| {
+        step.family
+            == runmat_analysis_core::PhysicsFamily::Coupled(
+                runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+            )
+            && !step
+                .state_inputs
+                .iter()
+                .any(|input| input.required_kind == runmat_analysis_core::StateKind::Thermal)
+    });
+    if !prescribed_profile_step {
+        return Ok(None);
+    }
     let reference_temperature_k = domain.reference_temperature.canonical_value();
     if !reference_temperature_k.is_finite() || reference_temperature_k <= 0.0 {
         return Err("thermo-mechanical reference temperature must be finite and positive".into());
@@ -98,7 +114,10 @@ fn realize_thermo_mechanical_context(
                         "temperature field targets unknown model region {region_id}"
                     ));
                 }
-                if region_deltas.insert(region_id.clone(), delta).is_some() {
+                if region_deltas
+                    .insert(region_id.clone(), (target.clone(), delta))
+                    .is_some()
+                {
                     return Err(format!(
                         "multiple active temperature fields target region {region_id} at one sample"
                     ));
@@ -124,8 +143,8 @@ fn realize_thermo_mechanical_context(
         region_temperature_deltas: region_deltas
             .into_iter()
             .map(
-                |(region_id, temperature_delta_k)| FeaThermoRegionTemperatureDelta {
-                    region_id,
+                |(_, (target, temperature_delta_k))| FeaThermoRegionTemperatureDelta {
+                    target,
                     temperature_delta_k,
                 },
             )

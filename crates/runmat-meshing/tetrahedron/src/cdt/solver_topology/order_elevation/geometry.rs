@@ -91,10 +91,10 @@ pub(super) fn append_midpoint_nodes<'source, 'control>(
         .len()
         .checked_add(edge_inventory.groups.len())
         .ok_or_else(|| resource("Tet10 node inventory overflows the platform index space"))?;
-    if final_node_count as u64 > input.request.resources.maximum_nodes {
+    if final_node_count as u64 > input.request.limits.maximum_nodes {
         return Err(resource(format!(
             "Tet10 elevation requires {final_node_count} nodes but the hard limit is {}",
-            input.request.resources.maximum_nodes
+            input.request.limits.maximum_nodes
         )));
     }
     let storage = super::super::storage::Storage(Some(evaluation.control));

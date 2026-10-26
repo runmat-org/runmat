@@ -236,10 +236,10 @@ pub(super) fn exact_study_fixture_with_wall_time(
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
-        function: request.function,
+        callable: request.callable.clone(),
         requested_outputs: request.requested_outputs,
     })
     .unwrap();
@@ -263,7 +263,8 @@ pub(super) fn exact_study_fixture_with_wall_time(
         });
     }
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: request.arguments,
         objects: locations,
     })
@@ -286,7 +287,7 @@ pub(super) fn exact_study_fixture_with_wall_time(
     }
     let mut resources = resources();
     resources.maximum_wall_millis = maximum_wall_millis;
-    let inventory = super::super::pool_resources::inventory(&resources).unwrap();
+    let inventory = super::super::pool_resources::inventory(&resources, &[]).unwrap();
     let workers = [
         (1, worker_allocation("worker-a", 11, &resources)),
         (2, worker_allocation("worker-b", 12, &resources)),
@@ -365,7 +366,6 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
@@ -390,11 +390,8 @@ pub(super) fn coarse_box_request() -> MeshingRequest {
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
     request.quality.volume.minimum_scaled_jacobian = 0.01;
-    request.resources.maximum_nodes = 10_000;
-    request.resources.maximum_elements = 10_000;
-    request.resources.maximum_search_work = 1_000_000;
-    request.resources.maximum_iterations = 1_000_000;
-    request.resources.maximum_wall_time_ms = 180_000;
+    request.limits.maximum_nodes = 10_000;
+    request.limits.maximum_elements = 10_000;
     request
 }
 
@@ -403,9 +400,7 @@ fn resources() -> ResourceRequest {
         cpu_millicores: 1_000,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     }
 }
@@ -455,6 +450,8 @@ fn worker_allocation(
         fencing_token: 1,
         state: "active".into(),
         resources: resources.clone(),
+        accelerator_devices: Vec::new(),
+        host: crate::test_support::host_inventory(),
         endpoint_identity: Some(evidence),
         run_key_envelope_authorized: false,
     }
@@ -523,6 +520,7 @@ pub(super) async fn run_worker(
 ) -> crate::NativeExecutionResult<()> {
     let allocation_id = allocation.allocation_lease_id.clone();
     let worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[
             RUN_ID.as_bytes(),
             allocation_id.as_bytes(),

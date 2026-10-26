@@ -91,9 +91,9 @@ geometry part {
     units = m
     region body : solid { select result
         expect exactly_one }
-    region low : face { select persistent_id "FIRST_FACE_ID"
+    region low : face { select id "FIRST_FACE_ID"
         expect exactly_one }
-    region high : face { select persistent_id "SECOND_FACE_ID"
+    region high : face { select id "SECOND_FACE_ID"
         expect exactly_one }
 }
 mesh volume on geometry.part {
@@ -126,7 +126,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.electric
-    formulation = experimental
     analysis potential {
         electromagnetic static {}
         accuracy { algebraic_relative_tolerance = 1e-11 }

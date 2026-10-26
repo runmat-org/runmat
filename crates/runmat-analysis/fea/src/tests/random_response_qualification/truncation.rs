@@ -27,9 +27,19 @@ fn cumulative_mass_threshold_selects_the_expected_modal_prefix() {
         let result =
             solve_modal_random_response(&summary, &basis, &excitation, converged_policy(threshold))
                 .unwrap();
-        assert_eq!(result.selected_mode_count(), expected_count);
+        // The selected prefix is closed over a repeated-frequency cluster.
+        let modes = basis.modes();
+        let cluster_frequency = modes[expected_count - 1].frequency_hz();
+        let closed_count = expected_count
+            + modes[expected_count..]
+                .iter()
+                .take_while(|mode| {
+                    (mode.frequency_hz() - cluster_frequency).abs() <= 1.0e-8 * cluster_frequency
+                })
+                .count();
+        assert_eq!(result.selected_mode_count(), closed_count);
         assert!(
-            (result.captured_mass_ratio_by_channel()[0] - cumulative[expected_count - 1]).abs()
+            (result.captured_mass_ratio_by_channel()[0] - cumulative[closed_count - 1]).abs()
                 < 1.0e-12
         );
     }

@@ -1,7 +1,5 @@
 use super::*;
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
     properties::compile_property_map,
@@ -30,7 +28,7 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "insulated-face".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(insulated_face),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(insulated_face))),
             operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::HeatFlux::new(0.0),
@@ -47,7 +45,6 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -59,7 +56,7 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
         &compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         },
     )
     .unwrap();
@@ -269,7 +266,7 @@ fn original_temperature_fields_survive_borrowed_authored_intent_validation() {
         &p.product.compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         },
         input.initial_fields,
     )

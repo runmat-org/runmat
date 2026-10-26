@@ -45,7 +45,16 @@ impl UnconstrainedHull {
         let mut work = InsertionWork::new(options, cancellation);
         let location = super::location::TetrahedronPointLocator::walking(&self.topology)
             .walk_from(node, self.hint.map(|index| index as usize), &mut work)?;
+        // A point on the hull boundary is in conflict with the unbounded cells over the
+        // coplanar hull faces whose circumcircle holds it; only the hull search finds them.
+        let on_hull = match location {
+            super::location::PointLocation::Contained(index) => {
+                coplanar_hull_face(&self.topology, index, node, &mut work)?
+            }
+            _ => None,
+        };
         let seed = match location {
+            _ if on_hull.is_some() => on_hull,
             super::location::PointLocation::Contained(index) => {
                 let prepared = super::prepare_insertion_from_hint(
                     &self.topology,
@@ -72,8 +81,8 @@ impl UnconstrainedHull {
             } => Some((tetrahedron, opposite)),
             super::location::PointLocation::Unresolved => None,
         };
-        let visible = search::visible_faces(&self.topology, node, seed, &mut work)?;
-        if visible.is_empty() {
+        let conflict = search::visible_faces(&self.topology, node, seed, &mut work)?;
+        if conflict.visible.is_empty() && conflict.coplanar.is_empty() {
             let prepared = super::prepare_insertion_from_hint(
                 &self.topology,
                 node,
@@ -93,9 +102,8 @@ impl UnconstrainedHull {
             self.hint = self.topology.vertex_stars[inserted].first().copied();
             return Ok(());
         }
-        let removed = search::finite_conflict(&self.topology, node, &visible, &mut work)?;
+        let removed = search::finite_conflict(&self.topology, node, &conflict, &mut work)?;
         let mut boundary = BTreeSet::new();
-        let mut attachments = BTreeSet::new();
         let mut affected_nodes = BTreeSet::new();
         for index in &removed {
             let tet = self
@@ -118,7 +126,10 @@ impl UnconstrainedHull {
                 if neighbor.is_some() && side != FaceSide::Interior {
                     return Err(error(
                         DelaunayInsertionErrorKind::InvalidTopology,
-                        "finite hull conflict boundary is not visible from the cavity side",
+                        format!(
+                            "finite hull conflict boundary is not visible from the cavity side ({side:?} face, cavity of {} cells)",
+                            removed.len()
+                        ),
                     ));
                 }
                 if side == FaceSide::Interior {
@@ -126,7 +137,8 @@ impl UnconstrainedHull {
                 }
             }
         }
-        for (index, opposite) in visible {
+        let mut attachments = BTreeSet::new();
+        for (index, opposite) in conflict.visible {
             if removed.contains(&index) {
                 continue;
             }
@@ -184,7 +196,27 @@ impl UnconstrainedHull {
     }
 }
 
-#[derive(PartialEq, Eq)]
+/// A hull face of cell `index` whose plane holds `node`.
+fn coplanar_hull_face(
+    topology: &TopologyMutation,
+    index: u32,
+    node: DelaunayVolumeNode,
+    work: &mut InsertionWork<'_>,
+) -> Result<Option<(u32, usize)>, DelaunayInsertionError> {
+    let tet = topology
+        .tetrahedron(index)
+        .expect("located tetrahedron is active");
+    for opposite in 0..4 {
+        if tet.neighbors[opposite].is_none()
+            && face_side(topology, tet.vertex_indices, opposite, node, work)? == FaceSide::Coplanar
+        {
+            return Ok(Some((index, opposite)));
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum FaceSide {
     Interior,
     Coplanar,

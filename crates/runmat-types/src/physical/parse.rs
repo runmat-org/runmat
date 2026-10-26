@@ -157,6 +157,8 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "ns" => (PhysicalDimension::TIME, 1e-9, 0.0),
         "Hz" => (PhysicalDimension::FREQUENCY, 1.0, 0.0),
         "kHz" => (PhysicalDimension::FREQUENCY, 1e3, 0.0),
+        "MHz" => (PhysicalDimension::FREQUENCY, 1e6, 0.0),
+        "GHz" => (PhysicalDimension::FREQUENCY, 1e9, 0.0),
         "kg" => (PhysicalDimension::MASS, 1.0, 0.0),
         "gram" => (PhysicalDimension::MASS, 1e-3, 0.0),
         "g" => (PhysicalDimension::ACCELERATION, 9.806_65, 0.0),
@@ -168,13 +170,22 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "GPa" => (PhysicalDimension::PRESSURE, 1e9, 0.0),
         "J" => (PhysicalDimension::ENERGY, 1.0, 0.0),
         "W" => (PhysicalDimension::POWER, 1.0, 0.0),
+        "mW" => (PhysicalDimension::POWER, 1e-3, 0.0),
+        "kW" => (PhysicalDimension::POWER, 1e3, 0.0),
+        "MW" => (PhysicalDimension::POWER, 1e6, 0.0),
         "K" => (PhysicalDimension::TEMPERATURE, 1.0, 0.0),
         "degC" => (PhysicalDimension::TEMPERATURE, 1.0, 273.15),
         "delta_degC" => (PhysicalDimension::TEMPERATURE, 1.0, 0.0),
         "A" => (PhysicalDimension::ELECTRIC_CURRENT, 1.0, 0.0),
+        "mA" => (PhysicalDimension::ELECTRIC_CURRENT, 1e-3, 0.0),
+        "kA" => (PhysicalDimension::ELECTRIC_CURRENT, 1e3, 0.0),
         "C" => (PhysicalDimension::new([0, 0, 1, 1, 0, 0, 0, 0]), 1.0, 0.0),
         "V" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1.0, 0.0),
+        "mV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e-3, 0.0),
+        "kV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e3, 0.0),
+        "MV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e6, 0.0),
         "T" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1.0, 0.0),
+        "mT" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1e-3, 0.0),
         "rad" => (PhysicalDimension::DIMENSIONLESS, 1.0, 0.0),
         "deg" => (
             PhysicalDimension::DIMENSIONLESS,
@@ -206,6 +217,22 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // witness: FEA-PUBLIC-LANGUAGE-001/unit_prefixes @ shared_infrastructure/mesh_independent/source_check; coverage: partial; boundary: kV/mm, kA, mT and MHz parse with the correct scale and dimension; kW, MW, mA, MN and mN are not asserted here.
+    #[test]
+    fn electrical_prefixes_scale_to_si() {
+        let field = parse_unit_expression("kV/mm").unwrap();
+        assert_eq!(
+            field.dimension,
+            PhysicalDimension::ELECTRIC_POTENTIAL
+                .divide(PhysicalDimension::LENGTH)
+                .unwrap()
+        );
+        assert_eq!(field.scale(), 1e6);
+        assert_eq!(parse_unit_expression("kA").unwrap().scale(), 1e3);
+        assert_eq!(parse_unit_expression("mT").unwrap().scale(), 1e-3);
+        assert_eq!(parse_unit_expression("MHz").unwrap().scale(), 1e6);
+    }
 
     #[test]
     fn parses_composed_si_and_scaled_units() {

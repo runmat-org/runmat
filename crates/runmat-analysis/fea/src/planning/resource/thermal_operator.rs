@@ -30,10 +30,19 @@ pub struct ThermalOperatorResourceFacts {
 }
 
 impl ThermalOperatorResourceFacts {
-    pub fn derive(mesh: &SolverMeshArtifact) -> Result<Self, ResourcePlanningError> {
+    /// Thermal interfaces with a finite conductance give their interface nodes a second-side
+    /// dof; the support is that of the split projection plus the conductance couplings.
+    pub fn derive(
+        mesh: &SolverMeshArtifact,
+        interfaces: &[runmat_analysis_core::AnalysisInterface],
+    ) -> Result<Self, ResourcePlanningError> {
         let planning_resident_bytes = Self::derivation_resident_bytes_estimate(mesh)?;
         let projection = AnalysisProjection::derive(mesh)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let (plans, dofs) =
+            crate::physics::thermal_interface::solid_conduction(&projection, interfaces)
+                .map_err(ResourcePlanningError::Invalid)?;
+        let projection = dofs.split_projection(&projection, &plans);
         let workspace = ThermalWorkspaceResourceFacts::derive(&projection)?;
         let mut rows = (0..projection.nodes.len())
             .map(|index| BTreeSet::from([index]))
@@ -53,6 +62,7 @@ impl ThermalOperatorResourceFacts {
                 rows[row].extend(nodes.iter().copied());
             }
         }
+        dofs.extend_support(&projection, &plans, &mut rows);
         let support = pattern_from_rows(rows, projection.nodes.len())?;
         let envelope = CoercivityWorkEnvelope::derive(&support)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;

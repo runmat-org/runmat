@@ -6,8 +6,8 @@ use super::super::{
     analysis_results_by_run_id_op, builtin_error, find_field, normalize_token, object_payload,
     operation_error, run_id_context_from_value, run_id_from_value, scalar_string,
     study_context_value, AnalysisFieldValues, AnalysisResultsQuery, AnalysisStudySpec,
-    BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, FEA_FIELD_CLASS,
-    FEA_STUDY_CLASS, MESH_NAME, PLOT_NAME,
+    BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, FEA_STUDY_CLASS, MESH_NAME,
+    PLOT_NAME,
 };
 
 pub(in crate::builtins::fea) struct FeaPlotRequest {
@@ -149,7 +149,10 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
             "plot requires an fea.Field",
         ));
     };
-    if object.class_name().display_name() != FEA_FIELD_CLASS {
+    if !object
+        .class_name()
+        .is(runmat_builtins::fea_contract::identities::FEA_FIELD_CLASS)
+    {
         return Err(builtin_error(
             PLOT_NAME,
             &ERROR_INPUT,

@@ -20,7 +20,7 @@ fn assembly(quadratic: bool) -> AcousticAssembly {
         slab_mesh(2)
     };
     let mut model = crate::physics::acoustic::canonical::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let properties = compile_solid_property_map(&model, &mesh).unwrap();
     AcousticAssembly::assemble(
         AnalysisProjection::derive(&mesh).unwrap(),
@@ -40,7 +40,7 @@ fn load(flow: ComplexScalar) -> RealizedExcitation {
             value: 1.0,
             approach: SignalSampleApproach::At,
         },
-        target: RealizedExcitationTarget::Region(RegionTarget::boundary("slab_left")),
+        target: RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
         kind: RealizedExcitationKind::VolumeVelocity(flow),
         policy: RealizedExcitationPolicy {
             frame: CoordinateFrame::BoundaryNormalTangent,
@@ -76,9 +76,9 @@ fn total_flow_normalizes_once_over_union_with_exact_tri3_tri6_moments() {
     for quadratic in [false, true] {
         for both_sides in [false, true] {
             let mut a = assembly(quadratic);
-            let mut faces = a.faces(&RegionTarget::boundary("slab_left")).unwrap();
+            let mut faces = a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))).unwrap();
             if both_sides {
-                faces.extend(a.faces(&RegionTarget::boundary("slab_right")).unwrap());
+                faces.extend(a.faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))).unwrap());
             }
             let area = faces
                 .iter()
@@ -128,7 +128,7 @@ fn total_flow_rejects_empty_duplicate_and_invalid_ownership_or_distribution() {
     let flow = ComplexScalar::real(1.0);
     let a = assembly(false);
     let face = a
-        .faces(&RegionTarget::boundary("slab_left"))
+        .faces(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")))
         .unwrap()
         .remove(0);
     let mut invalid_patches = vec![vec![], vec![face.clone(), face.clone()]];

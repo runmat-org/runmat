@@ -1,5 +1,5 @@
 use runmat_analysis_core::{
-    AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
+    AnalysisProcedure, StructuralKinematics, BoundaryTransferImplementation, ConstitutiveImplementation,
     CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization,
     FormulationAdmissionRejectionReason, FormulationAxis, RecoveryImplementation,
     SourceImplementation, SpatialOperatorImplementation, StructuralFormulationRealization,
@@ -18,6 +18,8 @@ pub use thermo_mechanical::thermomechanical_exact_realization;
 pub struct StructuralRealizationInput {
     pub assemblies: Vec<StructuralFormulationRealization>,
     pub procedure: AnalysisProcedure,
+    /// Kinematics of a nonlinear step; ignored (and required small strain) for every other procedure.
+    pub kinematics: StructuralKinematics,
     pub coupling: CouplingImplementation,
     pub sources: Vec<SourceImplementation>,
     pub boundary_transfers: Vec<BoundaryTransferImplementation>,
@@ -53,28 +55,45 @@ pub fn structural_exact_realization(
             ));
         }
         let assembly = &mut input.assemblies[0];
-        assembly.operator = match assembly.operator {
-            StructuralOperatorImplementation::Tet4LinearElasticity
-            | StructuralOperatorImplementation::Tet4SmallStrainContinuum => {
-                StructuralOperatorImplementation::Tet4SmallStrainContinuum
-            }
-            StructuralOperatorImplementation::Tet10LinearElasticity
-            | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
-                StructuralOperatorImplementation::Tet10SmallStrainContinuum
-            }
+        let large = input.kinematics == StructuralKinematics::LargeDeformation;
+        assembly.operator = match (assembly.operator, large) {
+            (
+                StructuralOperatorImplementation::Tet4LinearElasticity
+                | StructuralOperatorImplementation::Tet4SmallStrainContinuum,
+                false,
+            ) => StructuralOperatorImplementation::Tet4SmallStrainContinuum,
+            (
+                StructuralOperatorImplementation::Tet10LinearElasticity
+                | StructuralOperatorImplementation::Tet10SmallStrainContinuum,
+                false,
+            ) => StructuralOperatorImplementation::Tet10SmallStrainContinuum,
+            (
+                StructuralOperatorImplementation::Tet4LinearElasticity
+                | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum,
+                true,
+            ) => StructuralOperatorImplementation::Tet4TotalLagrangianContinuum,
+            (
+                StructuralOperatorImplementation::Tet10LinearElasticity
+                | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum,
+                true,
+            ) => StructuralOperatorImplementation::Tet10TotalLagrangianContinuum,
             _ => {
                 return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
                     FormulationAxis::SpatialOperator,
                 ))
             }
         };
-    } else if input.assemblies.iter().any(|assembly| {
-        matches!(
-            assembly.operator,
-            StructuralOperatorImplementation::Tet4SmallStrainContinuum
-                | StructuralOperatorImplementation::Tet10SmallStrainContinuum
-        )
-    }) {
+    } else if input.kinematics != StructuralKinematics::SmallStrain
+        || input.assemblies.iter().any(|assembly| {
+            matches!(
+                assembly.operator,
+                StructuralOperatorImplementation::Tet4SmallStrainContinuum
+                    | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+                    | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum
+                    | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum
+            )
+        })
+    {
         return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
             FormulationAxis::SpatialOperator,
         ));
@@ -117,14 +136,16 @@ fn structural_component(
 ) -> Result<ExactFormulationComponent, FormulationAdmissionRejectionReason> {
     let (topologies, recovery) = match assembly.operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
-        | StructuralOperatorImplementation::Tet4SmallStrainContinuum => (
+        | StructuralOperatorImplementation::Tet4SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum => (
             vec![TopologyImplementation::CanonicalSolverMeshTet4],
             RecoveryImplementation::Structural(
                 StructuralRecoveryImplementation::Tet4ConstantStrain,
             ),
         ),
         StructuralOperatorImplementation::Tet10LinearElasticity
-        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => (
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => (
             vec![TopologyImplementation::CanonicalSolverMeshTet10],
             RecoveryImplementation::Structural(
                 StructuralRecoveryImplementation::Tet10IntegrationPointProjection,
@@ -161,7 +182,13 @@ fn structural_component(
 
     Ok(ExactFormulationComponent {
         spatial_operator: SpatialOperatorImplementation::Structural(assembly.operator),
-        constitutive: if procedure == AnalysisProcedure::Nonlinear {
+        constitutive: if matches!(
+            assembly.operator,
+            StructuralOperatorImplementation::Tet4TotalLagrangianContinuum
+                | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum
+        ) {
+            ConstitutiveImplementation::GreenLagrangeJ2IsotropicHardening
+        } else if procedure == AnalysisProcedure::Nonlinear {
             ConstitutiveImplementation::SmallStrainJ2IsotropicHardening
         } else {
             ConstitutiveImplementation::IsotropicLinearElasticity
@@ -181,6 +208,8 @@ const fn structural_operator_order(operator: StructuralOperatorImplementation) -
         StructuralOperatorImplementation::SyntheticDiagonalChain => 4,
         StructuralOperatorImplementation::Tet4SmallStrainContinuum => 5,
         StructuralOperatorImplementation::Tet10SmallStrainContinuum => 6,
+        StructuralOperatorImplementation::Tet4TotalLagrangianContinuum => 7,
+        StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => 8,
     }
 }
 
@@ -195,6 +224,7 @@ const fn source_order(source: SourceImplementation) -> u8 {
         SourceImplementation::CanonicalVolumeProjection => 1,
         SourceImplementation::CanonicalBoundaryProjection => 2,
         SourceImplementation::CanonicalBoundaryPressureIntegration => 3,
+        SourceImplementation::CanonicalFollowerBoundaryIntegration => 4,
         SourceImplementation::CanonicalPointProjection => 5,
         SourceImplementation::AcousticHashedTargetGraphProjection => 6,
         SourceImplementation::BoundaryResultantMomentProjection => 7,
@@ -227,6 +257,7 @@ const fn boundary_transfer_order(transfer: BoundaryTransferImplementation) -> u8
         BoundaryTransferImplementation::UnmappedFallback => 7,
         BoundaryTransferImplementation::FullExteriorTangentialPotentialGroundWithWeakCoulombGauge => 8,
         BoundaryTransferImplementation::FullExteriorElectricPerfectConductor => 9,
+        BoundaryTransferImplementation::DeclaredConformalInterfaceLaw => 10,
     }
 }
 
@@ -293,6 +324,14 @@ fn valid_sources(operator: StructuralOperatorImplementation) -> &'static [Source
             SourceImplementation::CanonicalBoundaryPressureIntegration,
             SourceImplementation::BoundaryResultantMomentProjection,
         ],
+        StructuralOperatorImplementation::Tet4TotalLagrangianContinuum
+        | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => &[
+            SourceImplementation::CanonicalVolumeProjection,
+            SourceImplementation::CanonicalBoundaryProjection,
+            SourceImplementation::CanonicalBoundaryPressureIntegration,
+            SourceImplementation::CanonicalFollowerBoundaryIntegration,
+            SourceImplementation::BoundaryResultantMomentProjection,
+        ],
         StructuralOperatorImplementation::Tet4LinearElasticity
         | StructuralOperatorImplementation::Tet10LinearElasticity => &[
             SourceImplementation::CanonicalVolumeProjection,
@@ -317,7 +356,9 @@ fn valid_boundary(operator: StructuralOperatorImplementation) -> BoundaryTransfe
         StructuralOperatorImplementation::Tet4LinearElasticity
         | StructuralOperatorImplementation::Tet10LinearElasticity
         | StructuralOperatorImplementation::Tet4SmallStrainContinuum
-        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum
+        | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => {
             BoundaryTransferImplementation::CanonicalBoundaryProjection
         }
         StructuralOperatorImplementation::EulerBernoulliBeam3d
@@ -367,8 +408,7 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
-        FormulationAdmissionRejectionReason, FormulationAxis, FormulationMaturity,
-        FormulationRequirement, PhysicsFamily, SolutionSpace,
+        FormulationAdmissionRejectionReason, FormulationAxis, PhysicsFamily, SolutionSpace,
     };
 
     use super::*;
@@ -381,6 +421,7 @@ mod tests {
                 Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
             )],
             procedure: AnalysisProcedure::Static,
+            kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
             coupling: CouplingImplementation::Uncoupled,
             sources,
             boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
@@ -403,6 +444,9 @@ mod tests {
         assert_eq!(first, reordered);
     }
 
+    // witness: FEA-SHARED-BASELINE-001/exact_realization_and_typed_contracts @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Modal response spectrum has a distinct admitted temporal realization.
     #[test]
     fn modal_response_spectrum_has_a_distinct_admitted_temporal_realization() {
         let mut input = structural_input(vec![SourceImplementation::CanonicalBoundaryProjection]);
@@ -413,15 +457,13 @@ mod tests {
             realization.temporals,
             vec![TemporalImplementation::StructuralModalResponseSpectrumCombination]
         );
-        let admitted = admit_formulation(FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::ModalResponseSpectrum,
             solution_space: SolutionSpace::ModalReduced,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
-        .expect("modal response-spectrum formulation should be admitted experimentally");
-        assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
+        .expect("modal response-spectrum formulation should be admitted");
     }
 
     #[test]
@@ -434,15 +476,13 @@ mod tests {
             realization.temporals,
             vec![TemporalImplementation::StructuralRandomResponseIntegration]
         );
-        let admitted = admit_formulation(FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::RandomResponse,
             solution_space: SolutionSpace::ModalReduced,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
-        .expect("random-response formulation should be admitted experimentally");
-        assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
+        .expect("random-response formulation should be admitted");
     }
 
     #[test]
@@ -452,18 +492,13 @@ mod tests {
             SourceImplementation::CanonicalVolumeProjection,
         ]))
         .expect("valid structural realization");
-        assert_eq!(
-            admit_formulation(FormulationAdmissionRequest {
-                family: PhysicsFamily::Structural,
-                procedure: AnalysisProcedure::Static,
-                solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
-                realization: canonical.clone(),
-            })
-            .expect("canonical exact evidence should be admitted")
-            .qualification(),
-            FormulationMaturity::Experimental
-        );
+        admit_formulation(FormulationAdmissionRequest {
+            family: PhysicsFamily::Structural,
+            procedure: AnalysisProcedure::Static,
+            solution_space: SolutionSpace::Direct,
+            realization: canonical.clone(),
+        })
+        .expect("canonical exact evidence should be admitted");
 
         let mut noncanonical = canonical.clone();
         noncanonical.components[0].sources.reverse();
@@ -471,7 +506,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: noncanonical,
         })
         .expect_err("noncanonical source order must not produce a second identity");
@@ -488,7 +522,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: duplicated,
         })
         .expect_err("duplicate source evidence must be rejected");
@@ -512,6 +545,7 @@ mod tests {
                 ),
             ],
             procedure: AnalysisProcedure::Static,
+            kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
             coupling: CouplingImplementation::Uncoupled,
             sources: vec![SourceImplementation::ExplicitRegionNodalDistribution],
             boundary_transfers: vec![BoundaryTransferImplementation::ExplicitRegionConnectivity],
@@ -534,7 +568,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
         .expect("the exact mixed formulation must pass admission");
@@ -554,6 +587,7 @@ mod tests {
                 ),
             ],
             procedure: AnalysisProcedure::Static,
+            kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
             coupling: CouplingImplementation::Uncoupled,
             sources: vec![
                 SourceImplementation::ExplicitRegionNodalDistribution,
@@ -578,7 +612,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
         .expect("component-owned mixed sources must round-trip through admission");

@@ -89,7 +89,7 @@ impl<S: CacheImport + Send + Sync> AcousticStudySource for RetainedAcousticSourc
             self.completed.wave_wall_millis,
         )
         .map_err(|error| error.to_string())?;
-        let expected = completion(&replay)?;
+        let expected = completion(&replay, self)?;
         if &expected != candidate {
             return Err("runtime acoustic completion differs from authenticated replay".into());
         }
@@ -100,7 +100,10 @@ impl<S: CacheImport + Send + Sync> AcousticStudySource for RetainedAcousticSourc
     }
 }
 
-fn completion(completed: &CompletedAcousticStudy) -> Result<AcousticStudyCompletion, String> {
+fn completion(
+    completed: &CompletedAcousticStudy,
+    source: &impl CacheImport,
+) -> Result<AcousticStudyCompletion, String> {
     let root = prepare_acoustic_study_root(completed).map_err(|error| error.to_string())?;
     let preparation = completed.preparation().map_err(|e| e.to_string())?;
     let access = &preparation.artifact_access;
@@ -122,15 +125,37 @@ fn completion(completed: &CompletedAcousticStudy) -> Result<AcousticStudyComplet
         .map_err(|e| e.to_string())?;
     let mut roots = vec![publication_root.reference().clone()];
     let mut samples = Vec::new();
-    for fields in &completed.assembly.fields {
-        let fields_root = artifact_root(fields)?;
+    // Each entry's own recovery and observation tasks published its fields and outputs.
+    for entry in &completed.entries {
+        let fields_root = artifact_root(&entry.field_objects)?;
         roots.push(fields_root.reference().clone());
         references.extend(
-            fields
+            entry
+                .field_objects
                 .unique_references(access, runmat_execution::value::ValueRefKind::ResultObject)
                 .map_err(|e| e.to_string())?,
         );
-        samples.push(FrequencySampleArtifactRoots::new(fields_root, None));
+        let observations_root = entry
+            .observation_objects
+            .as_ref()
+            .map(|objects| -> Result<_, String> {
+                let root = artifact_root(objects)?;
+                roots.push(root.reference().clone());
+                references.extend(
+                    objects
+                        .unique_references(
+                            access,
+                            runmat_execution::value::ValueRefKind::ResultObject,
+                        )
+                        .map_err(|e| e.to_string())?,
+                );
+                Ok(root)
+            })
+            .transpose()?;
+        samples.push(FrequencySampleArtifactRoots::new(
+            fields_root,
+            observations_root,
+        ));
     }
     let mut unique = BTreeMap::new();
     for reference in references {
@@ -180,6 +205,33 @@ fn completion(completed: &CompletedAcousticStudy) -> Result<AcousticStudyComplet
                     host_workload_digest: solve.workload.identity.digest(),
                     result: entry.result.result.clone(),
                     numerical_receipt: entry.result.numerical_receipt.clone(),
+                    observation_catalog: entry.observation_catalog.clone(),
+                    observation_results: match &entry.observations {
+                        Some(observations) => entry
+                            .workload
+                            .model
+                            .sequence
+                            .steps
+                            .iter()
+                            .find(|step| step.step_id == entry.workload.step_id)
+                            .ok_or("acoustic entry omits its selected authored step")?
+                            .observations
+                            .iter()
+                            .map(|request| {
+                                let spec = request.spec().ok_or(
+                                    "acoustic publication has a non-field observation without a result spec",
+                                )?;
+                                runmat_analysis_execution::import_observation_result(
+                                    source,
+                                    observations,
+                                    &spec.observation_id,
+                                    preparation.output_policy.inventory_limits(),
+                                )
+                                .map_err(|error| error.to_string())
+                            })
+                            .collect::<Result<Vec<_>, String>>()?,
+                        None => Vec::new(),
+                    },
                     accuracy: entry.accuracy.artifact.clone(),
                     states: entry
                         .states
@@ -220,7 +272,7 @@ pub(crate) fn convert(
         completed,
         store,
     };
-    let dto = completion(&source.completed)?;
+    let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, AcousticStudyObjectSource::new(source)))
 }
@@ -240,7 +292,7 @@ pub fn acoustic_study_completion_from_source(
         store: source,
         objects: BTreeMap::new(),
     };
-    let dto = completion(&source.completed)?;
+    let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, AcousticStudyObjectSource::new(source)))
 }

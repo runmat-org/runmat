@@ -44,7 +44,7 @@ use validation::{
     validate_numeric_representation, validate_resolved_spatial_reduction, validate_supported_spec,
 };
 pub(crate) use verification::{
-    verify_authored_observations, verify_finite_volume_observation_plan_for_topology,
+    verify_authored_observations,
     verify_observation_plan, verify_sampled_observation_plan, verify_structural_observation_plan,
 };
 
@@ -224,6 +224,7 @@ fn resolve_request<'a>(
         connector_plan,
         limits,
     )?;
+    let target = restrict_to_support(target, source_field, topology)?;
     validate_resolved_spatial_reduction(spec, source_field, &target)?;
     let component = resolve_component(spec, source_field)?;
     let result_value_shape = spec.result_value_shape();
@@ -471,7 +472,11 @@ fn operation_multiplier(request: &ObservationRequest, spec: &ObservationSpec) ->
             reduction: Some(_), ..
         }) => match spec.reduction.as_ref().map(|reduction| reduction.spatial) {
             Some(SpatialReduction::RootMeanSquare) => 12,
-            Some(SpatialReduction::Integral | SpatialReduction::Average) => 8,
+            Some(
+                SpatialReduction::Integral
+                | SpatialReduction::Average
+                | SpatialReduction::NormalFlux,
+            ) => 8,
             _ => 3,
         },
         _ => 2,
@@ -526,4 +531,94 @@ fn target_error(spec: &ObservationSpec, reason: impl Into<String>) -> Observatio
         observation_id: spec.observation_id.0.clone(),
         reason: reason.into(),
     }
+}
+
+
+/// A region-supported field is observed only where it carries values: volume, element and node
+/// targets keep their entities inside the support, and an empty intersection fails closed.
+fn restrict_to_support(
+    target: ResolvedObservationTarget,
+    field: &RecoveredFieldDefinition,
+    topology: &ObservationTopology,
+) -> Result<ResolvedObservationTarget, ObservationError> {
+    if field.support().is_complete() {
+        return Ok(target);
+    }
+    let support_topology = topology.support_topology().ok_or(ObservationError::Identity(
+        "a region-supported field needs a mesh projection topology",
+    ))?;
+    let resolve = |domain| {
+        field
+            .support()
+            .resolve(domain, support_topology)
+            .map_err(|error| ObservationError::Invalid(error.to_string()))
+            .map(|support| support.unwrap_or_default())
+    };
+    let keep = |indices: Vec<usize>, identities: Vec<StableDigest>, support: &[usize]| {
+        indices
+            .into_iter()
+            .zip(identities)
+            .filter(|(index, _)| support.binary_search(index).is_ok())
+            .unzip::<_, _, Vec<_>, Vec<_>>()
+    };
+    let restricted = match target {
+        ResolvedObservationTarget::Nodes {
+            indices,
+            identities,
+        } => {
+            let support = resolve(crate::results::field::RecoveredFieldEntityDomain::Nodes)?;
+            let (indices, identities) = keep(indices, identities, &support);
+            ResolvedObservationTarget::Nodes {
+                indices,
+                identities,
+            }
+        }
+        ResolvedObservationTarget::Elements {
+            domain,
+            indices,
+            identities,
+        } => {
+            let support = resolve(domain)?;
+            let (indices, identities) = keep(indices, identities, &support);
+            ResolvedObservationTarget::Elements {
+                domain,
+                indices,
+                identities,
+            }
+        }
+        ResolvedObservationTarget::Volume {
+            element_indices,
+            element_identities,
+        } => {
+            let support =
+                resolve(crate::results::field::RecoveredFieldEntityDomain::VolumeElements)?;
+            let (element_indices, element_identities) =
+                keep(element_indices, element_identities, &support);
+            ResolvedObservationTarget::Volume {
+                element_indices,
+                element_identities,
+            }
+        }
+        ResolvedObservationTarget::Boundary {
+            face_indices,
+            face_identities,
+        } if field.entity_domain()
+            == crate::results::field::RecoveredFieldEntityDomain::OrientedFaces =>
+        {
+            let support =
+                resolve(crate::results::field::RecoveredFieldEntityDomain::OrientedFaces)?;
+            let (face_indices, face_identities) = keep(face_indices, face_identities, &support);
+            ResolvedObservationTarget::Boundary {
+                face_indices,
+                face_identities,
+            }
+        }
+        other => other,
+    };
+    if restricted.selected_entity_count() == 0 {
+        return Err(ObservationError::Invalid(
+            "observation target lies entirely outside the field's supported regions".into(),
+        ));
+    }
+    Ok(restricted)
 }

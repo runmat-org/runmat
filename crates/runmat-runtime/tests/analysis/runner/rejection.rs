@@ -20,7 +20,6 @@ pub(super) fn check(
                     } else {
                         ComputeBackend::Cpu
                     },
-                    FormulationRequirement::Experimental,
                     AnalysisCfdRunOptions::default(),
                     OperationContext::new(None, None),
                 ))

@@ -126,12 +126,6 @@ impl NonlinearSolidStudyCoordinator {
                     &self.preparation.product.workload.model.sequence,
                 )?,
                 step: self.preparation.product.workload.model.sequence.steps[0].clone(),
-                formulation_requirement: self
-                    .preparation
-                    .product
-                    .workload
-                    .controls
-                    .formulation_requirement,
                 observations,
                 program_revision: self.preparation.program_revision.clone(),
                 output_policy: self.preparation.output_policy,

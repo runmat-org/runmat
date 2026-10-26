@@ -64,16 +64,64 @@ impl ThermalResultMetadata<'_> {
     }
 }
 
-pub(in crate::execution) struct ManifestFieldIdentities<'a>(
-    pub &'a [[crate::results::field::RecoveredFieldArtifactEntry; 4]],
-);
-impl Serialize for ManifestFieldIdentities<'_> {
+/// Per-sample field identities. Each sample serializes as a fixed tuple (temperature,
+/// gradient, flux, storage rate, then the second-side interface temperature when present);
+/// a study with finite-conductance interfaces pairs the samples with the interface node ids,
+/// so a study without one keeps exactly its earlier identity.
+pub(in crate::execution) struct FieldIdentities<'a, F> {
+    pub samples: &'a [F],
+    pub interface_node_ids: &'a [u64],
+    pub identities: fn(&F) -> Vec<crate::results::field::RecoveredFieldIdentity>,
+}
+
+struct Samples<'a, F> {
+    samples: &'a [F],
+    identities: fn(&F) -> Vec<crate::results::field::RecoveredFieldIdentity>,
+}
+
+impl<F> Serialize for Samples<'_, F> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeSeq;
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for entries in self.0 {
-            sequence.serialize_element(&entries.each_ref().map(|entry| entry.field))?;
+        use serde::ser::{SerializeSeq, SerializeTuple};
+        struct Row(Vec<crate::results::field::RecoveredFieldIdentity>);
+        impl Serialize for Row {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut tuple = serializer.serialize_tuple(self.0.len())?;
+                for identity in &self.0 {
+                    tuple.serialize_element(identity)?;
+                }
+                tuple.end()
+            }
+        }
+        let mut sequence = serializer.serialize_seq(Some(self.samples.len()))?;
+        for sample in self.samples {
+            sequence.serialize_element(&Row((self.identities)(sample)))?;
         }
         sequence.end()
     }
+}
+
+impl<F> Serialize for FieldIdentities<'_, F> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let samples = Samples {
+            samples: self.samples,
+            identities: self.identities,
+        };
+        if self.interface_node_ids.is_empty() {
+            samples.serialize(serializer)
+        } else {
+            (samples, self.interface_node_ids).serialize(serializer)
+        }
+    }
+}
+
+pub(in crate::execution) fn manifest_entry_identities(
+    entries: &Vec<crate::results::field::RecoveredFieldArtifactEntry>,
+) -> Vec<crate::results::field::RecoveredFieldIdentity> {
+    entries.iter().map(|entry| entry.field).collect()
+}
+
+pub(in crate::execution) fn retained_identities(
+    identities: &Vec<crate::results::field::RecoveredFieldIdentity>,
+) -> Vec<crate::results::field::RecoveredFieldIdentity> {
+    identities.clone()
 }

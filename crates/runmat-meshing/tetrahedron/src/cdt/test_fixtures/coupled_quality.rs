@@ -9,11 +9,11 @@ use runmat_meshing_size::metric::{
 };
 
 fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "octahedron".into(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "octahedron".into(),
+        Vec::new(),
+    )
 }
 pub(in crate::cdt) fn fixture(
     permuted: bool,
@@ -72,11 +72,11 @@ pub(in crate::cdt) fn fixture_scaled(
             ));
         }
         cells.push([offset, offset + 1, offset + 2, offset + 3]);
-        regions.push(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: format!("background-{index}"),
-            assembly_path: Vec::new(),
-        });
+        regions.push(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            format!("background-{index}"),
+            Vec::new(),
+        ));
     }
     let topology = build_delaunay_volume_topology(
         nodes,
@@ -108,11 +108,11 @@ pub(in crate::cdt) fn fixture_scaled(
                     .map(f64::to_bits)
             });
             points.sort_unstable();
-            let entity = PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: format!("outer-{points:?}"),
-                assembly_path: Vec::new(),
-            };
+            let entity = PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                format!("outer-{points:?}"),
+                Vec::new(),
+            );
             let region = topology.tetrahedra[face.tetrahedron_index as usize]
                 .region_id
                 .clone()
@@ -141,10 +141,12 @@ pub(in crate::cdt) fn metric(
     scoped: bool,
 ) -> MetricFieldRequest {
     let mut request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.5).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     if scoped {
         // The original six vertices use byte-repeated IDs below 208. Restrict

@@ -78,8 +78,6 @@ pub(super) fn admit(
     }
     let accuracy =
         structural_study::lifecycle::accuracy_completion::classify_accuracy(&completed.accuracy);
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, accuracy.numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
         execution_backend: run.execution_backend,
@@ -92,6 +90,7 @@ pub(super) fn admit(
         preconditioner: run.preconditioner,
         quality_policy: contracts::format_quality_policy(QualityPolicy::Strict),
         fallback_events: Vec::new(),
+        effective_memory_ceiling_bytes: None,
     };
     let output = OperationEnvelope::new(
         AnalysisOperation::Nonlinear.name(),
@@ -112,9 +111,7 @@ pub(super) fn admit(
             result_quality: accuracy.result_quality,
             run_status: accuracy.run_status,
             numerically_acceptable: accuracy.numerically_acceptable,
-            production_publishable,
             quality_reasons: accuracy.quality_reasons,
-            production_publication_reasons,
             provenance,
         },
     );

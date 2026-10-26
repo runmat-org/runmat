@@ -5,8 +5,7 @@ mod observations;
 pub(crate) mod prestress;
 
 use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,
-    Temperature, ThermalDomain,
+    AnalysisSequence, IndependentDomain, ProcedureStep, StateId, Temperature, ThermalDomain,
 };
 use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
@@ -25,7 +24,7 @@ use runmat_analysis_fea::{
     ComputeBackend,
 };
 use runmat_execution::{
-    task::RetryPolicy, Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision,
+    task::RetryPolicy, Digest, ExecutionScopeId, PoolId, ProgramRevision,
 };
 use runmat_execution_artifact::{
     cache::FilesystemObjectStore, ArtifactAccess, ProgramExecutionResponse,
@@ -53,7 +52,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "insulated-face".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(insulated_face),
+            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(insulated_face))),
             operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::HeatFlux::new(0.0),
@@ -75,7 +74,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
                 runmat_analysis_core::ThermalConstraint {
                     constraint_id: "equilibrium-temperature".into(),
                     kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                        target: runmat_analysis_core::RegionTarget::boundary(selector),
+                        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
                         value: runmat_analysis_core::PrescribedValue::Constant(Temperature::new(
                             293.15,
                         )),
@@ -106,7 +105,6 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -128,10 +126,12 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
             authorization_scope: "native-thermal-study-test".into(),
             encryption_context: digest,
         },
+        // The driver admits a task only on a worker whose runtime matches the program's
+        // environment, so the fixture program carries this build's actual environment.
         program_revision: ProgramRevision::new(
             digest,
             digest,
-            ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap(),
         output_policy: AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap(),
@@ -142,7 +142,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
 fn planning_policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
+        element_heat_source: None,
     }
 }
 
@@ -377,10 +377,6 @@ fn run_chain(
     assert_eq!(receipt.source_resource_usage, baseline.evidence.identity());
     assert_eq!(receipt.source_resource_plan, solve_plan);
     assert_eq!(receipt.source_result, completed.result.manifest.identity());
-    assert_eq!(
-        receipt.formulation_requirement,
-        FormulationRequirement::Experimental
-    );
     assert_eq!(receipt.accuracy_status, AccuracyStatus::Satisfied);
     validate_result_publication_resource_usage(
         receipt,

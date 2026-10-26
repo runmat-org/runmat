@@ -69,7 +69,6 @@ fn fixture() -> (
     let mut run = super::super::analysis_run_linear_static_with_options(
         &super::super::tests::sample_model(),
         runmat_analysis_fea::ComputeBackend::Cpu,
-        runmat_analysis_core::FormulationRequirement::Experimental,
         Default::default(),
         crate::operations::OperationContext::new(None, None),
     )
@@ -82,7 +81,6 @@ fn fixture() -> (
         execution: super::super::AnalysisExecutionStep {
             step_id: step.step_id.clone(),
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_options: super::super::AnalysisSolverOptions::defaults_for(&step).unwrap(),
         },
         procedure_step: step,
@@ -94,11 +92,9 @@ fn fixture() -> (
         run_id: run.run_id.clone(),
         run_status: run.run_status,
         numerically_acceptable: run.numerically_acceptable,
-        production_publishable: run.production_publishable,
         solver_convergence: run.solver_convergence,
         result_quality: run.result_quality,
         quality_reasons: run.quality_reasons.clone(),
-        production_publication_reasons: run.production_publication_reasons.clone(),
         provenance: run.provenance.clone(),
         numerical_result: super::super::AnalysisStudyStepNumericalResultData::Standard,
         evidence_artifact_path: String::new(),

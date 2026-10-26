@@ -4,14 +4,12 @@ use crate::{
     solve::nonlinear::solid::continuum_qualification::fixture,
     topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
 };
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn complete_point_history_and_accepted_cap_have_their_own_resource_authority() {
     for quadratic in [false, true] {
         let (model, mesh, _) = fixture::prepare(1, quadratic);
         let mut options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             max_accepted_increments: 8,
             ..NonlinearSolveOptions::default()
@@ -70,7 +68,6 @@ fn complete_point_history_and_accepted_cap_have_their_own_resource_authority() {
 fn authored_memory_ceiling_rejects_before_physical_assembly_and_solve() {
     let (mut model, mesh, _) = fixture::prepare(1, false);
     let options = NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
         ..NonlinearSolveOptions::default()
@@ -98,9 +95,10 @@ fn authored_memory_ceiling_rejects_before_physical_assembly_and_solve() {
 #[test]
 fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparation() {
     use crate::planning::resource::ResourcePlanningError;
-    let (model, mesh, _) = fixture::prepare(1, false);
+    let (mut model, mesh, _) = fixture::prepare(1, false);
+    // An authored ceiling: the default is unbounded and placement applies machine capacity.
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 8 << 30;
     let options = NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
         ..NonlinearSolveOptions::default()
@@ -139,9 +137,10 @@ fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparati
 fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
     use crate::planning::resource::{build_resource_plan, FeaResourcePlan, SolveResourcePolicy};
     for quadratic in [false, true] {
-        let (model, mesh, _) = fixture::prepare(1, quadratic);
+        let (mut model, mesh, _) = fixture::prepare(1, quadratic);
+        // An authored ceiling: the default is unbounded and placement applies machine capacity.
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 8 << 30;
         let mut options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh),
             max_accepted_increments: 8,
             ..NonlinearSolveOptions::default()
@@ -216,5 +215,43 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
             matches!(error, FeaRunError::Resource(crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
             required, maximum: ceiling, .. }) if required == maximum + 1 && ceiling == maximum)
         );
+    }
+}
+
+#[test]
+fn diag_resource_scaling_with_mesh_size() {
+    for cells in [2, 4, 6] {
+        let (model, mesh, _) = fixture::prepare(cells, true);
+        let mut model = model;
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = u64::MAX / 4;
+        let options = NonlinearSolveOptions {
+            solver_mesh: Some(mesh.clone()),
+            ..NonlinearSolveOptions::default()
+        };
+        for limit in [8usize, 4096] {
+            let plan = prepare_with_output_limit(&model, &model.sequence.steps[0], ComputeBackend::Cpu, &options, limit).unwrap();
+            let FeaResourceDemand::StructuralNonlinearPipeline(demand) = &plan.input.demand else { panic!() };
+            let integration = crate::topology::CanonicalSolidIntegrationPlan::derive(
+                &mesh,
+                crate::topology::CanonicalSolidIntegrationRule::Keast15,
+            )
+            .unwrap();
+            let properties = crate::properties::compile_structural_property_map(&model, Some(&mesh))
+                .unwrap()
+                .identity;
+            let storage = crate::assembly::nonlinear_solid::resources::NonlinearSolidStorageDemand::derive(
+                &integration,
+                &properties,
+                mesh.topology.nodes.len() * 3,
+                1,
+                limit,
+                options.line_search,
+            )
+            .unwrap();
+            eprintln!("DIAG storage cells={cells} limit={limit} points={} {storage:?}", integration.total_point_count());
+            eprintln!("DIAG cells={cells} limit={limit} request_memory={} breakdown={:?} persistent={} artifact={} solve={:?}",
+                plan.request.memory_bytes, plan.breakdown, demand.additional_persistent_bytes.0,
+                demand.operator.publication.result_artifact_bytes.0, demand.operator.solve);
+        }
     }
 }

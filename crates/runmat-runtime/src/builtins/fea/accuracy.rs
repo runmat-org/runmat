@@ -8,16 +8,18 @@ use runmat_analysis_core::{
 use super::*;
 use crate::builtins::fea::study_policies::{accuracy as policy, observation};
 use crate::builtins::fea::study_values::{
-    from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
-    VALUE_FIELD,
+    from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 
-pub(super) const TARGET_CLASS: &str = "fea.AccuracyTarget";
-pub(super) const TOLERANCE_CLASS: &str = "fea.AccuracyTolerance";
-pub(super) const EQUIVALENCE_CLASS: &str = "fea.NumericalEquivalencePolicy";
-pub(super) const RESOURCES_CLASS: &str = "fea.AccuracyResourceCeiling";
-pub(super) const CRITERION_CLASS: &str = "fea.AccuracyCriterion";
-pub(super) const PLAN_CLASS: &str = "fea.AccuracyPlan";
+use runmat_builtins::fea_contract::policy_types::classes;
+
+pub(super) const TARGET_CLASS: &str = classes::ACCURACY_TARGET.display_name();
+pub(super) const TOLERANCE_CLASS: &str = classes::ACCURACY_TOLERANCE.display_name();
+pub(super) const EQUIVALENCE_CLASS: &str = classes::NUMERICAL_EQUIVALENCE_POLICY.display_name();
+pub(super) const RESOURCES_CLASS: &str = classes::ACCURACY_RESOURCE_CEILING.display_name();
+pub(super) const CRITERION_CLASS: &str = classes::ACCURACY_CRITERION.display_name();
+pub(super) const PLAN_CLASS: &str = classes::ACCURACY_PLAN.display_name();
 
 const RESOURCES_FIELDS: &[&str] = &[
     "maximum_refinement_cycles",
@@ -43,218 +45,9 @@ const PLAN_FIELDS: &[&str] = &[
     "resources",
 ];
 
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const ID_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "id",
-    BuiltinParamType::StringScalar,
-    "Stable identifier.",
-)];
-const VALUE_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "value",
-    BuiltinParamType::NumericScalar,
-    "Finite positive tolerance.",
-)];
-const ABSOLUTE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "quantity",
-        BuiltinParamType::Any,
-        "Typed observation quantity.",
-    ),
-    required(
-        "canonicalValue",
-        BuiltinParamType::NumericScalar,
-        "Positive tolerance in canonical SI units.",
-    ),
-];
-const RESOURCES_INPUTS: [BuiltinParamDescriptor; 5] = [
-    required(
-        "maximumRefinementCycles",
-        BuiltinParamType::NumericScalar,
-        "Maximum automatic spatial refinements.",
-    ),
-    required(
-        "maximumSolverTightenings",
-        BuiltinParamType::NumericScalar,
-        "Maximum solver-tolerance tightenings.",
-    ),
-    required(
-        "maximumSamples",
-        BuiltinParamType::NumericScalar,
-        "Maximum observation or study samples.",
-    ),
-    required(
-        "maximumWallTimeMilliseconds",
-        BuiltinParamType::NumericScalar,
-        "Maximum wall time in milliseconds.",
-    ),
-    required(
-        "maximumResidentBytes",
-        BuiltinParamType::NumericScalar,
-        "Maximum resident bytes.",
-    ),
-];
-const CRITERION_INPUTS: [BuiltinParamDescriptor; 6] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Criterion identifier.",
-    ),
-    required("target", BuiltinParamType::Any, "Typed accuracy target."),
-    required(
-        "contribution",
-        BuiltinParamType::Any,
-        "Typed error contribution.",
-    ),
-    required(
-        "tolerance",
-        BuiltinParamType::Any,
-        "Typed accuracy tolerance.",
-    ),
-    required(
-        "evidence",
-        BuiltinParamType::Any,
-        "Typed required evidence.",
-    ),
-    required(
-        "mandatory",
-        BuiltinParamType::LogicalArray,
-        "Whether failure blocks acceptance.",
-    ),
-];
-const PLAN_INPUTS: [BuiltinParamDescriptor; 6] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Accuracy-plan identifier.",
-    ),
-    required(
-        "criteria",
-        BuiltinParamType::Any,
-        "Typed criterion or cell array.",
-    ),
-    required(
-        "unavailableEvidence",
-        BuiltinParamType::Any,
-        "Typed unavailable-evidence policy.",
-    ),
-    required(
-        "exceededLimit",
-        BuiltinParamType::Any,
-        "Typed limit action.",
-    ),
-    required(
-        "equivalence",
-        BuiltinParamType::Any,
-        "Typed numerical-equivalence policy.",
-    ),
-    required(
-        "resources",
-        BuiltinParamType::Any,
-        "Typed resource ceiling.",
-    ),
-];
-
-const NUMERIC_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "tolerance or resource ceiling",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Resource ceilings remain exact; physical tolerances cross once into canonical binary64 storage.",
-}];
-const NUMERIC_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typed accuracy parameter",
-        inputs: &NUMERIC_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Accuracy authoring constructs immutable host values and does not execute a solver.",
-    }];
-const STRUCTURAL_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "This constructor accepts identifiers and typed FEA policy objects only.",
-};
-
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-descriptor!(
-    TARGET_OBSERVATION_DESCRIPTOR,
-    TARGET_OBSERVATION_SIGNATURES,
-    "target = fea.AccuracyTarget.observation(id)",
-    &ID_INPUTS
-);
-descriptor!(
-    TARGET_QUANTITY_DESCRIPTOR,
-    TARGET_QUANTITY_SIGNATURES,
-    "target = fea.AccuracyTarget.quantity(quantity)",
-    &[required(
-        "quantity",
-        BuiltinParamType::Any,
-        "Typed observation quantity."
-    )]
-);
-descriptor!(
-    TARGET_NUMERICAL_RESULT_DESCRIPTOR,
-    TARGET_NUMERICAL_RESULT_SIGNATURES,
-    "target = fea.AccuracyTarget.numericalResult()",
-    &NO_INPUTS
-);
-descriptor!(
-    TARGET_GLOBAL_DESCRIPTOR,
-    TARGET_GLOBAL_SIGNATURES,
-    "target = fea.AccuracyTarget.globalEquilibrium()",
-    &NO_INPUTS
-);
-descriptor!(
-    TARGET_INTERFACE_DESCRIPTOR,
-    TARGET_INTERFACE_SIGNATURES,
-    "target = fea.AccuracyTarget.interfaceClosure()",
-    &NO_INPUTS
-);
-descriptor!(
-    TARGET_EQUIVALENCE_DESCRIPTOR,
-    TARGET_EQUIVALENCE_SIGNATURES,
-    "target = fea.AccuracyTarget.executionEquivalence()",
-    &NO_INPUTS
-);
-
 #[runtime_builtin(
     name = "fea.AccuracyTarget.observation",
-    category = "fea",
-    summary = "Target a typed observation for accuracy acceptance.",
-    keywords = "fea,accuracy,target,observation,typed",
-    descriptor(TARGET_OBSERVATION_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn target_observation(id: String) -> BuiltinResult<Value> {
@@ -267,11 +60,7 @@ pub async fn target_observation(id: String) -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.AccuracyTarget.quantity",
-    category = "fea",
-    summary = "Target a physical quantity for accuracy acceptance.",
-    keywords = "fea,accuracy,target,quantity,typed",
-    descriptor(TARGET_QUANTITY_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn target_quantity(quantity: Value) -> BuiltinResult<Value> {
@@ -284,55 +73,35 @@ pub async fn target_quantity(quantity: Value) -> BuiltinResult<Value> {
 }
 
 macro_rules! no_arg_target {
-    ($function:ident, $name:literal, $descriptor:ident, $value:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Select a typed study-level accuracy target.", keywords = "fea,accuracy,target,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::accuracy")]
+    ($function:ident, $name:literal, $value:expr) => {
+        #[runtime_builtin(name = $name, binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
         pub async fn $function() -> BuiltinResult<Value> { to_typed_value($name, TARGET_CLASS, $value) }
     };
 }
 no_arg_target!(
     target_numerical_result,
     "fea.AccuracyTarget.numericalResult",
-    TARGET_NUMERICAL_RESULT_DESCRIPTOR,
     AccuracyTarget::NumericalResult
 );
 no_arg_target!(
     target_global,
     "fea.AccuracyTarget.globalEquilibrium",
-    TARGET_GLOBAL_DESCRIPTOR,
     AccuracyTarget::GlobalEquilibrium
 );
 no_arg_target!(
     target_interface,
     "fea.AccuracyTarget.interfaceClosure",
-    TARGET_INTERFACE_DESCRIPTOR,
     AccuracyTarget::InterfaceClosure
 );
 no_arg_target!(
     target_equivalence,
     "fea.AccuracyTarget.executionEquivalence",
-    TARGET_EQUIVALENCE_DESCRIPTOR,
     AccuracyTarget::ExecutionEquivalence
 );
 
-descriptor!(
-    TOLERANCE_RELATIVE_DESCRIPTOR,
-    TOLERANCE_RELATIVE_SIGNATURES,
-    "tolerance = fea.AccuracyTolerance.relative(value)",
-    &VALUE_INPUTS
-);
-descriptor!(
-    TOLERANCE_ABSOLUTE_DESCRIPTOR,
-    TOLERANCE_ABSOLUTE_SIGNATURES,
-    "tolerance = fea.AccuracyTolerance.absolute(quantity, canonicalValue)",
-    &ABSOLUTE_INPUTS
-);
 #[runtime_builtin(
     name = "fea.AccuracyTolerance.relative",
-    category = "fea",
-    summary = "Create a relative accuracy tolerance.",
-    keywords = "fea,accuracy,tolerance,relative,typed",
-    descriptor(TOLERANCE_RELATIVE_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn tolerance_relative(value: Value) -> BuiltinResult<Value> {
@@ -345,11 +114,7 @@ pub async fn tolerance_relative(value: Value) -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.AccuracyTolerance.absolute",
-    category = "fea",
-    summary = "Create a dimensioned absolute accuracy tolerance.",
-    keywords = "fea,accuracy,tolerance,absolute,typed",
-    descriptor(TOLERANCE_ABSOLUTE_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn tolerance_absolute(quantity: Value, value: Value) -> BuiltinResult<Value> {
@@ -364,31 +129,9 @@ pub async fn tolerance_absolute(quantity: Value, value: Value) -> BuiltinResult<
     )
 }
 
-descriptor!(
-    EQUIVALENCE_DETERMINISTIC_DESCRIPTOR,
-    EQUIVALENCE_DETERMINISTIC_SIGNATURES,
-    "policy = fea.NumericalEquivalencePolicy.deterministic()",
-    &NO_INPUTS
-);
-descriptor!(
-    EQUIVALENCE_RELATIVE_DESCRIPTOR,
-    EQUIVALENCE_RELATIVE_SIGNATURES,
-    "policy = fea.NumericalEquivalencePolicy.relativeTolerance(value)",
-    &VALUE_INPUTS
-);
-descriptor!(
-    EQUIVALENCE_ABSOLUTE_DESCRIPTOR,
-    EQUIVALENCE_ABSOLUTE_SIGNATURES,
-    "policy = fea.NumericalEquivalencePolicy.absoluteTolerance(value)",
-    &VALUE_INPUTS
-);
 #[runtime_builtin(
     name = "fea.NumericalEquivalencePolicy.deterministic",
-    category = "fea",
-    summary = "Require deterministic numerical equivalence.",
-    keywords = "fea,accuracy,equivalence,deterministic,typed",
-    descriptor(EQUIVALENCE_DETERMINISTIC_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn equivalence_deterministic() -> BuiltinResult<Value> {
@@ -400,11 +143,7 @@ pub async fn equivalence_deterministic() -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.NumericalEquivalencePolicy.relativeTolerance",
-    category = "fea",
-    summary = "Bound relative numerical-equivalence variation.",
-    keywords = "fea,accuracy,equivalence,relative,typed",
-    descriptor(EQUIVALENCE_RELATIVE_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn equivalence_relative(value: Value) -> BuiltinResult<Value> {
@@ -419,11 +158,7 @@ pub async fn equivalence_relative(value: Value) -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.NumericalEquivalencePolicy.absoluteTolerance",
-    category = "fea",
-    summary = "Bound absolute numerical-equivalence variation.",
-    keywords = "fea,accuracy,equivalence,absolute,typed",
-    descriptor(EQUIVALENCE_ABSOLUTE_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
 pub async fn equivalence_absolute(value: Value) -> BuiltinResult<Value> {
@@ -437,17 +172,13 @@ pub async fn equivalence_absolute(value: Value) -> BuiltinResult<Value> {
     )
 }
 
-descriptor!(RESOURCES_DESCRIPTOR, RESOURCES_SIGNATURES, "resources = fea.AccuracyResourceCeiling.new(maximumRefinementCycles, maximumSolverTightenings, maximumSamples, maximumWallTimeMilliseconds, maximumResidentBytes)", &RESOURCES_INPUTS);
 #[runtime_builtin(
     name = "fea.AccuracyResourceCeiling.new",
-    category = "fea",
-    summary = "Bound automatic accuracy work and resource use.",
-    keywords = "fea,accuracy,resources,ceiling,typed",
-    descriptor(RESOURCES_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn resources(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn resources(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.AccuracyResourceCeiling.new";
     if args.len() != 5 {
         return Err(builtin_error(
@@ -468,17 +199,13 @@ pub async fn resources(args: Vec<Value>) -> BuiltinResult<Value> {
     serializable_to_object(NAME, &ERROR_INTERNAL, RESOURCES_CLASS, &ceiling)
 }
 
-descriptor!(CRITERION_DESCRIPTOR, CRITERION_SIGNATURES, "criterion = fea.AccuracyCriterion.new(id, target, contribution, tolerance, evidence, mandatory)", &CRITERION_INPUTS);
 #[runtime_builtin(
     name = "fea.AccuracyCriterion.new",
-    category = "fea",
-    summary = "Create one typed accuracy acceptance criterion.",
-    keywords = "fea,accuracy,criterion,evidence,typed",
-    descriptor(CRITERION_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn criterion(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn criterion(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.AccuracyCriterion.new";
     if args.len() != 6 {
         return Err(builtin_error(
@@ -506,23 +233,13 @@ pub async fn criterion(args: Vec<Value>) -> BuiltinResult<Value> {
     )
 }
 
-descriptor!(PLAN_DESCRIPTOR, PLAN_SIGNATURES, "plan = fea.AccuracyPlan.new(id, criteria, unavailableEvidence, exceededLimit, equivalence, resources)", &PLAN_INPUTS);
-descriptor!(
-    PLAN_EXPERIMENTAL_DESCRIPTOR,
-    PLAN_EXPERIMENTAL_SIGNATURES,
-    "plan = fea.AccuracyPlan.experimentalBaseline(id)",
-    &ID_INPUTS
-);
 #[runtime_builtin(
     name = "fea.AccuracyPlan.new",
-    category = "fea",
-    summary = "Create a typed study-step accuracy plan.",
-    keywords = "fea,accuracy,plan,acceptance,typed",
-    descriptor(PLAN_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn plan(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn plan(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.AccuracyPlan.new";
     if args.len() != 6 {
         return Err(builtin_error(
@@ -550,21 +267,17 @@ pub async fn plan(args: Vec<Value>) -> BuiltinResult<Value> {
     )
 }
 #[runtime_builtin(
-    name = "fea.AccuracyPlan.experimentalBaseline",
-    category = "fea",
-    summary = "Create the explicit non-production baseline accuracy plan.",
-    keywords = "fea,accuracy,plan,experimental,typed",
-    descriptor(PLAN_EXPERIMENTAL_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
+    name = "fea.AccuracyPlan.baseline",
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn experimental_plan(id: String) -> BuiltinResult<Value> {
-    const NAME: &str = "fea.AccuracyPlan.experimentalBaseline";
+pub async fn baseline_plan(id: String) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.AccuracyPlan.baseline";
     serializable_to_object(
         NAME,
         &ERROR_INTERNAL,
         PLAN_CLASS,
-        &AccuracyPlan::experimental_baseline(nonempty_id(NAME, "accuracy plan id", id)?),
+        &AccuracyPlan::baseline(nonempty_id(NAME, "accuracy plan id", id)?),
     )
 }
 
@@ -572,75 +285,306 @@ pub(super) fn accuracy_plan(name: &'static str, value: &Value) -> BuiltinResult<
     object_payload(name, value, PLAN_CLASS)
 }
 
+const ACCURACY_STUDY_CLASSES: [ImmutableStudyClass; 6] = [
+    ImmutableStudyClass {
+        class_name: TARGET_CLASS,
+        type_identity: "runmat.fea.accuracy-target",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("observation", "fea.AccuracyTarget.observation"),
+            ("quantity", "fea.AccuracyTarget.quantity"),
+            ("numericalResult", "fea.AccuracyTarget.numericalResult"),
+            ("globalEquilibrium", "fea.AccuracyTarget.globalEquilibrium"),
+            ("interfaceClosure", "fea.AccuracyTarget.interfaceClosure"),
+            (
+                "executionEquivalence",
+                "fea.AccuracyTarget.executionEquivalence",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: TOLERANCE_CLASS,
+        type_identity: "runmat.fea.accuracy-tolerance",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("relative", "fea.AccuracyTolerance.relative"),
+            ("absolute", "fea.AccuracyTolerance.absolute"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: EQUIVALENCE_CLASS,
+        type_identity: "runmat.fea.numerical-equivalence-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "deterministic",
+                "fea.NumericalEquivalencePolicy.deterministic",
+            ),
+            (
+                "relativeTolerance",
+                "fea.NumericalEquivalencePolicy.relativeTolerance",
+            ),
+            (
+                "absoluteTolerance",
+                "fea.NumericalEquivalencePolicy.absoluteTolerance",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: RESOURCES_CLASS,
+        type_identity: "runmat.fea.accuracy-resource-ceiling",
+        fields: RESOURCES_FIELDS,
+        methods: &[("new", "fea.AccuracyResourceCeiling.new")],
+    },
+    ImmutableStudyClass {
+        class_name: CRITERION_CLASS,
+        type_identity: "runmat.fea.accuracy-criterion",
+        fields: CRITERION_FIELDS,
+        methods: &[("new", "fea.AccuracyCriterion.new")],
+    },
+    ImmutableStudyClass {
+        class_name: PLAN_CLASS,
+        type_identity: "runmat.fea.accuracy-plan",
+        fields: PLAN_FIELDS,
+        methods: &[
+            ("new", "fea.AccuracyPlan.new"),
+            ("baseline", "fea.AccuracyPlan.baseline"),
+        ],
+    },
+];
+
 pub(super) fn ensure_accuracy_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            TARGET_CLASS,
-            "runmat.fea.accuracy-target",
-            VALUE_FIELD,
-            &[
-                ("observation", "fea.AccuracyTarget.observation"),
-                ("quantity", "fea.AccuracyTarget.quantity"),
-                ("globalEquilibrium", "fea.AccuracyTarget.globalEquilibrium"),
-                ("interfaceClosure", "fea.AccuracyTarget.interfaceClosure"),
-                (
-                    "executionEquivalence",
-                    "fea.AccuracyTarget.executionEquivalence",
-                ),
-            ],
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(classes::ACCURACY_TARGET);
+    SCHEMAS.call_once(|| register_immutable_schemas(&ACCURACY_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACCURACY_STUDY_CLASSES));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_analysis_core::{
+        AccuracyLimitAction, ErrorContributionKind, ObservationQuantity, RequiredAccuracyEvidence,
+        UnavailableEvidencePolicy,
+    };
+    use runmat_value::CellArray;
+
+    fn registered() {
+        super::super::ensure_value_classes_registered();
+    }
+
+    fn tip_criterion() -> Value {
+        block_on(criterion(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("tip_mesh".into()),
+                block_on(target_observation("tip_displacement".into())).unwrap(),
+                block_on(policy::contribution_spatial()).unwrap(),
+                block_on(tolerance_relative(Value::Num(0.01))).unwrap(),
+                block_on(policy::evidence_convergence()).unwrap(),
+                Value::Bool(true),
+            ]),
+        ))
+        .unwrap()
+    }
+
+    fn ceiling(bytes: Value) -> BuiltinResult<Value> {
+        block_on(resources(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Int(IntValue::U8(2)),
+                Value::Num(100.0),
+                Value::Num(600_000.0),
+                bytes,
+            ]),
+        ))
+    }
+
+    #[test]
+    fn targets_preserve_typed_values_and_reject_empty_or_untyped_inputs() {
+        registered();
+        let observation = block_on(target_observation("tip_displacement".into())).unwrap();
+        assert_eq!(
+            from_typed_value::<AccuracyTarget>("test", TARGET_CLASS, &observation).unwrap(),
+            AccuracyTarget::Observation(ObservationId("tip_displacement".into()))
         );
-        register_immutable_class(
-            TOLERANCE_CLASS,
-            "runmat.fea.accuracy-tolerance",
-            VALUE_FIELD,
-            &[
-                ("relative", "fea.AccuracyTolerance.relative"),
-                ("absolute", "fea.AccuracyTolerance.absolute"),
-            ],
+        assert!(block_on(target_observation("  ".into())).is_err());
+
+        let stress = block_on(observation::quantity_von_mises_stress()).unwrap();
+        let quantity = block_on(target_quantity(stress)).unwrap();
+        assert_eq!(
+            from_typed_value::<AccuracyTarget>("test", TARGET_CLASS, &quantity).unwrap(),
+            AccuracyTarget::Quantity(ObservationQuantity::VonMisesStress)
         );
-        register_immutable_class(
-            EQUIVALENCE_CLASS,
-            "runmat.fea.numerical-equivalence-policy",
-            VALUE_FIELD,
-            &[
-                (
-                    "deterministic",
-                    "fea.NumericalEquivalencePolicy.deterministic",
-                ),
-                (
-                    "relativeTolerance",
-                    "fea.NumericalEquivalencePolicy.relativeTolerance",
-                ),
-                (
-                    "absoluteTolerance",
-                    "fea.NumericalEquivalencePolicy.absoluteTolerance",
-                ),
-            ],
+        assert!(block_on(target_quantity(Value::String("stress".into()))).is_err());
+
+        for (value, expected) in [
+            (
+                block_on(target_numerical_result()),
+                AccuracyTarget::NumericalResult,
+            ),
+            (block_on(target_global()), AccuracyTarget::GlobalEquilibrium),
+            (
+                block_on(target_interface()),
+                AccuracyTarget::InterfaceClosure,
+            ),
+            (
+                block_on(target_equivalence()),
+                AccuracyTarget::ExecutionEquivalence,
+            ),
+        ] {
+            let value = value.unwrap();
+            assert_eq!(
+                from_typed_value::<AccuracyTarget>("test", TARGET_CLASS, &value).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn tolerances_and_equivalence_store_finite_scalars_and_reject_non_numeric_inputs() {
+        registered();
+        let relative = block_on(tolerance_relative(Value::Int(IntValue::I8(1)))).unwrap();
+        assert_eq!(
+            from_typed_value::<AccuracyTolerance>("test", TOLERANCE_CLASS, &relative).unwrap(),
+            AccuracyTolerance::Relative(1.0)
         );
-        register_immutable_class(
-            RESOURCES_CLASS,
-            "runmat.fea.accuracy-resource-ceiling",
-            RESOURCES_FIELDS,
-            &[("new", "fea.AccuracyResourceCeiling.new")],
+        let displacement = block_on(observation::quantity_displacement()).unwrap();
+        let absolute = block_on(tolerance_absolute(displacement, Value::Num(1e-4))).unwrap();
+        assert_eq!(
+            from_typed_value::<AccuracyTolerance>("test", TOLERANCE_CLASS, &absolute).unwrap(),
+            AccuracyTolerance::Absolute {
+                quantity: ObservationQuantity::Displacement,
+                canonical_value: 1e-4,
+            }
         );
-        register_immutable_class(
-            CRITERION_CLASS,
-            "runmat.fea.accuracy-criterion",
-            CRITERION_FIELDS,
-            &[("new", "fea.AccuracyCriterion.new")],
+        assert!(block_on(tolerance_relative(Value::Bool(true))).is_err());
+        assert!(block_on(tolerance_relative(Value::Num(f64::NAN))).is_err());
+        assert!(block_on(tolerance_absolute(
+            Value::String("displacement".into()),
+            Value::Num(1.0)
+        ))
+        .is_err());
+
+        let deterministic = block_on(equivalence_deterministic()).unwrap();
+        let relative = block_on(equivalence_relative(Value::Num(1e-10))).unwrap();
+        let absolute = block_on(equivalence_absolute(Value::Num(1e-12))).unwrap();
+        for (value, expected) in [
+            (deterministic, NumericalEquivalencePolicy::Deterministic),
+            (
+                relative,
+                NumericalEquivalencePolicy::RelativeTolerance(1e-10),
+            ),
+            (
+                absolute,
+                NumericalEquivalencePolicy::AbsoluteTolerance(1e-12),
+            ),
+        ] {
+            assert_eq!(
+                from_typed_value::<NumericalEquivalencePolicy>("test", EQUIVALENCE_CLASS, &value)
+                    .unwrap(),
+                expected
+            );
+        }
+        assert!(block_on(equivalence_relative(Value::String("1e-10".into()))).is_err());
+    }
+
+    #[test]
+    fn resource_ceilings_stay_exact_and_reject_invalid_counts() {
+        registered();
+        let wide = (1u64 << 53) + 1;
+        let value = ceiling(Value::Int(IntValue::U64(wide))).unwrap();
+        let ceiling_value: AccuracyResourceCeiling =
+            object_payload("test", &value, RESOURCES_CLASS).unwrap();
+        assert_eq!(ceiling_value.maximum_resident_bytes, wide);
+        assert_eq!(ceiling_value.maximum_solver_tightenings, 2);
+        assert_eq!(ceiling_value.maximum_wall_time_milliseconds, 600_000);
+        assert!(ceiling(Value::Num(-1.0)).is_err());
+        assert!(ceiling(Value::Num(2.5)).is_err());
+        assert!(block_on(resources(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)])
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn criterion_requires_typed_policies_and_a_logical_mandatory_flag() {
+        registered();
+        let value = tip_criterion();
+        let criterion_value: AccuracyCriterion =
+            object_payload("test", &value, CRITERION_CLASS).unwrap();
+        assert_eq!(criterion_value.criterion_id, "tip_mesh");
+        assert_eq!(
+            criterion_value.contribution,
+            ErrorContributionKind::SpatialDiscretization
         );
-        register_immutable_class(
-            PLAN_CLASS,
-            "runmat.fea.accuracy-plan",
-            PLAN_FIELDS,
-            &[
-                ("new", "fea.AccuracyPlan.new"),
-                (
-                    "experimentalBaseline",
-                    "fea.AccuracyPlan.experimentalBaseline",
-                ),
-            ],
+        assert_eq!(
+            criterion_value.evidence,
+            RequiredAccuracyEvidence::ConvergenceStudy
         );
-    });
+        assert!(criterion_value.mandatory);
+
+        let numeric_flag = block_on(criterion(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("tip_mesh".into()),
+                block_on(target_global()).unwrap(),
+                block_on(policy::contribution_algebraic()).unwrap(),
+                block_on(tolerance_relative(Value::Num(1e-8))).unwrap(),
+                block_on(policy::evidence_residual()).unwrap(),
+                Value::Num(1.0),
+            ]),
+        ));
+        assert!(numeric_flag.unwrap_err().to_string().contains("logical"));
+        assert!(block_on(criterion(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "tip_mesh".into()
+            )])
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn plans_accept_criteria_cells_and_round_trip_portably() {
+        registered();
+        let criteria = Value::Cell(CellArray::new(vec![tip_criterion()], 1, 1).unwrap());
+        let value = block_on(plan(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("static_acceptance".into()),
+                criteria,
+                block_on(policy::unavailable_fail()).unwrap(),
+                block_on(policy::limit_refine()).unwrap(),
+                block_on(equivalence_relative(Value::Num(1e-12))).unwrap(),
+                ceiling(Value::Num(2e9)).unwrap(),
+            ]),
+        ))
+        .unwrap();
+        let encoded = crate::execution::value_codec::encode_inline_value(&value).unwrap();
+        let decoded = crate::execution::value_codec::decode_inline_value(&encoded).unwrap();
+        let plan_value = accuracy_plan("test", &decoded).unwrap();
+        assert_eq!(plan_value.accuracy_plan_id.0, "static_acceptance");
+        assert_eq!(plan_value.criteria.len(), 1);
+        assert_eq!(
+            plan_value.unavailable_evidence,
+            UnavailableEvidencePolicy::Fail
+        );
+        assert_eq!(plan_value.exceeded_limit, AccuracyLimitAction::Refine);
+        assert!(block_on(plan(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "p".into()
+            )])
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn baseline_matches_the_core_baseline() {
+        registered();
+        let value = block_on(baseline_plan("bracket.accuracy".into())).unwrap();
+        assert_eq!(
+            accuracy_plan("test", &value).unwrap(),
+            AccuracyPlan::baseline("bracket.accuracy")
+        );
+        assert!(block_on(baseline_plan(String::new())).is_err());
+    }
 }

@@ -4,6 +4,26 @@ pub(super) fn prepare_run_artifact(
     run: &AnalysisRunResult,
     created_at: String,
 ) -> Result<PreparedRunArtifact, String> {
+    prepare_run_artifact_with_admission(run, created_at, &mut |_| Ok(()), None)
+}
+
+/// Receives field chunks as they are produced so they need not stay resident in staging.
+pub(super) trait FieldChunkSink {
+    /// Admits one field's encoded payload and chunk copies while they are in flight.
+    fn admit_in_flight(&mut self, bytes: u64) -> Result<(), String>;
+    fn put(&mut self, digest: Digest, bytes: &[u8]) -> Result<(), String>;
+}
+
+/// Prepares the persisted run, charging `admit` before each phase allocates:
+/// field payloads and their chunks, render tiles, history chunks, the typed
+/// stripping copy, and the stripped run's JSON projection (the only JSON tree
+/// built). Charges are cumulative requested estimates, not measured heap.
+pub(super) fn prepare_run_artifact_with_admission(
+    run: &AnalysisRunResult,
+    created_at: String,
+    admit: &mut dyn FnMut(u64) -> Result<(), String>,
+    mut sink: Option<&mut dyn FieldChunkSink>,
+) -> Result<PreparedRunArtifact, String> {
     let mut fields = BTreeMap::<String, PersistedFieldArtifact>::new();
     let mut chunks = HashMap::new();
     let mut seen_field_ids = HashSet::new();
@@ -43,6 +63,16 @@ pub(super) fn prepare_run_artifact(
                 if values.is_empty() {
                     return;
                 }
+                // The encoded payload and its chunk copies coexist while chunking.
+                let payload_bytes = (values.len() as u64).saturating_mul(16);
+                let admitted = match sink.as_deref_mut() {
+                    Some(sink) => sink.admit_in_flight(payload_bytes),
+                    None => admit(payload_bytes),
+                };
+                if let Err(error) = admitted {
+                    preparation_error = Some(error);
+                    return;
+                }
                 let payload = encode_field_values(values);
                 let payload_digest = Digest::sha256(&payload);
                 let logical_identity = field_logical_identity(field, payload_digest);
@@ -72,6 +102,13 @@ pub(super) fn prepare_run_artifact(
                     manifest: chunked.manifest.clone(),
                 };
                 for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+                    if let Some(sink) = sink.as_deref_mut() {
+                        if let Err(error) = sink.put(descriptor.digest, &bytes) {
+                            preparation_error = Some(error);
+                            return;
+                        }
+                        continue;
+                    }
                     match chunks.get(&descriptor.digest) {
                         Some(existing) if existing != &bytes => {
                             preparation_error =
@@ -106,6 +143,7 @@ pub(super) fn prepare_run_artifact(
     }
 
     let render_tiles = if let Some(topology) = run.render_topology.as_ref() {
+        admit(typed_estimate(topology)?)?;
         let (mut index, objects) = render_tiles::partition(topology)?;
         index.field_summaries = summarize_render_fields(run, index.volume_element_count)?;
         index.validate()?;
@@ -128,6 +166,8 @@ pub(super) fn prepare_run_artifact(
     };
     let mut observation_histories = Vec::with_capacity(run.run.observation_histories.len());
     for history in &run.run.observation_histories {
+        // Canonical bytes plus their chunk copies.
+        admit(typed_estimate(history)?.saturating_mul(2))?;
         let payload = history
             .canonical_bytes()
             .map_err(|error| error.to_string())?;
@@ -157,21 +197,148 @@ pub(super) fn prepare_run_artifact(
             manifest: chunked.manifest,
         });
     }
+    // Transient dynamic-balance vectors are numerical payload: chunk them like fields.
+    let dynamic_balance = match run.transient_results.as_ref() {
+        Some(transient)
+            if transient
+                .dynamic_balance_snapshots
+                .iter()
+                .any(|balance| !balance.applied_load.is_empty()) =>
+        {
+            let mut flat = Vec::new();
+            let mut dof_counts = Vec::with_capacity(transient.dynamic_balance_snapshots.len());
+            for balance in &transient.dynamic_balance_snapshots {
+                dof_counts.push(balance.applied_load.len() as u64);
+                for vector in [
+                    &balance.applied_load,
+                    &balance.inertia_force,
+                    &balance.damping_force,
+                    &balance.elastic_force,
+                    &balance.equilibrium_residual,
+                ] {
+                    if vector.len() != balance.applied_load.len() {
+                        return Err("transient dynamic balance vectors differ in length".into());
+                    }
+                    flat.extend_from_slice(vector);
+                }
+            }
+            let payload_bytes = (flat.len() as u64).saturating_mul(16);
+            match sink.as_deref_mut() {
+                Some(sink) => sink.admit_in_flight(payload_bytes)?,
+                None => admit(payload_bytes)?,
+            }
+            let payload = encode_field_values(&flat);
+            drop(flat);
+            let chunked = chunk_numerical_payload(
+                AnalysisNumericalObjectKind::Field,
+                Digest::sha256(&payload),
+                &payload,
+                DEFAULT_ANALYSIS_CHUNK_BYTES,
+            )
+            .map_err(|error| error.to_string())?;
+            for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+                if let Some(sink) = sink.as_deref_mut() {
+                    sink.put(descriptor.digest, &bytes)?;
+                    continue;
+                }
+                match chunks.entry(descriptor.digest) {
+                    std::collections::hash_map::Entry::Occupied(existing)
+                        if existing.get() != &bytes =>
+                    {
+                        return Err("dynamic balance chunk digest collision".into());
+                    }
+                    std::collections::hash_map::Entry::Occupied(_) => {}
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(bytes);
+                    }
+                }
+            }
+            Some(PersistedDynamicBalance {
+                dof_counts,
+                manifest: chunked.manifest,
+            })
+        }
+        _ => None,
+    };
+    admit(typed_estimate(run)?)?;
     let mut stripped_run = run.clone();
+    if dynamic_balance.is_some() {
+        if let Some(transient) = stripped_run.transient_results.as_mut() {
+            for balance in &mut transient.dynamic_balance_snapshots {
+                *balance = runmat_analysis_fea::StructuralDynamicBalanceSnapshot {
+                    applied_load: Vec::new(),
+                    inertia_force: Vec::new(),
+                    damping_force: Vec::new(),
+                    elastic_force: Vec::new(),
+                    equilibrium_residual: Vec::new(),
+                };
+            }
+        }
+    }
     stripped_run.observation_scalars =
         runmat_analysis_fea::results::assessment::scalar_observation_inventory(&run.run);
     stripped_run.render_topology = None;
-    stripped_run.run.observation_histories.clear();
+    stripped_run.run.observation_histories = Vec::new();
     crate::analysis::operations::visit_analysis_result_fields_mut(&mut stripped_run, |field| {
         if let AnalysisFieldValues::HostF64(values) = &mut field.values {
             if !values.is_empty() {
-                values.clear();
+                // Release the copied values rather than retaining their capacity.
+                *values = Vec::new();
             }
         }
     });
     let field_inventory =
         crate::analysis::operations::collect_analysis_result_fields(&stripped_run);
-    let run_value = serde_json::to_value(&stripped_run)
+    // Materialized observations and series reductions are chunked out so the typed metadata is
+    // the record's only copy of the run content.
+    let observation_payload = if stripped_run.run.observations.is_empty()
+        && stripped_run.run.series_reductions.is_empty()
+    {
+        None
+    } else {
+        // Field values were stripped above; their shells stay in the inventory and rehydrate
+        // from the field chunks when the run is materialized.
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "observations": &stripped_run.run.observations,
+            "series_reductions": &stripped_run.run.series_reductions,
+        }))
+        .map_err(|error| format!("failed to encode observation payload: {error}"))?;
+        stripped_run.run.observations = Vec::new();
+        stripped_run.run.series_reductions = Vec::new();
+        match sink.as_deref_mut() {
+            Some(sink) => sink.admit_in_flight(payload.len() as u64)?,
+            None => admit(payload.len() as u64)?,
+        }
+        let chunked = chunk_numerical_payload(
+            AnalysisNumericalObjectKind::History,
+            Digest::sha256(&payload),
+            &payload,
+            DEFAULT_ANALYSIS_CHUNK_BYTES,
+        )
+        .map_err(|error| error.to_string())?;
+        for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+            if let Some(sink) = sink.as_deref_mut() {
+                sink.put(descriptor.digest, &bytes)?;
+                continue;
+            }
+            match chunks.entry(descriptor.digest) {
+                std::collections::hash_map::Entry::Occupied(existing)
+                    if existing.get() != &bytes =>
+                {
+                    return Err("observation payload chunk digest collision".into());
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(bytes);
+                }
+            }
+        }
+        Some(chunked.manifest)
+    };
+    admit(json_projection_estimate(&stripped_run)?)?;
+    // The typed metadata is the single copy; the digest binds its JSON projection.
+    let metadata = stripped_run;
+    let run_value = serde_json::to_value(&metadata)
         .map_err(|error| format!("failed to encode stripped analysis run: {error}"))?;
     let materialized_field_ids = fields.keys().map(ToOwned::to_owned).collect::<Vec<_>>();
     let run_digest = persisted_run_digest(
@@ -181,15 +348,17 @@ pub(super) fn prepare_run_artifact(
         render_tiles.as_ref(),
         &observation_histories,
         None,
+        dynamic_balance.as_ref(),
+        observation_payload.as_ref(),
     )?;
-    let metadata = compact_run_metadata(&run_value)?;
+    drop(run_value);
     Ok(PreparedRunArtifact {
         persisted: PersistedRunArtifact {
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
             created_at,
             op_version: run_operation_version(run)?,
             run_digest,
-            run: run_value,
+            run: serde_json::Value::Null,
             metadata,
             field_inventory,
             materialized_field_ids,
@@ -197,9 +366,25 @@ pub(super) fn prepare_run_artifact(
             render_tiles,
             observation_histories,
             original_fields: None,
+            dynamic_balance,
+            observation_payload,
         },
         chunks,
     })
+}
+
+fn typed_estimate(value: &impl serde::Serialize) -> Result<u64, String> {
+    runmat_canonical_codec::typed_resident_bytes_estimate(value).map_err(|error| error.to_string())
+}
+
+fn json_projection_estimate(value: &impl serde::Serialize) -> Result<u64, String> {
+    runmat_canonical_codec::profile_serialized(
+        value,
+        runmat_canonical_codec::CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
+    )
+    .map_err(|error| error.to_string())?
+    .json_projection_resident_bytes_estimate()
+    .ok_or_else(|| "stripped run JSON projection estimate is invalid".to_string())
 }
 
 fn summarize_render_fields(

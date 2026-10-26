@@ -1,6 +1,12 @@
 use super::*;
 use crate::{fixtures::canonical_tetrahedron_solver_mesh, CanonicalMeshingContract, ElementOrder};
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 fixtures reserve unused node and nested provenance string capacity. The
+//   typed storage inventory counts that growth while canonical bytes remain identical. Excludes
+//   allocator bookkeeping, other owner copies, staging admission, measured peak and whole-study
+//   scaling.
 #[test]
 fn unused_nested_capacities_are_counted_without_changing_canonical_identity() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -14,14 +20,22 @@ fn unused_nested_capacities_are_counted_without_changing_canonical_identity() {
         let node_growth =
             slots::<super::super::SolverMeshNode>(mesh.topology.nodes.capacity() - nodes).unwrap();
         let provenance = &mut mesh.topology.nodes[0].provenance[0];
+        let address = provenance.shared_address();
         let capacity = provenance.source_topology_id.capacity();
         provenance.source_topology_id.reserve_exact(200);
         let text_growth = (provenance.source_topology_id.capacity() - capacity) as u64;
+        // Mutating a shared identity detaches this handle into its own allocation, which the
+        // inventory then charges in full; an unshared one grows in place.
+        let identity_growth = if provenance.shared_address() == address {
+            text_growth
+        } else {
+            provenance.shared_heap_bytes()
+        };
         assert_eq!(
             mesh.retained_storage_bytes(128 << 20, &mut || Ok(()))
                 .unwrap()
                 - before,
-            node_growth + text_growth
+            node_growth + identity_growth
         );
         assert_eq!(mesh.canonical_encode().unwrap(), encoded);
         // Canonical materialization has its own independent workspace demand.
@@ -50,6 +64,7 @@ fn retained_storage_counts_new_nested_metadata_and_checks_overflow() {
     );
     let mut checkpoint = || Ok(());
     let mut storage = Storage {
+        seen: Some(Default::default()),
         bytes: u64::MAX,
         maximum: u64::MAX,
         checkpoint: &mut checkpoint,
@@ -87,10 +102,15 @@ fn storage_inventory_respects_ceiling_and_cooperative_rejection_without_mutation
 fn projection_and_artifact_share_the_same_nested_capacity_inventory() {
     for order in [crate::ElementOrder::Tet4, crate::ElementOrder::Tet10] {
         let artifact = crate::fixtures::canonical_tetrahedron_solver_mesh(order);
+        // The artifact charges each distinct shared identity allocation once; a projection
+        // built from live geometry owns handles only.
+        let identity_heap = distinct_identity_heap(&artifact);
+        assert!(identity_heap > 0);
         let expected = artifact
             .retained_storage_bytes(128 << 20, &mut || Ok(()))
             .unwrap()
-            - std::mem::size_of_val(&artifact) as u64;
+            - std::mem::size_of_val(&artifact) as u64
+            - identity_heap;
         let projection = crate::SolverMeshProjection {
             schema_version: crate::SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
             geometry: artifact.geometry,
@@ -105,4 +125,37 @@ fn projection_and_artifact_share_the_same_nested_capacity_inventory() {
             expected
         );
     }
+}
+
+fn distinct_identity_heap(artifact: &crate::SolverMeshArtifact) -> u64 {
+    fn visit(
+        value: &serde_json::Value,
+        seen: &mut std::collections::HashSet<usize>,
+        total: &mut u64,
+    ) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if map.contains_key("source_topology_id") && map.contains_key("kind") {
+                    if let Ok(id) =
+                        serde_json::from_value::<PersistentEntityId>(value.clone())
+                    {
+                        // Interning resolves to the live allocation the artifact holds.
+                        if seen.insert(id.shared_address()) {
+                            *total += id.shared_heap_bytes();
+                        }
+                        return;
+                    }
+                }
+                map.values().for_each(|value| visit(value, seen, total));
+            }
+            serde_json::Value::Array(values) => {
+                values.iter().for_each(|value| visit(value, seen, total))
+            }
+            _ => {}
+        }
+    }
+    let mut seen = Default::default();
+    let mut total = 0;
+    visit(&serde_json::to_value(artifact).unwrap(), &mut seen, &mut total);
+    total
 }

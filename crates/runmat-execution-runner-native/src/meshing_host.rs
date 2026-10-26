@@ -15,6 +15,7 @@ use runmat_meshing_execution::{
     MeshingStageKernel,
 };
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
+#[cfg(test)]
 use tokio::io::AsyncReadExt;
 
 use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V2};
@@ -162,10 +163,11 @@ pub async fn run_meshing_worker_stdio(
         "meshing worker CPU allocation");
     let cancellation = Arc::new(ParentConnectionCancellation::default());
     let parent_connection = Arc::clone(&cancellation);
-    let parent_watchdog = tokio::spawn(cancel_and_terminate_on_parent_disconnect(
-        reader,
-        parent_connection,
-    ));
+    // The parent keeps stdin open until this one-shot worker exits. Watch it
+    // from a detached thread: a Tokio blocking stdin read would hold runtime
+    // shutdown open and deadlock with the parent waiting for exit.
+    drop(reader);
+    let parent_watchdog = ParentDisconnectWatchdog::spawn(parent_connection)?;
     let store = FilesystemObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let (progress_sender, mut progress_receiver) =
@@ -219,7 +221,7 @@ pub async fn run_meshing_worker_stdio(
             }
         }
     };
-    parent_watchdog.abort();
+    parent_watchdog.finish();
     if let Some(error) = progress_error
         .lock()
         .expect("meshing progress error poisoned")
@@ -239,6 +241,7 @@ pub async fn run_meshing_worker_stdio(
     Ok(())
 }
 
+#[cfg(test)]
 async fn cancel_on_parent_disconnect(
     mut reader: impl tokio::io::AsyncRead + Unpin,
     cancellation: Arc<ParentConnectionCancellation>,
@@ -248,17 +251,40 @@ async fn cancel_on_parent_disconnect(
     cancellation.cancel();
 }
 
-async fn cancel_and_terminate_on_parent_disconnect(
-    reader: impl tokio::io::AsyncRead + Unpin,
-    cancellation: Arc<ParentConnectionCancellation>,
-) {
-    cancel_on_parent_disconnect(reader, cancellation).await;
-    tokio::time::sleep(PARENT_DISCONNECT_SHUTDOWN_GRACE).await;
-    // A native worker has no useful independent lifetime: its object store, progress stream, and
-    // terminal response all belong to the parent attempt. Cooperative cancellation gets a short
-    // grace period for normal cleanup; a kernel that is between cancellation checkpoints must not
-    // survive indefinitely as an orphan.
-    std::process::exit(1);
+struct ParentDisconnectWatchdog {
+    finished: Arc<AtomicBool>,
+}
+
+impl ParentDisconnectWatchdog {
+    fn spawn(cancellation: Arc<ParentConnectionCancellation>) -> NativeExecutionResult<Self> {
+        let finished = Arc::new(AtomicBool::new(false));
+        let watched = Arc::clone(&finished);
+        std::thread::Builder::new()
+            .name("runmat-meshing-parent-watchdog".into())
+            .spawn(move || {
+                let mut unexpected_input = [0_u8; 1];
+                let _ = std::io::Read::read(&mut std::io::stdin().lock(), &mut unexpected_input);
+                if watched.load(Ordering::Acquire) {
+                    return;
+                }
+                cancellation.cancel();
+                std::thread::sleep(PARENT_DISCONNECT_SHUTDOWN_GRACE);
+                if watched.load(Ordering::Acquire) {
+                    return;
+                }
+                // A native worker has no useful independent lifetime: its object store, progress
+                // stream, and terminal response all belong to the parent attempt. Cooperative
+                // cancellation gets a short grace period for normal cleanup; a kernel that is
+                // between cancellation checkpoints must not survive indefinitely as an orphan.
+                std::process::exit(1);
+            })
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        Ok(Self { finished })
+    }
+
+    fn finish(&self) {
+        self.finished.store(true, Ordering::Release);
+    }
 }
 
 struct ChannelProgress {

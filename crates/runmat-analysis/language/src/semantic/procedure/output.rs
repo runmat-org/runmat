@@ -89,6 +89,7 @@ fn lower_expression(
             operation @ (OutputOperation::Real
             | OutputOperation::Imaginary
             | OutputOperation::Phase
+            | OutputOperation::Level
             | OutputOperation::Magnitude
             | OutputOperation::VonMises) => {
                 let source = positional_or_named(arguments, 0, "field")?;
@@ -97,6 +98,7 @@ fn lower_expression(
                         OutputOperation::Real => AuthoredFieldProjection::Real,
                         OutputOperation::Imaginary => AuthoredFieldProjection::Imaginary,
                         OutputOperation::Phase => AuthoredFieldProjection::Phase,
+                        OutputOperation::Level => AuthoredFieldProjection::Level,
                         OutputOperation::Magnitude => AuthoredFieldProjection::Magnitude,
                         OutputOperation::VonMises => AuthoredFieldProjection::VonMises,
                         _ => unreachable!(),
@@ -266,6 +268,69 @@ fn lower_expression(
                         }
                         _ => unreachable!(),
                     },
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                    target,
+                    ties: AuthoredExtremaTiePolicy::FirstCanonical,
+                })
+            }
+            // The active intensity of a harmonic analysis through a face region: the flux of
+            // its native element-average intensity field.
+            OutputOperation::SoundPower => {
+                let analysis = positional_or_named(arguments, 0, "analysis")?;
+                let CheckedExpressionKind::Reference(path) = &analysis.kind else {
+                    return invalid(declaration, analysis, diagnostics);
+                };
+                let [namespace, step_id] = path.as_slice() else {
+                    return invalid(declaration, analysis, diagnostics);
+                };
+                if namespace != "analysis" {
+                    return invalid(declaration, analysis, diagnostics);
+                }
+                let target = positional_or_named(arguments, 1, "through")?;
+                let target =
+                    super::super::model::region_source(bound, declaration, target, diagnostics)?;
+                if matches!(target, AuthoredRegionSource::ModelInput(_)) {
+                    lower::error(
+                        declaration,
+                        expression.span,
+                        "study output regions must name an exact geometry region",
+                        diagnostics,
+                    );
+                    return None;
+                }
+                Some(AuthoredOutputExpression::SpatialReduction {
+                    reduction: AuthoredSpatialReduction::NormalFlux,
+                    source: Box::new(AuthoredOutputExpression::AnalysisField {
+                        step_id: step_id.clone(),
+                        quantity: runmat_analysis_core::ObservationQuantity::AcousticIntensity,
+                        location: FieldLocation::Element,
+                    }),
+                    target,
+                    ties: AuthoredExtremaTiePolicy::FirstCanonical,
+                })
+            }
+            OutputOperation::NormalFlux => {
+                let source = positional_or_named(arguments, 0, "field")?;
+                let target = positional_or_named(arguments, 1, "through")?;
+                let target =
+                    super::super::model::region_source(bound, declaration, target, diagnostics)?;
+                if matches!(target, AuthoredRegionSource::ModelInput(_)) {
+                    lower::error(
+                        declaration,
+                        expression.span,
+                        "study output regions must name an exact geometry region",
+                        diagnostics,
+                    );
+                    return None;
+                }
+                Some(AuthoredOutputExpression::SpatialReduction {
+                    reduction: AuthoredSpatialReduction::NormalFlux,
                     source: Box::new(lower_expression(
                         bound,
                         declaration,

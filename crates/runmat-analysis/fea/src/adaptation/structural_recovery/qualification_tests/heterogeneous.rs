@@ -8,7 +8,6 @@ pub(super) fn solved_heterogeneous_tet4_stress_matches_an_independent_constituti
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
@@ -63,7 +62,7 @@ pub(super) fn solved_heterogeneous_tet4_stress_matches_an_independent_constituti
             .iter()
             .find(|assignment| {
                 assignment.selected_region_id()
-                    == Some(element.region_id.source_topology_id.as_str())
+                    == element.region_id.analysis_selection_id().ok().as_deref()
             })
             .unwrap();
         let material = model
@@ -116,7 +115,7 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
     let aluminum = model
         .material_assignments
         .iter_mut()
-        .find(|assignment| assignment.selected_region_id() == Some("mid_aluminum"))
+        .find(|assignment| assignment.selected_region_id() == Some(runmat_meshing_core::fixtures::fixture_region("mid_aluminum").as_str()))
         .unwrap();
     aluminum.assigned_material_id = "mat_aluminum".into();
     aluminum.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
@@ -127,7 +126,6 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
@@ -195,7 +193,7 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
             .iter()
             .find(|assignment| {
                 assignment.selected_region_id()
-                    == Some(element.region_id.source_topology_id.as_str())
+                    == element.region_id.analysis_selection_id().ok().as_deref()
             })
             .unwrap();
         let material = model
@@ -289,7 +287,6 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
         &reordered,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()

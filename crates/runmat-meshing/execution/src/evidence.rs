@@ -14,6 +14,8 @@ pub struct MeshingEvidenceContext {
     pub cache_admission: CacheAdmissionDecision,
     /// Driver-observed elapsed time for the complete operation, including concurrent stages.
     pub wall_time_ms: u64,
+    /// The execution ceilings the run was admitted under.
+    pub ceilings: runmat_meshing_core::MeshingExecutionCeilings,
 }
 
 /// Canonicalizes factual winning-stage observations and closes them over the final artifact.
@@ -37,6 +39,7 @@ pub fn assemble_meshing_evidence(
         .map_err(|_| invalid("canonical solver artifact length exceeds u64"))?;
     let resources = aggregate_resources(artifact, &stages, artifact_bytes, context.wall_time_ms)?;
     let evidence = MeshingEvidence {
+        ceilings: context.ceilings,
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact.resolved_request.canonical_digest()?,
@@ -74,8 +77,7 @@ fn aggregate_resources(
     Ok(MeshingResourceUsage {
         generated_nodes: u64::try_from(artifact.topology.nodes.len())
             .map_err(|_| invalid("solver node inventory exceeds u64"))?,
-        generated_elements: u64::try_from(artifact.topology.volume_elements.len())
-            .map_err(|_| invalid("solver element inventory exceeds u64"))?,
+        generated_elements: artifact.generated_element_count(),
         peak_memory_bytes,
         peak_scratch_bytes,
         wall_time_ms,

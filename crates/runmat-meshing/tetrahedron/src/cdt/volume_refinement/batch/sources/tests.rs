@@ -3,6 +3,12 @@ use crate::cdt::volume_refinement::tests::{context, quality, region};
 use crate::cdt::{assign_delaunay_volume_regions, DelaunayTopologyOptions};
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A batch-sized frontier matches the complete priority-sort prefix through4096
+//   unrelated cells, including ties, empty selection and cancellation. It bounds retained source
+//   references; preparation still reads the quality inventory and does not establish complete
+//   localized refinement throughput.
 #[test]
 fn bounded_frontier_matches_the_full_priority_order_across_unrelated_inventory() {
     for unrelated in [0, 64, 4096] {
@@ -56,6 +62,11 @@ fn bounded_frontier_matches_the_full_priority_order_across_unrelated_inventory()
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Bounded windows visit every source before wrapping on an unchanged inventory,
+//   including a blocked leading priority band. Priorities are synthetic scheduling inputs; this
+//   does not establish cavity feasibility, physical convergence or localized whole-mesh work.
 #[test]
 fn bounded_windows_visit_blocked_leaders_and_the_entire_tail_before_wrapping() {
     let topology = crate::cdt::topology::queries::tests::topology(256);
@@ -109,6 +120,11 @@ fn bounded_windows_visit_blocked_leaders_and_the_entire_tail_before_wrapping() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A partial window resumes after its last examined source rather than skipping
+//   unexamined entries or restarting the leading source. The cursor is scheduling state, not
+//   reusable rejection evidence.
 #[test]
 fn interrupted_window_resumes_at_the_last_examined_source() {
     let topology = crate::cdt::topology::queries::tests::topology(1);

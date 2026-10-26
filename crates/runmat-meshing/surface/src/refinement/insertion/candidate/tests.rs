@@ -22,13 +22,14 @@ impl GeometryEvaluationControl for Control {
         Ok(())
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Batch insertion admission preserves direct node duplication, protected-segment and
+//   trimmed-domain decisions on the tested disconnected regions. Existing robust predicates remain
+//   authoritative.
 #[test]
 fn indexed_membership_matches_direct_admission_in_disconnected_trimmed_regions() {
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "query-fixture".into(),
-        assembly_path: vec![],
-    };
+    let face = PersistentEntityId::new(PersistentEntityKind::Face, "query-fixture".into(), vec![]);
     let triangles = vec![
         ExactFaceDelaunayTriangle {
             vertex_indices: [0, 1, 2],

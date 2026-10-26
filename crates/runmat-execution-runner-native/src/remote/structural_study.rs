@@ -99,10 +99,26 @@ pub(super) async fn execute_for_composition(
         MeshedGeometryRegions::PersistentEntities(_) => {
             return Ok(
                 super::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(
-                    "typed structural studies require source-neutral materialized geometry".into(),
+                    "typed studies require source-neutral materialized geometry".into(),
                 ),
             )
         }
+    };
+    let Some(planning) = decoded.planning.structural() else {
+        let regions = regions.clone();
+        return Box::pin(super::family_study::execute(
+            super::family_study::FamilyComposition {
+                pool,
+                request,
+                meshing_request: geometry_contract.request.meshing_request.clone(),
+                decoded,
+                completed,
+                regions,
+                input_outcomes,
+                resources,
+            },
+        ))
+        .await;
     };
     let product = match runmat_analysis_fea::study::build_structural_study_product_with_fields(
         runmat_analysis_fea::study::StructuralStudyProductInput {
@@ -111,7 +127,7 @@ pub(super) async fn execute_for_composition(
             regions,
             materials: &decoded.materials,
             mesh: &completed.result.artifact,
-            planning: decoded.planning,
+            planning,
         },
         &decoded.initial_fields,
     ) {
@@ -160,4 +176,70 @@ pub(super) async fn execute_for_composition(
         },
     )
     .await
+}
+
+/// Terminal of one authored study root composed on an existing worker pool.
+#[derive(Debug)]
+pub enum RemoteStudyRootOutcome {
+    Completed {
+        response: runmat_execution_artifact::ProgramExecutionResponse,
+        objects: Vec<runmat_execution_artifact::ProgramExecutionObject>,
+    },
+    Failed(String),
+    Cancelled,
+    Indeterminate(String),
+}
+
+/// Compose any authored study root (structural or family) on a connected pool and return its
+/// complete result closure. The driver process uses the same composition for cluster runs.
+pub async fn execute_study_root_on_pool(
+    pool: Arc<RemotePoolDriver>,
+    request: &ProgramExecutionRequest,
+    scope: &str,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<RemoteStudyRootOutcome> {
+    let mut recovery = crate::RetainedStructuralTransientRecovery::default();
+    let outcome = execute_for_composition(
+        Arc::clone(&pool),
+        request,
+        scope,
+        resources,
+        None,
+        &mut recovery,
+    )
+    .await?;
+    Ok(match outcome {
+        super::exact_structural_study::RemoteExactStructuralStudyComposition::Completed(
+            response,
+        ) => {
+            let mut objects = Vec::new();
+            if let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+                result_objects,
+                ..
+            } = &response
+            {
+                for reference in result_objects {
+                    let bytes = pool.execution_object(reference)?.ok_or_else(|| {
+                        crate::NativeExecutionError::Protocol(
+                            "remote result object is absent from the worker pool".into(),
+                        )
+                    })?;
+                    objects.push(runmat_execution_artifact::ProgramExecutionObject {
+                        reference: reference.clone(),
+                        bytes: bytes.to_vec(),
+                    });
+                }
+            }
+            RemoteStudyRootOutcome::Completed { response, objects }
+        }
+        super::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(message) => {
+            RemoteStudyRootOutcome::Failed(message)
+        }
+        super::exact_structural_study::RemoteExactStructuralStudyComposition::Cancelled => {
+            RemoteStudyRootOutcome::Cancelled
+        }
+        super::exact_structural_study::RemoteExactStructuralStudyComposition::Indeterminate(
+            message,
+        ) => RemoteStudyRootOutcome::Indeterminate(message),
+    })
 }

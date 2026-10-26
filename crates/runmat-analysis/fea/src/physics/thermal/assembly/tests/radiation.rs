@@ -16,7 +16,7 @@ fn slab() -> (AnalysisModel, runmat_meshing_core::SolverMeshArtifact) {
         .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "gray_surface".into(),
-        target: RegionTarget::boundary("slab_right"),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         operator: BoundaryOperator::ThermalRadiation {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
             emissivity: runmat_analysis_core::SurfaceEmissivity::new(0.8),
@@ -25,6 +25,14 @@ fn slab() -> (AnalysisModel, runmat_meshing_core::SolverMeshArtifact) {
     (model, mesh)
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel;
+//   boundary: Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does
+//   not cover arbitrary enclosure radiation.
+// witness: FEA-THERMAL-PUBLIC-001/radiation_to_ambient @ thermal_steady/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: A Tet4 slab with a gray surface matches the Stefan-Boltzmann law with emissivity 0.8
+//   at 350 K surface against a 300 K ambient; convection on the same face and transient radiation
+//   are not covered.
 #[test]
 fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum() {
     let (mut model, mesh) = slab();
@@ -37,14 +45,14 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "hot_face".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary("slab_left"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
                 value: PrescribedValue::Constant(Temperature::new(surface + flux)),
             },
         }));
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -188,7 +196,7 @@ fn radiation_anchor_is_actual_positive_tangent_not_nonzero_emissivity_alone() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),

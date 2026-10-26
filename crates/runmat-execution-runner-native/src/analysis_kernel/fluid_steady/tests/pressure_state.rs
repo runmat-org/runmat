@@ -1,6 +1,10 @@
 //! Full native output, receipt and portable cold-state authority at a large gauge.
 use super::*;
 
+// witness: FEA-FLUID-EQUATIONS-001/pressure_state @
+//   incompressible_laminar_steady/canonical_tetrahedra/native_process;
+//   boundary: Native result/receipt preserves original governing fields under gauge shift; not
+//   distributed algebra or producer-death transient evidence.
 #[test]
 fn native_pressure_projection_preserves_original_governing_state() {
     let mut baseline = None;
@@ -32,13 +36,13 @@ fn native_pressure_projection_preserves_original_governing_state() {
         receipt.validate_against(&workload, &result, &mesh).unwrap();
         let original = result.original();
         assert_eq!(
-            original.pressure_pa.len(),
-            original.pressure_fluctuation_pa.len()
+            original.pressure_pa.canonical_values().len(),
+            original.pressure_fluctuation_pa.canonical_values().len()
         );
         for (absolute, fluctuation) in original
             .pressure_pa
-            .iter()
-            .zip(&original.pressure_fluctuation_pa)
+            .canonical_values().iter()
+            .zip(original.pressure_fluctuation_pa.canonical_values())
         {
             assert_eq!(absolute.to_bits(), (reference + fluctuation).to_bits());
         }

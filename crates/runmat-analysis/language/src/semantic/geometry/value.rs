@@ -91,6 +91,7 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
             value,
             unit,
             source_unit_symbol,
+            ..
         } => Some(GeometryScalarExpression::Quantity {
             value: Box::new(scalar(value)?),
             unit: *unit,
@@ -130,6 +131,7 @@ pub(super) fn vector3(value: &CheckedExpression) -> Option<[GeometryScalarExpres
         value: components,
         unit,
         source_unit_symbol,
+        ..
     } = &value.kind
     {
         let CheckedExpressionKind::List(values) = &components.kind else {

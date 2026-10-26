@@ -169,6 +169,16 @@ impl AnalysisProjection {
             })
     }
 
+    /// Sign that turns the corner-ordered parametric normal `x,ξ × x,η` into the face's
+    /// oriented area vector, shared by reference and deformed-surface integration.
+    pub(crate) fn boundary_parametric_orientation(
+        &self,
+        face: &ProjectedBoundaryFace,
+    ) -> Result<f64, AnalysisProjectionError> {
+        self.boundary_coordinates_and_orientation(face)
+            .map(|(_, _, orientation)| orientation)
+    }
+
     fn boundary_coordinates_and_orientation(
         &self,
         face: &ProjectedBoundaryFace,
@@ -253,6 +263,11 @@ pub struct VolumePointLocation {
 impl VolumeQuadraturePoint {
     pub fn shape_values(&self) -> &[f64] {
         &self.shape_values[..self.node_count]
+    }
+
+    /// Corner (P1) barycentric gradients at this point; constant on affine elements.
+    pub fn physical_barycentric_gradients(&self) -> &[[f64; 3]; 4] {
+        &self.physical_barycentric_gradients
     }
 
     pub fn physical_shape_gradients(&self) -> &[[f64; 3]] {

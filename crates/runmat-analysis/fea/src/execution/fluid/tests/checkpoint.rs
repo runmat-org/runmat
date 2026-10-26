@@ -38,8 +38,8 @@ fn original_full_history_cold_split_matches_unsplit_and_rejects_semantic_corrupt
     request.recover_output(&split, &mesh).unwrap();
     // Immutable prefixes share original arrays in-process; cold decoding remains separate.
     assert!(std::ptr::eq(
-        request.predecessor.original_results().next().unwrap(),
-        split.original_results().next().unwrap()
+        request.predecessor.retained_results().next().unwrap(),
+        split.retained_results().next().unwrap()
     ));
     assert!(request.recover_output(&unsplit, &mesh).is_err());
     {
@@ -50,8 +50,12 @@ fn original_full_history_cold_split_matches_unsplit_and_rejects_semantic_corrupt
     assert_eq!(split.next_interval(), 3);
     assert_eq!(split.next_output_ordinal(), 3);
     assert_eq!(
-        split.original_results().collect::<Vec<_>>(),
-        unsplit.original_results().collect::<Vec<_>>()
+        split.intervals().collect::<Vec<_>>(),
+        unsplit.intervals().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        split.retained_results().last(),
+        unsplit.retained_results().last()
     );
     assert!(split.charged_operator_work() > request.predecessor.charged_operator_work());
     for substitution in 0..5 {
@@ -61,7 +65,7 @@ fn original_full_history_cold_split_matches_unsplit_and_rejects_semantic_corrupt
             1 => data["charged_operator_work"] = serde_json::json!(0),
             2 => data["blocks"][0]["charged_operator_work"] = serde_json::json!(0),
             3 => {
-                data["blocks"][0]["original"]["original"][0]["face_volume_flux_m3_per_s"][0] =
+                data["blocks"][0]["original"]["retained"][0][1]["face_volume_flux_m3_per_s"][0] =
                     serde_json::json!(0.1)
             }
             _ => data["blocks"].as_array_mut().unwrap().swap(0, 1),

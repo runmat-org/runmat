@@ -11,7 +11,9 @@ mod compound;
 mod integer_values;
 mod materialization_profile;
 pub use materialization_profile::{
-    profile_serialized, profile_serialized_shape, profile_serialized_with_control,
+    profile_direct_materialization, profile_serialized, profile_serialized_shape,
+    profile_serialized_with_control,
+    profile_typed_resident_bytes,
     serialized_materialization_resident_bytes_estimate,
 };
 #[cfg(test)]
@@ -59,12 +61,12 @@ pub struct CanonicalEncodingProfile {
     pub resident_workspace_bytes_estimate: u64,
 }
 
-/// Profiles the direct encoder's byte buffers and sorted-map metadata. Four wire
-/// bounds cover simultaneous input/output buffer capacities during concatenation;
-/// peak live ancestor-map metadata and copied keys remain additional. Finished
-/// child-map metadata is released before the next sibling; string values are
-/// borrowed. No full JSON tree is
-/// constructed by that encoder. Original typed input must be charged separately.
+/// Profiles the direct encoder's byte buffers and sorted-map metadata: the reserved output
+/// bound, plus the peak of separately held buffers (struct fields that arrive before a smaller
+/// key, maps that leave strictly increasing key order, collections of unknown length) with
+/// their growth and copy slack, plus peak live ancestor-map metadata and copied keys.
+/// String values are borrowed. No full JSON tree is constructed by that encoder. Original
+/// typed input must be charged separately.
 pub fn profile_canonical_encoding<T: Serialize + ?Sized>(
     value: &T,
     limits: CanonicalLimits,
@@ -76,12 +78,15 @@ pub fn profile_canonical_encoding<T: Serialize + ?Sized>(
         live_map_metadata: 0,
         peak_map_metadata: 0,
         integer_value_bounds: false,
+        child_peak: 0,
     };
     counter.encoded(ENVELOPE_BYTES)?;
     value.serialize(Profiler::value(&mut counter, 0))?;
+    // The encoder reserves the profiled output once and streams into it; only fields that
+    // arrive before a smaller key and collections of unknown length are held separately.
     let workspace = counter
         .encoded_bytes
-        .checked_mul(4)
+        .checked_add(counter.child_peak)
         .and_then(|bytes| bytes.checked_add(counter.peak_map_metadata))
         .and_then(|bytes| {
             bytes.checked_add(
@@ -124,6 +129,9 @@ struct Counter {
     live_map_metadata: u64,
     peak_map_metadata: u64,
     integer_value_bounds: bool,
+    /// Peak bytes held in encoder buffers while encoding the value that just completed,
+    /// relative to its parent's sink (see `compound::Compound::finish`).
+    child_peak: u64,
 }
 
 impl Counter {
@@ -466,7 +474,7 @@ impl<'a> ser::Serializer for Profiler<'a> {
         _: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        self.compound(Some(len), Kind::Map)
+        self.compound(Some(len), Kind::Struct)
     }
     fn serialize_struct_variant(
         self,
@@ -475,7 +483,7 @@ impl<'a> ser::Serializer for Profiler<'a> {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        self.variant(variant)?.compound(Some(len), Kind::Map)
+        self.variant(variant)?.compound(Some(len), Kind::Struct)
     }
     fn collect_str<T: std::fmt::Display + ?Sized>(self, value: &T) -> Result<(), Self::Error> {
         self.display(value)

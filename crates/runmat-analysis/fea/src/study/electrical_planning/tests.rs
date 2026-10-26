@@ -8,20 +8,19 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
     prescribe(
         &mut model,
         "left".into(),
-        RegionTarget::boundary("slab_left"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
         0.0,
     );
     prescribe(
         &mut model,
         "right".into(),
-        RegionTarget::boundary("slab_right"),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         2.0,
     );
     let properties = crate::properties::compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],
@@ -33,7 +32,8 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
 
 fn policy() -> ElectricalStudyPlanningPolicy {
     ElectricalStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 
@@ -88,16 +88,6 @@ fn unsupported_lifecycle_and_missing_accuracy_are_not_silently_lowered() {
         required_state_digest: "not-admitted".into(),
     };
     assert!(plan_electrical_study(&changed, policy()).is_err());
-    let mismatched = ElectricalStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Production,
-    };
-    assert!(matches!(
-        plan_electrical_study(&study, mismatched),
-        Err(ElectricalStudyPlanningError::FormulationRequirementMismatch)
-    ));
-    changed = study;
-    changed.formulation_requirement = FormulationRequirement::Production;
-    assert!(plan_electrical_study(&changed, mismatched).is_err());
 }
 
 #[test]
@@ -105,13 +95,13 @@ fn floating_and_integral_terminal_intent_is_not_replaced_by_insulation() {
     use runmat_analysis_core::{ElectricCurrent, ElectricalConstraint, PrescribedValue};
     for kind in [
         ElectricalConstraintKind::FloatingConductor {
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         },
         ElectricalConstraintKind::Equipotential {
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
         },
         ElectricalConstraintKind::IntegralCurrent {
-            target: RegionTarget::boundary("slab_right"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
             value: PrescribedValue::Constant(ElectricCurrent::new(1.0)),
         },
     ] {

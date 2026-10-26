@@ -130,6 +130,9 @@ impl StructuralPrestressProducerCoordinator {
             required_capabilities: self.preparation.required_capabilities.clone(),
             accelerator_requests: self.preparation.accelerator_requests.clone(),
             local_execution: self.preparation.local_execution,
+            solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         })?;
         self.phase = ProducerPhase::AwaitingPreload(prepared.host.workload.identity.digest());
         Ok(prepared)

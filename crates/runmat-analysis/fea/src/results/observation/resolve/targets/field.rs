@@ -71,6 +71,38 @@ pub(super) fn resolve_field_target(
                     )?;
                     nodes_target(indices, topology, maximum)
                 }
+                // A volume-element field on a boundary region is the set of elements that own the
+                // region's faces (the field's surface trace), used by selections and extrema.
+                (EntityDimension::Face, ExpectedTopology::BoundaryFace, FieldLocation::Element)
+                    if field_domain == RecoveredFieldEntityDomain::VolumeElements =>
+                {
+                    let projection = solid_projection(topology, spec)?;
+                    let faces = matching_faces(region, projection);
+                    enforce_cardinality(region.cardinality, faces.clone().count(), spec)?;
+                    let mut owners = std::collections::BTreeSet::new();
+                    for index in faces {
+                        let [owner] = projection.boundary_faces[index]
+                            .adjacent_element_indices
+                            .as_slice()
+                        else {
+                            return Err(target_error(
+                                spec,
+                                "element fields on a boundary need faces with one owning element",
+                            ));
+                        };
+                        owners.insert(*owner);
+                        if owners.len() > maximum {
+                            return Err(ObservationError::Limit("selected topology entities"));
+                        }
+                    }
+                    // Volume-element field indices follow the projection's element order.
+                    elements_target(
+                        owners.into_iter().collect(),
+                        field_domain,
+                        topology,
+                        maximum,
+                    )
+                }
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace, FieldLocation::Face) => {
                     if field_domain != RecoveredFieldEntityDomain::OrientedFaces
                         || topology.finite_volume.is_none()

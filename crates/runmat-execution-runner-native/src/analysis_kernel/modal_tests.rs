@@ -1,8 +1,8 @@
 use super::NativeAnalysisKernel;
 use runmat_analysis_core::{
-    AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement, IndependentDomain,
-    PrescribedStructuralDofs, PrescribedValue, ProcedureStep, ProcedureStepId, RegionTarget,
-    StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+    AnalysisConstraint, CoordinateFrame, Displacement, IndependentDomain, PrescribedStructuralDofs,
+    PrescribedValue, ProcedureStep, ProcedureStepId, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_analysis_execution::{
     execute_reserved_serial_analysis, import_structural_modal_result, prepare_analysis_objects,
@@ -25,6 +25,12 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::ElementOrder;
 use std::collections::BTreeSet;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 native scalar extraction, cold basis/receipt recovery and actual result
+//   codec profiles check the shared output reservation. One-byte construction understatement
+//   rejects. This finite workflow does not qualify arbitrary modal counts, realistic original
+//   studies or measured peak memory.
 #[test]
 fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_source_budget() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -64,7 +70,6 @@ fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_
             model,
             step_id: ProcedureStepId("modes".into()),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation: ModalTruncationPolicy::requested(1),
             convergence: ModalConvergencePolicy::exploratory(),

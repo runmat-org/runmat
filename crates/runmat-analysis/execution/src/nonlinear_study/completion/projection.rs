@@ -109,6 +109,7 @@ impl CompletedNonlinearSolidStudy {
             .and_then(|n| n.checked_add(slots))
             .ok_or_else(|| limit("original prefix caller storage overflow"))?;
         let preparation = NonlinearSolidStudyPreparation {
+            local_execution: replay.local_execution,
             product: NonlinearSolidStudyProduct { compiled, workload },
             mesh: replay.mesh,
             accepted_block_limit: replay.accepted_block_limit,

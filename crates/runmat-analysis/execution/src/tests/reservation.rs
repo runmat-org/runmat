@@ -38,7 +38,6 @@ fn original_prepared_resources_must_fit_the_execution_reservation_before_kernel_
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -59,6 +58,9 @@ fn original_prepared_resources_must_fit_the_execution_reservation_before_kernel_
         required_capabilities: BTreeSet::new(),
         accelerator_requests: vec![],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     })
     .unwrap();
     let mut store = MemoryObjects::default();

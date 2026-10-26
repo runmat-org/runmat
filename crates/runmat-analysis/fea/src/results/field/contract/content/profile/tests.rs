@@ -1,5 +1,5 @@
 use super::*;
-use runmat_canonical_codec::profile_serialized;
+use runmat_canonical_codec::profile_serialized_shape;
 
 fn definition(
     quantity: ObservationQuantity,
@@ -57,7 +57,7 @@ fn shape_profile_bounds_actual_identity_wire_for_advertised_storage_shapes() {
                 let profile =
                     RecoveredField::identity_profile_shape(&definition, sample, count).unwrap();
                 let actual =
-                    profile_serialized(&(&definition, sample, &storage), FIELD_LIMITS).unwrap();
+                    profile_serialized_shape(&(&definition, sample, &storage), FIELD_LIMITS).unwrap();
                 assert_eq!(profile, actual);
                 // Independent original tuple proves no domain, prefix, tuple-order or wire change.
                 let original = encode_contract(
@@ -90,10 +90,14 @@ fn identity_profile_rejects_invalid_metadata_overflow_and_codec_limits() {
         usize::MAX
     )
     .is_err());
-    assert!(
-        RecoveredField::identity_profile_shape(&valid, RecoveredFieldSample::Final, 1_000_001)
-            .is_err()
-    );
+    // Six stored components per entity, each at least one encoded byte: beyond the byte ceiling.
+    let beyond_ceiling = FIELD_LIMITS.maximum_encoded_bytes / 6 + 1;
+    assert!(RecoveredField::identity_profile_shape(
+        &valid,
+        RecoveredFieldSample::Final,
+        beyond_ceiling
+    )
+    .is_err());
     for sample in [
         RecoveredFieldSample::TimeSeconds(f64::NAN),
         RecoveredFieldSample::FrequencyHertz(f64::INFINITY),
@@ -115,5 +119,26 @@ fn identity_profile_rejects_invalid_metadata_overflow_and_codec_limits() {
     invalid.value_shape = ObservationValueShape::Scalar;
     assert!(
         RecoveredField::identity_profile_shape(&invalid, RecoveredFieldSample::Final, 1).is_err()
+    );
+}
+
+#[test]
+fn identity_profile_admits_mesh_scale_fields_beyond_a_fixed_item_count() {
+    // A vector field on a large fluid mesh has millions of values in one collection; the field
+    // contract bounds them by its encoded-byte ceiling, not a fixed item count.
+    let definition = definition(
+        ObservationQuantity::HeatFlux,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    );
+    let entities = 2_000_000;
+    let profile =
+        RecoveredField::identity_profile_shape(&definition, RecoveredFieldSample::Final, entities)
+            .unwrap();
+    assert!(profile.encoded_bytes_upper_bound >= 3 * entities as u64);
+    let beyond = FIELD_LIMITS.maximum_encoded_bytes / 3 + 1;
+    assert!(
+        RecoveredField::identity_profile_shape(&definition, RecoveredFieldSample::Final, beyond)
+            .is_err()
     );
 }

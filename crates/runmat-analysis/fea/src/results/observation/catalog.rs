@@ -12,10 +12,10 @@ use crate::execution::{
 };
 use crate::results::field::RecoveredFieldArtifactManifest;
 
-mod finite_volume;
 mod frequency;
 mod sampled;
 mod selection;
+mod volume_mesh;
 pub use selection::ObservationSelectionCoordinate;
 
 const PREFIX: &[u8] = b"runmat-observation-field-catalog/v1\0";
@@ -25,11 +25,6 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum ObservationFieldCatalogSource {
-    FiniteVolumeRecovery {
-        recovery_request: Box<FieldRecoveryRequest>,
-        manifest: Box<RecoveredFieldArtifactManifest>,
-        layout: Box<crate::results::field::FiniteVolumeFieldTopology>,
-    },
     SampledRecovery {
         recovery_request: Box<FieldRecoveryRequest>,
         manifest: Box<RecoveredFieldArtifactManifest>,
@@ -46,6 +41,15 @@ pub enum ObservationFieldCatalogSource {
     },
     Thermal {
         manifest: Box<ThermalSolverResultManifest>,
+    },
+    /// Native node/element fields on the canonical solver mesh, for any physics family.
+    /// The producing authored step is carried and bound to the request's producer, so
+    /// plans re-resolve without decoding the family-specific workload.
+    VolumeMeshRecovery {
+        recovery_request: Box<FieldRecoveryRequest>,
+        manifest: Box<RecoveredFieldArtifactManifest>,
+        sequence: crate::execution::SequenceIdentity,
+        step: Box<runmat_analysis_core::ProcedureStep>,
     },
 }
 
@@ -184,17 +188,6 @@ impl ObservationFieldCatalog {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match &self.source {
-            ObservationFieldCatalogSource::FiniteVolumeRecovery {
-                recovery_request,
-                manifest,
-                layout,
-            } => {
-                super::source::validate_finite_volume_authority(
-                    recovery_request,
-                    manifest,
-                    layout,
-                )?;
-            }
             ObservationFieldCatalogSource::SampledRecovery {
                 recovery_request,
                 manifest,
@@ -218,6 +211,21 @@ impl ObservationFieldCatalog {
                 }
             }
             ObservationFieldCatalogSource::Thermal { manifest } => manifest.validate()?,
+            ObservationFieldCatalogSource::VolumeMeshRecovery {
+                recovery_request,
+                manifest,
+                sequence,
+                step,
+            } => {
+                super::source::validate_volume_mesh_authority(recovery_request, manifest)?;
+                if crate::execution::StepIdentity::from_solver_contract(*sequence, step)?
+                    != recovery_request.producer
+                {
+                    return Err(invalid(
+                        "volume-mesh catalog step differs from its recovery producer",
+                    ));
+                }
+            }
             ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
                 frequency::validate_samples(samples)?;
             }
@@ -240,7 +248,7 @@ impl ObservationFieldCatalog {
             } => selection.validate_structural(recovery_request, manifest),
             ObservationFieldCatalogSource::Thermal { .. }
             | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
-            | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
+            | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected structural catalog"))
             }
@@ -260,7 +268,7 @@ impl ObservationFieldCatalog {
             }
             ObservationFieldCatalogSource::Structural { .. }
             | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
-            | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
+            | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected thermal catalog"))
             }

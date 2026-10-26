@@ -42,11 +42,7 @@ impl AnalysisPublicationBuilder {
                 .collect::<Vec<_>>();
             let counts = definitions
                 .iter()
-                .map(|definition| {
-                    source
-                        .entity_counts
-                        .entity_count(definition.entity_domain())
-                })
+                .map(|definition| definition.stored_entities(source.entity_counts))
                 .collect::<Vec<_>>();
             // Every producer in this vertical uses one sample variant; profiles bound scalar widths.
             let sample = source.fields[0].sample;
@@ -73,9 +69,7 @@ impl AnalysisPublicationBuilder {
                     != entry
                         .definition
                         .storage_shape(
-                            source
-                                .entity_counts
-                                .entity_count(entry.definition.entity_domain()),
+                            entry.definition.stored_entities(source.entity_counts),
                         )
                         .map_err(|error| error.to_string())?
                 {
@@ -91,11 +85,6 @@ impl AnalysisPublicationBuilder {
                     .and_then(|bytes| bytes.checked_add(peak))
                     .ok_or("original source construction profile overflow")?,
             )?;
-            let chunks = self
-                .store
-                .chunks
-                .read()
-                .map_err(|_| "publication chunks poisoned")?;
             let mut entries = Vec::with_capacity(source.fields.len());
             for entry in &source.fields {
                 let field = run
@@ -104,9 +93,9 @@ impl AnalysisPublicationBuilder {
                     .find(|field| field.field_id == entry.definition.field_id())
                     .ok_or("original source channel disappeared")?;
                 let payload =
-                    super::super::field_reader::read_field_payload(field, &mut |digest| {
-                        Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
-                    })?;
+                    self.read_staged_chunks(|mut read| {
+                super::super::field_reader::read_field_payload(field, &mut read)
+            })?;
                 let recovered = RecoveredField::new(
                     entry.definition.clone(),
                     entry.sample,

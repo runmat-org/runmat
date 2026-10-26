@@ -23,7 +23,7 @@ fn fixture_with_memory(
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.1, 0.2]);
     step.accuracy.resources.maximum_resident_bytes = maximum_resident_bytes;
@@ -33,7 +33,7 @@ fn fixture_with_memory(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));
@@ -42,7 +42,6 @@ fn fixture_with_memory(
             model,
             step_id: ProcedureStepId("acoustic".into()),
             frequency: Frequency::new(0.1),
-            formulation_requirement: FormulationRequirement::Experimental,
             solver: Default::default(),
             power_balance_relative_tolerance: 1e-8,
         })
@@ -126,12 +125,18 @@ fn aggregate_admission_cannot_enlarge_original_authored_memory_ceiling() {
 #[test]
 fn aggregate_accounts_mesh_as_input_not_as_emitted_output() {
     let (workload, mesh, entries) = fixture_with_memory(8 * 1024 * 1024 * 1024);
+    let request = runmat_analysis_fea::execution::AcousticFrequencyAssemblyRequest::new(vec![
+        None;
+        entries.len()
+    ])
+    .unwrap();
     let prepared = prepare_acoustic_frequency_assembly_task(AcousticFrequencyAssemblyPreparation {
         authored_study_digest: Digest::sha256("authored"),
         frozen_project_digest: None,
         workload,
         mesh,
         entries,
+        request: request.clone(),
         artifact_access: ArtifactAccess {
             authorization_scope: "test".into(),
             encryption_context: Digest::sha256("scope"),
@@ -166,6 +171,7 @@ fn aggregate_accounts_mesh_as_input_not_as_emitted_output() {
             matches!(
                 input.manifest.kind,
                 AnalysisNumericalObjectKind::AcousticFrequencyWorkload
+                    | AnalysisNumericalObjectKind::AcousticFrequencyAssemblyRequest
                     | AnalysisNumericalObjectKind::SolverResult
             )
         })
@@ -200,6 +206,7 @@ fn aggregate_accounts_mesh_as_input_not_as_emitted_output() {
         prepared.workload.clone(),
         &prepared.mesh,
         prepared.entries.clone(),
+        &request,
     )
     .unwrap();
     let actual_result_profile = runmat_canonical_codec::profile_serialized(
@@ -219,27 +226,6 @@ fn aggregate_accounts_mesh_as_input_not_as_emitted_output() {
                 .encoded_payload_bytes_upper_bound
                 .0
     );
-    let mut actual_field_bytes = 0;
-    for (result, artifact) in prepared.entries.iter().zip(&assembled.fields) {
-        let (_, field_profile) = result.native_field_encoding_profiles().unwrap();
-        let partitions =
-            crate::field_recovery::recovered_field_payload_partitions(artifact).unwrap();
-        let bytes = partitions
-            .iter()
-            .map(|(_, bytes)| bytes.len() as u64)
-            .sum::<u64>();
-        let resident = partitions
-            .iter()
-            .map(|(_, bytes)| {
-                runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
-                    bytes,
-                )
-                .unwrap()
-            })
-            .sum::<u64>();
-        assert!(bytes <= field_profile.encoded_bytes_upper_bound);
-        assert!(resident <= field_profile.materialization_resident_bytes_estimate);
-        actual_field_bytes += bytes;
-    }
-    assert!(actual_field_bytes <= demand.fields_output.encoded_payload_bytes_upper_bound.0);
+    // Fields are recovered and published by each frequency entry's own task; the fan-in
+    // emits only the assembled result and publication manifest.
 }

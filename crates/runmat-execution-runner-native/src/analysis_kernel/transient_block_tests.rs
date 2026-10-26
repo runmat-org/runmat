@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, ExcitationTarget, FormulationRequirement, IndependentDomain,
-    PrescribedStructuralDofs, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RegionTarget,
-    SequenceDependency, SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    AnalysisConstraint, ExcitationTarget, IndependentDomain, PrescribedStructuralDofs,
+    ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RegionTarget, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
     StructuralConstraint, StructuralConstraintKind, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
@@ -34,7 +34,7 @@ use runmat_analysis_fea::{
     ComputeBackend, ModalSolveOptions, ModalTruncationPolicy,
 };
 use runmat_execution::value::ValueRefKind;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, LogicalObject, ObjectNamespace, ProgramExecutionObject,
@@ -58,14 +58,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("transient-block-graph"),
         digest("transient-block-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("transient-block-runtime"),
-            digest("transient-block-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }
@@ -78,12 +71,13 @@ fn transient_fixture() -> (
     *model.material_assignments[0]
         .target
         .selected_region_id_mut()
-        .expect("fixture uses selected material region") = "region".into();
+        .expect("fixture uses selected material region") =
+        runmat_meshing_core::fixtures::fixture_region("region");
     model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
         constraint_id: "fixed-face".into(),
         frame: runmat_analysis_core::CoordinateFrame::Global,
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("face:0"),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
             translations: [
                 runmat_analysis_core::StructuralTranslationDof::Ux,
                 runmat_analysis_core::StructuralTranslationDof::Uy,
@@ -101,7 +95,7 @@ fn transient_fixture() -> (
         }),
     })];
     model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("face:3"));
+        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")));
     (
         model,
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
@@ -138,7 +132,6 @@ fn prepared_modal_transient_fixture(
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(3),
             solver_mesh: Some(mesh.clone()),
             ..ModalSolveOptions::default()
@@ -173,7 +166,6 @@ fn prepared_modal_transient_fixture(
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::ModalReduced {
             basis_transition: Box::new(basis_transition),
         },
@@ -269,7 +261,7 @@ fn authored_modal_support_motion_fixture() -> (
             constraint_id: "moving-root-x".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 translations: vec![TranslationDofMotion {
                     dof: StructuralTranslationDof::Ux,
                     history: StructuralKinematicHistory::AccelerationDriven {
@@ -286,7 +278,7 @@ fn authored_modal_support_motion_fixture() -> (
             constraint_id: "fixed-root-yz".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary("face:0"),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
                 translations: [StructuralTranslationDof::Uy, StructuralTranslationDof::Uz]
                     .into_iter()
                     .map(|dof| TranslationDofValue {
@@ -349,7 +341,6 @@ fn native_scope_task_rederives_its_plan_and_returns_the_exact_restart_scope() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -371,6 +362,7 @@ fn assert_scope_task_round_trip(
     let limits = ObjectInventoryLimits::default();
     let prepared =
         prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             workload: workload.clone(),
             mesh: mesh.clone(),
             modal_state: modal_state.clone(),
@@ -423,7 +415,6 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
         model: model.clone(),
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -441,7 +432,6 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -469,6 +459,7 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
     )
     .unwrap();
     let preparation = StructuralTransientSequencePreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects,
         mesh: mesh_objects,
         modal_state: None,
@@ -614,13 +605,13 @@ fn transient_sequence_preserves_typed_scope_resource_rejection() {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
     };
     let error =
         match prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             workload,
             mesh,
             modal_state: None,
@@ -652,6 +643,8 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
         let limits = ObjectInventoryLimits::default();
         let plan =
             prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 workload: &workload,
                 mesh: &mesh,
                 modal_state: Some(&modal_state),
@@ -665,6 +658,8 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
             .unwrap();
         let scope_task =
             prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 workload: workload.clone(),
                 mesh: mesh.clone(),
                 modal_state: Some(modal_state.clone()),
@@ -811,7 +806,6 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
         model: model.clone(),
         step_id: ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -826,7 +820,6 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-8,
     };
@@ -925,6 +918,7 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
 
     let scope_task =
         prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             workload: plan.workload.clone(),
             mesh: plan.mesh.clone(),
             modal_state: plan.modal_state.clone(),

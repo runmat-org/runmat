@@ -4,6 +4,13 @@ use super::*;
 use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
 use crate::cdt::volume_sliver::working::CaptureSeed;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: One centroid split retains two checked edits and bounded quality undo entries with
+//   zero, 32 and256 disconnected background cells under uniform and scoped face sizing; rollback
+//   and independent complete handoff match the original state. The counter bounds retained local
+//   records, not total preparation work, allocator bytes, connected dependency propagation or
+//   native peak memory.
 #[test]
 fn retained_local_edits_and_quality_undo_are_independent_of_background_mesh_size() {
     check_scaling(false);

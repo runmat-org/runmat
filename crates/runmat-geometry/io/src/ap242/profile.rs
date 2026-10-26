@@ -452,6 +452,11 @@ END-ISO-10303-21;"#;
         assert!(inventory.unsupported.is_empty());
     }
 
+    // witness: FEA-AUTHORING-GEOMETRY-002/physical_material_graph @
+    //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+    //   boundary: The standard legacy material designation is retained as an explicit alternate to the
+    //   recommended-practice graph; the primary graph walk is covered by the resolves_typed_parameters
+    //   test.
     #[test]
     fn retains_the_standard_legacy_material_designation_as_an_explicit_alternate() {
         let inventory = inspect_ap242(LEGACY_DESIGNATION).unwrap();

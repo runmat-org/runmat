@@ -1,6 +1,9 @@
-//! Shared parameters of the typed FEA public and method surface.
+//! Parameter descriptors for the FEA operation surface. These are the single
+//! signature authority; runtime entrypoints re-export them.
 
-use crate::*;
+use crate::BuiltinParamArity;
+use crate::BuiltinParamDescriptor;
+use crate::BuiltinParamType;
 
 pub const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
@@ -9,7 +12,6 @@ pub const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "FEA object or operation result.",
 }];
-
 pub const IN_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "study",
     ty: BuiltinParamType::Any,
@@ -17,7 +19,6 @@ pub const IN_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "A fea.Study or fea.Sweep object.",
 }];
-
 pub const IN_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -48,7 +49,6 @@ pub const IN_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
         description: "Optional Mesh and Execution settings.",
     },
 ];
-
 pub const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -56,7 +56,6 @@ pub const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     default: None,
     description: "Constructor or query arguments.",
 }];
-
 pub const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -81,7 +80,6 @@ pub const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
             "Explicit frame, materials, assignments, constraints, boundaries, signals, excitations, steps or sequence, domains, and interfaces.",
     },
 ];
-
 pub const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -98,7 +96,6 @@ pub const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Mechanical, thermal, acoustic, electrical, and plastic material fields.",
     },
 ];
-
 pub const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -122,7 +119,6 @@ pub const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Optional logical FailFast control.",
     },
 ];
-
 pub const RESULTS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "runOrRunId",
@@ -139,7 +135,6 @@ pub const RESULTS_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Field, diagnostic, one-based mode/snapshot selector, and inclusion options.",
     },
 ];
-
 pub const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Name, Value",
     ty: BuiltinParamType::Any,
@@ -147,7 +142,6 @@ pub const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Optional positive integer WindowSize.",
 }];
-
 pub const FIELD_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "resultsOrRun",
@@ -171,7 +165,6 @@ pub const FIELD_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Typed independent-domain sample, such as fea.Frequency.hertz(120).",
     },
 ];
-
 pub const FIELD_PAGE_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "field",
@@ -195,7 +188,22 @@ pub const FIELD_PAGE_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Positive maximum logical value count, capped at 4096.",
     },
 ];
-
+pub const STEP_RESULT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "run",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Aggregate fea.RunResult returned by fea.run.",
+    },
+    BuiltinParamDescriptor {
+        name: "stepId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Exact authored procedure-step id.",
+    },
+];
 pub const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "field",
@@ -212,7 +220,6 @@ pub const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Visualization options such as Edges, Overlay, or Deformed.",
     },
 ];
-
 pub const MESH_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "context",
@@ -229,7 +236,6 @@ pub const MESH_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Mesh display options such as Source or Edges.",
     },
 ];
-
 pub const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "baselineRunId",
@@ -246,7 +252,6 @@ pub const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Candidate persisted run id.",
     },
 ];
-
 pub const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "target",

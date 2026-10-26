@@ -75,7 +75,7 @@ fn insulated_uniform_heating_publishes_storage_density_not_total_power() {
                 solver_mesh: Some(
                     runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order),
                 ),
-                ..experimental_thermal_options()
+                ..baseline_thermal_options()
             },
         )
         .unwrap();

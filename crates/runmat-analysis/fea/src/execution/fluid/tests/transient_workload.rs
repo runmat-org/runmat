@@ -19,7 +19,6 @@ fn authored_transient() -> (FluidTransientWorkload, SolverMeshArtifact) {
         FluidTransientWorkload {
             model,
             step_id: ProcedureStepId("advance".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             policy: CanonicalFluidPolicy {
                 linear_relative_tolerance: steady.policy.linear_relative_tolerance,
                 ..CanonicalFluidPolicy::default()
@@ -129,7 +128,7 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
     let projection = crate::topology::AnalysisProjection::derive(&m).unwrap();
     let topology =
         crate::topology::FiniteVolumeTopology::derive(&projection, w.geometry_policy).unwrap();
-    for (i, r) in result.original_results().iter().enumerate() {
+    for (i, r) in result.retained_results() {
         let time = 0.3 * ((i + 1) as f64 / 3.);
         for u in r.velocity_m_per_s.canonical_values() {
             assert!((u[0] - (0.001 + 0.01 * time)).abs() < 1e-8);
@@ -164,9 +163,6 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
     let mut low = w.clone();
     low.policy.maximum_resident_bytes = 1;
     assert!(low.prepare(&m).is_err());
-    let mut production = w;
-    production.formulation_requirement = FormulationRequirement::Production;
-    assert!(production.prepare(&m).is_err());
 }
 
 fn velocity_field(mesh: &SolverMeshArtifact, values: Vec<f64>) -> InitialFieldBinding {
@@ -309,9 +305,7 @@ fn nonuniform_original_nodal_field_integrates_exact_cell_and_face_initial_data_w
 #[test]
 fn transient_formulation_cannot_be_claimed_by_generic_profile_admission() {
     let (w, m) = authored_transient();
-    let identity =
-        crate::admission::admit_canonical_fluid_transient(&m, FormulationRequirement::Experimental)
-            .unwrap();
+    let identity = crate::admission::admit_canonical_fluid_transient(&m).unwrap();
     assert_ne!(
         identity.realization(),
         &crate::admission::canonical_fluid_steady_realization()
@@ -321,8 +315,7 @@ fn transient_formulation_cannot_be_claimed_by_generic_profile_admission() {
         AnalysisProcedure::TransientResponse,
         Some(&m),
         SourceImplementation::CanonicalVolumeProjection,
-        BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        FormulationRequirement::Experimental
+        BoundaryTransferImplementation::CanonicalBoundaryProjection
     )
     .is_err());
     assert_eq!(
@@ -334,4 +327,137 @@ fn transient_formulation_cannot_be_claimed_by_generic_profile_admission() {
         1
     );
     let _ = w;
+}
+
+/// The authored study workload runs the same backward-Euler history as the kernel workload,
+/// retains it with its initial state, and cold-recovers every interval without solving.
+#[test]
+fn authored_study_workload_retains_and_recovers_the_complete_transient_history() {
+    let (kernel, m) = accelerating_transient();
+    let study = FluidSteadyWorkload {
+        model: kernel.model.clone(),
+        step_id: kernel.step_id.clone(),
+        policy: kernel.policy,
+        geometry_policy: kernel.geometry_policy,
+    };
+    assert!(study.is_transient());
+    assert_eq!(
+        study.formulation(&m).unwrap().realization().temporals,
+        vec![TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure]
+    );
+    let budget = study.result_encoding_profile(&m).unwrap();
+    let result = study.execute(&m).unwrap();
+    let bytes = result.canonical_bytes().unwrap();
+    assert!((bytes.len() as u64) <= budget.encoded_bytes_upper_bound);
+    let history = result.transient_history().unwrap();
+    assert_eq!(history.intervals().len(), 3);
+    let reference = kernel.execute(&m).unwrap();
+    assert_eq!(history.intervals(), reference.intervals());
+    assert_eq!(history.retained_results(), reference.retained_results());
+    assert_eq!(result.original(), reference.terminal().unwrap());
+    let cold = FluidSteadySolverResult::from_canonical_bytes_for(
+        &bytes,
+        Digest::sha256(&bytes),
+        &study,
+        &m,
+    )
+    .unwrap();
+    assert_eq!(cold, result);
+    let receipt = FluidNumericalReceiptArtifact::new(&study, &cold, &m).unwrap();
+    receipt.validate_against(&study, &cold, &m).unwrap();
+    // A steady study cannot adopt a retained transient history, nor the reverse.
+    let mut steady = study.clone();
+    steady.model.sequence = AnalysisSequence::from_steps(
+        "physical-time",
+        vec![ProcedureStep::fluid_static("advance")],
+    );
+    steady.model.initial_conditions.clear();
+    assert!(FluidSteadySolverResult::from_canonical_bytes_for(
+        &bytes,
+        Digest::sha256(&bytes),
+        &steady,
+        &m
+    )
+    .is_err());
+}
+
+// witness: FEA-FLUID-TRANSIENT-001/history @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: an authored time history retains the sampled interval's fields (and drops the
+//   others), and native field recovery publishes them at their physical times beside the
+//   terminal state, against the accelerating-flow reference.
+#[test]
+fn authored_history_retains_and_publishes_fields_at_sampled_times() {
+    let (kernel, m) = accelerating_transient();
+    let mut study = FluidSteadyWorkload {
+        model: kernel.model.clone(),
+        step_id: kernel.step_id.clone(),
+        policy: kernel.policy,
+        geometry_policy: kernel.geometry_policy,
+    };
+    study.model.sequence.steps[0]
+        .observations
+        .push(ObservationRequest::History(ObservationSpec {
+            observation_id: ObservationId("velocity_history".into()),
+            quantity: ObservationQuantity::FluidVelocity,
+            value_shape: ObservationValueShape::Vector3,
+            target: ObservationTarget::WholeModel,
+            source_location: FieldLocation::Cell,
+            output_location: FieldLocation::Cell,
+            recovery: RecoveryPolicy::Native,
+            component: ObservationComponent::All,
+            frame: CoordinateFrame::Global,
+            sign_convention: SignConvention::Native,
+            complex_representation: ComplexRepresentation::Real,
+            sampling: SamplingPolicy::TimeSeconds(vec![0.1]),
+            reduction: None,
+            storage: ObservationStoragePolicy {
+                precision: SignalPrecision::Real64,
+                compression: CompressionPolicy::Lossless,
+                retention: RetentionPolicy::Canonical,
+                partial_access: PartialAccessPolicy::ManifestAndChunks,
+            },
+            purpose: ObservationPurpose::Publication,
+            cost: ObservationCostPolicy::Automatic,
+        }));
+    let result = study.execute(&m).unwrap();
+    let history = result.transient_history().unwrap();
+    assert_eq!(history.intervals().len(), 3);
+    assert_eq!(
+        history
+            .retained_results()
+            .iter()
+            .map(|(ordinal, _)| *ordinal)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+    let request = result.native_field_request(&study, &m).unwrap();
+    let fields = result.recover_native_fields(&study, &m, &request).unwrap();
+    result.validate_native_fields(&study, &m, &fields).unwrap();
+    let samples = fields
+        .fields()
+        .iter()
+        .map(|field| field.sample())
+        .collect::<Vec<_>>();
+    let velocity = fields
+        .fields()
+        .iter()
+        .filter(|field| field.definition().quantity() == ObservationQuantity::FluidVelocity)
+        .collect::<Vec<_>>();
+    assert_eq!(velocity.len(), 2);
+    for (field, time) in velocity.iter().zip([0.1, 0.3]) {
+        let crate::results::field::RecoveredFieldSample::TimeSeconds(t) = field.sample() else {
+            panic!("{:?}", field.sample())
+        };
+        assert!((t - time).abs() < 1e-12, "{t}");
+        let values = field.storage().as_host_f64().unwrap();
+        for u in values.chunks(3) {
+            assert!((u[0] - (0.001 + 0.01 * time)).abs() < 1e-8, "{u:?} at {time}");
+        }
+    }
+    assert!(samples.windows(2).all(|pair| match pair {
+        [crate::results::field::RecoveredFieldSample::TimeSeconds(a),
+         crate::results::field::RecoveredFieldSample::TimeSeconds(b)] => a <= b,
+        _ => false,
+    }));
 }

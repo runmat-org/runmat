@@ -29,7 +29,7 @@ fn fixture(order: ElementOrder) -> (AnalysisModel, SolverMeshArtifact) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.constraints.clear();
     model.boundaries.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let mut action = model.excitations[0].excitation().clone();
     action.target = ExcitationTarget::WholeModel;
     action.direction = None;
@@ -86,7 +86,7 @@ fn run(
     assemble(
         model,
         mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh, &[])
             .unwrap()
             .support(),
         sources,
@@ -266,7 +266,7 @@ fn selected_region_keeps_full_canonical_rows_and_integrates_only_that_region() {
             unreachable!()
         };
         action.target =
-            ExcitationTarget::Region(runmat_analysis_core::RegionTarget::volume("selected"));
+            ExcitationTarget::Region(runmat_analysis_core::RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("selected")));
         let sources = realize_excitations(&model, None, ExcitationSamplePoint::Static).unwrap();
         let output = run(&model, &mesh, &sources).unwrap();
         assert!(

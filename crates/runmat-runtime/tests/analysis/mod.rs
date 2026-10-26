@@ -9,7 +9,6 @@ use runmat_accelerate_api::{
 use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ProcedureStep};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
-use runmat_geometry_core::LengthUnit;
 use runmat_meshing_core::{
     solver_volume_element_identity, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
     MeshNeighbor, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshNode,
@@ -25,8 +24,7 @@ use runmat_runtime::analysis::{
     AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
     AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions,
     AnalysisStructuralTimeStepPolicy, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
-    FallbackEvent, FallbackReason, FallbackStage, FormulationRequirement, PrecisionMode,
-    PreconditionerMode, QualityPolicy,
+    FallbackEvent, FallbackReason, FallbackStage, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
@@ -214,7 +212,6 @@ struct FixtureRunRecord {
     electromagnetic_resonance_quality_factor: Option<f64>,
     electromagnetic_resonance_flux_gain: Option<f64>,
     numerically_acceptable: Option<bool>,
-    production_publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
     failures: Vec<String>,

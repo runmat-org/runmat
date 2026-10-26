@@ -180,7 +180,10 @@ pub fn build_prepared_nonlinear_state_publication_resource_plan(
         b.manifest.payload_digest,
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
-            output: projected_output_resource_facts(profile.encoded_bytes_upper_bound)?,
+            output:
+                runmat_analysis_fea::planning::resource::profiled_canonical_output_resource_facts(
+                    profile,
+                )?,
             output_set: projected_output_set_resource_facts(),
         },
         workload.model.sequence.steps[0].accuracy.resources,

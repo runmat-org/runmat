@@ -36,8 +36,7 @@ impl FluidTransientWorkload {
             step,
             &self.initial_fields,
         )?;
-        if self.formulation_requirement != FormulationRequirement::Experimental
-            || step.family != PhysicsFamily::Fluid
+        if step.family != PhysicsFamily::Fluid
             || step.procedure != AnalysisProcedure::TransientResponse
             || step.solution_space != SolutionSpace::Direct
             || !matches!(
@@ -81,7 +80,7 @@ impl FluidTransientWorkload {
             })
         {
             return Err(invalid(
-                "unsupported standalone fresh experimental transient fluid authority",
+                "unsupported standalone fresh transient fluid authority",
             ));
         }
         // Keep unsupported actions explicit; selection itself belongs to the shared case owner.
@@ -93,7 +92,15 @@ impl FluidTransientWorkload {
                 "transient fluid action lacks canonical realization",
             ));
         }
-        crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
+        if step.observations.iter().any(|request| {
+            matches!(
+                request,
+                runmat_analysis_core::ObservationRequest::Diagnostic(_)
+                    | runmat_analysis_core::ObservationRequest::Monitor(_)
+            )
+        }) {
+            return Err(invalid("fluid outputs observe native fields only"));
+        }
         super::super::FluidTransientSchedule::derive(&self.model, step)?;
         Ok(())
     }

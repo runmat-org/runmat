@@ -185,6 +185,8 @@ export type BuiltinExampleRequirements = {
     | "Python"
     | "NumPy"
     | "PlotCore"
+    | "NativeCad"
+    | "NativeMeshing"
   >;
   toolchain: Array<
     | "CCompiler"

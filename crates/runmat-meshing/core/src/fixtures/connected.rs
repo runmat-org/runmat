@@ -214,9 +214,9 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
         edge.order = BoundaryEdgeOrder::Line3;
     }
     artifact.resolved_request.element_order = ElementOrder::Tet10;
-    artifact.resolved_request.resources.maximum_nodes = artifact
+    artifact.resolved_request.limits.maximum_nodes = artifact
         .resolved_request
-        .resources
+        .limits
         .maximum_nodes
         .max(artifact.topology.nodes.len() as u64);
     for topology in &mut artifact.topology.field_topologies {

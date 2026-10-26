@@ -13,6 +13,7 @@ pub use self::conjugate_heat_transfer_interface_resistance::CHT_RESISTANCE_CATAL
 pub use self::contact_interface_coulomb::CONTACT_COULOMB_CATALOG_ENTRY;
 pub use self::contact_interface_frictionless::CONTACT_FRICTIONLESS_CATALOG_ENTRY;
 pub use self::fluid_structure_interface_no_slip::FLUID_STRUCTURE_INTERFACE_CATALOG_ENTRY;
+#[cfg(test)]
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &CONTACT_COULOMB_CATALOG_ENTRY,
     &CONTACT_FRICTIONLESS_CATALOG_ENTRY,

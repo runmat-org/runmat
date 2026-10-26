@@ -31,6 +31,8 @@ pub struct MeshingRunEvidenceContext {
 pub struct ExactMeshingDagRun<'a> {
     pub geometry: &'a PreparedExactGeometryInput,
     pub request: MeshingRequest,
+    /// Execution ceilings for this run (outside the request identity).
+    pub ceilings: runmat_meshing_core::MeshingExecutionCeilings,
     pub artifact_access: ArtifactAccess,
     pub capability_cohort: Option<String>,
     pub program_revision: ProgramRevision,
@@ -38,6 +40,9 @@ pub struct ExactMeshingDagRun<'a> {
     pub preferred_faces_per_partition: u32,
     pub inventory_limits: ObjectInventoryLimits,
     pub evidence: MeshingRunEvidenceContext,
+    /// Named solid, face and edge regions of the materialized geometry. The request's size
+    /// controls resolve against them before any stage runs; empty when the request has none.
+    pub named_regions: std::collections::BTreeMap<String, runmat_meshing_core::NamedRegionEntities>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -169,12 +174,21 @@ pub async fn execute_exact_meshing_dag_async<E: ExactMeshingDagExecutor>(
     run: ExactMeshingDagRun<'_>,
     executor: &mut E,
 ) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
+    let mut run = run;
+    // Authored size controls become scoped metric contributions on persistent entities; every
+    // stage then reads them from the one resolved request.
+    run.request = run
+        .request
+        .resolve_size_controls(&run.named_regions, &run.geometry.geometry_objects().topology)
+        .map_err(|error| ExactMeshingDagRunError::Invalid(error.to_string()))?
+        .0;
     validate_run(&run)?;
     register_inputs(&run, executor)?;
     let started = Instant::now();
     let planner = ExactMeshingDagPlanner::new(
         run.geometry,
         run.request.clone(),
+        run.ceilings,
         run.artifact_access.clone(),
         run.capability_cohort.clone(),
     )?;
@@ -242,7 +256,10 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
             "edge and face partition sizes must be nonzero".into(),
         ));
     }
-    if run.geometry.geometry_objects().topology.regions.is_empty() {
+    let topology = &run.geometry.geometry_objects().topology;
+    if (run.request.dimension.is_solid() && topology.regions.is_empty())
+        || (!run.request.dimension.is_solid() && topology.faces.is_empty())
+    {
         return Err(ExactMeshingDagRunError::Stage(
             MeshingStageExecutionError::Failure(Box::new(MeshingFailure {
                 schema_version: MESHING_FAILURE_SCHEMA_VERSION,
@@ -253,7 +270,12 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
                 witnesses: Vec::new(),
                 request_values: Vec::new(),
                 achieved_values: Vec::new(),
-                remediation: "select geometry containing at least one closed solid region".into(),
+                remediation: if run.request.dimension.is_solid() {
+                    "select geometry containing at least one closed solid region".into()
+                } else {
+                    "select geometry containing at least one face for shell or beam meshing"
+                        .into()
+                },
             })),
         ));
     }

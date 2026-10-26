@@ -1634,6 +1634,24 @@ pub trait RuntimeAnalysisService {
             crate::operations::OperationErrorEnvelope,
         >,
     >;
+
+    /// Execute a typed `.fea` study document by path through the host's public study runner
+    /// (`runmat fea run`), returning its authenticated publication. Hosts without a native
+    /// study runner refuse explicitly.
+    fn execute_document(
+        &self,
+        path: std::path::PathBuf,
+    ) -> RuntimeServiceFuture<Result<crate::analysis::AnalysisStudyRunData, crate::RuntimeError>>
+    {
+        Box::pin(async move {
+            Err(crate::build_runtime_error(format!(
+                "this host cannot execute the FEA document `{}`; run it with a native RunMat build",
+                path.display()
+            ))
+            .with_identifier("RunMat:fea:OperationFailed")
+            .build())
+        })
+    }
 }
 
 /// Session-owned authority over the exact immutable executable active in an invocation.
