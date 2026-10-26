@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use runmat_canonical_codec::{
-    profile_direct_materialization, profile_serialized, SerializedCanonicalProfile,
+    profile_direct_materialization, SerializedCanonicalProfile,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
@@ -295,6 +295,7 @@ pub(super) fn admit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_canonical_codec::profile_serialized;
 
     #[test]
     fn borrowed_core_storage_has_exact_actual_serializer_profile() {

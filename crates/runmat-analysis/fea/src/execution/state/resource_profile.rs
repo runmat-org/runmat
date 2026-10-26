@@ -5,7 +5,7 @@
 //! separately account source decoding, retained transport, typed state storage and validation.
 use runmat_analysis_core::AnalysisField;
 use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
-use serde::ser::SerializeMap;
+use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Serialize, Serializer};
 
 use super::*;
@@ -234,19 +234,19 @@ struct StateProjection<'a, T: ?Sized> {
 
 impl<T: Serialize + ?Sized> Serialize for StateProjection<'_, T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(11))?;
-        map.serialize_entry("schema_version", &1_u16)?;
-        map.serialize_entry("identity", &Digest::sha256([]))?;
-        map.serialize_entry("content_digest", &Digest::sha256([]))?;
-        map.serialize_entry("producer", &self.request.producer)?;
-        map.serialize_entry("state_id", &self.request.declaration.state_id)?;
-        map.serialize_entry("kind", &self.request.declaration.kind)?;
-        map.serialize_entry("completeness", &self.request.declaration.completeness)?;
-        map.serialize_entry("persistence", &self.request.declaration.persistence)?;
-        map.serialize_entry("topology_digest", &self.request.topology_digest)?;
-        map.serialize_entry("source_result", &self.request.source_result)?;
-        map.serialize_entry("payload", self.payload)?;
-        map.end()
+        let mut state = serializer.serialize_struct("CanonicalSemanticState", 11)?;
+        state.serialize_field("schema_version", &1_u16)?;
+        state.serialize_field("identity", &Digest::sha256([]))?;
+        state.serialize_field("content_digest", &Digest::sha256([]))?;
+        state.serialize_field("producer", &self.request.producer)?;
+        state.serialize_field("state_id", &self.request.declaration.state_id)?;
+        state.serialize_field("kind", &self.request.declaration.kind)?;
+        state.serialize_field("completeness", &self.request.declaration.completeness)?;
+        state.serialize_field("persistence", &self.request.declaration.persistence)?;
+        state.serialize_field("topology_digest", &self.request.topology_digest)?;
+        state.serialize_field("source_result", &self.request.source_result)?;
+        state.serialize_field("payload", self.payload)?;
+        state.end()
     }
 }
 
@@ -258,10 +258,10 @@ struct Tagged<'a, T: ?Sized> {
 
 impl<T: Serialize + ?Sized> Serialize for Tagged<'_, T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("kind", self.kind)?;
-        map.serialize_entry(self.key, self.value)?;
-        map.end()
+        let mut variant = serializer.serialize_struct("CanonicalSemanticStatePayload", 2)?;
+        variant.serialize_field("kind", self.kind)?;
+        variant.serialize_field(self.key, self.value)?;
+        variant.end()
     }
 }
 
