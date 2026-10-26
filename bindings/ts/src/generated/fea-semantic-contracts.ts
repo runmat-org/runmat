@@ -1977,6 +1977,12 @@ export interface GeometryFeatureRegionSelection {
   cardinality: GeometryRegionCardinality;
 }
 
+export interface GeometryNamedSelections {
+  schema_version: number;
+  source_digest: GeometryDigest;
+  regions: GeometryRegionDefinition[];
+}
+
 export interface GeometryParameterDefinition {
   parameter_id: string;
   parameter_type: GeometryParameterType;
@@ -2159,6 +2165,7 @@ export interface ImportedFunctionIdentity {
 }
 
 export interface ImportedGeometryDefinition {
+  named_selections?: GeometryNamedSelections;
   logical_path: string;
   format: GeometrySourceFormat;
   authored_units: LengthUnit | null;

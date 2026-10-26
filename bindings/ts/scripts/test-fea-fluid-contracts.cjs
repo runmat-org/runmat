@@ -28,10 +28,17 @@ const interfaces = names.map((name) => {
   assert.ok(declaration, `missing ${name}`);
   return declaration;
 });
+const coupling = generated.match(/export type FeaPressureVelocityCoupling = [^;]+;/)?.[0];
+assert.ok(coupling, "missing Rust-derived pressure/velocity coupling choices");
+assert.match(coupling, /"coupled" \| "segregated"/);
+interfaces.unshift(coupling);
 const source = [...interfaces,
   'declare const ordinary: Omit<FeaCanonicalFluidPolicy, "fixed_point_acceleration">;',
   'const disabled: FeaCanonicalFluidPolicy = { ...ordinary, fixed_point_acceleration: null };',
   'const enabled: FeaCanonicalFluidPolicy = { ...ordinary, fixed_point_acceleration: { maximum_absolute_coefficient: 32 } };',
+  'const segregated: FeaCanonicalFluidPolicy = { ...disabled, pressure_velocity_coupling: "segregated" };',
+  '// @ts-expect-error coupling choices must match Rust',
+  'const invalidCoupling: FeaCanonicalFluidPolicy = { ...disabled, pressure_velocity_coupling: "automatic" };',
   '// @ts-expect-error acceleration authority must not silently default',
   'const missing: FeaCanonicalFluidPolicy = ordinary;',
   '// @ts-expect-error numerical policy is a typed object, not a switch',

@@ -82,6 +82,7 @@ const analysisEnumTypes = [
   ["PrecisionMode", "FeaPrecisionMode"],
   ["PreconditionerMode", "FeaPreconditionerMode"],
   ["QualityPolicy", "FeaQualityPolicy"],
+  ["PressureVelocityCoupling", "FeaPressureVelocityCoupling"],
 ];
 const progressEnumTypes = [
   ["FeaProgressPhase", "FeaProgressPhase"],
@@ -233,6 +234,8 @@ function rustTypeToTs(type) {
       return { type: "FeaModalConvergencePolicy", nullable: false };
     case "runmat_analysis_fea::physics::cfd::canonical::CanonicalFluidPolicy":
       return { type: "FeaCanonicalFluidPolicy", nullable: false };
+    case "PressureVelocityCoupling":
+      return { type: "FeaPressureVelocityCoupling", nullable: false };
     case "crate::solve::fixed_point::AndersonOnePolicy":
       return { type: "FeaAndersonOnePolicy", nullable: false };
     case "runmat_analysis_fea::topology::FiniteVolumeProjectionPolicy":
@@ -355,6 +358,7 @@ function readStructFields(source, name, options = {}) {
   let pendingField = "";
   for (const rawLine of body.split("\n")) {
     const line = rawLine.trim();
+    if (line.startsWith("//")) continue;
     if (pendingField) {
       pendingField += ` ${line}`;
       if (line.endsWith(",")) {
