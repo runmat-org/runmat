@@ -96,7 +96,7 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
         ],
         elements: vec![StructuralElement {
             element_id: "beam_1".into(),
-            region_id: "span".into(),
+            region_id: runmat_meshing_core::fixtures::fixture_edge("span"),
             kind: StructuralElementKind::Beam(BeamElementModel {
                 node_ids: [101, 102],
                 section_id: "rect".into(),
@@ -162,7 +162,7 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
         vec![
             FixtureExcitation {
                 id: "beam_tip_force".into(),
-                region_id: "span".into(),
+                region_id: runmat_meshing_core::fixtures::fixture_edge("span"),
                 kind: FixtureExcitationKind::Force([1_000.0, 0.0, 0.0]),
             },
             FixtureExcitation {
@@ -222,7 +222,7 @@ pub fn mixed_solid_beam_shell_model(attached_coordinates_m: [f64; 3]) -> Analysi
     ]);
     structural.elements.push(StructuralElement {
         element_id: "shell_1".into(),
-        region_id: "skin".into(),
+        region_id: runmat_meshing_core::fixtures::fixture_face("skin"),
         kind: StructuralElementKind::Shell(ShellElementModel {
             node_ids: [101, 103, 104],
             section_id: "skin_2mm".into(),

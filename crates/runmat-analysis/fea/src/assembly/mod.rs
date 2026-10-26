@@ -2033,7 +2033,7 @@ mod tests {
             ],
             elements: vec![runmat_analysis_core::StructuralElement {
                 element_id: "beam_1".to_string(),
-                region_id: "span".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_edge("span"),
                 kind: runmat_analysis_core::StructuralElementKind::Beam(
                     runmat_analysis_core::BeamElementModel {
                         node_ids: [1, 2],
@@ -2935,7 +2935,7 @@ mod tests {
             },
         ];
         let structural = model.structural.as_mut().expect("beam topology");
-        structural.elements[0].region_id = "span_first".into();
+        structural.elements[0].region_id = runmat_meshing_core::fixtures::fixture_edge("span_first");
         structural.nodes.push(runmat_analysis_core::StructuralNode {
             node_id: 3,
             coordinates_m: runmat_types::physical::Quantity::<
@@ -2946,7 +2946,7 @@ mod tests {
         });
         let mut second_element = structural.elements[0].clone();
         second_element.element_id = "beam_2".into();
-        second_element.region_id = "span_second".into();
+        second_element.region_id = runmat_meshing_core::fixtures::fixture_edge("span_second");
         let StructuralElementKind::Beam(beam) = &mut second_element.kind else {
             unreachable!("fixture element is a beam")
         };
@@ -4415,7 +4415,7 @@ mod tests {
             .elements
             .push(runmat_analysis_core::StructuralElement {
                 element_id: "beam_2".into(),
-                region_id: "beam_span_2".into(),
+                region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span_2"),
                 kind: StructuralElementKind::Beam(runmat_analysis_core::BeamElementModel {
                     node_ids: [3, 4],
                     section_id: "rect".into(),
