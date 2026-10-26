@@ -72,7 +72,7 @@ impl BrowserPreferenceService {
         budget: &mut CpuCooperationBudget,
         mutation: DocumentMutation,
         profiling: Option<&CommandProfilingReceipt>,
-    ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
+    ) -> Result<transaction::BrowserCheckedSource, PreferenceServiceError> {
         let result = self
             .mutate_request(
                 budget,
@@ -81,8 +81,8 @@ impl BrowserPreferenceService {
             )
             .await?;
         match result {
-            completed @ transaction::BrowserPrepared::Completed { .. } => Ok(completed),
-            transaction::BrowserPrepared::NeedsPreparation(_) => {
+            completed @ transaction::BrowserCheckedSource::Completed { .. } => Ok(completed),
+            transaction::BrowserCheckedSource::NeedsPreparation(_) => {
                 unreachable!("prepared mutation owns no caller defaults")
             }
         }
@@ -93,7 +93,7 @@ impl BrowserPreferenceService {
         budget: &mut CpuCooperationBudget,
         mutation: transaction::BrowserMutation,
         profiling: Option<&CommandProfilingReceipt>,
-    ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
+    ) -> Result<transaction::BrowserCheckedSource, PreferenceServiceError> {
         let gate = budget
             .await_cancellable(self.gate.clone().lock_owned())
             .await
@@ -261,7 +261,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                     )
                     .await?;
                 match prepared {
-                    transaction::BrowserPrepared::NeedsPreparation(indices) => {
+                    transaction::BrowserCheckedSource::NeedsPreparation(indices) => {
                         if indices.is_empty() {
                             return Err(PreferenceServiceError::InvalidTransaction(
                                 "browser preference default selection made no progress".into(),
@@ -277,7 +277,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                             shared.mark_prepared(index, payload);
                         }
                     }
-                    transaction::BrowserPrepared::Completed { values, .. } => {
+                    transaction::BrowserCheckedSource::Completed { values, .. } => {
                         let mut output = Vec::with_capacity(values.len());
                         for payload in &values {
                             output.push(
@@ -369,7 +369,7 @@ impl RuntimeUserPathService for BrowserPreferenceService {
                     profiling.as_ref(),
                 )
                 .await?;
-            let transaction::BrowserPrepared::Completed { user_path, .. } = prepared else {
+            let transaction::BrowserCheckedSource::Completed { user_path, .. } = prepared else {
                 unreachable!("user-path mutation owns no caller defaults")
             };
             Ok(user_path.expect("user-path mutation prepares a setting snapshot"))
