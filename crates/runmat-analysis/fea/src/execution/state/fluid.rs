@@ -59,8 +59,10 @@ pub fn fluid_state_publication_workspace_bytes(
         STATE_LIMITS,
     )?;
     let decoded_original = canonical_payload_materialization_resident_bytes_estimate(result_bytes)?;
+    // Publication verifies the retained result (re-prepare and residual re-evaluation);
+    // it runs no linear solve, so the verification phase bound applies.
     let required = add(
-        projection.phase_resident_bytes_upper_bound.0,
+        projection.verification_phase_resident_bytes_upper_bound.0,
         add(
             decoded_original,
             add(

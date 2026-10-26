@@ -47,6 +47,9 @@ pub struct FluidSteadyResourceProjection {
     /// Source preparation, original numerical reserve, profile/decode and encode
     /// lifetimes summed conservatively; scheduler fixed/transport costs are separate.
     pub phase_resident_bytes_upper_bound: ByteCount,
+    /// The same lifetimes with the numerical verification bound in place of the solve
+    /// reserve: re-preparing and verifying a retained result runs no linear solve.
+    pub verification_phase_resident_bytes_upper_bound: ByteCount,
 }
 
 fn invalid(error: impl std::fmt::Display) -> ResourcePlanningError {
@@ -111,10 +114,18 @@ fn derive_projection(
         workload_profile.encoded_bytes_upper_bound,
         mesh_profile.encoded_bytes_upper_bound,
     )?;
+    let decoded_inputs = admission::add(input_profiles, input_buffers)?;
     let phase_resident = admission::phase_resident_bytes(
         numerical.resident_bytes_upper_bound,
         source_preparation_resident_bytes,
-        admission::add(input_profiles, input_buffers)?,
+        decoded_inputs,
+        result.encoded_bytes_upper_bound,
+        result.materialization_resident_bytes_estimate,
+    )?;
+    let verification_phase_resident = admission::phase_resident_bytes(
+        numerical.verification_resident_bytes_upper_bound,
+        source_preparation_resident_bytes,
+        decoded_inputs,
         result.encoded_bytes_upper_bound,
         result.materialization_resident_bytes_estimate,
     )?;
@@ -132,14 +143,10 @@ fn derive_projection(
             .map_err(|_| ResourcePlanningError::Overflow("fluid mesh wire length"))?,
     )?;
     let actual_decode_resident_bytes = admission::add(
-        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-            &workload_bytes,
-        )
-        .map_err(invalid)?,
-        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-            &mesh_bytes,
-        )
-        .map_err(invalid)?,
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&workload_bytes)
+            .map_err(invalid)?,
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&mesh_bytes)
+            .map_err(invalid)?,
     )?;
     drop(workload_bytes);
     drop(mesh_bytes);
@@ -160,6 +167,7 @@ fn derive_projection(
             result.materialization_resident_bytes_estimate,
         ),
         phase_resident_bytes_upper_bound: ByteCount(phase_resident),
+        verification_phase_resident_bytes_upper_bound: ByteCount(verification_phase_resident),
     })
 }
 

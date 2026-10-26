@@ -71,6 +71,7 @@ const RESERVATION_KEYS: &[&str] = &[
     "faces",
     "sparse_entries",
     "resident_bytes_upper_bound",
+    "verification_resident_bytes_upper_bound",
     "operator_work_upper_bound",
     "linear_iterations_upper_bound",
 ];
@@ -87,7 +88,7 @@ pub const FLUID_RECEIPT_MAX_ENCODED_BYTES: u64 = 128
     + PROVENANCE.len() as u64
     + 18 * 9
     + keys(RESERVATION_KEYS)
-    + 6 * 9;
+    + RESERVATION_KEYS.len() as u64 * 9;
 const LIMITS: CanonicalLimits =
     CanonicalLimits::new(FLUID_RECEIPT_MAX_ENCODED_BYTES as usize, 32, 128, 16);
 
