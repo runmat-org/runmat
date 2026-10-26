@@ -96,7 +96,7 @@ pub(in crate::analysis) fn complete_buckling_study(
         },
         numerical.preload_result.run,
         Some(&preload_run_id),
-        None,
+        Default::default(),
     )?;
     let preload_fields = crate::analysis::collect_semantic_state_fields(&preload_run.data);
     numerical.prestress_state.validate().map_err(|error| {

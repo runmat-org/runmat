@@ -387,6 +387,7 @@ fn structural_result(
                         solver_result_identity: step.result_identity,
                         result: step.result.clone(),
                         numerical_receipt: step.numerical_receipt.clone(),
+                        static_solve_path: Some(step.static_solve_path),
                     })
                     .collect(),
                 states: sequence

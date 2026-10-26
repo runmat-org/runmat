@@ -135,6 +135,7 @@ fn complete_linear_sequence(
     completion_identity: AnalysisStudyCompletionIdentity,
     preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
 ) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
+    let effective_memory_ceiling_bytes = result.effective_memory_ceiling_bytes;
     let mut numerical_by_step = BTreeMap::new();
     for step in result.steps {
         if numerical_by_step
@@ -219,7 +220,10 @@ fn complete_linear_sequence(
             prepared_linear,
             numerical.result.run,
             Some(&assigned_run_id),
-            None,
+            crate::analysis::StaticSolvePlacement {
+                effective_memory_ceiling_bytes,
+                static_solve_path: numerical.static_solve_path,
+            },
         )?;
         let mut authored_execution = step.authored_execution;
         authored_execution.solver_options =

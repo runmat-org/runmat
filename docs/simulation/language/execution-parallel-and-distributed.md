@@ -47,6 +47,18 @@ RunMat keeps these execution shapes separate:
 The first two do not constitute a distributed solve. Evidence and user-visible status use these
 terms precisely.
 
+## Memory per worker
+
+`memory_per_worker <= 16 GiB` bounds the resident memory of each worker that runs the study.
+Planning works within the effective ceiling: the smallest of this bound, the step's own resident
+ceiling, and the memory the host admits. A linear static solid solve selects its path within that
+ceiling. When the sparse Cholesky factor fits, the factor proves coercivity and solves. When it
+doesn't fit, element rigidity proves the operator positive definite and AMG-preconditioned
+conjugate gradients solve it, accepted by the true residual. Each published run records the
+effective ceiling (`effective_memory_ceiling_bytes`) and the selected path (`static_solve_path`)
+in its provenance, and `runmat fea run --json` prints both. Neither value enters the
+study-definition identity.
+
 ## Fan-out policy
 
 ```fea

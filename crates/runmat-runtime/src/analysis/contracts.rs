@@ -620,6 +620,18 @@ pub struct RunProvenance {
     /// memory this host admitted), when known. Provenance only: it never enters an identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_memory_ceiling_bytes: Option<u64>,
+    /// The static solve path the admitted plan selected under that ceiling, when the step is a
+    /// static SPD solve. Provenance only: it never enters an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_solve_path: Option<runmat_analysis_fea::planning::resource::StaticSolvePath>,
+}
+
+/// Where a static solve ran and how: the effective memory ceiling and the solve path it
+/// selected. Run provenance only; neither value enters an identity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StaticSolvePlacement {
+    pub effective_memory_ceiling_bytes: Option<u64>,
+    pub static_solve_path: Option<runmat_analysis_fea::planning::resource::StaticSolvePath>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

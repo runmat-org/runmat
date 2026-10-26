@@ -254,6 +254,7 @@ mod tests {
             max_workers: 1,
             local_cpu_capacity_millicores: None,
             local_memory_capacity_bytes: None,
+            authored_worker_memory_bytes: None,
             max_message_bytes: 1024,
             max_object_bytes: 512 * 1024 * 1024,
             max_stderr_bytes: 1024,
