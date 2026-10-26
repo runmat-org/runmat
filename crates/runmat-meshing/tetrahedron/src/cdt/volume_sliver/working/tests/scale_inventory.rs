@@ -81,6 +81,7 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
         global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     if scoped {
         request

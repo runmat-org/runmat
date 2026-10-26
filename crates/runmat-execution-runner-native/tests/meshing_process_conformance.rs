@@ -696,6 +696,7 @@ async fn remote_conformance() {
                     },
                     request: full_dag.1.clone(),
                     artifact_access: full_dag.2.clone(),
+                    named_regions: Default::default(),
                     capability_cohort: Some("native-cohort-v1".into()),
                     program_revision: request.recipe.program_revision.clone(),
                     preferred_edges_per_partition: 3,
@@ -1171,6 +1172,7 @@ fn request() -> MeshingRequest {
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -1201,6 +1203,7 @@ fn request() -> MeshingRequest {
             maximum_checkpoint_latency_ms: 1000,
             maximum_work_units_between_checks: 1000,
         },
+        size_controls: Vec::new(),
     }
 }
 

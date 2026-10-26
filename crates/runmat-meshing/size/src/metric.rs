@@ -224,6 +224,21 @@ pub struct MetricFieldRequest {
     /// A supported scope is graded by distance instead of applying across incident faces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_supports: Vec<MetricEntitySupport>,
+    /// Requested element layers across a thin gap between non-incident boundary entities.
+    /// `None` is the canonical two layers and keeps existing request identities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells_across_gap: Option<u32>,
+}
+
+impl MetricFieldRequest {
+    /// Canonical element layers across a thin gap when none is requested.
+    pub const DEFAULT_CELLS_ACROSS_GAP: u32 = 2;
+
+    /// Element layers proximity sizing resolves across a thin gap.
+    pub fn resolved_cells_across_gap(&self) -> u32 {
+        self.cells_across_gap
+            .unwrap_or(Self::DEFAULT_CELLS_ACROSS_GAP)
+    }
 }
 
 impl MetricFieldRequest {
@@ -245,6 +260,15 @@ impl MetricFieldRequest {
             contribution.validate()?;
         }
         local::validate_supports(&self.entity_supports)?;
+        if self
+            .cells_across_gap
+            .is_some_and(|cells| !(1..=64).contains(&cells))
+        {
+            return Err(MetricContractError::invalid(
+                "cells across gap",
+                "must be between 1 and 64",
+            ));
+        }
         if self
             .contributions
             .windows(2)

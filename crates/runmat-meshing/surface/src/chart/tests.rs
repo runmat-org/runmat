@@ -231,6 +231,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = SurfaceQualityTargets {
         minimum_metric_edge_length: 0.001,
@@ -968,6 +969,7 @@ fn singular_spherical_wedge_uses_an_exact_bounded_polar_chart() {
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 1.3,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let geometry = crate::evaluate_exact_face_geometry_in_parameterization(
         &domains[0].trimmed,

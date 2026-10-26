@@ -23,7 +23,7 @@ FEA root-selection options are `--study <id>` and `--sweep <id>`. `check`, `plan
 | --- | --- |
 | `geometry <id> { ... }` | exactly one imported, constructed, or generated source plus typed regions as needed |
 | `geometry <id> from geometry.<source> { derive { ... } }` | immutable derived feature graph |
-| `mesh <id> on geometry.<id> { tetrahedra { ... } }` | `order`, `target_size`, and `maximum_deviation` |
+| `mesh <id> on geometry.<id> { tetrahedra { ... } }` | `order`, `target_size`, and `maximum_deviation`; optional `maximum_grading_ratio`, `deterministic_seed`, `cells_across_gap` and `refine <name> { on, target_size }` blocks |
 | `material <id> { ... }` | one or more physical capability properties required by its consumers |
 | `model <id> { ... }` | assignments, conditions, actions/signals, cases, properties, and composition |
 | `study <id> { ... }` | geometry, matching mesh, model, at least one analysis, and optional outputs/inputs/execution |

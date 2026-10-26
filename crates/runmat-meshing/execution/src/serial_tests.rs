@@ -1626,6 +1626,7 @@ pub(crate) fn request() -> MeshingRequest {
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -1656,6 +1657,7 @@ pub(crate) fn request() -> MeshingRequest {
             maximum_checkpoint_latency_ms: 1000,
             maximum_work_units_between_checks: 1000,
         },
+        size_controls: Vec::new(),
     }
 }
 

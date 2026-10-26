@@ -210,6 +210,9 @@ pub(super) async fn execute_geometry_for_composition(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: runmat_meshing_core::NamedRegionEntities::from_resolved_regions(
+                &materialization.regions,
+            ),
         },
         &mut executor,
     )
@@ -347,6 +350,7 @@ pub(super) async fn execute_for_composition(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )

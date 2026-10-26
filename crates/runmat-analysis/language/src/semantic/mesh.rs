@@ -7,7 +7,12 @@ use crate::{
     FeaSymbolKind, FeaSymbolOrigin, LogicalSourcePath,
 };
 use runmat_geometry_core::GeometryDefinitionRef;
-use runmat_meshing_core::{ElementOrder, MeshDefinition, MeshDimension, MeshingRequestSettings};
+use runmat_analysis_core::AuthoredRegionSource;
+use runmat_geometry_core::GeometryRegionRole;
+use runmat_meshing_core::{
+    ElementOrder, MeshDefinition, MeshDimension, MeshSizeControl, MeshSizeControlTarget,
+    MeshingRequestSettings,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn lower_mesh_definitions(
@@ -88,6 +93,30 @@ fn definition(
     let deterministic_seed =
         optional_integer(declaration, settings_block, "deterministic_seed", diagnostics)
             .unwrap_or(defaults.deterministic_seed);
+    let cells_across_gap =
+        optional_integer(declaration, settings_block, "cells_across_gap", diagnostics).and_then(
+            |cells| match u32::try_from(cells) {
+                Ok(cells @ 1..=64) => Some(cells),
+                _ => {
+                    coded(
+                        declaration,
+                        declaration.span,
+                        "fea.semantic.mesh.cells_across_gap",
+                        "mesh `cells_across_gap` must be an integer from 1 to 64",
+                        diagnostics,
+                    );
+                    None
+                }
+            },
+        );
+    let size_controls = size_controls(
+        bound,
+        declaration,
+        &geometry,
+        settings_block,
+        target_edge_length_m,
+        diagnostics,
+    );
     let settings = MeshingRequestSettings {
         element_order: order?,
         dimension,
@@ -95,6 +124,8 @@ fn definition(
         target_edge_length_m: target_edge_length_m?,
         maximum_chordal_deviation_m: maximum_chordal_deviation_m?,
         maximum_grading_ratio,
+        cells_across_gap,
+        size_controls,
         ..defaults
     };
 
@@ -249,8 +280,16 @@ fn reject_unsupported_settings(
     if block == "tetrahedra" {
         supported.insert("order");
     }
+    if block == "tetrahedra" {
+        supported.insert("cells_across_gap");
+    }
     let mut seen = BTreeSet::new();
     for statement in statements {
+        if matches!(&statement.kind, CheckedFeaStatementKind::Block { header, .. }
+            if block == "tetrahedra" && refine_name(header).is_some())
+        {
+            continue;
+        }
         let CheckedFeaStatementKind::Assignment {
             target, relation, ..
         } = &statement.kind
@@ -296,6 +335,165 @@ fn reject_unsupported_settings(
             );
         }
     }
+}
+
+/// `refine <name> { on = geometry.<g>.region.<r>  target_size = <length> }` blocks of a
+/// `tetrahedra` request: one local size control per named solid, face or edge region.
+fn refine_name(header: &str) -> Option<&str> {
+    let mut words = header.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("refine"), Some(name), None) => Some(name),
+        _ => None,
+    }
+}
+
+fn size_controls(
+    bound: &BoundFeaProgram,
+    declaration: &CheckedFeaDeclaration,
+    geometry: &GeometryDefinitionRef,
+    statements: &[CheckedFeaStatement],
+    global_size_m: Option<f64>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Vec<MeshSizeControl> {
+    let mut controls = BTreeMap::<String, MeshSizeControl>::new();
+    let mut regions = BTreeMap::<String, String>::new();
+    for statement in statements {
+        let CheckedFeaStatementKind::Block {
+            header,
+            statements: body,
+            ..
+        } = &statement.kind
+        else {
+            continue;
+        };
+        let Some(name) = refine_name(header) else {
+            continue;
+        };
+        let errors = diagnostics.len();
+        for member in body {
+            match &member.kind {
+                CheckedFeaStatementKind::Assignment { target, .. }
+                    if target.len() == 1 && ["on", "target_size"].contains(&target[0].as_str()) => {}
+                _ => coded(
+                    declaration,
+                    member.span,
+                    "fea.semantic.mesh.control_setting",
+                    format!("refine `{name}` accepts only `on` and `target_size`"),
+                    diagnostics,
+                ),
+            }
+        }
+        let Some(on) = assignment(body, "on") else {
+            missing(declaration, &format!("on` in `refine {name}"), diagnostics);
+            continue;
+        };
+        let target = match super::model::region_source(bound, declaration, on, diagnostics) {
+            Some(AuthoredRegionSource::Geometry(region)) => {
+                if region.module_path != geometry.module_path
+                    || region.geometry_id != geometry.geometry_id
+                {
+                    coded(
+                        declaration,
+                        on.span,
+                        "fea.semantic.mesh.control_region",
+                        format!(
+                            "refine `{name}` selects a region of geometry `{}`, not the meshed geometry `{}`",
+                            region.geometry_id, geometry.geometry_id
+                        ),
+                        diagnostics,
+                    );
+                    None
+                } else {
+                    match region.role {
+                        GeometryRegionRole::Solid => Some((region.region_id, MeshSizeControlTarget::Solid)),
+                        GeometryRegionRole::Face => Some((region.region_id, MeshSizeControlTarget::Face)),
+                        GeometryRegionRole::Edge => Some((region.region_id, MeshSizeControlTarget::Edge)),
+                        role => {
+                            coded(
+                                declaration,
+                                on.span,
+                                "fea.semantic.mesh.control_region",
+                                format!("refine `{name}` requires a solid, face or edge region, not a {role:?} region"),
+                                diagnostics,
+                            );
+                            None
+                        }
+                    }
+                }
+            }
+            Some(AuthoredRegionSource::ModelInput(_)) => {
+                coded(
+                    declaration,
+                    on.span,
+                    "fea.semantic.mesh.control_region",
+                    format!("refine `{name}` requires a geometry region, not an input"),
+                    diagnostics,
+                );
+                None
+            }
+            None => None,
+        };
+        let size = required_length(declaration, body, "target_size", diagnostics);
+        let (Some((region_id, target)), Some(size)) = (target, size) else {
+            continue;
+        };
+        if diagnostics.len() != errors {
+            continue;
+        }
+        if !size.is_finite() || size <= 0.0 {
+            coded(
+                declaration,
+                statement.span,
+                "fea.semantic.mesh.control_size",
+                format!("refine `{name}` target_size must be positive"),
+                diagnostics,
+            );
+            continue;
+        }
+        if global_size_m.is_some_and(|global| size >= global) {
+            coded(
+                declaration,
+                statement.span,
+                "fea.semantic.mesh.control_size",
+                format!(
+                    "refine `{name}` target_size must be smaller than the mesh target_size; \
+                     local controls refine, and the smallest requested size wins where controls meet"
+                ),
+                diagnostics,
+            );
+            continue;
+        }
+        if let Some(previous) = regions.insert(region_id.clone(), name.to_string()) {
+            coded(
+                declaration,
+                statement.span,
+                "fea.semantic.mesh.control_conflict",
+                format!("refine `{name}` and refine `{previous}` both control region `{region_id}`"),
+                diagnostics,
+            );
+            continue;
+        }
+        if controls.contains_key(name) {
+            coded(
+                declaration,
+                statement.span,
+                "fea.semantic.mesh.control_conflict",
+                format!("duplicate refine `{name}`"),
+                diagnostics,
+            );
+            continue;
+        }
+        controls.insert(
+            name.to_string(),
+            MeshSizeControl {
+                control_id: name.to_string(),
+                region_id,
+                target,
+                target_size_m: size,
+            },
+        );
+    }
+    controls.into_values().collect()
 }
 
 fn assignment<'a>(
@@ -475,6 +673,24 @@ fn invalid(
         format!("mesh setting `{name}` requires a {expected}"),
         diagnostics,
     );
+}
+
+fn coded(
+    declaration: &CheckedFeaDeclaration,
+    span: runmat_types::Span,
+    code: &'static str,
+    message: impl Into<String>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    diagnostics.push(FeaDiagnostic::error(
+        code,
+        message,
+        FeaDiagnosticPhase::Lowering,
+        Some(FeaDiagnosticLocation {
+            path: declaration.module.clone(),
+            span,
+        }),
+    ));
 }
 
 fn diagnostic(

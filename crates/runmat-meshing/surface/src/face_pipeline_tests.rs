@@ -55,6 +55,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let partitions = face_partition_descriptors(&topology, 1).unwrap();
     let context = ExactFacePartitionContext {
@@ -440,6 +441,7 @@ fn authoritative_spherical_octant_runs_the_complete_face_partition() {
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let partitions = face_partition_descriptors(&topology, 1).unwrap();
     let context = ExactFacePartitionContext {

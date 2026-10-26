@@ -7,7 +7,7 @@ use super::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder, MeshDimension,
     MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
+    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION, MeshSizeControl,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -22,6 +22,13 @@ pub struct MeshingRequestSettings {
     pub maximum_grading_ratio: f64,
     pub limits: MeshingSizeLimits,
     pub cancellation: CancellationPolicy,
+    /// Requested element layers across thin gaps (proximity sizing). `None` keeps the canonical
+    /// two layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells_across_gap: Option<u32>,
+    /// Local sizing controls on named geometry regions, ordered by control name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub size_controls: Vec<MeshSizeControl>,
 }
 
 impl Default for MeshingRequestSettings {
@@ -42,6 +49,8 @@ impl Default for MeshingRequestSettings {
                 maximum_checkpoint_latency_ms: 1_000,
                 maximum_work_units_between_checks: 100_000,
             },
+            cells_across_gap: None,
+            size_controls: Vec::new(),
         }
     }
 }
@@ -72,6 +81,13 @@ impl MeshingRequestSettings {
                 "must be at least one",
             ));
         }
+        if self.cells_across_gap.is_some_and(|cells| !(1..=64).contains(&cells)) {
+            return Err(MeshingContractError::invalid(
+                "cells across gap",
+                "must be between 1 and 64",
+            ));
+        }
+        super::validate_size_controls(&self.size_controls)?;
         self.limits.validate()?;
         self.cancellation.validate()
     }
@@ -117,6 +133,7 @@ pub fn resolve_meshing_request(
             global_metric: metric,
             maximum_grading_ratio: settings.maximum_grading_ratio,
             contributions: Vec::new(),
+            cells_across_gap: settings.cells_across_gap,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -140,6 +157,7 @@ pub fn resolve_meshing_request(
         },
         limits: settings.limits,
         cancellation: settings.cancellation,
+        size_controls: settings.size_controls,
     };
     request.validate()?;
     Ok(request)

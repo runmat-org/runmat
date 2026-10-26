@@ -161,6 +161,7 @@ pub(super) fn metric_request() -> MetricFieldRequest {
                 metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
             },
         ],
+        cells_across_gap: None,
     }
 }
 
@@ -280,6 +281,7 @@ fn anisotropic_metric_reports_a_sliver_without_scheduling_size_refinement() {
         },
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let options = DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 1.0e12,
@@ -357,6 +359,7 @@ fn constrained_boundary_radius_edge_is_reported_but_shape_drives_admission() {
             global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
             maximum_grading_ratio: 1.5,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         &provenance,
         options,

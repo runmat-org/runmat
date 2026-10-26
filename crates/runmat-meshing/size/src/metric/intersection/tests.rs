@@ -49,6 +49,7 @@ fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_commo
             global_metric: base,
             maximum_grading_ratio: 1.3,
             contributions,
+            cells_across_gap: None,
         };
         let resolved = ResolvedMetricField::new(&request)
             .unwrap()

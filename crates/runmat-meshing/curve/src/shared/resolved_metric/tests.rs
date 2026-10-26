@@ -61,6 +61,7 @@ fn curve_boundary_trace_satisfies_every_adjacent_fine_face_before_surface_execut
                 },
                 metric: required,
             }],
+            cells_across_gap: None,
         };
         let field = ResolvedCurveMetricField::new(&topology, &request).unwrap();
         let GeometryModel::ExactBRep { model } = &document.model else {

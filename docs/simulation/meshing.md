@@ -132,8 +132,105 @@ backends. `maximum_grading_ratio` limits how quickly the requested size may chan
 regions. Lower values produce smoother transitions and can require more elements.
 
 `order`, `target_size`, and `maximum_deviation` are required. `maximum_grading_ratio` and
-`deterministic_seed` have canonical defaults. The language does not currently expose region-local
-refinement, boundary layers, hybrid element families, or user-selectable meshing algorithms.
+`deterministic_seed` have canonical defaults. `cells_across_gap` and `refine` blocks are optional local controls,
+described next.
+
+## Local sizing controls
+
+A `tetrahedra` block can refine named solid, face and edge regions, and can ask for a number of
+element layers across thin gaps:
+
+```fea
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+        cells_across_gap = 3
+
+        refine bolt_holes {
+            on = geometry.bracket.region.hole_walls
+            target_size = 1 mm
+        }
+        refine fillet_edges {
+            on = geometry.bracket.region.fillet_edges
+            target_size = 0.5 mm
+        }
+    }
+}
+```
+
+`refine <name>` selects one named geometry region, the same regions constraints and loads select,
+and requests a local target edge length on it:
+
+| Region role | What the control sizes |
+| --- | --- |
+| `solid` | Every cell of the solid, and the faces and edges that bound it |
+| `face` | The face triangles, the edges that bound the faces and the cells that touch them |
+| `edge` | The edge segments and the triangles and cells that touch the edges |
+
+Away from a refined region, the size grows back to the global `target_size` no faster than
+`maximum_grading_ratio` per element layer, so `maximum_grading_ratio` is the mesh's growth rate.
+
+`cells_across_gap = N` asks for N elements through every thin gap and thin wall narrower than N
+times the global `target_size`. Proximity sizing measures two kinds of gap:
+
+- between two boundary edges that share no vertex, where the size across the gap is the gap
+  divided by N, along the gap direction;
+- between two faces that share no vertex and face each other across the gap: the two sides of a
+  thin wall or plate, the inner and outer surfaces of a tube, or the two walls of a slot. Both faces
+  get an isotropic size of the gap divided by N, so their triangles and every cell touching them
+  resolve the gap with N elements, and the volume grades from there. The gap is measured between
+  the faces' boundary samples whose separation lies within about 25 degrees of both surface
+  normals, so faces that meet through a blend or a chamfer are not a gap.
+
+Without `cells_across_gap`, edge proximity resolves two layers and faces are not measured, so a
+mesh's identity and output stay the same as before the setting existed.
+
+**Precedence.** Where controls meet, the smallest requested size wins. A face and the edges that
+bound it, a solid and its faces, and the global size all constrain the shared mesh entities, and
+the metric field combines them by most-restrictive intersection. The result is the same whatever
+order the controls are written in, and a coarse control can't undo a finer one on a shared entity.
+For this reason a local `target_size` must be smaller than the global `target_size`.
+
+The checker rejects, with typed diagnostics:
+
+| Code | Cause |
+| --- | --- |
+| `fea.semantic.mesh.control_region` | `on` names a region of another geometry, an input, or a vertex or cell region. An unknown region name fails type checking |
+| `fea.semantic.mesh.control_size` | A `target_size` that is zero, negative, or not smaller than the global `target_size` |
+| `fea.semantic.mesh.control_conflict` | Two `refine` blocks on the same region, or two with the same name |
+| `fea.semantic.mesh.control_setting` | A setting other than `on` and `target_size` inside `refine` |
+| `fea.semantic.mesh.cells_across_gap` | A count outside 1 to 64 |
+
+Every control is part of the canonical meshing request and its identity, so meshes with different
+controls have different identities. A mesh without controls keeps the identity it had before
+controls existed. When the geometry is materialized, each control's region resolves to persistent
+entities and becomes one metric contribution per entity in the same field that carries curvature,
+feature and proximity sizing.
+
+**Evidence.** Each applied control adds one row per resolved entity to the meshing evidence's
+`sizing` list, with the control name, the requested and resolved size, and the achieved corner
+edge lengths (count, minimum, mean, maximum) on that entity: the boundary triangles of a face, the
+boundary segments of an edge, or the cells of a solid.
+
+Measured on the docs fixtures (linear tetrahedra):
+
+| Case | Elements | Edge length on the controlled entity | Elsewhere |
+| --- | --- | --- | --- |
+| Cantilever 1000 × 100 × 100 mm, `target_size = 50 mm` | 2,692 | end faces: mean 27.5 mm, max 45.5 mm | 257 to 299 cells per 100 mm of length |
+| Same, `refine` the loaded end to 12.5 mm | 5,178 | loaded end: 608 edges, mean 8.0 mm, max 12.5 mm | fixed end mean 19.8 mm; 2,560 cells in the last 100 mm, 277 to 331 in each other 100 mm |
+| Pipe r = 50 mm, L = 500 mm, `target_size = 8 mm` | 270,088 | inlet: mean 4.1 mm, max 7.9 mm | |
+| Same, `refine` the inlet to 2 mm | 325,854 | inlet: mean 1.3 mm, max 2.0 mm | outlet mean 3.9 mm, max 8.0 mm |
+| 40 × 40 × 3 mm slab, `target_size = 3 mm` | 7,753 | 1.5 elements through the thickness | |
+| 40 × 40 × 3 mm slab, `target_size = 10 mm`, `cells_across_gap` 2 / 3 / 5 | 35,659 / 90,471 / 263,933 | 2.7 / 3.7 / 5.6 elements through the thickness | |
+
+Elements through the thickness is the thickness divided by the mean edge length of the cells in the
+middle half of the slab. Without `cells_across_gap`, the 10 mm slab fails volume quality
+refinement.
+
+The language does not currently expose boundary layers, hybrid element families, or
+user-selectable meshing algorithms.
 
 ## Practical guidance
 

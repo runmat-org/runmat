@@ -39,6 +39,7 @@ fn resolver_conservatively_intersects_only_incident_contributions() {
                 metric: unit,
             },
         ],
+        cells_across_gap: None,
     };
     let resolver = ResolvedMetricField::new(&request).unwrap();
     let resolved = resolver.resolve(&BTreeSet::from([edge, region])).unwrap();
@@ -74,6 +75,7 @@ fn contract_rejects_duplicate_and_ambiguous_global_contributions() {
         global_metric: unit,
         maximum_grading_ratio: 1.25,
         contributions: vec![contribution.clone(), contribution],
+        cells_across_gap: None,
     };
     assert_eq!(
         request.validate().unwrap_err().field,
@@ -104,6 +106,7 @@ fn request_intersects_and_canonicalizes_derived_contributions() {
         global_metric: unit,
         maximum_grading_ratio: 1.25,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let contribution = |entity_id| MetricContribution {
         source: MetricSourceKind::Curve,
@@ -150,6 +153,7 @@ fn uniform_resolution_is_entity_independent_and_scoped_requests_cannot_claim_it(
         },
         maximum_grading_ratio: 1.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let region = id(PersistentEntityKind::Region, "region");
     let field = ResolvedMetricField::new(&request).unwrap();
@@ -195,6 +199,7 @@ fn topology_multiplicity_preserves_density_and_all_constraint_provenance() {
             global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
             maximum_grading_ratio: 1.5,
             contributions: Vec::new(),
+            cells_across_gap: None,
         };
         let mut incident = BTreeSet::new();
         let mut reference = None;
@@ -291,6 +296,7 @@ fn compact_scope_index_matches_exhaustive_incident_selection() {
         global_metric: unit,
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     for source in [
         MetricSourceKind::Region,
@@ -354,6 +360,7 @@ fn graded_request(
         } else {
             Vec::new()
         },
+        cells_across_gap: None,
     };
     (request, edge, face)
 }

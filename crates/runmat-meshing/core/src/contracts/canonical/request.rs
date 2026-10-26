@@ -372,6 +372,10 @@ pub struct MeshingRequest {
     pub quality: MeshingQualityTargets,
     pub limits: MeshingSizeLimits,
     pub cancellation: CancellationPolicy,
+    /// Authored local sizing controls on named geometry regions. Omitted when empty so requests
+    /// without local controls keep their identities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub size_controls: Vec<super::MeshSizeControl>,
 }
 
 impl MeshingRequest {
@@ -393,6 +397,7 @@ impl MeshingRequest {
         self.metric.validate()?;
         self.quality.validate()?;
         self.limits.validate()?;
+        super::validate_size_controls(&self.size_controls)?;
         self.cancellation.validate()
     }
 }

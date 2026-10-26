@@ -867,6 +867,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let permissive_quality = SurfaceQualityTargets {
         minimum_metric_edge_length: 0.001,
@@ -1471,6 +1472,7 @@ fn metric_request() -> MetricFieldRequest {
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 

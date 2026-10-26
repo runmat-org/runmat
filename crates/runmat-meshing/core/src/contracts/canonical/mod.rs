@@ -21,6 +21,7 @@ mod manifest;
 mod metric;
 mod request;
 mod settings;
+mod size_controls;
 mod solver_projection;
 mod transfer;
 mod workload;
@@ -55,6 +56,7 @@ pub use chunk::{
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalCodecControl, MeshingCanonicalLimits};
 pub use error::MeshingContractError;
 pub use evidence::{
+    AchievedEdgeLengths,
     CacheAdmissionDecision, ErrorDistribution, InvariantEvidence, MeshingEvidence,
     MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity,
     ReusedMeshingStageObservation, SizingResolutionEvidence, MESHING_EVIDENCE_SCHEMA_VERSION,
@@ -91,6 +93,10 @@ pub use request::{
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
+pub use size_controls::{
+    size_control_evidence, validate_size_controls, AppliedSizeControl, MeshSizeControl, MeshSizeControlTarget,
+    NamedRegionEntities,
+};
 pub use settings::{
     production_algorithm_versions, resolve_meshing_request, MeshingRequestSettings,
 };

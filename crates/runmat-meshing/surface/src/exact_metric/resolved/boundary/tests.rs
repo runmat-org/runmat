@@ -54,6 +54,7 @@ fn boundary_support_preserves_edge_local_tensors_instead_of_using_the_face_envel
                 metric,
             })
             .collect(),
+        cells_across_gap: None,
     };
     let field = ResolvedFaceMetricField::new(&topology, &request).unwrap();
     assert_eq!(

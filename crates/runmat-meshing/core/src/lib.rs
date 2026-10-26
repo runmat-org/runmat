@@ -32,6 +32,8 @@ pub use contracts::canonical::{
     MeshingManifestMetadata, MeshingOperation, MeshingPartitionDescriptor,
     MeshingPartitionIdentity, MeshingPartitionKind, MeshingPartitionResultRef, MeshingProgress,
     MeshingExecutionCeilings, MeshingQualityTargets, MeshingRequest, MeshingRequestSettings,
+    size_control_evidence, validate_size_controls, AchievedEdgeLengths, AppliedSizeControl,
+    MeshSizeControl, MeshSizeControlTarget, NamedRegionEntities,
     MeshingResourceBudget, MeshingSizeLimits,
     MeshingResourceUsage, MeshingStageEvidence, MeshingStageIdentity, MeshingStageKind,
     MeshingStageManifest, MeshingStageResultIdentity, MeshingStageResultKind,

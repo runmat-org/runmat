@@ -101,6 +101,7 @@ fn same_facet_atomic_refill_reaches_validated_carved_volume() {
         global_metric: MetricTensor3::isotropic_length_m(20.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality_options = DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 2.0,

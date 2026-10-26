@@ -100,6 +100,7 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
             global_metric: MetricTensor3::isotropic_length_m(1.).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: vec![],
+            cells_across_gap: None,
         };
         let curve_quality = CurveQualityTargets {
             maximum_chordal_deviation_m: 0.001,

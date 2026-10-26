@@ -143,6 +143,7 @@ pub(in crate::cdt) fn metric(
         global_metric: MetricTensor3::isotropic_length_m(1.5).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     if scoped {
         // The original six vertices use byte-repeated IDs below 208. Restrict

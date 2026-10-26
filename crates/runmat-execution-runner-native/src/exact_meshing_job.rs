@@ -160,6 +160,7 @@ pub fn mesh_exact_geometry(
                 preferred_faces_per_partition: job.preferred_faces_per_partition,
                 inventory_limits: job.inventory_limits,
                 evidence: job.evidence,
+                named_regions: Default::default(),
             },
             &mut executor,
         )?

@@ -44,6 +44,7 @@ fn publication_case(side: u32, thin: bool) {
         global_metric: MetricTensor3::isotropic_length_m(2.).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = crate::cdt::evaluate_delaunay_volume_quality(
         &topology,

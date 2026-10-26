@@ -169,6 +169,7 @@ fn request(face_id: &PersistentEntityId) -> MetricFieldRequest {
                 yz: 0.0,
             },
         }],
+        cells_across_gap: None,
     }
 }
 

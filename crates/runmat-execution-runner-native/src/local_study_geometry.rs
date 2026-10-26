@@ -163,6 +163,9 @@ pub(crate) async fn execute_local_study_geometry(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: runmat_meshing_core::NamedRegionEntities::from_resolved_regions(
+                &output.regions,
+            ),
         },
         &mut executor,
     )

@@ -15,6 +15,15 @@ use runmat_meshing_core::{
 
 use runmat_meshing_size::metric::DirectionalMetricEnvelope;
 
+/// One regular boundary sample of a face: where an edge's pcurve lands on it, with the unit
+/// surface normal there (orientation as parameterized; consumers use it up to sign).
+#[derive(Clone, Debug)]
+pub(super) struct FaceNormalSample {
+    pub face_id: runmat_geometry_core::PersistentEntityId,
+    pub point_m: [f64; 3],
+    pub normal: [f64; 3],
+}
+
 pub(super) struct FaceMetricSamples<'a> {
     base: DirectionalMetricEnvelope,
     quality: SurfaceQualityTargets,
@@ -60,7 +69,7 @@ impl<'a> FaceMetricSamples<'a> {
         evaluator: &(impl ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
         control: &dyn GeometryEvaluationControl,
         parameter: f64,
-    ) -> Result<Vec<[f64; 3]>, SharedCurveError> {
+    ) -> Result<Vec<FaceNormalSample>, SharedCurveError> {
         let mut normals = Vec::new();
         for coedge in relations.edge_coedges(&edge.id) {
             let face = relations.face(&coedge.face_id);
@@ -115,7 +124,11 @@ impl<'a> FaceMetricSamples<'a> {
             let normal = normalize(area).ok_or_else(failure)?;
             let curvature = surface_principal_curvature(&derivatives)
                 .map_err(|error| geometry_error(edge, error))?;
-            normals.push(normal);
+            normals.push(FaceNormalSample {
+                face_id: face.id.clone(),
+                point_m: derivatives.point_m,
+                normal,
+            });
             if curvature.minimum_1_per_m == 0.0 && curvature.maximum_1_per_m == 0.0 {
                 continue;
             }

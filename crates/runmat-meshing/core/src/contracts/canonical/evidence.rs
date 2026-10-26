@@ -199,6 +199,22 @@ pub struct SizingResolutionEvidence {
     pub achieved_maximum_size_m: f64,
     pub clipped_contribution_count: u32,
     pub rejected_contribution_count: u32,
+    /// Authored size control that requested this scope's size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_id: Option<String>,
+    /// Achieved corner edge lengths of the mesh entities on the scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub achieved: Option<AchievedEdgeLengths>,
+}
+
+/// Corner edge-length statistics of the mesh entities on one sizing scope.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AchievedEdgeLengths {
+    pub edge_count: u64,
+    pub minimum_m: f64,
+    pub mean_m: f64,
+    pub maximum_m: f64,
 }
 
 impl SizingResolutionEvidence {

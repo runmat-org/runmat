@@ -74,6 +74,7 @@ pub(super) fn metric() -> MetricFieldRequest {
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
@@ -91,6 +92,7 @@ fn anisotropic_metric() -> MetricFieldRequest {
         },
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 

@@ -244,6 +244,7 @@ fn execute_fixture_with_layout(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )
@@ -273,6 +274,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
             entity_supports: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -303,6 +305,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
             maximum_checkpoint_latency_ms: 10_000,
             maximum_work_units_between_checks: 1_000_000,
         },
+        size_controls: Vec::new(),
     }
 }
 

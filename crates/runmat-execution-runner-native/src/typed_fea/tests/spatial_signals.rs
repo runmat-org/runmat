@@ -230,6 +230,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
                     sizing: Vec::new(),
                     cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
                 },
+                named_regions: Default::default(),
             },
             &mut executor,
         )

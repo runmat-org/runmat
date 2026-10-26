@@ -90,6 +90,7 @@ fn stalled_state_reaches_the_host_observer_without_replacing_the_verdict() {
         global_metric: MetricTensor3::isotropic_length_m(10.).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let options = DelaunayVolumeMeshOptions::default();
     let quality = evaluate_delaunay_volume_quality(

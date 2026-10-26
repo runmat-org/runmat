@@ -595,6 +595,7 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
             },
             metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(0.1).unwrap(),
         }],
+        cells_across_gap: None,
     };
     let metric = ResolvedCurveMetricField::new(&topology, &request).unwrap();
     let evaluation = metric
@@ -634,6 +635,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.3,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = runmat_meshing_core::CurveQualityTargets {
         maximum_chordal_deviation_m: 0.001,
@@ -919,6 +921,7 @@ fn resolved_metric_request(
                 metric: unit,
             },
         ],
+        cells_across_gap: None,
     }
 }
 

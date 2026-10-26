@@ -134,7 +134,12 @@ impl<F: FnMut() -> Result<(), MeshingContractError>> Storage<'_, F> {
             quality: _,
             limits: _,
             cancellation: _,
+            size_controls,
         } = request;
+        for control in size_controls {
+            self.add(control.control_id.len() as u64)?;
+            self.add(control.region_id.len() as u64)?;
+        }
         let super::AlgorithmVersionSet {
             geometry,
             curve,

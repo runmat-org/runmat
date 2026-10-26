@@ -86,6 +86,7 @@ pub(in crate::cdt::volume_sliver) fn quality(
         global_metric: MetricTensor3::isotropic_length_m(10.).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     evaluate_delaunay_volume_quality(
         topology,

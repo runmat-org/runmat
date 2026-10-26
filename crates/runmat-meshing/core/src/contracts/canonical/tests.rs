@@ -46,6 +46,7 @@ fn request() -> MeshingRequest {
                 },
                 metric: MetricTensor3::isotropic_length_m(0.002).unwrap(),
             }],
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
@@ -76,6 +77,7 @@ fn request() -> MeshingRequest {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 4096,
         },
+        size_controls: Vec::new(),
     }
 }
 

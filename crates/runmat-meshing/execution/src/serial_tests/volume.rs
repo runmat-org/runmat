@@ -52,6 +52,7 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
                 sizing: Vec::new(),
                 cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )
@@ -554,6 +555,7 @@ fn execution_ceilings_do_not_change_the_published_mesh() {
                     sizing: Vec::new(),
                     cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
                 },
+                named_regions: Default::default(),
             },
             &mut executor,
         )

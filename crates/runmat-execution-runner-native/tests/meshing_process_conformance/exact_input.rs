@@ -128,6 +128,7 @@ fn execute_native_dag(
                 sizing: Vec::new(),
                 cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
             },
+            named_regions: Default::default(),
         },
         &mut executor,
     )

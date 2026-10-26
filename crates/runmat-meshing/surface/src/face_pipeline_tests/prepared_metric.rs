@@ -49,6 +49,7 @@ fn one_partition_reuses_one_prepared_producer_field_across_geometry_and_acceptan
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: vec![],
+        cells_across_gap: None,
     };
     let expected = Counter(AtomicU64::new(0));
     crate::ResolvedFaceMetricField::new_with_control(&topology, &request, &expected).unwrap();
