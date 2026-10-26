@@ -1113,31 +1113,23 @@ pub(super) fn assemble_linear_system_impl(
     if let Some(operators) = solid_operators.as_ref() {
         mass_diag[..mesh_dof_count].copy_from_slice(&operators.lumped_mass_diag[..mesh_dof_count]);
     }
-    let mut stiffness_csr = solid_operators
-        .as_ref()
-        .map(|operators| operators.stiffness.clone());
-    let mut mass_csr = solid_operators
-        .as_ref()
-        .map(|operators| operators.consistent_mass.clone());
-    let mut damping_csr = solid_operators
-        .as_ref()
-        .map(|operators| operators.damping.clone());
-    stiffness_csr = stiffness_csr.map(|matrix| {
+    // The solid operators move into the structural DOF space; no copy of them stays alive.
+    let expanded = |matrix: RealSparseMatrix| {
         matrix
-            .expanded_square(dof_count)
+            .into_expanded_square(dof_count)
             .expect("structural DOF expansion is valid")
-    });
-    let solid_element_stiffness_csr = stiffness_csr.clone();
-    mass_csr = mass_csr.map(|matrix| {
-        matrix
-            .expanded_square(dof_count)
-            .expect("structural DOF expansion is valid")
-    });
-    damping_csr = damping_csr.map(|matrix| {
-        matrix
-            .expanded_square(dof_count)
-            .expect("structural DOF expansion is valid")
-    });
+    };
+    let (mut stiffness_csr, mass_csr, mut damping_csr) = match solid_operators {
+        Some(operators) => (
+            Some(expanded(operators.stiffness)),
+            Some(expanded(operators.consistent_mass)),
+            Some(expanded(operators.damping)),
+        ),
+        None => (None, None, None),
+    };
+    // The element-only stiffness is retained only when connectors join the solid operator: the
+    // connector-anchored nullspace proof needs both parts.
+    let mut solid_element_stiffness_csr = None;
     let mut structural_connector_stiffness_count = 0;
     let mut structural_connector_damping_count = 0;
     let mut structural_connector_plan = None;
@@ -1220,16 +1212,17 @@ pub(super) fn assemble_linear_system_impl(
             let connector = connector_stiffness
                 .finish()
                 .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
-            let solid = stiffness_csr.as_ref().ok_or({
+            let solid = stiffness_csr.take().ok_or({
                 LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
             })?;
             let combined = RealSparseMatrix::scaled_sum(
-                &[(1.0, solid), (1.0, &connector)],
+                &[(1.0, &solid), (1.0, &connector)],
                 OperatorRole::Stiffness,
                 MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
             )
             .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
             structural_connector_stiffness_csr = Some(connector);
+            solid_element_stiffness_csr = Some(solid);
             stiffness_csr = Some(combined);
         }
         if summary.damping_count > 0 {

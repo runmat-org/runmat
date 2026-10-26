@@ -360,6 +360,7 @@ impl PreparedSerialFeaStudy {
                         solver_result_identity: step.result_identity,
                         result: step.result,
                         numerical_receipt: step.numerical_receipt,
+                        static_solve_path: Some(step.static_solve_path),
                     })
                     .collect(),
                 states: completed

@@ -2023,6 +2023,7 @@ fn sequence_result(
             solver_result_identity,
             result,
             numerical_receipt,
+            static_solve_path: None,
         }],
         states,
     })

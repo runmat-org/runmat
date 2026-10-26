@@ -362,7 +362,10 @@ pub fn analysis_complete_structural_study_op(
             linear,
             step.result.run,
             None,
-            effective_memory_ceiling_bytes,
+            crate::analysis::StaticSolvePlacement {
+                effective_memory_ceiling_bytes,
+                static_solve_path: step.static_solve_path,
+            },
         )?;
         completed.push(CompletedStudyStep {
             step_id: step.step_id,

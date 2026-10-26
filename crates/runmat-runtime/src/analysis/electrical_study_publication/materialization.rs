@@ -70,6 +70,7 @@ pub(super) fn admit(
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
         effective_memory_ceiling_bytes: None,
+        static_solve_path: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),

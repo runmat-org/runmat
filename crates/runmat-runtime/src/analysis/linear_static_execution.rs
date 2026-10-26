@@ -102,5 +102,5 @@ pub(super) fn execute_linear_static_with_executor(
             )
         })?
     };
-    analysis_admit_linear_static_run_with_id(prepared, run, None, None)
+    analysis_admit_linear_static_run_with_id(prepared, run, None, Default::default())
 }

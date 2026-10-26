@@ -4570,6 +4570,7 @@ mod tests {
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
                 effective_memory_ceiling_bytes: None,
+                static_solve_path: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
@@ -4711,6 +4712,7 @@ mod tests {
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
                 effective_memory_ceiling_bytes: None,
+                static_solve_path: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("indexed run should persist");

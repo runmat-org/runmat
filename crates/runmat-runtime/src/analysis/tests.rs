@@ -171,6 +171,7 @@ fn test_structural_sequence_result(
             solver_result_identity,
             result,
             numerical_receipt,
+            static_solve_path: None,
         }],
         states,
     })
@@ -4325,7 +4326,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("rejected-property-coverage"),
-            effective_memory_ceiling_bytes: None,
+            placement: Default::default(),
         },
         solved.data.run.clone(),
     )
@@ -4346,7 +4347,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("rejected-structural-capability"),
-            effective_memory_ceiling_bytes: None,
+            placement: Default::default(),
         },
         solved.data.run,
     )

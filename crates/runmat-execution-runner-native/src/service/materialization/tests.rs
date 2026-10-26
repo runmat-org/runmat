@@ -21,6 +21,7 @@ fn service_fixture() -> (tempfile::TempDir, super::NativeExecutionService) {
         max_workers: 1,
         local_cpu_capacity_millicores: None,
         local_memory_capacity_bytes: None,
+        authored_worker_memory_bytes: None,
         worker_memory_bytes: 1024 * 1024 * 1024,
         worker_scratch_bytes: 1024 * 1024 * 1024,
         worker_cpu_millicores: 1_000,

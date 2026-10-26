@@ -201,7 +201,9 @@ pub async fn execute_structural_workloads_locally(
             crate::NativeExecutionError::Configuration(
                 "prepared structural study has no workloads".into(),
             )
-        })?;
+        })?
+        // The execution policy's `memory_per_worker` bounds every worker of the study.
+        .min(execution_config.authored_worker_memory_bytes.unwrap_or(u64::MAX));
     // The effective ceiling is min(authored, machine): an unbounded authored ceiling runs within
     // the memory this host admits (the same snapshot as the pool's capacity).
     let machine_resident_bytes = match execution_config.local_memory_capacity_bytes {
@@ -673,6 +675,7 @@ pub async fn execute_structural_workloads_locally(
                             solver_result_identity: step.result_identity,
                             result: step.result,
                             numerical_receipt: step.numerical_receipt,
+                            static_solve_path: Some(step.static_solve_path),
                         })
                         .collect(),
                     states: completed
