@@ -185,6 +185,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

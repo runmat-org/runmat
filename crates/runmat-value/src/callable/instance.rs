@@ -24,6 +24,7 @@ pub(crate) enum CallableInstanceKind {
     Method,
     Bound,
     Closure,
+    Scoped,
 }
 
 static NEXT_CALLABLE_INSTANCE: AtomicU64 = AtomicU64::new(1);

@@ -18,7 +18,6 @@ use runmat_value::{Value, ValueSequence};
 use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;
-use crate::supervisor::GraphBatchSubmission;
 use crate::{NativeExecutionConfig, NativeExecutionResult};
 
 mod materialization;
@@ -63,6 +62,8 @@ struct TaskRecord {
     read: bool,
     claimed: bool,
     completion_order: Option<u64>,
+    retention: runmat_runtime::execution::TaskRetention,
+    callback_completion: Option<Arc<TaskCompletion>>,
 }
 
 struct GraphJobReceipt {
@@ -100,6 +101,9 @@ impl NativeExecutionService {
         let mut state = self.state.lock().expect("native service poisoned");
         let retired = retire_verified_graph_cancellations(&mut state);
         drop(state);
+        for task in &retired.callbacks {
+            self.driver.release_completed_callback(*task);
+        }
         drop(retired);
     }
 
@@ -208,6 +212,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let mut state = self.state.try_lock().ok()?;
         let retired = retire_verified_graph_cancellations(&mut state);
         drop(state);
+        for task in &retired.callbacks {
+            self.driver.release_completed_callback(*task);
+        }
         drop(retired);
         let state = self.state.try_lock().ok()?;
         for future in state.futures.values() {
@@ -565,6 +572,79 @@ impl RuntimeExecutionServices for NativeExecutionService {
         true
     }
 
+    fn supports_callback_batches(&self) -> bool {
+        true
+    }
+    fn submit_callback_batch(
+        &self,
+        calls: Vec<DeferredCall>,
+        pool: &PoolHandle,
+        cancellation: runmat_execution::cancellation::CancellationToken,
+    ) -> Result<Vec<TaskHandle>, ExecutionServiceError> {
+        materialization::submit_callback_batch(self, calls, pool, cancellation)
+    }
+    fn release_callback_batch(&self, tasks: &[TaskHandle]) -> Result<(), ExecutionServiceError> {
+        materialization::release_callback_batch(self, tasks)
+    }
+    fn wait_task_change(
+        &self,
+        task: &TaskHandle,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        let completion = (|| {
+            self.validate_scope(task.scope_id)?;
+            let state = self.state.lock().expect("native service poisoned");
+            let record = state
+                .tasks
+                .get(&task.id)
+                .filter(|r| {
+                    r.generation == task.generation
+                        && r.retention != runmat_runtime::execution::TaskRetention::Refetchable
+                })
+                .ok_or(ExecutionServiceError::UnknownHandle)?;
+            match state.futures.get(&record.future_id) {
+                Some(FutureState::Running(running) | FutureState::CancellingGraph(running)) => {
+                    Ok(Some(Arc::clone(running.completion())))
+                }
+                Some(_) => Ok(None),
+                None => Err(ExecutionServiceError::UnknownHandle),
+            }
+        })();
+        Box::pin(async move {
+            if let Some(completion) = completion? {
+                completion.wait_terminal().await;
+            }
+            Ok(())
+        })
+    }
+    fn wait_pending(
+        &self,
+        value: &Value,
+    ) -> Option<runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>>
+    {
+        if !matches!(value, Value::Future(_) | Value::Task(_)) {
+            return None;
+        }
+        let completion = (|| {
+            let future = self
+                .future_for_value(value.clone())?
+                .map_err(|_| ExecutionServiceError::UnknownHandle)?;
+            self.validate_scope(future.scope_id)?;
+            let state = self.state.lock().expect("native service poisoned");
+            match state.futures.get(&future.id) {
+                Some(FutureState::Running(running) | FutureState::CancellingGraph(running)) => {
+                    Ok(Some(Arc::clone(running.completion())))
+                }
+                Some(_) => Ok(None),
+                None => Err(ExecutionServiceError::UnknownHandle),
+            }
+        })();
+        Some(Box::pin(async move {
+            if let Some(completion) = completion? {
+                completion.wait_terminal().await;
+            }
+            Ok(())
+        }))
+    }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
         self.sweep_completed_graph_cancellations();
         let requested_outputs = u16::try_from(call.invocation.requested_outputs())
@@ -740,11 +820,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 target,
                 runmat_execution::value::ValueLimits::default(),
             )?;
-            let submitted = self.durable.submit_graph(GraphBatchSubmission {
-                request,
-                idempotency_key: options.idempotency_key,
-                retention_millis: options.retention_millis,
-            })?;
+            let submitted = self.durable.submit_graph(request, options)?;
             if submitted.handle.outputs != outputs {
                 return Err(ExecutionServiceError::InvalidOutputContract);
             }
@@ -1083,7 +1159,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
             return Ok(AwaitAction::Pending(original));
         };
         let rooted = match transfer {
-            Ok(runmat_execution_runner::AttemptSuccess::Graph { graph }) => {
+            Ok(runmat_execution_runner::AttemptSuccess::Graph { graph, .. }) => {
                 receipt.decode_in_context(runtime, &graph)
             }
             Ok(_) => Err(ExecutionServiceError::Infrastructure(
@@ -1311,23 +1387,53 @@ impl RuntimeExecutionServices for NativeExecutionService {
     }
 }
 
-fn retire_verified_graph_cancellations(state: &mut State) -> Vec<FutureState> {
+struct RetiredGraphValues {
+    _values: Vec<FutureState>,
+    callbacks: Vec<TaskId>,
+}
+fn retire_verified_graph_cancellations(state: &mut State) -> RetiredGraphValues {
     let mut still_pending = Vec::new();
     let mut completed = Vec::new();
     for id in std::mem::take(&mut state.cancelling_graphs) {
-        if let Some(FutureState::CancellingGraph(running)) = state.futures.get(&id) {
-            match running.completion().verified_terminal() {
-                Some(true) => completed.push((id, running.completion().completion_order())),
+        let completion = match state.futures.get(&id) {
+            Some(FutureState::CancellingGraph(running)) => Some(running.completion()),
+            Some(_) => state
+                .tasks
+                .values()
+                .find(|task| {
+                    task.future_id == id
+                        && task.retention
+                            == runmat_runtime::execution::TaskRetention::ReleasingCallbackBatch
+                })
+                .and_then(|task| task.callback_completion.as_ref()),
+            None => None,
+        };
+        if let Some(completion) = completion {
+            match completion.verified_terminal() {
+                Some(true) => completed.push((id, completion.completion_order())),
                 None => still_pending.push(id),
-                // Failed tree retirement is deliberately retained, but
-                // it cannot later become a verified cancellation.
                 Some(false) => {}
             }
         }
     }
     state.cancelling_graphs = still_pending;
     let mut retired = Vec::with_capacity(completed.len());
+    let mut callbacks = Vec::new();
     for (future_id, order) in completed {
+        let releasing = state.tasks.iter().find_map(|(id, task)| {
+            (task.future_id == future_id
+                && task.retention
+                    == runmat_runtime::execution::TaskRetention::ReleasingCallbackBatch)
+                .then_some(*id)
+        });
+        if let Some(task) = releasing {
+            if let Some(previous) = state.futures.remove(&future_id) {
+                retired.push(previous);
+            }
+            state.tasks.remove(&task);
+            callbacks.push(task);
+            continue;
+        }
         if let Some(previous) = state.futures.insert(future_id, FutureState::Cancelled) {
             retired.push(previous);
         }
@@ -1341,7 +1447,10 @@ fn retire_verified_graph_cancellations(state: &mut State) -> Vec<FutureState> {
             }
         }
     }
-    retired
+    RetiredGraphValues {
+        _values: retired,
+        callbacks,
+    }
 }
 
 fn record_native_completion(state: &mut State, future_id: FutureId) {

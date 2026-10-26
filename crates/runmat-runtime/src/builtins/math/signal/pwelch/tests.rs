@@ -1198,9 +1198,7 @@ mod cooperation_tests {
             assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
             if cancel {
                 source.cancel(CancellationReason::User);
-                let Poll::Ready(Err(WindowArgError::Execution(error))) =
-                    future.as_mut().poll(&mut context)
-                else {
+                let Poll::Ready(Err(error)) = future.as_mut().poll(&mut context) else {
                     panic!("cancelled window generation must not publish a window");
                 };
                 assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

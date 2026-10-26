@@ -6,6 +6,7 @@ enum FunctionHandleKind {
     Simple,
     Anonymous,
     Scoped,
+    InvocationScoped,
     Nested,
     Unknown,
 }
@@ -16,6 +17,7 @@ impl FunctionHandleKind {
             Self::Simple => "simple",
             Self::Anonymous => "anonymous",
             Self::Scoped => "scopedfunction",
+            Self::InvocationScoped => "scopedcallable",
             Self::Nested => "nested",
             Self::Unknown => "unknown",
         }
@@ -50,6 +52,11 @@ fn role_kind(role: runmat_types::FunctionSourceRole) -> Option<FunctionHandleKin
 
 pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
     match handle {
+        Value::ScopedFunctionHandle(_) => Ok(metadata_struct(
+            runmat_value::Utf8Text::new("<invocation-scoped callable>".to_owned()),
+            FunctionHandleKind::InvocationScoped,
+            runmat_value::Utf8Text::default(),
+        )),
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name) => Ok(metadata_struct(

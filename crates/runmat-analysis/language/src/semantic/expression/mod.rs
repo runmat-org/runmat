@@ -4,7 +4,7 @@ use crate::{
     AnalysisOperationCatalog, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
     LogicalSourcePath, OperationResolutionRequest,
 };
-use runmat_parser::fea::{
+use runmat_fea_syntax::{
     FeaBinaryOperator, FeaCallArgument, FeaExpression, FeaExpressionKind, FeaReference,
     FeaUnaryOperator,
 };

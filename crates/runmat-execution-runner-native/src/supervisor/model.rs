@@ -223,6 +223,10 @@ impl ProgramBatchSubmission {
 #[serde(deny_unknown_fields)]
 pub struct GraphBatchSubmission {
     pub request: GraphExecutionRequest,
+    /// Absent retains the historical derived Graph route. Present is the
+    /// caller's exact scheduler admission, never a budget hint to replace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<runmat_execution_runner::TaskSubmission>,
     pub idempotency_key: Option<String>,
     pub retention_millis: u64,
 }
@@ -251,6 +255,9 @@ impl GraphBatchSubmission {
         self.request
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        if let Some(task) = &self.task {
+            crate::graph_submission::validate_original(&self.request, task)?;
+        }
         if self.request.assignment.is_some()
             || self.request.job_id.is_some()
             || self
@@ -273,11 +280,14 @@ impl GraphBatchSubmission {
         #[derive(Serialize)]
         struct StableGraphSubmission<'a> {
             request: &'a GraphExecutionRequest,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            task: Option<&'a runmat_execution_runner::TaskSubmission>,
             idempotency_key: Option<&'a str>,
             retention_millis: u64,
         }
         let stable = StableGraphSubmission {
             request: &self.request,
+            task: self.task.as_ref(),
             idempotency_key: None,
             retention_millis: self.retention_millis,
         };
@@ -472,6 +482,12 @@ pub enum BatchDriverInvocation {
         job_id: runmat_execution::JobId,
         submission: Box<GraphBatchSubmission>,
     },
+    GraphTask {
+        job_directory: PathBuf,
+        attempt: Box<DurableProgramAttempt>,
+        submission: Box<GraphBatchSubmission>,
+        lease: Box<super::DurableAttemptLease>,
+    },
 }
 
 impl BatchDriverInvocation {
@@ -479,7 +495,8 @@ impl BatchDriverInvocation {
         match self {
             Self::Script { job_directory, .. }
             | Self::Program { job_directory, .. }
-            | Self::Graph { job_directory, .. } => job_directory,
+            | Self::Graph { job_directory, .. }
+            | Self::GraphTask { job_directory, .. } => job_directory,
         }
     }
 }

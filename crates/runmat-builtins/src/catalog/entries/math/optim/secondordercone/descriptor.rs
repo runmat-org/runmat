@@ -30,14 +30,14 @@ const SOC_INPUTS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Cone matrix in norm(A*x + b) <= d'*x + gamma.",
+        description: "Cone matrix in norm(A*x - b) <= d'*x - gamma.",
     },
     BuiltinParamDescriptor {
         name: "b",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Cone offset vector.",
+        description: "Cone center vector, subtracted from A*x.",
     },
     BuiltinParamDescriptor {
         name: "d",
@@ -51,7 +51,7 @@ const SOC_INPUTS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Scalar cone right-hand-side offset.",
+        description: "Scalar bound subtracted from d'*x; smaller gamma loosens the cone.",
     },
 ];
 

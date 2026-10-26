@@ -128,6 +128,9 @@ pub(super) fn execute<A: DescriptorArguments>(
     let selected = match args.prepare(runtime) {
         Err(error) => admit_future(runtime, async move { Err(error) }),
         Ok(args) => match target {
+            CallableTarget::Scoped(handle) => {
+                scoped(runtime, handle, args, requested_outputs, metadata)
+            }
             CallableTarget::Bound(binding) => {
                 bound(runtime, binding, args, requested_outputs, metadata)
             }
@@ -169,6 +172,10 @@ pub(super) fn execute<A: DescriptorArguments>(
                 runtime,
                 invoke_retained_forwarded(runtime, value, args, requested_outputs, metadata),
             ),
+            CallableTarget::RetainedBuiltin(value) => admit_future(
+                runtime,
+                invoke_retained_builtin(runtime, value, args, requested_outputs, metadata),
+            ),
         },
     };
     selected.map_ok(move |value| {
@@ -193,6 +200,10 @@ pub(super) fn try_execute<A: DescriptorArguments>(
     let selected = match args.prepare(runtime) {
         Err(error) => admit_future(runtime, async move { Err(error) }),
         Ok(args) => match target {
+            CallableTarget::Scoped(handle) => admit_future(
+                runtime,
+                scoped(runtime, handle, args, requested_outputs, metadata).map_ok(Some),
+            ),
             CallableTarget::Bound(binding) => {
                 try_bound(runtime, binding, args, requested_outputs, metadata)
             }
@@ -241,6 +252,11 @@ pub(super) fn try_execute<A: DescriptorArguments>(
                 invoke_retained_forwarded(runtime, value, args, requested_outputs, metadata)
                     .map_ok(Some),
             ),
+            CallableTarget::RetainedBuiltin(value) => admit_future(
+                runtime,
+                invoke_retained_builtin(runtime, value, args, requested_outputs, metadata)
+                    .map_ok(Some),
+            ),
         },
     };
     selected.map_ok(move |value| {
@@ -252,6 +268,24 @@ pub(super) fn try_execute<A: DescriptorArguments>(
             }
         })
     })
+}
+
+#[inline(never)]
+fn scoped(
+    runtime: Option<&RuntimeContext>,
+    handle: runmat_value::ScopedFunctionHandle,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+) -> ExecutionFuture<'static, RootedValueSequence> {
+    crate::execution::scoped_callable::invoke(
+        runtime,
+        handle,
+        args.into_function_arguments(),
+        requested_outputs,
+        metadata.function_input_callsite,
+    )
+    .unwrap_or_else(crate::execution::RuntimeContinuationFuture::rejected)
 }
 
 #[inline(never)]
@@ -608,4 +642,29 @@ pub(crate) async fn invoke_selected_retained_closure(
     )
     .await
     .map(Some)
+}
+
+/// Keep the admitted source generation alive while dispatch borrows its name.
+/// In particular this path never performs semantic name lookup again.
+async fn invoke_retained_builtin(
+    runtime: Option<&RuntimeContext>,
+    value: super::RetainedCallableValue,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+) -> Result<RootedValueSequence, RuntimeError> {
+    let name = super::named_selection::retained_name(value.value()).ok_or_else(|| {
+        crate::runtime_error::semantic_error(
+            "CallableTarget",
+            "selected builtin has no retained name",
+        )
+    })?;
+    super::call_builtin_with_requested_outputs(
+        runtime,
+        name,
+        args,
+        requested_outputs,
+        metadata.function_input_callsite,
+    )
+    .await
 }

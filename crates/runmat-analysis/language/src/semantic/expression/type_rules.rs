@@ -35,11 +35,11 @@ pub(super) fn numeric_join(left: &FeaType, right: &FeaType) -> FeaType {
 pub(super) fn multiply_type(left: &FeaType, right: &FeaType) -> Option<FeaType> {
     match (left, right) {
         (FeaType::Quantity(left), FeaType::Quantity(right)) => {
-            Some(FeaType::Quantity((left.multiply(*right)?).into()))
+            Some(FeaType::Quantity(left.multiply(*right)?))
         }
         (FeaType::Quantity(dimension), FeaType::Integer | FeaType::Real)
         | (FeaType::Integer | FeaType::Real, FeaType::Quantity(dimension)) => {
-            Some(FeaType::Quantity((*dimension).into()))
+            Some(FeaType::Quantity(*dimension))
         }
         _ if left.is_numeric() && right.is_numeric() => Some(numeric_join(left, right)),
         _ => None,
@@ -49,16 +49,15 @@ pub(super) fn multiply_type(left: &FeaType, right: &FeaType) -> Option<FeaType> 
 pub(super) fn divide_type(left: &FeaType, right: &FeaType) -> Option<FeaType> {
     match (left, right) {
         (FeaType::Quantity(left), FeaType::Quantity(right)) => {
-            Some(FeaType::Quantity((left.divide(*right)?).into()))
+            Some(FeaType::Quantity(left.divide(*right)?))
         }
         (FeaType::Quantity(dimension), FeaType::Integer | FeaType::Real) => {
-            Some(FeaType::Quantity((*dimension).into()))
+            Some(FeaType::Quantity(*dimension))
         }
         (FeaType::Integer | FeaType::Real, FeaType::Quantity(dimension)) => {
             Some(FeaType::Quantity(
-                (runmat_types::physical::DynamicDimension::from(PhysicalDimension::DIMENSIONLESS)
-                    .divide(*dimension)?)
-                .into(),
+                runmat_types::physical::DynamicDimension::from(PhysicalDimension::DIMENSIONLESS)
+                    .divide(*dimension)?,
             ))
         }
         _ if left.is_numeric() && right.is_numeric() => Some(numeric_join(left, right)),

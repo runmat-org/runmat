@@ -36,7 +36,8 @@ impl TypeName for Value {
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle(_) => "function handle",
+            | Value::BoundFunctionHandle(_)
+            | Value::ScopedFunctionHandle(_) => "function handle",
             Value::Closure(_) => "closure",
             Value::ClassRef(_) => "class reference",
             Value::MException(_) => "MException",

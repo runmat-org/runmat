@@ -7,15 +7,14 @@ use runmat_types::ClassMethodOwner;
 /// constructor bindings; method bodies are indexed by typed owner once, not
 /// resolved by class or method text during invocation.
 pub(super) fn admit(
-    request: &runmat_execution_artifact::GraphExecutionRequest,
+    graph: &runmat_execution::value::PayloadGraph,
     units: &[RuntimeBoundExecutableUnit],
     receipts: &[Option<Rc<crate::SelectedUnitInteropReceipt>>],
     bindings: &HashMap<GraphBoundOwner, BoundFunctionBinding>,
     class_method_targets: &HashMap<(GraphBoundOwner, ClassMethodOwner), GraphBoundOwner>,
     class_products: &mut HashMap<GraphBoundOwner, Rc<crate::SelectedClassProduct>>,
 ) -> Result<HashMap<GraphBoundOwner, Rc<runmat_value::SelectedObjectClassFacts>>, String> {
-    let mut selected_owners = request
-        .graph
+    let mut selected_owners = graph
         .nodes
         .iter()
         .filter_map(|node| match node {
@@ -42,7 +41,7 @@ pub(super) fn admit(
             let binding = bindings
                 .get(&owner)
                 .ok_or("selected class method has no admitted binding")?;
-            if !std::ptr::eq(selected_bound_body(unit, binding)?, body)
+            if !std::ptr::eq(selected_bound_body(unit.registry(), binding)?, body)
                 || body.selected_source_owner.as_ref().is_none_or(|issued| {
                     unit.selected_source_owner()
                         .is_none_or(|selected| !issued.same_issuance(selected))

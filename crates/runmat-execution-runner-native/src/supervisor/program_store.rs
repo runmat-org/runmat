@@ -1,6 +1,8 @@
 //! Immutable original attempt assignments and provider reports; job IDs only route them.
 use super::filesystem::{atomic_json, immutable_json, read_json, read_optional_json};
-use super::model::{DurableProgramAttempt, ProgramBatchExecution, ProgramBatchSubmission};
+#[cfg(test)]
+use super::model::ProgramBatchSubmission;
+use super::model::{DurableProgramAttempt, ProgramBatchExecution};
 use super::store::{JobStore, PersistedRequest, PersistedWorkload};
 use crate::{NativeExecutionError, NativeExecutionResult};
 use runmat_execution::{identity::AttemptId, JobId};
@@ -20,24 +22,49 @@ struct Completion {
 }
 
 impl JobStore {
+    #[cfg(test)]
     pub(super) fn program_submission(
         &self,
         id: JobId,
     ) -> NativeExecutionResult<Option<ProgramBatchSubmission>> {
+        Ok(match self.retained_submission(id)? {
+            Some(super::retained::RetainedSubmission::Direct(s)) => Some(*s),
+            _ => None,
+        })
+    }
+    pub(super) fn retained_submission(
+        &self,
+        id: JobId,
+    ) -> NativeExecutionResult<Option<super::retained::RetainedSubmission>> {
         let request: PersistedRequest = read_json(&self.job_dir(id).join("request.json"))?;
         if request.schema_version != 1 || request.handle.id != id {
             return Err(invalid("durable routing request identity is invalid"));
         }
         match request.workload {
-            PersistedWorkload::Script { .. } | PersistedWorkload::Graph { .. } => Ok(None),
+            PersistedWorkload::Script { .. } => Ok(None),
             PersistedWorkload::Program { submission } => {
                 submission.validate()?;
                 if submission.request_digest()? != request.request_digest {
                     return Err(invalid(
-                        "durable program request digest differs from its original invocation",
+                        "durable program differs from its original invocation",
                     ));
                 }
-                Ok(Some(*submission))
+                Ok(Some(super::retained::RetainedSubmission::Direct(
+                    submission,
+                )))
+            }
+            PersistedWorkload::Graph { submission } => {
+                submission.validate()?;
+                if submission.request_digest()? != request.request_digest {
+                    return Err(invalid(
+                        "durable Graph differs from its original invocation",
+                    ));
+                }
+                if submission.task.is_some() {
+                    Ok(Some(super::retained::RetainedSubmission::Graph(submission)))
+                } else {
+                    Ok(None)
+                }
             }
         }
     }
@@ -47,10 +74,10 @@ impl JobStore {
         id: JobId,
         assignment: &DurableProgramAttempt,
     ) -> NativeExecutionResult<()> {
-        let submission = self.program_submission(id)?.ok_or_else(|| {
-            invalid("script or graph job cannot receive a portable program assignment")
-        })?;
-        validate_assignment(assignment, &submission)?;
+        let submission = self
+            .retained_submission(id)?
+            .ok_or_else(|| invalid("workload has no original retained task assignment"))?;
+        validate_assignment(assignment, submission.task())?;
         immutable_json(
             &assignment_path(&self.job_dir(id), assignment.request.id),
             assignment,
@@ -64,14 +91,14 @@ impl JobStore {
         &self,
         id: JobId,
     ) -> NativeExecutionResult<Option<DurableProgramAttempt>> {
-        let Some(submission) = self.program_submission(id)? else {
+        let Some(submission) = self.retained_submission(id)? else {
             return Ok(None);
         };
         let path = self.job_dir(id).join("assignment.json");
         let Some(assignment) = read_optional_json(&path)? else {
             return Ok(None);
         };
-        validate_assignment(&assignment, &submission)?;
+        validate_assignment(&assignment, submission.task())?;
         Ok(Some(assignment))
     }
 
@@ -83,9 +110,9 @@ impl JobStore {
         let assignment: DurableProgramAttempt =
             read_json(&assignment_path(&self.job_dir(id), request.id))?;
         let submission = self
-            .program_submission(id)?
+            .retained_submission(id)?
             .ok_or_else(|| invalid("portable program control cannot route to a script"))?;
-        validate_assignment(&assignment, &submission)?;
+        validate_assignment(&assignment, submission.task())?;
         if assignment.request != *request {
             return Err(invalid(
                 "provider control differs from its original immutable assignment",
@@ -104,23 +131,20 @@ impl JobStore {
             return Ok(None);
         };
         let submission = self
-            .program_submission(id)?
+            .retained_submission(id)?
             .ok_or_else(|| invalid("program report routes to a script"))?;
         if completed.schema_version != 1
             || completed.report.attempt_id != assignment.id
             || completed.report.task_id != assignment.task_id
             || completed.report.worker_id != assignment.worker_id
             || completed.report.driver_fence != assignment.driver_fence
-            || submission.task.request != assignment.task
+            || submission.task().request != assignment.task
         {
             return Err(invalid(
                 "durable provider report differs from its original assigned task",
             ));
         }
-        completed
-            .response
-            .validate_against(&submission.program_request())
-            .map_err(|error| invalid(error.to_string()))?;
+        submission.validate_response(&completed.response)?;
         if let Some(progress) = &completed.latest_progress {
             progress.validate().map_err(invalid)?;
         }
@@ -135,25 +159,39 @@ impl JobStore {
         }
         if let AttemptReport::Succeeded { result } = &completed.report.report {
             result.validate_against(assignment).map_err(invalid)?;
-            let (outputs, objects) = match &completed.response {
-                crate::protocol::WorkerResponse::Success { outputs } => (
-                    outputs.as_slice(),
-                    &[] as &[runmat_execution::value::ValueRef],
-                ),
-                crate::protocol::WorkerResponse::ExternalizedSuccess {
-                    outputs,
-                    result_objects,
-                } => (outputs.as_slice(), result_objects.as_slice()),
-                _ => {
+            if let (
+                crate::protocol::WorkerResponse::GraphSuccess { graph },
+                runmat_execution_runner::AttemptSuccess::Graph {
+                    graph: reported, ..
+                },
+            ) = (&completed.response, result)
+            {
+                if graph != reported {
                     return Err(invalid(
-                        "successful provider report contradicts original response",
-                    ))
+                        "durable Graph report differs from its exact original response",
+                    ));
                 }
-            };
-            if result.values() != Some((outputs, objects)) {
-                return Err(invalid(
-                    "durable provider result differs from the original response",
-                ));
+            } else {
+                let (outputs, objects) = match &completed.response {
+                    crate::protocol::WorkerResponse::Success { outputs } => (
+                        outputs.as_slice(),
+                        &[] as &[runmat_execution::value::ValueRef],
+                    ),
+                    crate::protocol::WorkerResponse::ExternalizedSuccess {
+                        outputs,
+                        result_objects,
+                    } => (outputs.as_slice(), result_objects.as_slice()),
+                    _ => {
+                        return Err(invalid(
+                            "successful provider report contradicts original response",
+                        ))
+                    }
+                };
+                if result.values() != Some((outputs, objects)) {
+                    return Err(invalid(
+                        "durable provider result differs from the original response",
+                    ));
+                }
             }
         } else if !matches!(
             completed.response,
@@ -174,7 +212,7 @@ impl JobStore {
 
 pub(super) fn load_assignment(
     job: &Path,
-    submission: &ProgramBatchSubmission,
+    submission: &runmat_execution_runner::TaskSubmission,
 ) -> NativeExecutionResult<DurableProgramAttempt> {
     let encoded = std::env::var(ATTEMPT_ID_ENV)
         .map_err(|_| invalid("durable provider lacks its original assignment identity"))?;
@@ -218,13 +256,13 @@ fn report_path(job: &Path, id: AttemptId) -> PathBuf {
 }
 fn validate_assignment(
     assignment: &DurableProgramAttempt,
-    submission: &ProgramBatchSubmission,
+    submission: &runmat_execution_runner::TaskSubmission,
 ) -> NativeExecutionResult<()> {
     if assignment.job_directory.parent()
         != Some(assignment.config.store_root.join("jobs").as_path())
         || assignment.schema_version != 1
-        || assignment.request.task_id != submission.task.request.id
-        || assignment.request.task != submission.task.request
+        || assignment.request.task_id != submission.request.id
+        || assignment.request.task != submission.request
     {
         return Err(invalid(
             "durable assignment lacks the original caller-admitted task",

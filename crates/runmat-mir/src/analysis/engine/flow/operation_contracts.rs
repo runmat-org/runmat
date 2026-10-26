@@ -9,8 +9,8 @@ use crate::analysis::inference::{
     conservative_rvalue_contract, rvalue_operation_contract, statement_phase_contract,
     FunctionSummary,
 };
-use crate::analysis::{MirOperationContract, MirOperationPhase, MirOperationSite};
 use crate::{BasicBlock, MirBody, MirStmt, MirTerminatorKind};
+use crate::{MirOperationContract, MirOperationPhase, MirOperationSite};
 
 use super::super::state::FlowState;
 
@@ -20,7 +20,7 @@ pub(super) fn complete_missing(
     contracts: &mut Vec<MirOperationContract>,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) {
-    let Some(expected) = crate::analysis::operation_sites(function, body) else {
+    let Some(expected) = crate::operation_sites(function, body) else {
         return;
     };
     let present = contracts
@@ -41,7 +41,7 @@ pub(super) fn complete_missing(
             (MirOperationPhase::Rvalue, Some(block)) => block
                 .statements
                 .get(site.point.position as usize)
-                .and_then(|statement| crate::analysis::statement_rvalue(&statement.kind))
+                .and_then(|statement| crate::statement_rvalue(&statement.kind))
                 .map(|value| conservative_rvalue_contract(value, summaries))
                 .unwrap_or_default(),
             (MirOperationPhase::Statement, Some(block)) => block
@@ -50,7 +50,7 @@ pub(super) fn complete_missing(
                 .map(|statement| statement_phase_contract(statement, summaries, &[]))
                 .unwrap_or_default(),
             (MirOperationPhase::TerminatorRvalue, Some(block)) => {
-                crate::analysis::terminator_rvalues(&block.terminator.kind)
+                crate::terminator_rvalues(&block.terminator.kind)
                     .get(site.ordinal as usize)
                     .map(|value| conservative_rvalue_contract(value, summaries))
                     .unwrap_or_default()
@@ -90,7 +90,7 @@ pub(super) fn record_statement(
     let Some(point) = point_for(function, block, position) else {
         return;
     };
-    if let Some(value) = crate::analysis::statement_rvalue(&statement.kind) {
+    if let Some(value) = crate::statement_rvalue(&statement.kind) {
         let (effects, capabilities) = rvalue_operation_contract(value, state, summaries);
         contracts.push(MirOperationContract {
             site: MirOperationSite {
@@ -127,7 +127,7 @@ pub(super) fn record_terminator(
     let Some(point) = point_for(function, block, block.statements.len()) else {
         return;
     };
-    for (ordinal, value) in crate::analysis::terminator_rvalues(&block.terminator.kind)
+    for (ordinal, value) in crate::terminator_rvalues(&block.terminator.kind)
         .into_iter()
         .enumerate()
     {

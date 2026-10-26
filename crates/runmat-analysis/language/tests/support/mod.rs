@@ -21,7 +21,9 @@ impl TestHost {
     pub fn with_geometry(mut self, path: &str, digest: u8) -> Self {
         self = self.with_geometry_inspection(
             path,
-            GeometryInspection {preview_extent_m: None, 
+            GeometryInspection {
+                preview_extent_m: None,
+                named_selections: None,
                 unit_evidence: Default::default(),
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
@@ -50,6 +52,7 @@ impl TestHost {
         self.with_geometry_inspection(
             path,
             GeometryInspection {
+            named_selections: None,
                 preview_extent_m: None,
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
@@ -98,6 +101,7 @@ impl TestHost {
                 inputs,
                 outputs,
                 effects,
+                cooperative_suspension: false,
                 capabilities: CapabilitySet::default(),
             },
         );
@@ -134,6 +138,7 @@ impl RunMatFunctionSource for TestHost {
             inputs: Vec::new(),
             outputs: Vec::new(),
             effects: EffectSet::default(),
+            cooperative_suspension: false,
             capabilities: CapabilitySet::default(),
         })
     }

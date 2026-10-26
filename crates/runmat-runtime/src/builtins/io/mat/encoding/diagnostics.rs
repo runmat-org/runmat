@@ -11,6 +11,10 @@ use runmat_builtins::{
 pub(crate) enum MatEncodingOwner {
     Save,
     MatFile,
+    BinaryRecord {
+        identity: &'static runmat_builtins::BuiltinCatalogIdentity,
+        error: &'static BuiltinErrorDescriptor,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -25,11 +29,13 @@ impl MatEncodingOwner {
         match self {
             Self::Save => "save",
             Self::MatFile => "matfile",
+            Self::BinaryRecord { identity, .. } => identity.name,
         }
     }
 
     fn descriptor(self, failure: MatEncodingFailure) -> &'static BuiltinErrorDescriptor {
         match (self, failure) {
+            (Self::BinaryRecord { error, .. }, _) => error,
             (Self::Save, MatEncodingFailure::Io) => &SAVE_ERROR_IO,
             (Self::Save, MatEncodingFailure::Selection) => &SAVE_ERROR_SELECTION,
             (Self::Save, MatEncodingFailure::Unsupported) => &SAVE_ERROR_UNSUPPORTED,

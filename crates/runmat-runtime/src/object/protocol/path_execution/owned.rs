@@ -17,7 +17,17 @@ where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    execute_owned_subsref_with_context(None, base, path, read_first, caller_function_name)
+    let runtime = crate::context::legacy::active();
+    async move {
+        execute_owned_subsref_with_context(
+            runtime.as_ref(),
+            base,
+            path,
+            read_first,
+            caller_function_name,
+        )
+        .await
+    }
 }
 
 pub fn execute_owned_subsref_in_context<'runtime, 'name, Read, ReadFuture>(
@@ -101,15 +111,19 @@ where
     Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
     WriteFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    execute_owned_subsasgn_with_context(
-        None,
-        base,
-        path,
-        values,
-        read_first,
-        write_first,
-        caller_function_name,
-    )
+    let runtime = crate::context::legacy::active();
+    async move {
+        execute_owned_subsasgn_with_context(
+            runtime.as_ref(),
+            base,
+            path,
+            values,
+            read_first,
+            write_first,
+            caller_function_name,
+        )
+        .await
+    }
 }
 
 pub fn execute_owned_subsasgn_in_context<'runtime, 'name, Read, ReadFuture, Write, WriteFuture>(

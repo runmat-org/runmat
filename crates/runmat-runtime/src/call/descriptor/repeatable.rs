@@ -6,13 +6,61 @@ use crate::execution::{RetainedValueReadLease, RootedValue, RootedValueSequence,
 use crate::RuntimeError;
 use runmat_value::Value;
 
+#[derive(Clone)]
 pub struct RepeatableCallable {
     selected: CallableDescriptor,
     // The descriptor has root-free aliases; this source owns actual roots and
     // drops those registrations before the final retained generation.
     _target_owner: RetainedValueReadLease,
+    reentry: Option<(
+        crate::execution::DeferredGraphProgram,
+        crate::execution::AdmittedCallableReentry,
+    )>,
 }
 impl RepeatableCallable {
+    pub(crate) fn admitted_reentry_program(
+        &self,
+    ) -> Option<&crate::execution::DeferredGraphProgram> {
+        self.reentry.as_ref().map(|(program, _)| program)
+    }
+
+    /// Restore only a compiled catalog identity, never resolve the spelling
+    /// through a user's current function namespace or source generation.
+    pub(crate) fn from_compiled_builtin(
+        runtime: &RuntimeContext,
+        builtin: runmat_types::BuiltinId,
+    ) -> Result<Self, RuntimeError> {
+        if runmat_builtins::builtin_catalog_entry_by_name(&builtin.0)
+            .is_none_or(|entry| entry.identity.name != builtin.0)
+        {
+            return Err(crate::build_runtime_error(
+                "saved builtin identity is absent from this runtime",
+            )
+            .with_identifier("RunMat:Execution:SelectedCallableUnavailable")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
+        let target = RootedValue::in_context(
+            Value::String(crate::call::argument_text::copy_str(
+                &builtin.0,
+                Some(runtime),
+            )?),
+            runtime,
+        )?;
+        let owner = RetainedValueReadLease::prepare_callable_rooted(target, Some(runtime))?;
+        let retained = super::RetainedCallableValue::from_read_lease(&owner);
+        Ok(Self {
+            selected: CallableDescriptor {
+                target: CallableTarget::RetainedBuiltin(retained),
+                args: Vec::new(),
+                requested_outputs: 1,
+                metadata: super::CallableMetadata::feval(None),
+            },
+            _target_owner: owner,
+            reentry: None,
+        })
+    }
+
     pub(crate) fn select(
         runtime: &RuntimeContext,
         target: Value,
@@ -23,6 +71,14 @@ impl RepeatableCallable {
             RootedValue::in_context(target, runtime)?,
             resolver,
         )
+    }
+    /// Reuse feval's deferred-name selection where no selected unit resolver
+    /// is present. Builtin and already-bound identities still freeze normally.
+    pub(crate) fn select_deferred_rooted(
+        runtime: Option<&RuntimeContext>,
+        target: RootedValue,
+    ) -> Result<Self, RuntimeError> {
+        Self::select_rooted(runtime, target, &DeferredResolver)
     }
     pub fn select_rooted(
         runtime: Option<&RuntimeContext>,
@@ -35,12 +91,26 @@ impl RepeatableCallable {
         Ok(Self {
             selected,
             _target_owner: owner,
+            reentry: None,
         })
     }
     pub fn with_callsite(mut self, callsite: Option<crate::callsite::CallsiteInfo>) -> Self {
         self.selected.metadata.function_input_callsite = callsite;
         self
     }
+    pub(crate) fn with_admitted_graph_reentry(
+        mut self,
+        program: crate::execution::DeferredGraphProgram,
+        receipt: crate::execution::AdmittedCallableReentry,
+    ) -> Self {
+        self.reentry = Some((program, receipt));
+        self
+    }
+    /// Borrow the root-free selected descriptor while this callable owns its source lease.
+    pub fn selected_descriptor(&self) -> &CallableDescriptor {
+        &self.selected
+    }
+
     pub fn selected_target(&self) -> &CallableTarget {
         &self.selected.target
     }
@@ -75,18 +145,17 @@ impl RepeatableCallable {
         self.invoke_retained(Some(runtime), arguments.into(), requested_outputs)
             .await
     }
-    pub async fn invoke_retained(
-        &self,
-        runtime: Option<&RuntimeContext>,
+    pub fn invoke_retained<'a>(
+        &'a self,
+        runtime: Option<&'a RuntimeContext>,
         arguments: BuiltinArguments,
         requested_outputs: usize,
-    ) -> Result<RootedValueSequence, RuntimeError> {
-        let mut selected = self.selected.clone();
-        selected.requested_outputs = requested_outputs;
-        let selected = selected.with_retained_arguments(arguments)?;
-        super::execute_retained_callable_descriptor(runtime, selected).await
+    ) -> impl std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a {
+        invocation::run(self, runtime, arguments, requested_outputs)
     }
 }
+#[path = "repeatable/invocation.rs"]
+mod invocation;
 pub(super) fn retained_target_name(value: &Value) -> Option<&str> {
     match value {
         Value::String(text) => crate::call::admission::text_target_name(text),
@@ -98,5 +167,15 @@ pub(super) fn retained_target_name(value: &Value) -> Option<&str> {
         | Value::MethodFunctionHandle(name) => Some(name.name().trim()),
         Value::Closure(closure) => Some(&closure.function_name),
         _ => None,
+    }
+}
+
+struct DeferredResolver;
+impl FunctionNameResolver for DeferredResolver {
+    fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
+        None
+    }
+    fn name_resolution_completeness(&self) -> super::NameResolutionCompleteness {
+        super::NameResolutionCompleteness::Deferred
     }
 }

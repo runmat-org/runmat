@@ -11,6 +11,7 @@ BuiltinDocumentationSection {
 "`\"Delimiter\"` controls the field separator and defaults to comma.",
 "`\"WriteVariableNames\"` controls header emission and defaults to true.",
 "Fields containing delimiters, quotes, or newlines are CSV-quoted.",
+"One-column numeric variables and scalar numeric cell values use general formatting with 15 significant digits for double storage and 7 for single storage. Scalar logical fields use 1 or 0; typed integers retain exact decimal values.",
 "Variables from all eight native integer classes are serialized with their exact decimal values.",
 "A typed-integer `WriteVariableNames` value, explicit `gpuArray` input, and the bytes-written output are available in RunMat mode.",
 ],

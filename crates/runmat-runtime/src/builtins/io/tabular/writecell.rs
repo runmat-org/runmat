@@ -331,7 +331,8 @@ pub(super) use xlsx::{
 fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter: &str) -> String {
     match cell {
         CellValue::Empty => String::new(),
-        CellValue::Number(value) => format_numeric(*value),
+        CellValue::Number(value) => format_text_numeric(runmat_value::NumericScalar::F64(*value)),
+        CellValue::Single(value) => format_text_numeric(runmat_value::NumericScalar::F32(*value)),
         CellValue::Integer(value) => value.decimal_string(),
         CellValue::Boolean(value) => {
             if *value {
@@ -341,6 +342,15 @@ fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter:
             }
         }
         CellValue::Text(text) => format_string(text, options.quote_strings, delimiter),
+    }
+}
+
+fn format_text_numeric(value: runmat_value::NumericScalar) -> String {
+    // Preserve this text writer's existing explicit signed-zero normalization.
+    if value.is_zero() {
+        "0".to_string()
+    } else {
+        crate::builtins::common::format::format_delimited_numeric(value)
     }
 }
 

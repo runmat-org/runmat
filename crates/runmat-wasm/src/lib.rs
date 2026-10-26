@@ -14,7 +14,7 @@ pub use api::execution_artifact::{
     build_execution_bundle, materialize_execution_bundle, BrowserExecutionRecipient,
 };
 #[cfg(not(feature = "graphics-replay"))]
-pub use api::execution_program::execute_program_artifact;
+pub use api::execution_program::{execute_program_artifact, execute_worker_program};
 #[cfg(not(feature = "graphics-replay"))]
 pub use api::init::init_runmat;
 #[cfg(not(feature = "graphics-replay"))]

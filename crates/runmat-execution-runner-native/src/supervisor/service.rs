@@ -68,7 +68,41 @@ impl LocalSupervisor {
         // Canonical archive decode and selected-V3 admission can be expensive;
         // complete it before entering the durable-store critical section.
         let validated = submission.into_validated()?;
+        if let Some(task) = &validated.submission.task {
+            let request = &validated.submission.request;
+            let admitted = request
+                .validate_and_admit_bundles()
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            crate::graph_submission::validate_scratch_bundles(&admitted, task)?;
+            let artifacts =
+                crate::local_store::ArtifactStore::new(self.config.paths.root.join("artifacts"))?;
+            #[derive(serde::Serialize)]
+            struct BorrowedStoredGraph<'a> {
+                request: &'a runmat_execution_artifact::GraphExecutionRequest,
+            }
+            let stored = artifacts.put_streamed_graph(
+                &BorrowedStoredGraph { request },
+                runmat_execution::resource::MAX_GRAPH_PROGRAM_WIRE_BYTES,
+            )?;
+            crate::graph_submission::validate_floor(request, task, stored.length)?;
+        }
         let mut store = self.store.lock().await;
+        if let Some(task) = &validated.submission.task {
+            let mut scheduler = self.scheduler.lock().await;
+            scheduler.validate_context(task)?;
+            // Preserve the complete original scheduler submission, not merely
+            // the request's derived callable or a replacement resource grant.
+            let task = task.clone();
+            let (record, created) = store.create_graph_validated(validated, unix_millis())?;
+            if !created {
+                return Ok((record, true));
+            }
+            let mut actions = scheduler.tick()?;
+            actions.extend(scheduler.admit(record.handle.id, &task)?);
+            self.dispatch_program_actions(&mut store, &mut scheduler, actions)
+                .await?;
+            return Ok((store.record(record.handle.id)?, false));
+        }
         let (record, created) = store.create_graph_validated(validated, unix_millis())?;
         if !created {
             return Ok((record, true));
@@ -111,7 +145,7 @@ impl LocalSupervisor {
                 .await?;
         }
         for mut record in records {
-            if store.program_submission(record.handle.id)?.is_some() {
+            if store.retained_submission(record.handle.id)?.is_some() {
                 self.reconcile_program(&mut store, &mut record).await?;
                 continue;
             }

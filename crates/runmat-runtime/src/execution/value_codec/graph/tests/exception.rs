@@ -183,7 +183,7 @@ fn retired_local_diagnostic_does_not_admit_a_reused_numeric_source() {
         );
         let value = Value::MException(crate::runtime_error::exception_from_error(error));
         let values = [value];
-        let prepared = prepare_payload_graph(&values, &issuer, ValueLimits::default())
+        let prepared = prepare_payload_graph(&values, &issuer, ValueLimits::default(), None)
             .expect("rooted snapshot");
         let frame_sources = prepared.exception_frame_sources();
         assert_eq!(frame_sources.len(), 1);
@@ -265,16 +265,17 @@ fn retired_local_diagnostic_does_not_admit_a_reused_numeric_source() {
 
         let spanless =
             Value::MException(crate::runtime_error::exception_from_error(unknown_location));
-        let spanless_graph = prepare_payload_graph(&[spanless], &issuer, ValueLimits::default())
-            .expect("rooted spanless diagnostic")
-            .finish(
-                &issuer,
-                &portable_map,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-            )
-            .expect("spanless retired diagnostic remains portable");
+        let spanless_graph =
+            prepare_payload_graph(&[spanless], &issuer, ValueLimits::default(), None)
+                .expect("rooted spanless diagnostic")
+                .finish(
+                    &issuer,
+                    &portable_map,
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &HashMap::new(),
+                )
+                .expect("spanless retired diagnostic remains portable");
         let GraphNode::Leaf { value } = &spanless_graph.nodes[spanless_graph.roots[0].0 as usize]
         else {
             panic!("spanless exception leaf")

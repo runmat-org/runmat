@@ -7,7 +7,6 @@ mod local;
 mod operation;
 mod parallel;
 mod region;
-mod type_designator;
 
 pub use builtin::*;
 pub use callable::{CallableFallbackPolicy, CallableIdentity};
@@ -18,4 +17,3 @@ pub use local::*;
 pub use operation::*;
 pub use parallel::*;
 pub use region::*;
-pub use type_designator::*;

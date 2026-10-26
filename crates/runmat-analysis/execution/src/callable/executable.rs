@@ -26,11 +26,15 @@ pub(crate) fn admit_named_signal_generator_from_executable(
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
     let function = verified_named_function(executable, &revision, &callable)?;
     let identity = &executable.manifest.identity;
+    let compiled_binding = crate::named_callable::CompiledCallableBinding::from_selected_identity(
+        identity,
+        &callable.qualified_name,
+    )?;
     super::admit_named_signal_generator(
         signal,
         revision,
         callable,
-        identity.source_digest,
+        compiled_binding,
         &function,
         available_capabilities,
     )
@@ -44,13 +48,23 @@ pub(crate) fn verified_named_function(
 ) -> AnalysisBridgeResult<runmat_mir::analysis::FunctionAnalysis> {
     executable.validate()?;
     let identity = &executable.manifest.identity;
-    if &identity.program != revision
-        || identity.root_package != callable.owner_identity
-        || identity.entrypoint_kind != ExecutableEntrypointKind::Function
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "portable executable differs from the frozen named callable",
-        ));
+    for (matches, diagnostic) in [
+        (
+            &identity.program == revision,
+            "portable executable program differs from the frozen named callable",
+        ),
+        (
+            identity.root_package == callable.owner_identity,
+            "portable executable root package differs from the frozen named callable",
+        ),
+        (
+            identity.entrypoint_kind == ExecutableEntrypointKind::Function,
+            "portable executable entrypoint kind differs from the frozen named callable",
+        ),
+    ] {
+        if !matches {
+            return Err(AnalysisBridgeError::Identity(diagnostic));
+        }
     }
     let payload = executable
         .component(ExecutableComponentKind::Analysis)

@@ -75,6 +75,7 @@ fn single_and_double_mapping_retain_class_shape_and_values() {
         |x| x + 1.0,
         &mut SignalCooperation::new(None, "tripuls"),
     ))
+    .unwrap()
     .unwrap();
     assert_eq!(single.shape(), [1, 3]);
     assert_eq!(
@@ -87,6 +88,7 @@ fn single_and_double_mapping_retain_class_shape_and_values() {
         |x| x + 1.0,
         &mut SignalCooperation::new(None, "rectpuls"),
     ))
+    .unwrap()
     .unwrap();
     assert_eq!(
         double.into_numeric_storage().unwrap(),
@@ -124,9 +126,7 @@ fn pending_turn_cancel_and_drop_do_not_publish_waveform() {
         assert_eq!(evaluated.get(), MAP_CHUNK);
         if cancel {
             source.cancel(CancellationReason::User);
-            let Poll::Ready(Err(WaveformMapError::Execution(error))) =
-                work.as_mut().poll(&mut context)
-            else {
+            let Poll::Ready(Err(error)) = work.as_mut().poll(&mut context) else {
                 panic!("expected cancellation");
             };
             assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

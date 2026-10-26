@@ -7,6 +7,7 @@ use crate::RuntimeError;
 use runmat_value::Value;
 
 mod creation;
+mod frame;
 mod structural;
 pub use creation::assignment_container_in_context;
 use structural::read_step;
@@ -68,6 +69,8 @@ pub struct PreparedSequenceDestination {
     kind: PreparedDestinationKind,
     _retained_roots: ControlVec<RootedValueLease>,
     _source_roots: RootedValueLease,
+    method_frame: Option<ControlBox<crate::object::protocol::ObjectAccessContext>>,
+    frame_control: DestinationControl,
 }
 
 #[derive(Debug)]
@@ -108,6 +111,7 @@ pub struct SequenceDestinationBuilder {
     control: DestinationControl,
     assignment_creation: runmat_types::AssignmentCreationPolicy,
     current_origin: ReceiverCreationOrigin,
+    method_frame: Option<ControlBox<crate::object::protocol::ObjectAccessContext>>,
 }
 
 impl SequenceDestinationBuilder {
@@ -151,6 +155,7 @@ impl SequenceDestinationBuilder {
             control,
             assignment_creation: runmat_types::AssignmentCreationPolicy::ExistingOnly,
             current_origin: ReceiverCreationOrigin::Existing,
+            method_frame: None,
         })
     }
 
@@ -182,6 +187,12 @@ impl SequenceDestinationBuilder {
         } else {
             (self.current.value().clone(), None)
         };
+        if let Some(access) = self.method_frame.as_deref() {
+            return crate::object::protocol::prepare_subscript_receiver_with_borrowed_access(
+                context, root, prefix, access,
+            )
+            .await;
+        }
         crate::object::protocol::prepare_subscript_receiver_in_context(
             context,
             root,
@@ -331,6 +342,7 @@ impl SequenceDestinationBuilder {
             self.current.value().clone(),
             &step,
             caller_function_name,
+            self.method_frame.as_deref(),
         )
         .await?;
         self.current_origin = next_origin;
@@ -437,23 +449,9 @@ impl SequenceDestinationBuilder {
                     count: 1, method: None,
                 }
             } else {
-                match context {
-                Some(context) => {
-                    crate::builtins::introspection::object_indexing::object_path_assignment_cardinality_in_context(
-                        context,
-                        &suffix.target,
-                        &destination.path,
-                    )
-                    .await?
-                }
-                None => {
-                    crate::builtins::introspection::object_indexing::object_path_assignment_cardinality(
-                        &suffix.target,
-                        &destination.path,
-                    )
-                    .await?
-                }
-            }
+                crate::builtins::introspection::object_indexing::object_path_assignment_cardinality_with_access(
+                    context, &suffix.target, &destination.path, self.method_frame.as_deref(),
+                ).await?
             };
             destination.cardinality = cardinality.count;
             destination.cardinality_method = cardinality.method;
@@ -462,11 +460,17 @@ impl SequenceDestinationBuilder {
                 kind: PreparedDestinationKind::ObjectProtocol(destination),
                 _retained_roots: self.selector_roots,
                 _source_roots: self.source_roots,
+                method_frame: self.method_frame,
+                frame_control: self.control,
             });
         }
-        let endpoint =
-            PreparedSequenceEndpoint::prepare_with_context(context, &self.current, endpoint)
-                .await?;
+        let endpoint = PreparedSequenceEndpoint::prepare_with_access(
+            context,
+            &self.current,
+            endpoint,
+            self.method_frame.as_deref(),
+        )
+        .await?;
         self.control.reserve(context, &mut self.selector_roots, 0)?;
         Ok(PreparedSequenceDestination {
             kind: PreparedDestinationKind::Structural {
@@ -475,6 +479,8 @@ impl SequenceDestinationBuilder {
             },
             _retained_roots: self.selector_roots,
             _source_roots: self.source_roots,
+            method_frame: self.method_frame,
+            frame_control: self.control,
         })
     }
 }
@@ -491,7 +497,8 @@ impl AssignmentStepSpec {
             .iter()
             .filter_map(|component| match component {
                 crate::object::indexing::ObjectIndexComponent::Value(value) => Some(value),
-                crate::object::indexing::ObjectIndexComponent::Colon => None,
+                crate::object::indexing::ObjectIndexComponent::Colon
+                | crate::object::indexing::ObjectIndexComponent::End => None,
             })
     }
     pub fn member_in_context(
@@ -526,6 +533,8 @@ impl PreparedSequenceDestination {
             kind,
             _retained_roots: retained_roots,
             _source_roots: source_roots,
+            method_frame: None,
+            frame_control: control,
         })
     }
 }

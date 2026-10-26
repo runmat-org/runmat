@@ -1,7 +1,7 @@
 //! VM host instructions and selected canonical builtins retain separate
 //! execution owners. Generic automatic promotion has neither authority.
 
-use super::{promote_binary, BinaryOp};
+use super::{promote_binary, promote_unary, BinaryOp, UnaryOp};
 use runmat_accelerate_api::ProviderExecutionResult;
 use runmat_runtime::context::RuntimeContext;
 use runmat_value::{NumericDType, Value};
@@ -34,6 +34,32 @@ enum BinaryExecutionOwner {
     CanonicalBuiltin,
 }
 
+/// The canonical unary builtin owns resident execution and any legal host
+/// continuation. Generic promotion cannot replace that operation's contract.
+pub async fn promote_builtin_unary_in_context(
+    runtime: &RuntimeContext,
+    op: UnaryOp,
+    value: &Value,
+) -> ProviderExecutionResult<Value> {
+    if let Some(route) = runtime.vm_fusion_host_route() {
+        if route.allows_host_promotion(runtime) {
+            if host_floating(value) {
+                return Ok(value.clone());
+            }
+            route.invalidate();
+        }
+    }
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(value.clone());
+    }
+    promote_unary(op, value).await
+}
+
+fn host_floating(value: &Value) -> bool {
+    matches!(value, Value::Num(_))
+        || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
+}
+
 async fn promote_binary_with_owner(
     runtime: &RuntimeContext,
     op: BinaryOp,
@@ -43,16 +69,12 @@ async fn promote_binary_with_owner(
 ) -> ProviderExecutionResult<(Value, Value)> {
     if let Some(route) = runtime.vm_fusion_host_route() {
         if route.allows_host_promotion(runtime) {
-            let host = |value: &Value| {
-                matches!(value, Value::Num(_))
-                    || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
-            };
             let scalar = |value: &Value| {
                 matches!(value, Value::Num(_))
                     || matches!(value, Value::Tensor(tensor) if tensor.len() == 1)
             };
-            if host(a)
-                && host(b)
+            if host_floating(a)
+                && host_floating(b)
                 && (matches!(op, BinaryOp::Elementwise)
                     || (matches!(op, BinaryOp::MatMul) && (scalar(a) || scalar(b))))
             {
@@ -62,7 +84,6 @@ async fn promote_binary_with_owner(
         }
     }
     if matches!(owner, BinaryExecutionOwner::CanonicalBuiltin)
-        && matches!(op, BinaryOp::Elementwise)
         && (matches!(a, Value::GpuTensor(_)) || matches!(b, Value::GpuTensor(_)))
     {
         return Ok((a.clone(), b.clone()));

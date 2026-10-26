@@ -12,7 +12,7 @@ use runmat_execution_artifact::{
 
 mod execution;
 mod install;
-use execution::boxed_unit_execution;
+use execution::{admitted_foreground_execution, boxed_unit_execution, ForegroundFailure};
 use install::boxed_selected_install;
 
 pub(super) enum HostUnitRequest {
@@ -276,22 +276,23 @@ async fn execute_foreign_host_route(route: ForeignHostRoute<'_>) -> ProgramExecu
         graph_failure_sources.clone(),
     );
     let callbacks = session.graphics_callback_queue().cloned();
-    let execution = async move {
-        match callbacks {
-            Some(queue) => queue.drive_execution_with_host_callbacks(execution).await,
-            None => Ok(execution.await),
-        }
+    let result = match admitted_foreground_execution(&runtime, execution, callbacks) {
+        Ok(execution) => driver
+            .participate_foreground(execution)
+            .await
+            .map_err(ForegroundFailure::from)
+            .and_then(|result| result),
+        Err(error) => Err(error),
     };
-    let mut response = match driver
-        .participate_foreground(execution)
-        .await
-        .and_then(|result| result)
-    {
+    let mut response = match result {
         Ok(response) => response,
-        Err(error) if graph_request => {
-            graph_failure_sources.encode_runtime_failure(error, &runtime)
+        Err(ForegroundFailure::Original(response)) => *response,
+        Err(ForegroundFailure::Control(error)) if graph_request => {
+            graph_failure_sources.encode_runtime_failure(*error, &runtime)
         }
-        Err(error) => runmat_vm::runtime_failure_response(error, &runtime),
+        Err(ForegroundFailure::Control(error)) => {
+            runmat_vm::runtime_failure_response(*error, &runtime)
+        }
     };
     if let Err(error) = session.flush_graphics().await {
         if !matches!(

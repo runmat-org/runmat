@@ -79,6 +79,7 @@ fn known_bad_controls_and_output_count_precede_registered_owner_download() {
     ));
 
     let error = block_on(ttest2_builtin(
+        None,
         resident(),
         host_sample(),
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -93,6 +94,7 @@ fn known_bad_controls_and_output_count_precede_registered_owner_download() {
     // An earlier deferred resident control must not hide a later known bad
     // host option; the whole host-visible admission pass precedes downloads.
     let error = block_on(ttest2_builtin(
+        None,
         host_sample(),
         host_sample(),
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -108,6 +110,7 @@ fn known_bad_controls_and_output_count_precede_registered_owner_download() {
 
     let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let error = block_on(ttest2_builtin(
+        None,
         resident(),
         host_sample(),
         crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -139,6 +142,7 @@ fn rejected_sample_and_control_downloads_retain_cause_and_borrowed_owner() {
     let resident = || Value::GpuTensor(allocation.handle.clone());
 
     let error = block_on(ttest2_builtin(
+        None,
         resident(),
         host_sample(),
         crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -154,6 +158,7 @@ fn rejected_sample_and_control_downloads_retain_cause_and_borrowed_owner() {
     assert_eq!(allocation.probe.retirements(), 0);
 
     let error = block_on(ttest2_builtin(
+        None,
         host_sample(),
         host_sample(),
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -170,4 +175,73 @@ fn rejected_sample_and_control_downloads_retain_cause_and_borrowed_owner() {
         .validate_live()
         .unwrap();
     assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[test]
+fn explicit_context_refuses_finite_work_before_download_and_retains_cancellation() {
+    use crate::context::{
+        host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeContext,
+        RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+    struct Finite(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Finite {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..Default::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let allocation = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let ledger = ManagedHostEffectLedger::new(1024 * 1024);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(Finite(ledger.clone()))),
+        );
+    let error = block_on(ttest2_builtin(
+        Some(runtime),
+        Value::GpuTensor(allocation.handle.clone()),
+        host_sample(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(ledger.snapshot().peak_reserved_bytes, 0);
+    let source = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_cancellation_token(source.token());
+    runtime.set_error_namespace("TtestInvocation");
+    source.cancel(runmat_execution::CancellationReason::User);
+    let error = block_on(ttest2_builtin(
+        Some(runtime),
+        Value::GpuTensor(allocation.handle.clone()),
+        host_sample(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("TtestInvocation:Cancelled"));
+    assert!(crate::runtime_error::error_has_control_cancellation_origin(
+        &error
+    ));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }

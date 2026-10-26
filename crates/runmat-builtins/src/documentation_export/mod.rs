@@ -64,6 +64,20 @@ pub fn export_presentation_from_directory(
     )
 }
 
+/// Project the complete canonical catalog for package-contained consumers.
+///
+/// This is an explicit source choice, not a fallback when directory assets are
+/// unavailable. All strict ownership/identity/link checks and the presentation
+/// marker remain; executable-example qualification is deliberately not claimed.
+pub fn export_canonical_presentation() -> Result<Value, Box<dyn std::error::Error>> {
+    project_export(
+        BTreeMap::new(),
+        ExportMode::Normal { transition: false },
+        &BTreeSet::new(),
+        ValidationPurpose::PresentationOnly,
+    )
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValidationPurpose {
     Qualified,

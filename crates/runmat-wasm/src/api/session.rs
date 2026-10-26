@@ -27,6 +27,7 @@ use runmat_runtime::data::{
     dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
     DataArrayValues,
 };
+use runmat_runtime::execution::RuntimeExecutionServices;
 use runmat_runtime::geometry::{
     GeometryInspectPayload, GeometryPreviewBudgetPayload, GeometryPreviewBudgetPolicyPayload,
     GeometryPreviewPayload, GeometryStatsPayload,
@@ -1321,12 +1322,10 @@ impl RunMatWasm {
         let active = self.active_interrupt.borrow().clone();
         if let Some(flag) = active {
             flag.cancel(runmat_execution::CancellationReason::User);
-            // The foreground session is moved out while running. Its shared
-            // execution service still owns selected worker invocations and
-            // must receive this same cancellation without borrowing the slot.
-            runmat_runtime::execution::RuntimeExecutionServices::drain_scope(
-                self.execution_service.as_ref(), runmat_execution::CancellationReason::User,
-            );
+            // An executing session is temporarily taken out of its RefCell.
+            // Its installed task service remains the owner of child attempts.
+            self.execution_service
+                .drain_scope(runmat_execution::CancellationReason::User);
             return;
         }
         if !self.in_flight_session.get() {
@@ -1827,6 +1826,8 @@ impl RunMatWasm {
         if self.disposed.replace(true) {
             return;
         }
+        self.execution_service
+            .drain_scope(runmat_execution::CancellationReason::Shutdown);
         if let Some(active) = self.active_interrupt.borrow().as_ref() {
             active.cancel(runmat_execution::CancellationReason::Shutdown);
         }

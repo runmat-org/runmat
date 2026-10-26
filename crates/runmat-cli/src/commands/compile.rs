@@ -215,13 +215,8 @@ pub async fn execute(
                 AotOptLevel::Speed => runmat_native_codegen::aot::NativeOptimization::Speed,
             },
             retained_functions: Some(program_link_plan.retained_functions()),
-            runtime_binding_mode: match policy {
-                runmat_aot::compile::CompilationPolicy::ClosedWorld => {
-                    runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld
-                }
-                _ => runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
-            },
-            retained_builtin_bindings: program_link_plan.retained_builtin_bindings.clone(),
+            runtime_binding_mode: program_link_plan.runtime_composition.binding_mode(),
+            retained_builtin_bindings: program_link_plan.runtime_composition.bindings().to_vec(),
             interop: program_link_plan.interop.clone(),
             foreign_policy: Some(
                 runmat_core::foreign_artifacts::capture_foreign_policy_object(&config.foreign)
@@ -256,6 +251,17 @@ pub async fn execute(
 
 fn print_link_explanation(plan: &runmat_aot::compile::ProgramLinkPlan) {
     println!("Link policy: {:?}", plan.policy);
+    match &plan.runtime_composition {
+        runmat_aot::compile::RuntimeComposition::Selected { bindings } => {
+            println!(
+                "Runtime composition: selected ({} exact builtin bindings)",
+                bindings.len()
+            );
+        }
+        runmat_aot::compile::RuntimeComposition::Dynamic { reason } => {
+            println!("Runtime composition: dynamic ({reason:?})");
+        }
+    }
     println!("Target: {}", plan.target_triple);
     println!("Reachable program and runtime symbols:");
     for node in &plan.reachability.nodes {
@@ -281,9 +287,9 @@ fn print_link_explanation(plan: &runmat_aot::compile::ProgramLinkPlan) {
     for family in &plan.retained_runtime_families {
         println!("  {}: {}", family.module, family.reason);
     }
-    if !plan.retained_builtin_bindings.is_empty() {
+    if !plan.runtime_composition.bindings().is_empty() {
         println!("Retained runtime builtin bindings:");
-        for binding in &plan.retained_builtin_bindings {
+        for binding in plan.runtime_composition.bindings() {
             println!(
                 "  {}#{}: {}",
                 binding.name, binding.variant, binding.native_symbol

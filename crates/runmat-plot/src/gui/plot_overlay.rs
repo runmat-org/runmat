@@ -41,14 +41,6 @@ pub struct PlotOverlay {
     axes_plot_rects: Vec<Rect>,
     /// Cached toolbar rectangle (egui points)
     toolbar_rect: Option<Rect>,
-    /// Cached sidebar rectangle (egui points)
-    sidebar_rect: Option<Rect>,
-
-    /// Show debug information
-    show_debug: bool,
-
-    /// Show Dystr information modal
-    show_dystr_modal: bool,
 
     // Toolbar state
     want_save_png: bool,
@@ -64,9 +56,6 @@ pub struct PlotOverlay {
 /// Configuration for the plot overlay
 #[derive(Debug, Clone)]
 pub struct OverlayConfig {
-    /// Whether to show the sidebar with controls
-    pub show_sidebar: bool,
-
     /// Whether to show the top toolbar (legend/grid/reset/save).
     pub show_toolbar: bool,
 
@@ -95,9 +84,6 @@ pub struct OverlayConfig {
     pub x_label: Option<String>,
     pub y_label: Option<String>,
 
-    /// Sidebar width
-    pub sidebar_width: f32,
-
     /// Margins around plot area
     pub plot_margins: PlotMargins,
 }
@@ -122,7 +108,6 @@ struct PanelLayout {
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            show_sidebar: true,
             show_toolbar: true,
             show_cad_overlay: true,
             font_scale: 1.0,
@@ -133,7 +118,6 @@ impl Default for OverlayConfig {
             title: None,
             x_label: None,
             y_label: None,
-            sidebar_width: 280.0,
             plot_margins: PlotMargins {
                 left: 60.0,
                 right: 20.0,
@@ -320,9 +304,6 @@ impl PlotOverlay {
             plot_area: None,
             axes_plot_rects: Vec::new(),
             toolbar_rect: None,
-            sidebar_rect: None,
-            show_debug: false,
-            show_dystr_modal: false,
             want_save_png: false,
             want_save_svg: false,
             want_reset_view: false,
@@ -1163,6 +1144,40 @@ impl PlotOverlay {
         ctx.set_visuals(visuals);
     }
 
+    /// Render plot actions without reserving space beside the plot.
+    fn render_toolbar(&mut self, ui: &mut egui::Ui, show_grid: bool, show_legend: bool) {
+        egui::TopBottomPanel::top("plot_toolbar")
+            .frame(transparent_frame())
+            .show_inside(ui, |ui| {
+                let padded = ui.max_rect().shrink2(egui::vec2(12.0, 6.0));
+                self.toolbar_rect = Some(padded);
+                let add_toolbar = |ui: &mut egui::Ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+                        ui.spacing_mut().button_padding = egui::vec2(8.0, 6.0);
+                        if ui.button("Save PNG").clicked() {
+                            self.want_save_png = true;
+                        }
+                        if ui.button("Save SVG").clicked() {
+                            self.want_save_svg = true;
+                        }
+                        if ui.button("Reset View").clicked() {
+                            self.want_reset_view = true;
+                        }
+                        let mut grid = show_grid;
+                        if ui.toggle_value(&mut grid, "Grid").changed() {
+                            self.want_toggle_grid = Some(grid);
+                        }
+                        let mut legend = show_legend;
+                        if ui.toggle_value(&mut legend, "Legend").changed() {
+                            self.want_toggle_legend = Some(legend);
+                        }
+                    });
+                };
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(padded), add_toolbar);
+            });
+    }
+
     /// Render the complete overlay UI
     pub fn render(
         &mut self,
@@ -1174,53 +1189,17 @@ impl PlotOverlay {
         let mut consumed_input = false;
         let mut plot_area = None;
 
-        // Render sidebar if enabled
-        if config.show_sidebar {
-            consumed_input |= self.render_sidebar(ctx, plot_renderer, config, &metrics);
-        }
-
         // Render main plot area
         let central_response = egui::CentralPanel::default()
             .frame(transparent_frame()) // Transparent frame
             .show(ctx, |ui| {
                 // Toolbar (top-right)
                 if config.show_toolbar {
-                    egui::TopBottomPanel::top("plot_toolbar")
-                        .frame(transparent_frame())
-                        .show_inside(ui, |ui| {
-                            let padded = ui.max_rect().shrink2(egui::vec2(12.0, 6.0));
-                            self.toolbar_rect = Some(padded);
-                            let add_toolbar = |ui: &mut egui::Ui| {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
-                                        ui.spacing_mut().button_padding = egui::vec2(8.0, 6.0);
-                                        if ui.button("Save PNG").clicked() {
-                                            self.want_save_png = true;
-                                        }
-                                        if ui.button("Save SVG").clicked() {
-                                            self.want_save_svg = true;
-                                        }
-                                        if ui.button("Reset View").clicked() {
-                                            self.want_reset_view = true;
-                                        }
-                                        let mut grid = plot_renderer.overlay_show_grid();
-                                        if ui.toggle_value(&mut grid, "Grid").changed() {
-                                            self.want_toggle_grid = Some(grid);
-                                        }
-                                        let mut legend = plot_renderer.overlay_show_legend();
-                                        if ui.toggle_value(&mut legend, "Legend").changed() {
-                                            self.want_toggle_legend = Some(legend);
-                                        }
-                                    },
-                                );
-                            };
-                            ui.allocate_new_ui(
-                                egui::UiBuilder::new().max_rect(padded),
-                                add_toolbar,
-                            );
-                        });
+                    self.render_toolbar(
+                        ui,
+                        plot_renderer.overlay_show_grid(),
+                        plot_renderer.overlay_show_legend(),
+                    );
                 } else {
                     self.toolbar_rect = None;
                 }
@@ -1229,11 +1208,6 @@ impl PlotOverlay {
 
         if config.show_toolbar {
             consumed_input |= central_response.response.hovered();
-        }
-
-        // Render Dystr modal if needed
-        if self.show_dystr_modal {
-            consumed_input |= self.render_dystr_modal(ctx);
         }
 
         // Store plot area for next frame
@@ -1283,128 +1257,6 @@ impl PlotOverlay {
                 })
             })
             .collect()
-    }
-
-    /// Render the sidebar with controls and information
-    fn render_sidebar(
-        &mut self,
-        ctx: &Context,
-        plot_renderer: &PlotRenderer,
-        config: &OverlayConfig,
-        metrics: &OverlayMetrics,
-    ) -> bool {
-        let mut consumed_input = false;
-
-        let sidebar_response = egui::SidePanel::left("plot_controls")
-            .resizable(true)
-            .default_width(config.sidebar_width)
-            .min_width(200.0)
-            .show(ctx, |ui| {
-                ui.style_mut().visuals.widgets.noninteractive.bg_fill = Color32::from_gray(25);
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::from_gray(35);
-                ui.style_mut().visuals.widgets.hovered.bg_fill = Color32::from_gray(45);
-
-                // Header with Dystr branding
-                ui.horizontal(|ui| {
-                    // Placeholder for Dystr logo (32x32 square)
-                    let logo_size = egui::Vec2::splat(32.0);
-                    let logo_rect = ui.allocate_exact_size(logo_size, egui::Sense::click()).0;
-
-                    // Draw placeholder logo background
-                    ui.painter().rect_filled(
-                        logo_rect,
-                        4.0, // rounded corners
-                        Color32::from_rgb(100, 100, 100),
-                    );
-
-                    // Draw "D" placeholder text in the logo area
-                    ui.painter().text(
-                        logo_rect.center(),
-                        Align2::CENTER_CENTER,
-                        "D",
-                        FontId::proportional(20.0),
-                        Color32::WHITE,
-                    );
-
-                    ui.vertical(|ui| {
-                        ui.heading("RunMat");
-                        ui.horizontal(|ui| {
-                            ui.small("a community project by ");
-                            if ui.small_button("dystr.com").clicked() {
-                                self.show_dystr_modal = true;
-                            }
-                        });
-                    });
-                });
-                ui.separator();
-                ui.label("GC Stats: [not available]");
-
-                // Camera information
-                ui.collapsing("📷 Camera", |ui| {
-                    let camera = plot_renderer.camera();
-                    ui.label(format!(
-                        "Position: {:.2}, {:.2}, {:.2}",
-                        camera.position.x, camera.position.y, camera.position.z
-                    ));
-                    ui.label(format!(
-                        "Target: {:.2}, {:.2}, {:.2}",
-                        camera.target.x, camera.target.y, camera.target.z
-                    ));
-
-                    if let Some(vb) = plot_renderer.view_bounds() {
-                        ui.label(format!("View X: {:.2} to {:.2}", vb.0, vb.1));
-                        ui.label(format!("View Y: {:.2} to {:.2}", vb.2, vb.3));
-                    }
-                    if let Some(db) = plot_renderer.data_bounds() {
-                        ui.label(format!("Data X: {:.2} to {:.2}", db.0, db.1));
-                        ui.label(format!("Data Y: {:.2} to {:.2}", db.2, db.3));
-                    }
-                });
-
-                // Scene information
-                ui.collapsing("🎬 Scene", |ui| {
-                    let stats = plot_renderer.scene_statistics();
-                    ui.label(format!("Nodes: {}", stats.total_nodes));
-                    ui.label(format!("Visible: {}", stats.visible_nodes));
-                    ui.label(format!("Vertices: {}", stats.total_vertices));
-                    ui.label(format!("Triangles: {}", stats.total_triangles));
-                });
-
-                // Performance metrics
-                ui.collapsing("⚡ Performance", |ui| {
-                    ui.label(format!("FPS: {:.1}", metrics.fps));
-                    ui.label(format!("Render: {:.2}ms", metrics.render_time_ms));
-                    ui.label(format!("Vertices: {}", metrics.vertex_count));
-                    ui.label(format!("Triangles: {}", metrics.triangle_count));
-                });
-
-                // Theme selection
-                ui.collapsing("🎨 Theme", |ui| {
-                    let label = match self.theme.variant {
-                        ThemeVariant::ModernDark => "Modern Dark",
-                        ThemeVariant::ClassicLight => "Classic Light",
-                        ThemeVariant::HighContrast => "High Contrast",
-                        ThemeVariant::Custom => "Custom",
-                    };
-                    ui.label(format!("{label} (Active)"));
-                    ui.checkbox(&mut self.show_debug, "Show Debug Info");
-                });
-
-                ui.separator();
-
-                // Plot controls
-                ui.collapsing("🔧 Controls", |ui| {
-                    ui.label("🖱️ Orbit: MMB drag (or RMB drag)");
-                    ui.label("🖱️ Pan: Shift + MMB drag (or Shift + RMB drag)");
-                    ui.label("🖱️ Zoom: Scroll wheel (zooms to cursor)");
-                    ui.label("🖱️ Alt + LMB/MMB/RMB: Orbit/Pan/Zoom");
-                    ui.label("📱 Touch: Pinch to zoom");
-                });
-            });
-
-        consumed_input |= sidebar_response.response.hovered();
-        self.sidebar_rect = Some(sidebar_response.response.rect);
-        consumed_input
     }
 
     /// Render the main plot area with grid, axes, and annotations
@@ -3763,11 +3615,6 @@ impl PlotOverlay {
         self.toolbar_rect
     }
 
-    /// Get sidebar rectangle from last frame
-    pub fn sidebar_rect(&self) -> Option<Rect> {
-        self.sidebar_rect
-    }
-
     pub fn take_toolbar_actions(&mut self) -> (bool, bool, bool, Option<bool>, Option<bool>) {
         let out = (
             self.want_save_png,
@@ -3787,96 +3634,15 @@ impl PlotOverlay {
     }
 
     pub(crate) fn overlay_pointer_captured(&self) -> bool {
-        self.cad_overlay.pointer_captured() || self.show_dystr_modal
+        self.cad_overlay.pointer_captured()
     }
 
     pub(crate) fn overlay_capture_regions(&self) -> Vec<[f32; 4]> {
-        let mut regions: Vec<[f32; 4]> = self
-            .cad_overlay
+        self.cad_overlay
             .capture_regions()
             .iter()
             .map(|rect| [rect.min.x, rect.min.y, rect.max.x, rect.max.y])
-            .collect();
-        if self.show_dystr_modal {
-            regions.push([
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                f32::INFINITY,
-                f32::INFINITY,
-            ]);
-        }
-        regions
-    }
-
-    /// Render the Dystr information modal
-    fn render_dystr_modal(&mut self, ctx: &Context) -> bool {
-        let mut consumed_input = false;
-
-        egui::Window::new("About Dystr")
-            .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(400.0)
-            .show(ctx, |ui| {
-                consumed_input = true;
-
-                ui.vertical_centered(|ui| {
-                    ui.add_space(10.0);
-
-                    // Dystr logo placeholder (larger for modal)
-                    let logo_size = egui::Vec2::splat(64.0);
-                    let logo_rect = ui.allocate_exact_size(logo_size, egui::Sense::hover()).0;
-
-                    ui.painter().rect_filled(
-                        logo_rect,
-                        8.0,                             // rounded corners
-                        Color32::from_rgb(60, 130, 200), // Dystr brand color placeholder
-                    );
-
-                    ui.painter().text(
-                        logo_rect.center(),
-                        Align2::CENTER_CENTER,
-                        "D",
-                        FontId::proportional(40.0),
-                        Color32::WHITE,
-                    );
-
-                    ui.add_space(15.0);
-
-                    ui.heading("Welcome to RunMat");
-                    ui.add_space(10.0);
-
-                    ui.label("RunMat is a high-performance MATLAB-compatible");
-                    ui.label("numerical computing platform, built as part of");
-                    ui.label("the Dystr computation ecosystem.");
-
-                    ui.add_space(15.0);
-
-                    ui.label("🚀 V8-inspired JIT compilation");
-                    ui.label("⚡ BLAS/LAPACK acceleration");
-                    ui.label("🎯 Full MATLAB compatibility");
-                    ui.label("🔬 Advanced plotting & visualization");
-
-                    ui.add_space(20.0);
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Visit dystr.com").clicked() {
-                            // Open dystr.com in browser
-                            if let Err(e) = webbrowser::open("https://dystr.com") {
-                                eprintln!("Failed to open browser: {e}");
-                            }
-                        }
-
-                        if ui.button("Close").clicked() {
-                            self.show_dystr_modal = false;
-                        }
-                    });
-
-                    ui.add_space(10.0);
-                });
-            });
-
-        consumed_input
+            .collect()
     }
 }
 
@@ -3901,6 +3667,35 @@ mod positioned_axes_tests {
     use crate::core::Camera;
     use egui::{pos2, vec2, Rect};
     use glam::Vec3;
+
+    #[test]
+    fn default_plot_toolbar_preserves_full_available_width() {
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 640.0));
+        let mut overlay = PlotOverlay::new();
+        let config = OverlayConfig::default();
+        assert!(config.show_toolbar);
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(super::transparent_frame())
+                    .show(ctx, |ui| {
+                        overlay.render_toolbar(ui, config.show_grid, true);
+                        let plot = ui.available_rect_before_wrap();
+                        assert_eq!(plot.min.x, screen.min.x);
+                        assert_eq!(plot.max.x, screen.max.x);
+                        assert!(plot.height() > 0.0);
+                    });
+            },
+        );
+        let toolbar = overlay.toolbar_rect().expect("default toolbar is retained");
+        assert!(toolbar.width() > 0.0);
+        assert!(screen.contains_rect(toolbar));
+    }
 
     #[test]
     fn overlay_annotations_are_absent_by_default_but_explicit_text_remains_visible() {

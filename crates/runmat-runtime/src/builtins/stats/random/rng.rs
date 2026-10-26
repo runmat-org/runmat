@@ -165,41 +165,14 @@ fn apply_command(
     }
 }
 
-fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
-    let mut struct_value = runmat_value::UnboundedStructValueBuilder::new();
-    let seed = snapshot.seed.unwrap_or(DEFAULT_USER_SEED);
-    let seed_value =
-        if crate::builtins::common::validation::integer_is_exact_f64(&IntValue::U64(seed)) {
-            Value::Num(seed as f64)
-        } else {
-            Value::Int(IntValue::U64(seed))
-        };
-    struct_value.fields.insert(
-        "Type".to_string(),
-        Value::string(snapshot.algorithm().as_str().to_string()),
-    );
-    struct_value.fields.insert("Seed".to_string(), seed_value);
-    let tensor = match &snapshot.state {
-        random::RandomState::MtSeed(_) | random::RandomState::Mt(_) => {
-            let state = snapshot.state.mt_snapshot().expect("twister state");
-            let mut words = Vec::with_capacity(625);
-            words.extend_from_slice(state.words());
-            words.push(state.index() as u32);
-            Tensor::new_integer(IntegerStorage::U32(words), vec![625, 1])
-        }
-        random::RandomState::Lcg(state) => {
-            let words = vec![*state as u32, (*state >> 32) as u32];
-            Tensor::new_integer(IntegerStorage::U32(words), vec![2, 1])
-        }
-    }
-    .map_err(|e| rng_internal_error(format!("rng: {e}")))?;
-    struct_value
-        .fields
-        .insert("State".to_string(), Value::Tensor(tensor));
-    Ok(Value::Struct(struct_value.finish()))
+mod portable;
+pub(crate) use portable::PortableSnapshot;
+
+pub(crate) fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
+    PortableSnapshot::capture(&snapshot).public_value()
 }
 
-fn snapshot_from_value(value: &Value) -> BuiltinResult<RngSnapshot> {
+pub(crate) fn snapshot_from_value(value: &Value) -> BuiltinResult<RngSnapshot> {
     let Value::Struct(struct_value) = value else {
         return Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
@@ -335,32 +308,52 @@ fn ensure_direct_seed_range(seed: u64) -> BuiltinResult<()> {
 }
 
 fn ensure_rng_state_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
-    if let (1, Some(Value::Struct(state))) = (args.len(), args.first()) {
-        let legacy_state = state
-            .fields
-            .get("Type")
-            .or_else(|| state.fields.get("type"))
-            .map(keyword_of)
-            .transpose()?
-            .flatten()
-            .as_deref()
-            == Some("runmat-lcg-v1");
-        let fields: &[&str] = if legacy_state {
-            &["Seed", "seed", "State", "state"]
-        } else {
-            &["Seed", "seed"]
-        };
-        let has_native_integer_field = fields
-            .iter()
-            .copied()
-            .filter_map(|name| state.fields.get(name))
-            .any(crate::builtins::common::validation::value_has_native_integer_class);
-        if has_native_integer_field {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &RNG_TYPED_STATE_EXTENSION,
-                NAME,
-            )?;
+    if args.len() == 1 {
+        if let Some(value) = args.first() {
+            ensure_snapshot_extension(value, crate::context::legacy::active().as_ref())?;
         }
+    }
+    Ok(())
+}
+pub(crate) fn restore_snapshot_value(
+    value: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<RngSnapshot> {
+    ensure_snapshot_extension(value, runtime)?;
+    snapshot_from_value(value)
+}
+fn ensure_snapshot_extension(
+    value: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
+    let Value::Struct(state) = value else {
+        return Ok(());
+    };
+    let legacy_state = state
+        .fields
+        .get("Type")
+        .or_else(|| state.fields.get("type"))
+        .map(keyword_of)
+        .transpose()?
+        .flatten()
+        .as_deref()
+        == Some("runmat-lcg-v1");
+    let fields: &[&str] = if legacy_state {
+        &["Seed", "seed", "State", "state"]
+    } else {
+        &["Seed", "seed"]
+    };
+    if fields
+        .iter()
+        .copied()
+        .filter_map(|name| state.fields.get(name))
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled_in_optional_context(
+            runtime,
+            &RNG_TYPED_STATE_EXTENSION,
+            NAME,
+        )?;
     }
     Ok(())
 }

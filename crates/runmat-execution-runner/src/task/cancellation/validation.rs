@@ -10,7 +10,7 @@ pub(crate) fn validate_cancellation(
     history: &[&AttemptRecord],
     now_millis: u64,
 ) -> RunnerResult<()> {
-    if (task.state == TaskState::Cancelled) != task.cancellation.is_some() {
+    if task.state == TaskState::Cancelled && task.cancellation.is_none() {
         return Err(invalid(
             "task cancellation state lacks or contradicts its original cause",
         ));
@@ -19,6 +19,21 @@ pub(crate) fn validate_cancellation(
         return Ok(());
     };
     let at = cancellation.requested_at_driver_millis;
+    if task.state != TaskState::Cancelled
+        && !(matches!(
+            task.state,
+            TaskState::Assigned
+                | TaskState::Running
+                | TaskState::Committing
+                | TaskState::Indeterminate
+        ) && history
+            .iter()
+            .any(|attempt| attempt.cancellation_requested_at == Some(at)))
+    {
+        return Err(invalid(
+            "original cancellation lacks a retained or retired attempt",
+        ));
+    }
     if at > now_millis {
         return Err(invalid(
             "task cancellation is newer than its observed history",

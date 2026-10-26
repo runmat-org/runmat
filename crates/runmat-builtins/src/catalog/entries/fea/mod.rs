@@ -33,6 +33,7 @@ pub use self::model::FEA_MODEL_CATALOG_ENTRY;
 pub use self::model_types::*;
 pub use self::plan::FEA_PLAN_CATALOG_ENTRY;
 pub use self::plot_method::FEA_PLOT_METHOD_CATALOG_ENTRY;
+pub use self::policy_types::*;
 pub use self::results::FEA_RESULTS_CATALOG_ENTRY;
 pub use self::run::FEA_RUN_CATALOG_ENTRY;
 pub use self::step_result::FEA_STEP_RESULT_CATALOG_ENTRY;

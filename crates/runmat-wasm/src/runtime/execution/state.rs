@@ -19,6 +19,15 @@ pub(super) enum FutureState {
         task_id: TaskId,
         receipt: Option<Rc<dyn GraphResultReceipt>>,
     },
+    UnsettledCallback {
+        task_id: TaskId,
+        receipt: Option<Rc<dyn GraphResultReceipt>>,
+        error: ExecutionServiceError,
+    },
+    CancellingCallback {
+        task_id: TaskId,
+        receipt: Option<Rc<dyn GraphResultReceipt>>,
+    },
     GraphCompleted {
         graph: Rc<PayloadGraph>,
         receipt: Rc<dyn GraphResultReceipt>,
@@ -44,6 +53,8 @@ pub(super) struct TaskRecord {
     pub(super) read: bool,
     pub(super) claimed: bool,
     pub(super) completion_order: Option<u64>,
+    pub(super) retention: runmat_runtime::execution::TaskRetention,
+    pub(super) callback_exit: Option<super::service::PhysicalCallback>,
 }
 
 pub(super) struct State {

@@ -33,6 +33,7 @@ pub use parallel::{
 };
 pub(crate) use state::{RandomState, RngAlgorithm, RngSnapshot, RuntimeRng};
 pub(crate) use turn::acquire as acquire_turn;
+pub(crate) use turn::acquire_original as acquire_original_turn;
 #[cfg(test)]
 pub(crate) use turn::try_acquire as try_acquire_turn;
 pub(crate) use turn::RandomTurn;

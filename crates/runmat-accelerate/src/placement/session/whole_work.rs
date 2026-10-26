@@ -588,7 +588,13 @@ fn exploration_candidate(
     let active = lock_probes(active);
     let signature = request.signature.cache_key();
     let eligible = |item: &Admitted<'_>| {
-        matches!(item.cost, CandidateCostEvidence::Unavailable(_))
+        // NativeSource has only per-operation owners, not a proved host or
+        // device completion boundary. It stays legal as an ordinary fallback,
+        // but probing it cannot produce a whole-work sample and would starve
+        // genuinely observable alternatives forever.
+        item.candidate.execution_location
+            != runmat_execution::CandidateExecutionLocation::NativeSource
+            && matches!(item.cost, CandidateCostEvidence::Unavailable(_))
             && (!item.candidate.kind.is_provider()
                 || !request.require_transactional_results
                 || item.candidate.transactional_results)

@@ -76,7 +76,10 @@ fn missing_input_does_not_mask_invalid_slot_or_stale_nonnull_reference() {
             Err(NativeExecutorError::Host(message)) if message == "native local is out of bounds"
         ));
 
-        let stale = state.arena.insert(Value::Num(3.0));
+        let stale = state
+            .arena
+            .insert(Value::Num(3.0), Some(&state.runtime))
+            .unwrap();
         state.arena.release(stale).unwrap();
         state.locals.push(stale);
         assert!(matches!(
@@ -92,7 +95,10 @@ fn numeric_region_reads_current_global_instead_of_old_local_snapshot() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();
         state.declare_global(0, "x".into()).unwrap();
-        let old = state.arena.insert(Value::Num(1.0));
+        let old = state
+            .arena
+            .insert(Value::Num(1.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, old).unwrap();
         state.values.insert(NativeValueId(40), old);
         state

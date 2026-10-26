@@ -130,13 +130,8 @@ pub(super) fn execute(
         local_service_inputs: host.local_service_inputs.clone(),
         optimization,
         retained_functions: Some(retained),
-        runtime_binding_mode: match request.policy {
-            runmat_aot::compile::CompilationPolicy::ClosedWorld => {
-                runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld
-            }
-            _ => runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
-        },
-        retained_builtin_bindings: plan.retained_builtin_bindings.clone(),
+        runtime_binding_mode: plan.runtime_composition.binding_mode(),
+        retained_builtin_bindings: plan.runtime_composition.bindings().to_vec(),
         interop: plan.interop.clone(),
         foreign_policy: Some(
             runmat_core::foreign_artifacts::capture_foreign_policy_object(&config.foreign)

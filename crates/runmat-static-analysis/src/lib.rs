@@ -1,4 +1,5 @@
 pub mod frontend;
+pub mod project;
 pub mod semantic;
 pub mod testing;
 

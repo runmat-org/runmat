@@ -167,7 +167,7 @@ impl HostState {
                 // snapshot could overwrite a newer global/persistent value.
                 continue;
             }
-            let value = self.arena.insert(capture.value);
+            let value = self.arena.insert(capture.value, Some(&self.runtime))?;
             self.set_local(slot, value)?;
         }
         Ok(())

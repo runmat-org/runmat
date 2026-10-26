@@ -27,9 +27,6 @@ log = "0.4"
 tracing = "0.1"
 once_cell = "1.19"
 
-# Web browser integration
-webbrowser = "0.8"
-
 # Serialization and config
 serde = { workspace = true }
 serde_json = { workspace = true }

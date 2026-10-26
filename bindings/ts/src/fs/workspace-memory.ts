@@ -8,7 +8,7 @@ import {
   MAX_WORKSPACE_PUBLICATION_BYTES, MAX_WORKSPACE_PUBLICATION_EDITS,
   type WorkspaceCaptureRequest, type WorkspacePublicationRequest, type WorkspacePublicationOutcome,
 } from "../generated/fea-workspace-contracts.js";
-import { invalidInput } from "./workspace-path.js";
+import { invalidInput } from "./errors.js";
 
 /** One authority per volume: every mounted handle shares its receipts and CAS. */
 export class MemoryWorkspaceAuthority {

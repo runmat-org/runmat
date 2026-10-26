@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use runmat_value::{IntValue, NumericScalar};
 
-use runmat_types::symbolic::is_valid_symbolic_identifier;
+use runmat_builtins::is_valid_symbolic_identifier;
 use runmat_value::SymbolicFunction;
 use runmat_value::{SymbolicArray, SymbolicExpr, Tensor, Value};
 

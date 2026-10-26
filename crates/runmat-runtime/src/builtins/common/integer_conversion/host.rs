@@ -56,7 +56,8 @@ pub(super) fn cast_host_value(value: Value, target: IntegerClass) -> Result<Valu
             handle.class_name.to_string(),
         ))),
         Value::Listener(_) => Err(CastError::Unsupported(UnsupportedValueKind::Listener)),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

@@ -173,7 +173,8 @@ fn inspect_uncached(
             ));
         }
     };
-    Ok(GeometryInspection {preview_extent_m: preview_extent_m(&imported.asset), 
+    Ok(GeometryInspection {preview_extent_m: preview_extent_m(&imported.asset),
+        named_selections: None,
         content_digest,
         topology_digest,
         capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
@@ -321,6 +322,19 @@ mod inspection_cache {
         }
         entries.push_back((key, inspection));
     }
+}
+
+/// Attach separately captured CAD-asset metadata after cached geometric inspection.
+/// Metadata is never cached by CAD bytes: its own edits must change the checked revision.
+pub(super) fn attach_named_selections(mut inspection: GeometryInspection, bytes: Option<&[u8]>) -> Result<GeometryInspection, SourceDiagnostic> {
+    if let Some(bytes) = bytes {
+        let selections: runmat_geometry_core::GeometryNamedSelections = serde_json::from_slice(bytes)
+            .map_err(|e| diagnostic("fea.geometry.invalid_selections", format!("Cannot read saved geometry selections: {e}"), SourceAvailability::Available))?;
+        selections.validate_source(runmat_geometry_core::GeometryDigest::from_bytes(inspection.content_digest.0))
+            .map_err(|e| diagnostic("fea.geometry.selection_review_required", e.to_string(), SourceAvailability::Available))?;
+        inspection.named_selections = Some(selections);
+    }
+    Ok(inspection)
 }
 
 #[cfg(test)]

@@ -161,7 +161,6 @@ fn pwelch_window_generation_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause)
         }
-        WindowArgError::Execution(error) => *error,
         WindowArgError::InvalidLength => pwelch_error(&PWELCH_ERROR_INVALID_WINDOW),
         WindowArgError::TensorBuild(detail) => {
             pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, detail)

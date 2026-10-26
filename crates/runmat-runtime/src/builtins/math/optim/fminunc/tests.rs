@@ -106,9 +106,25 @@ fn fminunc_rosenbrock_converges_from_standard_start() {
     )))
     .expect("call-port scope");
     let x0 = Value::Tensor(Tensor::new(vec![-1.2, 1.0], vec![2, 1]).unwrap());
+    let _outputs = crate::output_count::push_output_count(Some(5)).unwrap();
     let result =
         block_on(runtime.scope(fminunc_builtin(objective, x0, Vec::new()))).expect("fminunc");
-    assert_close_vec(&vector_from_value(&result), &[1.0, 1.0], 2.0e-3);
+    let Value::OutputList(outputs) = result else {
+        panic!("five outputs")
+    };
+    assert_close_vec(&vector_from_value(&outputs[0]), &[1.0, 1.0], 2.0e-3);
+    let Value::Num(flag) = outputs[2] else {
+        panic!("flag")
+    };
+    assert!(matches!(flag, 1.0 | 2.0));
+    if flag == 1.0 {
+        assert!(
+            vector_from_value(&outputs[4])
+                .iter()
+                .all(|value| value.abs() <= DEFAULT_TOL_FUN),
+            "flag 1 requires its actual evaluated derivative criterion"
+        );
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -323,6 +339,163 @@ fn fminunc_rejects_budget_too_small_for_finite_difference_gradient() {
 }
 
 #[test]
+fn small_objective_change_is_not_a_quasi_newton_optimality_certificate() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (runtime, objective, _bound) = selected_bound(110);
+    let _entry = runtime.enter();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |id, args, requested| {
+            assert_eq!(id, 110);
+            assert_eq!(requested, 2);
+            counted.fetch_add(1, Ordering::SeqCst);
+            let x = vector_from_value(&args[0]);
+            let sequence = crate::sequence::ValueSequence::comma_separated(vec![
+                Value::Num(0.5 * x[0].powi(2) + x[1].powi(2)),
+                Value::Tensor(Tensor::new(vec![x[0], 2.0 * x[1]], vec![2, 1]).unwrap()),
+            ])
+            .map_err(crate::sequence::sequence_error_to_runtime);
+            Box::pin(async move {
+                crate::execution::RootedValueSequence::new(sequence?)
+                    .map_err(|error| error.into_runtime_error())
+            })
+        },
+    )))
+    .unwrap();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
+    options.insert("SpecifyObjectiveGradient", Value::Bool(true));
+    options.insert("OptimalityTolerance", Value::Num(1e-6));
+    options.insert("Display", Value::from("off"));
+    let _outputs = crate::output_count::push_output_count(Some(5)).unwrap();
+    let capture = crate::console::begin_capture().unwrap();
+    let result = block_on(runtime.scope(fminunc_builtin(
+        objective.clone(),
+        Value::Tensor(Tensor::new(vec![0.0005, 0.0005], vec![2, 1]).unwrap()),
+        vec![Value::Struct(options.finish())],
+    )))
+    .unwrap();
+    let Value::OutputList(outputs) = result else {
+        panic!("five outputs")
+    };
+    assert_eq!(outputs[2], Value::Num(1.0));
+    assert!(vector_from_value(&outputs[4])
+        .iter()
+        .all(|value| value.abs() <= 1e-6));
+    let Value::Struct(info) = &outputs[3] else {
+        panic!("info")
+    };
+    assert!(matches!(info.fields["iterations"],Value::Num(value) if value>1.0));
+    assert_eq!(
+        info.fields["funcCount"],
+        Value::Num(calls.load(Ordering::SeqCst) as f64)
+    );
+    assert!(capture.finish().unwrap().is_empty());
+    let before = calls.load(Ordering::SeqCst);
+    let mut inactive = runmat_value::UnboundedStructValueBuilder::new();
+    inactive.insert("FunctionTolerance", Value::from("dormant TR payload"));
+    let mut cooperation = crate::builtins::math::optim::common::ScalarCooperation::new(
+        runmat_builtins::OptimSolver::Fminunc,
+        Some(&runtime),
+    );
+    let admitted = block_on(
+        crate::builtins::math::optim::common::prepare_solver_options(
+            runmat_builtins::OptimSolver::Fminunc,
+            Some(inactive.finish()),
+            Some(&FMINUNC_OPTION_EXTENSION),
+            Some(&FMINUNC_RESIDENT_EXTENSION),
+            Some(&runtime),
+            &mut cooperation,
+        ),
+    )
+    .unwrap()
+    .unwrap();
+    let parsed = FminuncOptions::from_struct(Some(admitted.structure()), 1).unwrap();
+    assert!(parsed.trust_region.is_none());
+    assert_eq!(
+        parsed.tol_fun, DEFAULT_TOL_FUN,
+        "dormant function tolerance cannot become QN optimality"
+    );
+    assert_eq!(
+        admitted.structure().fields["FunctionTolerance"],
+        Value::from("dormant TR payload")
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        before,
+        "inactive TR metadata causes no objective replay"
+    );
+}
+
+#[test]
+fn numerical_failure_has_an_explicit_non_matlab_status_not_objective_limit_or_success() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (runtime, objective, _bound) = selected_bound(111);
+    let _entry = runtime.enter();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |id, args, requested| {
+            assert_eq!(id, 111);
+            assert_eq!(requested, 2);
+            counted.fetch_add(1, Ordering::SeqCst);
+            let x = vector_from_value(&args[0])[0];
+            let sequence = crate::sequence::ValueSequence::comma_separated(vec![
+                Value::Num(-x),
+                Value::Num(-1.0),
+            ])
+            .map_err(crate::sequence::sequence_error_to_runtime);
+            Box::pin(async move {
+                crate::execution::RootedValueSequence::new(sequence?)
+                    .map_err(|error| error.into_runtime_error())
+            })
+        },
+    )))
+    .unwrap();
+    let _outputs = crate::output_count::push_output_count(Some(5)).unwrap();
+    for extensions in [false, true] {
+        runtime.set_runmat_extensions_enabled(extensions);
+        calls.store(0, Ordering::SeqCst);
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
+        options.insert("SpecifyObjectiveGradient", Value::Bool(true));
+        options.insert("Display", Value::from("notify"));
+        let capture = crate::console::begin_capture().unwrap();
+        let result = block_on(runtime.scope(fminunc_builtin(
+            objective.clone(),
+            Value::Num(0.0),
+            vec![Value::Struct(options.finish())],
+        )));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            25,
+            "one initial state and bounded line-search trials, no replay"
+        );
+        if !extensions {
+            assert_eq!(
+                result.unwrap_err().identifier(),
+                Some("RunMat:compatibility:FminuncNumericalFailureExtension")
+            );
+            assert!(capture.finish().unwrap().is_empty());
+        } else {
+            let Value::OutputList(outputs) = result.unwrap() else {
+                panic!("five outputs")
+            };
+            assert_eq!(outputs[0], Value::Num(0.0));
+            assert_eq!(outputs[1], Value::Num(0.0));
+            assert_eq!(outputs[2], Value::Num(-4.0));
+            assert_eq!(outputs[4], Value::Num(-1.0));
+            let Value::Struct(info) = &outputs[3] else {
+                panic!("info")
+            };
+            assert_eq!(info.fields["iterations"], Value::Num(0.0));
+            let text = capture.finish().unwrap();
+            assert!(text.contains("no local-minimum claim"));
+            assert_eq!(text.lines().count(), 1, "notify is summary-only");
+        }
+    }
+}
+
+#[test]
 fn options_read_typed_integer_tensor_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let max_iter = Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
@@ -425,4 +598,133 @@ fn fminunc_rejects_huge_direct_iteration_limits() {
     ))
     .unwrap_err();
     assert!(err.message().contains("MaxFunEvals"));
+}
+
+#[test]
+fn quasi_newton_update_options_threshold_and_final_hessian_keep_actual_call_budget() {
+    use runmat_builtins::OptimQuasiNewtonUpdate as Update;
+    let (runtime, objective, _bound) = selected_bound(191);
+    let _entry = runtime.enter();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |function, args, requested| {
+            assert_eq!(function, 191);
+            assert_eq!(requested, 2);
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let x = vector_from_value(&args[0]);
+            Box::pin(async move {
+                let f = x.iter().map(|x| x * x).sum();
+                let gradient = Value::Tensor(
+                    Tensor::new(x.iter().map(|x| 2. * x).collect(), vec![2, 1]).unwrap(),
+                );
+                let sequence =
+                    crate::sequence::ValueSequence::comma_separated(vec![Value::Num(f), gradient])
+                        .map_err(crate::sequence::sequence_error_to_runtime)?;
+                crate::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error())
+            })
+        },
+    )))
+    .unwrap();
+    let x0 = || Value::Tensor(Tensor::new(vec![2., -3.], vec![2, 1]).unwrap());
+    let options = |field: &str, value: Value, limit: f64, max_iter: f64, max_evals: f64| {
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
+        opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
+        opts.insert(field, value);
+        opts.insert("ObjectiveLimit", Value::Num(limit));
+        opts.insert("MaxIter", Value::Num(max_iter));
+        opts.insert("MaxFunEvals", Value::Num(max_evals));
+        Value::Struct(opts.finish())
+    };
+    let history = std::num::NonZeroUsize::new(2).unwrap();
+    for (field, value, update) in [
+        ("HessianApproximation", Value::from("bfgs"), Update::Bfgs),
+        (
+            "HessianApproximation",
+            Value::Cell(
+                runmat_value::CellArray::new(vec![Value::from("lbfgs"), Value::Num(2.)], 1, 2)
+                    .unwrap(),
+            ),
+            Update::LimitedMemory { history },
+        ),
+        ("HessUpdate", Value::from("dfp"), Update::Dfp),
+        ("HessUpdate", Value::from("steepdesc"), Update::Steepest),
+    ] {
+        calls.store(0, std::sync::atomic::Ordering::SeqCst);
+        let _outputs = crate::output_count::push_output_count(Some(6)).unwrap();
+        let result = block_on(runtime.scope(fminunc_builtin(
+            objective.clone(),
+            x0(),
+            vec![options(field, value, -1e20, 20., 100.)],
+        )))
+        .unwrap();
+        let Value::OutputList(outputs) = result else {
+            panic!("outputs")
+        };
+        assert_close_vec(&vector_from_value(&outputs[0]), &[0., 0.], 1e-10);
+        assert!(matches!(outputs[2], Value::Num(1.)));
+        if matches!(update, Update::LimitedMemory { .. }) {
+            assert!(matches!(&outputs[5], Value::Tensor(value) if value.is_empty()));
+        } else {
+            assert_close_vec(&vector_from_value(&outputs[5]), &[2., 0., 0., 2.], 1e-8);
+        }
+        let Value::Struct(info) = &outputs[3] else {
+            panic!("output")
+        };
+        assert!(
+            matches!(info.fields.get("algorithm"),Some(Value::String(value))if value==update.algorithm())
+        );
+        assert!(
+            matches!(info.fields.get("funcCount"),Some(Value::Num(n))if *n==calls.load(std::sync::atomic::Ordering::SeqCst) as f64)
+        );
+    }
+    for (limit, expected_calls) in [(14., 1), (1., 3)] {
+        calls.store(0, std::sync::atomic::Ordering::SeqCst);
+        let _outputs = crate::output_count::push_output_count(Some(5)).unwrap();
+        let result = block_on(runtime.scope(fminunc_builtin(
+            objective.clone(),
+            x0(),
+            vec![options("HessUpdate", Value::from("dfp"), limit, 20., 100.)],
+        )))
+        .unwrap();
+        let Value::OutputList(outputs) = result else {
+            panic!("outputs")
+        };
+        assert!(matches!(outputs[2], Value::Num(-3.)));
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            expected_calls
+        );
+    }
+    for update in [Update::Bfgs, Update::LimitedMemory { history }] {
+        calls.store(0, std::sync::atomic::Ordering::SeqCst);
+        let _outputs = crate::output_count::push_output_count(Some(6)).unwrap();
+        let result = block_on(runtime.scope(fminunc_builtin(
+            objective.clone(),
+            x0(),
+            vec![options(
+                "HessianApproximation",
+                Value::from(update.name()),
+                -1e20,
+                0.,
+                1.,
+            )],
+        )));
+        if matches!(update, Update::LimitedMemory { .. }) {
+            let Value::OutputList(outputs) = result.unwrap() else {
+                panic!("outputs")
+            };
+            assert!(matches!(&outputs[5], Value::Tensor(value) if value.is_empty()));
+            assert!(matches!(outputs[2], Value::Num(0.)));
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:fminunc:HessianUnavailable")
+            );
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 }

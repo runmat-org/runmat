@@ -15,7 +15,7 @@ impl LocalDriver {
             .swap(false, std::sync::atomic::Ordering::AcqRel)
         {
             return Err(crate::NativeExecutionError::Protocol(
-                "injected post-accept checkpoint failure".into(),
+                "injected checkpoint publication failure".into(),
             ));
         }
         let publication = self.checkpoints.write(snapshot);

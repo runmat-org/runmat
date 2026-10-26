@@ -317,6 +317,10 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
     }
 }
 
+#[path = "trace/geometry.rs"]
+mod geometry;
+pub(in crate::builtins::math) use geometry::{trace_geometry, TraceGeometry};
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

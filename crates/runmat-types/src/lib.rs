@@ -20,7 +20,6 @@ pub mod reduction;
 pub mod serde_f32;
 pub mod serde_f64;
 pub mod source;
-pub mod symbolic;
 pub mod version;
 
 pub use contract::*;
@@ -51,10 +50,6 @@ pub use floating_remainder::FloatingRemainderKind;
 pub use rules::*;
 pub use scalar_program::{ScalarOperation, ScalarUnaryMath};
 pub use source::{merge_span, Span};
-pub use symbolic::{
-    parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration,
-    SymbolicDeclarationError,
-};
 pub use version::{SchemaIdentity, RUNMAT_TYPES_SCHEMA};
 
 pub mod path;

@@ -107,6 +107,9 @@ impl SharedValueGeneration {
         let mut requested = Self::requested_bytes();
         let mut retained_claims = 1usize;
         match value {
+            Value::ScopedFunctionHandle(_) => {
+                return Err(ExactHostNumericAllocationError::UnsupportedClass)
+            }
             Value::FunctionHandle(handle)
             | Value::ExternalFunctionHandle(handle)
             | Value::MethodFunctionHandle(handle) => {

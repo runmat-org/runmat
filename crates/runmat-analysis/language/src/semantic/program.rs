@@ -7,7 +7,7 @@ use crate::{
     FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource,
     LogicalSourcePath,
 };
-use runmat_parser::fea::{
+use runmat_fea_syntax::{
     FeaBlock, FeaDeclaration, FeaModelDefinitionKind, FeaModuleItem, FeaStatementKind,
 };
 use runmat_types::Span;
@@ -71,7 +71,7 @@ pub fn check_program<
                 let FeaModuleItem::Declaration(declaration) = item else {
                     continue;
                 };
-                if (declaration.kind == runmat_parser::fea::FeaDeclarationKind::Sweep)
+                if (declaration.kind == runmat_fea_syntax::FeaDeclarationKind::Sweep)
                     != checking_sweeps
                 {
                     continue;
@@ -240,7 +240,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> InputCheck<'_, C> {
     fn check(
         &self,
         input: &super::scope::InputSyntax,
-        expression: Option<&runmat_parser::fea::FeaExpression>,
+        expression: Option<&runmat_fea_syntax::FeaExpression>,
         member: &'static str,
         diagnostics: &mut Vec<FeaDiagnostic>,
     ) -> Option<CheckedExpression> {
@@ -337,7 +337,14 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                     CheckedFeaStatementKind::UniformSample {
                         start: check_value(catalog, path, source, scope, start, diagnostics),
                         end: check_value(catalog, path, source, scope, end, diagnostics),
-                        rate: check_value(catalog, path, source, scope, rate, diagnostics),
+                        rate: Box::new(check_value(
+                            catalog,
+                            path,
+                            source,
+                            scope,
+                            rate,
+                            diagnostics,
+                        )),
                     }
                 }
                 FeaStatementKind::AppliedLoad {
@@ -563,7 +570,7 @@ fn check_value<C: AnalysisOperationCatalog + ?Sized>(
     path: &LogicalSourcePath,
     source: &str,
     scope: &ExpressionScope,
-    value: &runmat_parser::fea::FeaExpression,
+    value: &runmat_fea_syntax::FeaExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> CheckedExpression {
     let (checked, mut found) = check_expression(

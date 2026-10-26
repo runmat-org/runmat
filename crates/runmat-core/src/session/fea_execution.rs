@@ -46,14 +46,18 @@ impl FeaStudyPreparationError {
         let mut value = serde_json::json!({"kind":"runtime","message":self.to_string(),"diagnostic":self.to_string(),"callstack":[]});
         if let Self::Meshing(failure) = self {
             value["identifier"] = "RM.FEA.PREPARATION.MESH_FAILED".into();
-            value["meshingFailure"] = serde_json::to_value(failure).expect("canonical meshing failure is serializable");
+            value["meshingFailure"] =
+                serde_json::to_value(failure).expect("canonical meshing failure is serializable");
         }
         value
     }
 }
 impl From<runmat_analysis_execution::SerialGeometryMeshingError> for FeaStudyPreparationError {
     fn from(error: runmat_analysis_execution::SerialGeometryMeshingError) -> Self {
-        match error.meshing_failure() { Some(failure) => Self::Meshing(Box::new(failure.clone())), None => Self::Invalid(error.to_string()) }
+        match error.meshing_failure() {
+            Some(failure) => Self::Meshing(Box::new(failure.clone())),
+            None => Self::Invalid(error.to_string()),
+        }
     }
 }
 
@@ -75,7 +79,9 @@ pub trait FeaGeometryExecutionHost {
         program: PreparedGeometryMaterializationProgram,
         source: PreparedGeometrySource,
         settings: MeshingRequestSettings,
-    ) -> impl Future<Output = Result<runmat_analysis_execution::PreparedFeaGeometry, FeaStudyPreparationError>>;
+    ) -> impl Future<
+        Output = Result<runmat_analysis_execution::PreparedFeaGeometry, FeaStudyPreparationError>,
+    >;
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

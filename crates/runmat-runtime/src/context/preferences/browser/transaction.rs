@@ -22,7 +22,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event, IdbObjectStore, IdbRequest, IdbTransaction, IdbTransactionMode};
 
-pub(super) enum BrowserCheckedSource {
+pub(super) enum BrowserPrepared {
     Completed {
         values: Vec<ValuePayload>,
         user_path: Option<UserPathSnapshot>,
@@ -84,7 +84,7 @@ pub(super) async fn mutate(
     mutation: BrowserMutation,
     gate: OwnedMutexGuard<()>,
     profiling: Option<&CommandProfilingReceipt>,
-) -> Result<BrowserCheckedSource, BrowserPreferenceError> {
+) -> Result<BrowserPrepared, BrowserPreferenceError> {
     let transaction = database
         .transaction_with_str_and_mode(DOCUMENT_STORE, IdbTransactionMode::Readwrite)
         .map_err(browser_error)?;
@@ -204,7 +204,7 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 .put_with_key(&bytes.into(), &JsValue::from_str(DOCUMENT_KEY))
                 .map_err(browser_error)?;
         }
-        Ok(BrowserCheckedSource::Completed {
+        Ok(BrowserPrepared::Completed {
             values: prepared.values,
             user_path: prepared.user_path,
         })
@@ -252,8 +252,8 @@ struct ActiveWrite {
     store: IdbObjectStore,
     request: IdbRequest,
     mutation: Option<BrowserMutation>,
-    prepared: Option<Result<BrowserCheckedSource, BrowserPreferenceError>>,
-    completion_sender: Option<oneshot::Sender<Result<BrowserCheckedSource, BrowserPreferenceError>>>,
+    prepared: Option<Result<BrowserPrepared, BrowserPreferenceError>>,
+    completion_sender: Option<oneshot::Sender<Result<BrowserPrepared, BrowserPreferenceError>>>,
     on_get: Option<Closure<dyn FnMut(Event)>>,
     on_complete: Option<Closure<dyn FnMut(Event)>>,
     on_abort: Option<Closure<dyn FnMut(Event)>>,

@@ -73,7 +73,7 @@ pub fn plan_signal_generator_chunks(
         })?;
     plan_generator_chunks(
         &generator.invocation,
-        &admitted.captures,
+        admitted.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
         admitted.sample_points.canonical_values(),
         component_count,
@@ -259,7 +259,7 @@ pub fn validate_signal_generator_chunks(
     let generator = matching_generator(signal, admitted)?;
     validate_generator_chunks(
         &generator.invocation,
-        &admitted.captures,
+        admitted.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
         admitted.sample_points.canonical_values(),
         chunks,

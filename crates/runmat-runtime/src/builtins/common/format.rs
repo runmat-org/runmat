@@ -12,6 +12,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 mod conversion;
 mod floating;
 use conversion::{FloatStyle, FormatConversion};
+pub(crate) use floating::format_delimited_numeric;
 use floating::format_float;
 
 const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
@@ -1155,6 +1156,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::StructArray(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

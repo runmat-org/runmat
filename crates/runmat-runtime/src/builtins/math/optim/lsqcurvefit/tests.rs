@@ -12,9 +12,15 @@ use std::sync::{
 fn one_output_does_not_publish_unused_gradient_or_jacobian() {
     let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = LeastSquaresResult {
+        point_evidence: crate::builtins::math::optim::least_squares::PointEvidence::Evaluated,
+        gradient: None,
+        cg_iterations: 0,
+        jacobian_source:
+            crate::builtins::math::optim::least_squares::JacobianSource::FiniteDifference,
+        method: crate::builtins::math::optim::least_squares::Method::LevenbergMarquardt,
         x: vec![2.0],
         residual: vec![0.0],
-        jacobian: vec![],
+        jacobian: crate::builtins::math::optim::least_squares::PublishedJacobian::RowMajor(vec![]),
         residual_len: 1,
         variable_len: 1,
         resnorm: 0.0,

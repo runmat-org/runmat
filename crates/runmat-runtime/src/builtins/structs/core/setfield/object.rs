@@ -19,6 +19,14 @@ pub(super) async fn assign_into_object(
         super::super::construction::input(runtime, &Value::Object(object.clone()))?;
     let _rhs_root = super::super::construction::input(runtime, &rhs)?;
     ensure_object_family_enabled()?;
+    if let Some(prepared) = super::super::field_path::native::prepare(
+        runtime,
+        &object,
+        crate::object::protocol::ObjectProtocol::Subsasgn,
+        &steps.first().expect("validated assignment path").name,
+    )? {
+        return prepared.assign(object, steps, rhs).await;
+    }
     let (first, rest) = steps
         .split_first()
         .expect("assignment path is validated before traversal");

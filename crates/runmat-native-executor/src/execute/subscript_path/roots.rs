@@ -16,7 +16,7 @@ pub(super) fn subscript_values<'a>(
             })
             .filter_map(|component| match component {
                 ObjectIndexComponent::Value(value) => Some(value),
-                ObjectIndexComponent::Colon => None,
+                ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
             }),
     )
 }
@@ -28,7 +28,7 @@ pub(super) fn subscript_roots(root: &Value, path: Option<&ObjectSubscriptPath>) 
         if let ObjectIndexSelector::IndexValues { components } = step.selector() {
             roots.extend(components.iter().filter_map(|component| match component {
                 ObjectIndexComponent::Value(value) => Some(value.clone()),
-                ObjectIndexComponent::Colon => None,
+                ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
             }));
         }
     }

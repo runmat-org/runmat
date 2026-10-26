@@ -14,6 +14,56 @@ fn failed() -> AttemptReport {
     }
 }
 
+#[test]
+fn wall_overrun_is_failed_with_actual_accounting_not_a_success_or_clamped_total() {
+    let mut fixture = common::fixture(1, 1);
+    let mut task = common::task(
+        "wall-overrun",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    task.request.resources.max_wall_millis = 5;
+    let request = common::submit(&mut fixture.driver, task);
+    let success = runmat_execution_runner::AttemptSuccess::new(
+        &request,
+        vec![runmat_execution::value::ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::Null,
+        ))],
+        Vec::new(),
+        6,
+        0,
+        0,
+    )
+    .unwrap();
+    assert!(success.validate_against(&request).is_err());
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &request,
+            AttemptReport::Succeeded { result: success },
+        )))
+        .unwrap();
+    let evidence = fixture
+        .driver
+        .task_execution_evidence(request.task_id)
+        .unwrap();
+    assert_eq!(
+        evidence.task.state,
+        runmat_execution::state::TaskState::Failed
+    );
+    assert!(evidence.task.committed.is_none());
+    assert_eq!(
+        evidence
+            .resource_aggregate(6)
+            .unwrap()
+            .summary
+            .usage
+            .wall_millis,
+        6
+    );
+}
+
 // Explicit fixture accounting tests transport and aggregation, not actual provider metering.
 #[test]
 fn every_unsuccessful_disposition_retains_original_accounting_after_cold_import() {
@@ -24,6 +74,7 @@ fn every_unsuccessful_disposition_retains_original_accounting_after_cold_import(
         },
         AttemptReport::Cancelled,
     ] {
+        let unresolved = matches!(&report, AttemptReport::Lost { .. });
         let mut fixture = common::fixture(1, 1);
         let task = common::task(
             "accounted-terminal",
@@ -48,10 +99,23 @@ fn every_unsuccessful_disposition_retains_original_accounting_after_cold_import(
             serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
         cold.validate().unwrap();
         assert_eq!(cold, original);
-        assert_eq!(
-            cold.resource_aggregate(5).unwrap().attempts,
-            vec![accounting]
-        );
+        if unresolved {
+            assert_eq!(
+                cold.attempts[0]
+                    .unverified_retirement
+                    .as_ref()
+                    .unwrap()
+                    .resources
+                    .as_deref(),
+                Some(&accounting)
+            );
+            assert!(cold.resource_aggregate(5).is_err());
+        } else {
+            assert_eq!(
+                cold.resource_aggregate(5).unwrap().attempts,
+                vec![accounting]
+            );
+        }
     }
 }
 

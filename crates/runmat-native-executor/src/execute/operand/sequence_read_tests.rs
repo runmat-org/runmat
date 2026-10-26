@@ -23,10 +23,16 @@ fn static_and_dynamic_member_reads_suspend_before_resolving_the_same_value() {
             state.current_request = Some(request);
             let mut structure = UnboundedStructValueBuilder::with_capacity(1);
             structure.insert("answer", Value::Num(42.0));
-            let base = state.arena.insert(Value::Struct(structure.finish()));
+            let base = state
+                .arena
+                .insert(Value::Struct(structure.finish()), Some(&state.runtime))
+                .unwrap();
             state.locals.push(base);
             let value = if dynamic {
-                let member = state.arena.insert(Value::String("answer".into()));
+                let member = state
+                    .arena
+                    .insert(Value::String("answer".into()), Some(&state.runtime))
+                    .unwrap();
                 state.locals.push(member);
                 MirRvalue::DynamicMember {
                     base: MirOperand::Local(MirLocalId(0)),

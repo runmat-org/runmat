@@ -18,6 +18,14 @@ pub(in crate::context) struct HostAllocationContext {
 }
 
 impl HostAllocationContext {
+    pub(super) fn same_owner(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.state, &other.state)
+            && self
+                .cancellation
+                .borrow()
+                .same_generation(&other.cancellation.borrow())
+            && Rc::ptr_eq(&self.parallel, &other.parallel)
+    }
     pub(in crate::context) fn new(
         state: Rc<RuntimeContextState>,
         cancellation: Rc<RefCell<CancellationToken>>,

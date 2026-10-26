@@ -182,6 +182,14 @@ impl RunMatSession {
         };
         let requests = prepared.requests(functions.clone(), profiles.clone())?;
         for request in requests.geometry {
+            let metadata = runmat_geometry_core::geometry_selection_metadata_path(request.logical_path.as_str()).map_err(|e| e.to_string())?;
+            let logical = LogicalSourcePath::file(metadata).map_err(|e| e.to_string())?;
+            let path = runmat_runtime::analysis::physical_source_path(&source_root, &logical).map_err(|e| e.to_string())?;
+            match runmat_filesystem::read_async(&path).await {
+                Ok(bytes) => prepared.add_geometry(logical, bytes)?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => return Err(format!("Cannot read saved geometry selections: {e}")),
+            }
             let physical_path =
                 runmat_runtime::analysis::physical_source_path(&source_root, &request.logical_path)
                     .map_err(|error| error.to_string())?;
@@ -320,6 +328,7 @@ impl RunMatSession {
                     .map(runmat_runtime::analysis::operation_pattern_from_value_fact)
                     .collect(),
                 effects: interface.effects,
+                cooperative_suspension: interface.cooperative_suspension,
                 capabilities: interface.capabilities,
             });
         }

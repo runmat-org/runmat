@@ -85,11 +85,6 @@ impl Ttest2OptionPlan {
                 if dim == 0 {
                     return Err(invalid_argument("ttest2: Dim must be a positive integer"));
                 }
-                if dim > MAX_SUPPORTED_DIM {
-                    return Err(invalid_argument(format!(
-                        "ttest2: Dim exceeds the supported maximum of {MAX_SUPPORTED_DIM}"
-                    )));
-                }
                 Ok(DecodedOption::Dim(dim - 1))
             }
             Ttest2OptionName::Tail => {
@@ -109,33 +104,26 @@ impl Ttest2OptionPlan {
         }
     }
 
-    async fn gather(value: Value) -> BuiltinResult<Value> {
-        gather_if_needed_async(&value).await.map_err(|cause| {
-            let mut owner = invalid_argument(format!("ttest2: {cause}"));
-            owner.gpu_gather_retry = cause.gpu_gather_retry;
-            owner.span = cause.span;
-            owner.source = Some(Box::new(cause));
-            owner
-        })
-    }
-
-    pub(super) async fn resolve(self) -> BuiltinResult<Options> {
+    pub(super) async fn resolve(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Options> {
         let mut options = Options::default();
         for step in self.steps {
             let decoded = match step {
                 Step::Ready(option) => option,
                 Step::DeferredValue(kind, value) => {
-                    let value = Self::gather(value).await?;
+                    let value = gathered_value(value, runtime).await?;
                     Self::decode_value(kind, &value)?
                 }
                 Step::DeferredName(name, value) => {
-                    let name = Self::gather(name).await?;
+                    let name = gathered_value(name, runtime).await?;
                     let name = scalar_text(&name, "option name")?;
                     let kind = Ttest2OptionName::from_public(&name).ok_or_else(|| {
                         invalid_argument(format!("ttest2: unsupported option '{name}'"))
                     })?;
                     Self::gate_integer_option(kind, &value)?;
-                    let value = Self::gather(value).await?;
+                    let value = gathered_value(value, runtime).await?;
                     Self::decode_value(kind, &value)?
                 }
             };

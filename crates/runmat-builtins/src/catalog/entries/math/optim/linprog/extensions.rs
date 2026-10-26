@@ -56,13 +56,19 @@ linprog_integer_extension!(
     "ub",
     "RunMat:compatibility:LinprogIntegerUbExtension"
 );
+linprog_integer_extension!(
+    LINPROG_INTEGER_OPTION_EXTENSION,
+    "linprog-integer-option",
+    "numeric option",
+    "RunMat:compatibility:LinprogIntegerOptionExtension"
+);
 pub const LINPROG_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "linprog-explicit-gpu-input",
     mode: BuiltinExtensionMode::RunMatOnly,
     description: "linprog with explicit gpuArray input is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:LinprogExplicitGpuInputExtension"),
 };
-pub const LINPROG_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
+pub const LINPROG_EXTENSIONS: [BuiltinExtensionDescriptor; 9] = [
     LINPROG_INTEGER_F_EXTENSION,
     LINPROG_INTEGER_A_EXTENSION,
     LINPROG_INTEGER_B_EXTENSION,
@@ -71,6 +77,7 @@ pub const LINPROG_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
     LINPROG_INTEGER_LB_EXTENSION,
     LINPROG_INTEGER_UB_EXTENSION,
     LINPROG_GPU_INPUT_EXTENSION,
+    LINPROG_INTEGER_OPTION_EXTENSION,
 ];
 const LINPROG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 7] = [
     BuiltinIntegerInputCapability {
@@ -124,5 +131,18 @@ const LINPROG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 7] = [
         notes: "Public ub is double; typed integers are independently gated.",
     },
 ];
-pub const LINPROG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "linprog(integer-valued solver inputs)", inputs: &LINPROG_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Every typed-integer role is a separately gated RunMat extension. Values must be exactly representable before crossing the host binary64 solver boundary." }];
+const LINPROG_INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "MaxIterations / MaxIter",
+    classes: &crate::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The exact nonnegative iteration limit is never converted through binary64 and must fit the backend's unsigned 32-bit iteration range.",
+}];
+pub const LINPROG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] =
+    [BuiltinIntegerCapabilityDescriptor { form: "linprog(integer-valued solver inputs)", inputs: &LINPROG_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Every typed-integer role is a separately gated RunMat extension. Values must be exactly representable before crossing the host binary64 solver boundary." },BuiltinIntegerCapabilityDescriptor {
+    form: "linprog(f,A,b,Aeq,beq,lb,ub,integer_options)", inputs: &LINPROG_INTEGER_OPTION_INPUT,
+    computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+    output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error,
+    backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter,
+    notes: "Typed integer iteration limits are independently gated and retained as exact structural counts, not solver floating operands.",
+}];

@@ -292,6 +292,9 @@ impl<'a> Query<'a> {
                 match &components[index] {
                     ObjectIndexComponent::Value(value) => Component::Value(value),
                     ObjectIndexComponent::Colon => Component::Scalar(Element::Literal(":")),
+                    ObjectIndexComponent::End => {
+                        return Err(crate::object::indexing::unresolved_end())
+                    }
                 }
             }
             Self::Typed(ObjectIndexSelector::ScalarIndices { indices }) => {

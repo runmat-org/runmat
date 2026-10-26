@@ -10,6 +10,21 @@ use crate::RuntimeError;
 use runmat_types::{CallableFallbackPolicy, CallableIdentity};
 use runmat_value::Value;
 
+/// Invocation-scoped callables are local to the pumped original evaluator.
+/// Refuse before foreign callback registration or transmission, not after a
+/// foreign effect has already occurred.
+pub(crate) fn reject_scoped_callback(value: &Value) -> Result<(), RuntimeError> {
+    if matches!(value, Value::ScopedFunctionHandle(_)) {
+        let mut error = foreign_error(
+            ForeignErrorKind::CallbackFailed,
+            "invocation-scoped callables cannot cross a foreign boundary",
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(error);
+    }
+    Ok(())
+}
+
 /// Normalize one retained RunMat callable into the executor-neutral callback
 /// request. Captures remain in the callable generation; `arguments` contains
 /// only the explicitly supplied suffix.
@@ -34,6 +49,7 @@ pub(crate) fn foreign_callback_request_rooted(
     requested_outputs: usize,
 ) -> Result<RuntimeCallRequest, RuntimeError> {
     use runmat_types::MethodId;
+    reject_scoped_callback(callback.value())?;
 
     let target = match callback.value() {
         Value::FunctionHandle(name) => {

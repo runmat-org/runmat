@@ -57,7 +57,6 @@ fn blackman_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &BLACKMAN_ERROR_INTERNAL, cause)
         }
-        WindowArgError::Execution(cause) => *cause,
         WindowArgError::TensorBuild(detail) => {
             blackman_error_with_detail(&BLACKMAN_ERROR_INTERNAL, detail)
         }
@@ -147,7 +146,7 @@ async fn blackman_in_runtime(
         },
         &mut cooperation,
     )
-    .await
+    .await?
     .map_err(blackman_map_window_error)
 }
 

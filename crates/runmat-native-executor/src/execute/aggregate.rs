@@ -12,7 +12,7 @@ fn adopt_tensor_result(
     state: &mut HostState,
     value: runmat_runtime::execution::RootedValue,
 ) -> NativeExecutorResult<NativeValueRef> {
-    Ok(value.with_owned(|value| state.arena.insert(value)))
+    value.with_owned(|value| state.arena.insert(value, Some(&state.runtime)))
 }
 
 pub(super) fn evaluate(
@@ -76,7 +76,7 @@ pub(super) fn evaluate(
                 CellArray::new(realized_rows.into_iter().flatten().collect(), rows, columns)
                     .map(Value::Cell)
                     .map_err(NativeExecutorError::Host)?;
-            Ok(state.arena.insert(value))
+            state.arena.insert(value, Some(&state.runtime))
         }
         MirAggregateKind::Tensor => {
             if runmat_runtime::host_matrix_can_run_inline(&state.runtime, &realized_rows)

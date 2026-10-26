@@ -703,6 +703,7 @@ impl PythonAdapter {
         context: &RuntimeContext,
         value: crate::call::RootedArgumentValue,
     ) -> Result<PythonValue, RuntimeError> {
+        crate::foreign::reject_scoped_callback(value.value())?;
         if super::super::is_callable(value.value()) {
             let foreign = context
                 .service_ports()

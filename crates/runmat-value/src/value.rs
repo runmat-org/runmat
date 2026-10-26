@@ -52,6 +52,8 @@ pub enum Value {
     // Function handle with compiler/session semantic identity.
     BoundFunctionHandle(BoundFunctionHandle),
     Closure(Closure),
+    /// Invocation-local callable capability; no source name or executable body.
+    ScopedFunctionHandle(ScopedFunctionHandle),
     ClassRef(SharedClassIdentity),
     MException(MException),
     /// Lazy executable work owned by the active runtime execution service.
@@ -73,6 +75,19 @@ pub enum Value {
 }
 
 impl Value {
+    /// Language function-handle class, including opaque invocation capabilities.
+    pub fn is_function_handle(&self) -> bool {
+        matches!(
+            self,
+            Self::FunctionHandle(_)
+                | Self::ExternalFunctionHandle(_)
+                | Self::MethodFunctionHandle(_)
+                | Self::BoundFunctionHandle(_)
+                | Self::Closure(_)
+                | Self::ScopedFunctionHandle(_)
+        )
+    }
+
     pub fn string(text: impl Into<Utf8Text>) -> Self {
         Self::String(text.into())
     }
@@ -132,6 +147,10 @@ impl Value {
             )),
             Self::BoundFunctionHandle(handle) => Some(CallableInstanceKey::new(
                 CallableInstanceKind::Bound,
+                handle.instance_id(),
+            )),
+            Self::ScopedFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Scoped,
                 handle.instance_id(),
             )),
             Self::Closure(closure) => Some(CallableInstanceKey::new(

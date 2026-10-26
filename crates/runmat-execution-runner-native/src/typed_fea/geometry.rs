@@ -12,9 +12,7 @@ use runmat_execution::task::RetryPolicy;
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{CancellationReason, Digest, ProgramRevision};
 
-use runmat_execution_artifact::{
-    ArtifactAccess, ProgramExecutionResponse,
-};
+use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionResponse};
 use runmat_geometry_core::{
     GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource,
 };
@@ -232,7 +230,7 @@ async fn compile_geometry_generator(
         request,
         compiled.revision,
         compiled.callable,
-        compiled.executable_source_digest,
+        compiled.compiled_binding,
         &compiled.function,
         &BTreeSet::new(),
     )
@@ -272,7 +270,7 @@ async fn execute_generator(
             scope_id: session.scope_id(),
             pool_id: session.pool_id(),
             host: crate::program_host::program_host(
-                &chunk.request,
+                chunk.direct_request().map_err(|error| error.to_string())?,
                 crate::program_host::local_trust(),
             )
             .map_err(|error| error.to_string())?,
@@ -284,7 +282,13 @@ async fn execute_generator(
     )
     .map_err(|error| error.to_string())?;
     let task = session
-        .submit(chunk.request.clone(), submission)
+        .submit(
+            chunk
+                .direct_request()
+                .map_err(|error| error.to_string())?
+                .clone(),
+            submission,
+        )
         .map_err(|error| error.to_string())?;
     let started = Instant::now();
     loop {

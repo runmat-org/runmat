@@ -59,7 +59,6 @@ fn hamming_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &HAMMING_ERROR_INTERNAL, cause)
         }
-        WindowArgError::Execution(cause) => *cause,
         WindowArgError::TensorBuild(detail) => {
             hamming_error_with_detail(&HAMMING_ERROR_INTERNAL, detail)
         }
@@ -140,7 +139,7 @@ async fn hamming_in_runtime(
         return Ok(value);
     }
     window_tensor(options, hamming_coefficient, &mut cooperation)
-        .await
+        .await?
         .map_err(hamming_map_window_error)
 }
 

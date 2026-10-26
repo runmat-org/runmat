@@ -20,11 +20,11 @@ type PendingTaskResolution = (
 
 impl RemotePoolDriver {
     pub(super) fn apply_report(self: &Arc<Self>, mut report: BackendReport) {
-        if matches!(&report.report, AttemptReport::GraphRetiredCancelled) {
+        if matches!(&report.report, AttemptReport::Retired) {
             // Only the local process owner can issue this certificate. A
             // remote worker cannot prove parent-owned process-tree cleanup.
             report.report = AttemptReport::RetirementUnverified {
-                message: "remote Graph retirement certificate has no local process owner".into(),
+                message: "remote retirement certificate has no local process owner".into(),
             };
         }
         let task_id = report.task_id;
@@ -211,9 +211,7 @@ fn report_failure(
         AttemptReport::Lost { .. } | AttemptReport::RetirementUnverified { .. } => {
             NativeProgramFailure::WorkerLost(message)
         }
-        AttemptReport::Cancelled | AttemptReport::GraphRetiredCancelled => {
-            NativeProgramFailure::Cancelled
-        }
+        AttemptReport::Cancelled | AttemptReport::Retired => NativeProgramFailure::Cancelled,
         _ => state_failure(state, message),
     }
 }
@@ -251,8 +249,18 @@ fn terminal_failure(driver: &Driver, task: &TaskRecord) -> Option<String> {
             .task_attempts(task_id)
             .expect("task is borrowed from this driver")
             .max_by_key(|attempt| attempt.request.ordinal)
-            .and_then(|attempt| attempt.terminal.as_ref())
-            .and_then(|terminal| terminal.diagnostic.clone())
+            .and_then(|attempt| {
+                attempt
+                    .terminal
+                    .as_ref()
+                    .and_then(|terminal| terminal.diagnostic.clone())
+                    .or_else(|| {
+                        attempt
+                            .unverified_retirement
+                            .as_ref()
+                            .map(|evidence| evidence.diagnostic.clone())
+                    })
+            })
             .unwrap_or_else(|| message.into()),
     )
 }

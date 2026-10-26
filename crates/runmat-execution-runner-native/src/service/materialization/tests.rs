@@ -229,8 +229,7 @@ fn caller_completion_cannot_overwrite_a_deferred_or_accepted_future() {
 
 #[cfg(unix)]
 #[test]
-fn accepted_checkpoint_failure_cancels_exact_task_and_cannot_submit_twice() {
-    use runmat_execution::state::TaskState;
+fn failed_checkpoint_publishes_no_task_and_cannot_submit_twice() {
     use runmat_execution::ExecutionHandleState;
     use runmat_execution_runner::driver::DriverEventKind;
     use runmat_runtime::execution::RuntimeExecutionServices;
@@ -241,20 +240,21 @@ fn accepted_checkpoint_failure_cancels_exact_task_and_cannot_submit_twice() {
     assert!(matches!(
         service.spawn(&future),
         Err(ExecutionServiceError::Failed(message))
-            if message.contains("injected post-accept checkpoint failure")
+            if message.contains("injected checkpoint publication failure")
     ));
     let snapshot = service.driver.scheduler_snapshot_for_test();
-    assert_eq!(snapshot.tasks.len(), 1, "driver accepted exactly one task");
-    let (task_id, task) = snapshot.tasks.iter().next().unwrap();
-    assert_eq!(task.state, TaskState::Cancelled);
-    assert_eq!(
-        snapshot
-            .events
-            .iter()
-            .filter(|event| matches!(&event.kind, DriverEventKind::TaskSubmitted { task_id: submitted, .. } if submitted == task_id))
-            .count(),
-        1,
+    assert!(
+        snapshot.tasks.is_empty(),
+        "unpublished admission is rolled back"
     );
+    assert!(
+        snapshot.attempts.is_empty(),
+        "no attempt may launch before publication"
+    );
+    assert!(!snapshot
+        .events
+        .iter()
+        .any(|event| matches!(&event.kind, DriverEventKind::TaskSubmitted { .. })));
     assert_eq!(
         service.inspect_future(&future).unwrap().state,
         ExecutionHandleState::Failed,
@@ -263,5 +263,128 @@ fn accepted_checkpoint_failure_cancels_exact_task_and_cannot_submit_twice() {
         service.spawn(&future),
         Err(ExecutionServiceError::Failed(_))
     ));
-    assert_eq!(service.driver.scheduler_snapshot_for_test().tasks.len(), 1);
+    assert!(service
+        .driver
+        .scheduler_snapshot_for_test()
+        .tasks
+        .is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn callback_waves_release_only_internal_records_after_rooted_result_handoff() {
+    use runmat_execution::{TaskHandle, TaskId};
+    use runmat_runtime::execution::{RootedValueSequence, RuntimeExecutionServices, TaskRetention};
+    runmat_gc::gc_test_context(|| {
+        let (_temporary, service) = service_fixture();
+        let public_future = service.create_future(admitted_program_call()).unwrap();
+        let public_task = TaskHandle {
+            id: TaskId::derive(&[b"refetchable"]),
+            scope_id: service.scope_id,
+            generation: 1,
+            outputs: public_future.outputs.clone(),
+        };
+        service.state.lock().unwrap().tasks.insert(
+            public_task.id,
+            super::TaskRecord {
+                future_id: public_future.id,
+                generation: 1,
+                read: false,
+                claimed: false,
+                completion_order: None,
+                retention: TaskRetention::Refetchable,
+                callback_completion: None,
+            },
+        );
+        assert!(service
+            .release_callback_batch(std::slice::from_ref(&public_task))
+            .is_err());
+        for wave in 0..3u64 {
+            let allocation = runmat_gc::gc_allocate_rooted(Value::Num(wave as f64)).unwrap();
+            let handle = allocation.handle();
+            let value = Value::HandleObject(runmat_value::HandleRef {
+                class_name: "RetainedCallbackValue".into(),
+                target: handle,
+                valid: true,
+            });
+            let result =
+                RootedValueSequence::new(runmat_value::ValueSequence::single(value).unwrap())
+                    .unwrap();
+            drop(allocation);
+            let future_id = FutureId::derive(&[b"callback", &wave.to_be_bytes()]);
+            let task = TaskHandle {
+                id: TaskId::derive(&[b"callback", &wave.to_be_bytes()]),
+                scope_id: service.scope_id,
+                generation: 1,
+                outputs: public_future.outputs.clone(),
+            };
+            {
+                let mut state = service.state.lock().unwrap();
+                state
+                    .futures
+                    .insert(future_id, FutureState::Completed(Ok(result.clone())));
+                state.tasks.insert(
+                    task.id,
+                    super::TaskRecord {
+                        future_id,
+                        generation: 1,
+                        read: false,
+                        claimed: false,
+                        completion_order: Some(wave),
+                        retention: TaskRetention::CallbackBatch,
+                        callback_completion: Some(
+                            crate::driver::LocalDriver::settled_callback_completion_for_test(),
+                        ),
+                    },
+                );
+            }
+            service
+                .release_callback_batch(std::slice::from_ref(&task))
+                .unwrap();
+            {
+                let state = service.state.lock().unwrap();
+                assert_eq!(state.tasks.len(), 1);
+                assert_eq!(state.futures.len(), 1);
+            }
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(
+                runmat_gc::gc_with_value(&handle, |_| ()).is_ok(),
+                "the returned result owns roots after service retirement"
+            );
+            let rooted = result.try_into_single().unwrap();
+            assert!(matches!(rooted.value(), Value::HandleObject(_)));
+            drop(rooted);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_err());
+        }
+        // A private Future that fails before atomic publication has no task
+        // record from which a later release could discover it.
+        let pool = service
+            .ensure_pool(runmat_execution::PoolRequest::automatic())
+            .unwrap();
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        assert!(service
+            .submit_callback_batch(
+                vec![admitted_program_call()],
+                &pool.handle,
+                cancellation.token(),
+            )
+            .is_err());
+        {
+            let state = service.state.lock().unwrap();
+            assert_eq!(state.futures.len(), 1, "unpublished private Future retired");
+            assert_eq!(state.tasks.len(), 1);
+        }
+        let snapshot = service.driver.scheduler_snapshot_for_test();
+        assert!(snapshot.tasks.is_empty());
+        assert!(snapshot.attempts.is_empty());
+        assert!(!snapshot.events.iter().any(|event| matches!(
+            event.kind,
+            runmat_execution_runner::driver::DriverEventKind::TaskSubmitted { .. }
+        )));
+        assert!(
+            service.inspect_future(&public_future).is_ok(),
+            "ordinary refetchable Future is untouched"
+        );
+    });
 }

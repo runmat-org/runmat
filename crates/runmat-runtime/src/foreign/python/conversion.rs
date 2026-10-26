@@ -747,7 +747,8 @@ fn value_kind(value: &Value) -> &'static str {
         Value::GpuTensor(_) => "GPU-resident",
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) => "object",
         Value::Listener(_) => "listener",
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

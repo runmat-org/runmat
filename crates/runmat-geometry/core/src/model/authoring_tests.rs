@@ -17,7 +17,9 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
         module_path: "project/main.fea".into(),
         geometry_id: "bracket".into(),
         parameters: Vec::new(),
-        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+        source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
+            preview_extent_m: None,
+            named_selections: None,
             unit_evidence: Default::default(),
             logical_path: "geometry/bracket.step".into(),
             format: GeometrySourceFormat::Step,
@@ -30,8 +32,7 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
                 ..GeometryAuthoringCapabilities::default()
             },
             exchange: None,
-            shared_interfaces: false,
-        }),
+            shared_interfaces: false,        })),
         regions: vec![GeometryRegionDefinition {
             region_id: "body".into(),
             role: GeometryRegionRole::Solid,

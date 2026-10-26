@@ -13,10 +13,12 @@ pub(crate) enum BrowserWorkerTopology {
 pub(crate) struct BrowserExecutionCapabilities {
     pub(crate) topology: BrowserWorkerTopology,
     pub(crate) max_workers: u32,
-    /// Host promises that launch settles only after physical worker exit and
-    /// cancel returns a Promise resolving after physical termination.
+    /// Owned-builtin launches certify physical exit on fulfillment; rejected
+    /// Promises require a task-bound cancelOwned acknowledgment.
     #[serde(default)]
     pub(crate) owned_builtin_work: bool,
+    /// Selected Direct/Graph programs require an exact Runtime-owned
+    /// invocation-retirement terminal, separate from literal owned-builtin exit.
     #[serde(default)]
     pub(crate) selected_program_work: bool,
 }
@@ -40,8 +42,11 @@ impl BrowserExecutionCapabilities {
         if self.topology == BrowserWorkerTopology::Serial && self.max_workers != 1 {
             return Err("the serial browser execution topology requires maxWorkers = 1".into());
         }
-        if (self.owned_builtin_work || self.selected_program_work) && !self.has_worker_isolation() {
+        if self.owned_builtin_work && !self.has_worker_isolation() {
             return Err("ownedBuiltinWork requires isolated browser workers".into());
+        }
+        if self.selected_program_work && !self.has_worker_isolation() {
+            return Err("selectedProgramWork requires isolated browser workers".into());
         }
         Ok(self)
     }

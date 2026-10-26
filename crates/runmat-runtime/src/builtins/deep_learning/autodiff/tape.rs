@@ -419,3 +419,81 @@ pub(super) fn push_binary_node(
         ),
     )?))
 }
+
+#[cfg(test)]
+mod unselected_scope_tests {
+    use super::*;
+    use crate::context::{PreparedUnselectedScope, RuntimeContext};
+    use crate::execution::RuntimeExecutionService;
+    use runmat_execution::profiling::{current_command_profiling, CommandProfilingRoot};
+    use runmat_value::{get_display_format, set_display_format, FormatMode};
+    use std::{
+        cell::Cell,
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    struct Probe(Rc<Cell<bool>>);
+    impl Future for Probe {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            assert!(crate::context::legacy::active().is_none());
+            assert!(active_tape().is_none());
+            assert!(current_command_profiling().is_none());
+            set_display_format(FormatMode::ShortG);
+            Poll::Pending
+        }
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            assert!(crate::context::legacy::active().is_none());
+            assert!(active_tape().is_none());
+            assert!(current_command_profiling().is_none());
+            assert_eq!(get_display_format(), FormatMode::ShortG);
+            self.0.set(true);
+        }
+    }
+    #[test]
+    fn explicit_original_none_masks_and_restores_every_foreign_poll_projection() {
+        let prior = get_display_format();
+        let unselected = PreparedUnselectedScope::prepare(None).unwrap();
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let profiling = CommandProfilingRoot::new();
+        let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_tape_poll_authority(TapePollAuthority::new(&tape))
+            .with_command_profiling(profiling.receipt());
+        foreign.display_format_owner().set(FormatMode::Long);
+        let entered = foreign.enter();
+        assert!(PreparedUnselectedScope::prepare(Some(&foreign)).is_err());
+        assert!(Rc::ptr_eq(&active_tape().unwrap(), &tape));
+        assert!(current_command_profiling()
+            .unwrap()
+            .same_command(&profiling.receipt()));
+        let dropped = Rc::new(Cell::new(false));
+        let mut work = Box::pin(unselected.scope(Probe(dropped.clone())));
+        assert!(work
+            .as_mut()
+            .poll(&mut Context::from_waker(futures::task::noop_waker_ref()))
+            .is_pending());
+        assert_eq!(
+            crate::context::legacy::active().unwrap().local_identity(),
+            foreign.local_identity()
+        );
+        assert_eq!(get_display_format(), FormatMode::Long);
+        assert!(Rc::ptr_eq(&active_tape().unwrap(), &tape));
+        assert!(current_command_profiling()
+            .unwrap()
+            .same_command(&profiling.receipt()));
+        drop(work);
+        assert!(dropped.get());
+        assert_eq!(get_display_format(), FormatMode::Long);
+        assert!(Rc::ptr_eq(&active_tape().unwrap(), &tape));
+        assert!(current_command_profiling()
+            .unwrap()
+            .same_command(&profiling.receipt()));
+        drop(entered);
+        assert_eq!(get_display_format(), FormatMode::ShortG);
+        set_display_format(prior);
+    }
+}

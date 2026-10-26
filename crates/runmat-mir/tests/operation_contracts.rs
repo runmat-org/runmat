@@ -1,7 +1,5 @@
 use runmat_mir::{
-    analysis::{analyze_assembly, MirOperationPhase},
-    lowering::lower_assembly,
-    MirConstructKind,
+    analysis::analyze_assembly, lowering::lower_assembly, MirConstructKind, MirOperationPhase,
 };
 use runmat_types::EffectKind;
 

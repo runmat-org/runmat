@@ -13,10 +13,7 @@ use crate::{NativeExecutionError, NativeExecutionResult, ProgramProgress};
 /// Compiled support of this worker executable. Allocation requests and node
 /// inventory must never issue software capabilities on its behalf.
 pub(super) fn software_capabilities() -> BTreeSet<Capability> {
-    BTreeSet::from([
-        Capability::GraphSelectedValuesV11,
-        Capability::GraphCallableArgumentsV12,
-    ])
+    runmat_vm::compiled_graph_execution_capabilities()
 }
 
 pub(super) async fn reply(

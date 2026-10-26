@@ -128,7 +128,10 @@ impl<'a> DenseLinearOperator<'a> {
     }
 }
 
-fn validate_shape(shape: &[usize], elements: usize) -> Result<(usize, usize), LinearOperatorError> {
+pub(in crate::builtins::math::linalg) fn validate_shape(
+    shape: &[usize],
+    elements: usize,
+) -> Result<(usize, usize), LinearOperatorError> {
     if shape.iter().skip(2).any(|&extent| extent != 1) {
         return Err(LinearOperatorError::DimensionMismatch);
     }

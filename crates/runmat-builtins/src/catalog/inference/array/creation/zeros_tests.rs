@@ -102,6 +102,26 @@ fn dynamic_gpu_element_class_never_infers_default_double() {
 }
 
 #[test]
+fn object_creation_result_is_not_inferred_from_its_prototype() {
+    let entry = crate::builtin_catalog_entry_by_name("zeros").unwrap();
+    let mut call = request(&["like"]);
+    call.arguments.push(ValueFact::scalar(ValueKindFact::Object(
+        runmat_types::ObjectFact {
+            class: None,
+            runtime_class: Some(runmat_types::standard::OPTIMIZATION_VARIABLE.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        },
+    )));
+    call.literals.literal_args.push(LiteralValue::Unknown);
+    let result = infer_zeros(&call, entry);
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
+}
+
+#[test]
 fn definite_reordered_or_repeated_gpu_controls_are_diagnosed() {
     let entry = crate::builtin_catalog_entry_by_name("zeros").unwrap();
     for controls in [

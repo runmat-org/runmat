@@ -1,6 +1,44 @@
 use super::*;
 use crate::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
+use runmat_types::BuiltinId;
 use std::{cell::Cell, rc::Rc};
+
+#[test]
+fn owned_name_classification_preserves_qualified_and_builtin_identity_with_deferred_resolver() {
+    struct DeferredResolver;
+    impl FunctionNameResolver for DeferredResolver {
+        fn resolve_function(&self, _: &str) -> Option<FunctionId> {
+            None
+        }
+    }
+    for target in [
+        Value::ExternalFunctionHandle("pkg.fn".into()),
+        Value::function_handle("logical".into()),
+    ] {
+        let descriptor =
+            CallableDescriptor::from_feval_value(target, Vec::new(), 0, &DeferredResolver);
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = descriptor.target
+        else {
+            panic!("owned selector retains its established resolved identity contract")
+        };
+        match identity.as_identity() {
+            CallableIdentity::Builtin(name) => {
+                assert_eq!(name.0, "logical");
+                assert_eq!(fallback_policy, CallableFallbackPolicy::None);
+            }
+            _ => {
+                assert_eq!(
+                    identity.as_identity(),
+                    &crate::external_callable_identity_for_name("pkg.fn")
+                );
+                assert_eq!(fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+            }
+        }
+    }
+}
 
 #[test]
 fn retained_descriptor_requires_target_only_selection() {
@@ -251,6 +289,10 @@ fn bounded_captured_builtin_preserves_original_generations_and_pending_roots() {
     }
     struct Resolver;
     impl FunctionNameResolver for Resolver {
+        fn name_resolution_completeness(&self) -> NameResolutionCompleteness {
+            NameResolutionCompleteness::Complete
+        }
+
         fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
             None
         }
@@ -418,6 +460,10 @@ impl RuntimeBuiltinService for FailingBuiltin {
 fn selected_named_fallback_error_is_not_absence_or_replayed() {
     struct NoSemanticFunctions;
     impl FunctionNameResolver for NoSemanticFunctions {
+        fn name_resolution_completeness(&self) -> NameResolutionCompleteness {
+            NameResolutionCompleteness::Complete
+        }
+
         fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
             None
         }
@@ -432,6 +478,7 @@ fn selected_named_fallback_error_is_not_absence_or_replayed() {
         "logical(1)",
     )
     .expect("issued selected source");
+    let _entry = runtime.enter();
     for identifier in ["RunMat:UndefinedFunction", "RunMat:ProbeReceiverInvalid"] {
         CALLS.with(|calls| calls.set(0));
         DIAGNOSTIC.with(|diagnostic| diagnostic.set(identifier));
@@ -462,20 +509,65 @@ fn selected_named_fallback_error_is_not_absence_or_replayed() {
         );
         CALLS.with(|calls| assert_eq!(calls.get(), 1));
 
-        let callback = RepeatableCallable::select(
-            &runtime,
+        for target in [
             Value::function_handle("logical".into()),
-            &NoSemanticFunctions,
-        )
-        .expect("select the named builtin callback once");
-        for expected_calls in 2..=3 {
-            let arguments =
-                crate::execution::RootedValues::in_context(vec![Value::Num(1.0)], &runtime)
-                    .expect("root the next callback input");
-            let error = futures::executor::block_on(callback.invoke_rooted(&runtime, arguments, 1))
-                .expect_err("a selected callback error is not an unavailable function");
-            assert_eq!(error.identifier(), Some(identifier));
-            CALLS.with(|calls| assert_eq!(calls.get(), expected_calls));
+            Value::ExternalFunctionHandle("logical".into()),
+            Value::String("logical".into()),
+            Value::CharArray(runmat_value::CharArray::new_row("logical")),
+        ] {
+            let original_name = match &target {
+                Value::String(text) => Some(text.as_str().as_ptr()),
+                Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
+                    Some(name.name().as_ptr())
+                }
+                _ => None, // Char refinement owns its admitted text conversion.
+            };
+            let callback = RepeatableCallable::select(&runtime, target, &NoSemanticFunctions)
+                .expect("select the named builtin callback once");
+            let CallableTarget::RetainedBuiltin(retained) = callback.selected_target() else {
+                panic!("known builtin must freeze its borrowed-name dispatch");
+            };
+            let selected_pointer = super::repeatable::retained_target_name(retained.value())
+                .unwrap()
+                .as_ptr();
+            if let Some(original_name) = original_name {
+                assert_eq!(selected_pointer, original_name);
+            }
+            let cloned = callback.selected_descriptor().clone();
+            let CallableTarget::RetainedBuiltin(alias) = &cloned.target else {
+                panic!("same selected target")
+            };
+            assert_eq!(
+                super::repeatable::retained_target_name(alias.value())
+                    .unwrap()
+                    .as_ptr(),
+                selected_pointer
+            );
+            // A subsequent real name publication must not retarget this selected
+            // builtin to a user function. The old forwarded path would enter it.
+            let _replacement = crate::user_functions::test_support::install_exact_named_forwarders(
+                &runtime,
+                &[("logical", 29091)],
+            )
+            .unwrap();
+            let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+                std::sync::Arc::new(|_, _, _| {
+                    panic!("a retained builtin repeated semantic name resolution")
+                }),
+            ))
+            .unwrap();
+            for requested in [0, 1] {
+                let expected_calls = CALLS.with(Cell::get) + 1;
+                let arguments =
+                    crate::execution::RootedValues::in_context(vec![Value::Num(1.)], &runtime)
+                        .unwrap();
+                let error = futures::executor::block_on(
+                    callback.invoke_rooted(&runtime, arguments, requested),
+                )
+                .expect_err("original builtin failure, not a redefined user callback");
+                assert_eq!(error.identifier(), Some(identifier));
+                CALLS.with(|calls| assert_eq!(calls.get(), expected_calls));
+            }
         }
     }
 }
@@ -585,4 +677,40 @@ fn resolved_family_selection_is_cold_until_the_selected_future_is_polled() {
         .expect("selected semantic function");
     assert_eq!(result.as_slice(), &[Value::Num(41.0)]);
     assert_eq!(calls.get(), 1);
+
+    struct ColdRepeatable;
+    impl FunctionNameResolver for ColdRepeatable {
+        fn resolve_function(&self, _: &str) -> Option<FunctionId> {
+            Some(FunctionId(41))
+        }
+    }
+    let selected = RepeatableCallable::select_rooted(
+        None,
+        crate::execution::RootedValue::in_optional_context(
+            Value::function_handle("ColdRepeatable".into()),
+            None,
+        )
+        .unwrap(),
+        &ColdRepeatable,
+    )
+    .unwrap();
+    let cold = crate::builtins::math::optim::common::callback_source::Callable::Selected(&selected)
+        .invoke(None, Vec::<Value>::new(), 1);
+    assert_eq!(calls.get(), 1);
+    drop(cold);
+    assert_eq!(calls.get(), 1);
+    for outputs in [0, 1] {
+        let expected = calls.get() + 1;
+        let result = futures::executor::block_on(
+            crate::builtins::math::optim::common::callback_source::Callable::Selected(&selected)
+                .invoke(None, Vec::<Value>::new(), outputs),
+        )
+        .expect("selected callback after lazy preparation");
+        if outputs == 0 {
+            assert!(result.as_slice().is_empty());
+        } else {
+            assert_eq!(result.as_slice(), &[Value::Num(41.)]);
+        }
+        assert_eq!(calls.get(), expected);
+    }
 }

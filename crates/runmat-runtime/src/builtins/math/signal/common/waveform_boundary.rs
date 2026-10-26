@@ -16,14 +16,7 @@ const LOGICAL_CONVERSION_CHUNK: usize = 4096;
 pub(crate) enum WaveformInputError {
     Invalid(String),
     Allocation(std::collections::TryReserveError),
-    Execution(Box<RuntimeError>),
     Tensor(String),
-}
-
-impl From<RuntimeError> for WaveformInputError {
-    fn from(error: RuntimeError) -> Self {
-        Self::Execution(Box::new(error))
-    }
 }
 
 impl WaveformInputError {
@@ -37,7 +30,6 @@ impl WaveformInputError {
             Self::Invalid(detail) => (invalid, detail, None),
             Self::Tensor(detail) => (internal, detail, None),
             Self::Allocation(cause) => (internal, cause.to_string(), Some(cause)),
-            Self::Execution(cause) => return *cause,
         };
         let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
             .with_builtin(builtin)
@@ -59,29 +51,25 @@ pub(crate) async fn waveform_input_tensor(
     value: Value,
     builtin: &'static str,
     cooperation: &mut SignalCooperation,
-) -> Result<Tensor, WaveformInputError> {
+) -> crate::BuiltinResult<Result<Tensor, WaveformInputError>> {
     let array = match value {
         Value::LogicalArray(array) => array,
         other => {
-            return tensor::value_into_tensor_for(builtin, other)
-                .map_err(WaveformInputError::Invalid);
+            return Ok(
+                tensor::value_into_tensor_for(builtin, other).map_err(WaveformInputError::Invalid)
+            );
         }
     };
-    cooperation
-        .completed(0)
-        .await
-        .map_err(WaveformInputError::from)?;
+    cooperation.completed(0).await?;
     let mut data = Vec::new();
-    data.try_reserve_exact(array.data.len())
-        .map_err(WaveformInputError::Allocation)?;
+    if let Err(cause) = data.try_reserve_exact(array.data.len()) {
+        return Ok(Err(WaveformInputError::Allocation(cause)));
+    }
     for chunk in array.data.chunks(LOGICAL_CONVERSION_CHUNK) {
         data.extend(chunk.iter().map(|&bit| if bit != 0 { 1.0 } else { 0.0 }));
-        cooperation
-            .completed(chunk.len() as u64)
-            .await
-            .map_err(WaveformInputError::from)?;
+        cooperation.completed(chunk.len() as u64).await?;
     }
-    Tensor::new(data, array.shape).map_err(WaveformInputError::Tensor)
+    Ok(Tensor::new(data, array.shape).map_err(WaveformInputError::Tensor))
 }
 
 /// Authenticate a resident waveform operand before another operand can cause

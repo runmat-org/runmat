@@ -212,6 +212,82 @@ pub(super) async fn read<T: SparseQrScalar>(
 }
 
 impl<T: SparseQrScalar> SparseCompleteQr<T> {
+    /// Factor caller-borrowed CSC directly into the same owned QR/COD fill.
+    /// Canonical topology validation precedes indexed coefficient reads.
+    pub(in crate::builtins::math::linalg) async fn factor_borrowed(
+        rows: usize,
+        columns: usize,
+        pointers: &[usize],
+        indices: &[usize],
+        values: &[T],
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<Self, Error> {
+        if !matches!(
+            HostAllocationReceipt::policy(runtime)?,
+            crate::context::host_allocation::HostAllocationPolicy::Unbounded
+        ) {
+            return Err(
+                crate::context::host_allocation::HostAllocationError::Resource(
+                    crate::context::host_effect::HostEffectAllocationError::Unavailable,
+                )
+                .into(),
+            );
+        }
+        let fence = HostAllocationReceipt::admit(runtime, HostAllocationPlan::new(0, 0)?)?;
+        let mut work = Work::for_optional_policy(runtime, fence.as_ref())?;
+        work.flush().await?;
+        let mut copied_pointers = runmat_value::exact_capacity_vec(pointers.len())
+            .map_err(crate::context::host_allocation::HostAllocationError::Numeric)?;
+        let mut copied_indices = runmat_value::exact_capacity_vec(indices.len())
+            .map_err(crate::context::host_allocation::HostAllocationError::Numeric)?;
+        for chunk in pointers.chunks(128) {
+            copied_pointers.extend_from_slice(chunk);
+            for _ in chunk {
+                work.tick().await?;
+            }
+        }
+        for chunk in indices.chunks(128) {
+            copied_indices.extend_from_slice(chunk);
+            for _ in chunk {
+                work.tick().await?;
+            }
+        }
+        let mut validation = SparseCscValidation::new(
+            rows,
+            columns,
+            copied_pointers.into(),
+            copied_indices.into(),
+            values.len(),
+        )
+        .map_err(Error::InvalidTopology)?;
+        loop {
+            let count = work.capacity();
+            let done = validation
+                .advance(NonZeroUsize::new(count).expect("nonzero sparse work capacity"))
+                .map_err(Error::InvalidTopology)?;
+            work.charge(count).await?;
+            if done {
+                break;
+            }
+        }
+        let mut input = Csc::empty(columns, &mut work).await?;
+        for column in 0..columns {
+            for index in pointers[column]..pointers[column + 1] {
+                let value = values[index];
+                if !value.finite() {
+                    return Err(Error::NonFiniteInput);
+                }
+                input.push(indices[index], value, &mut work).await?;
+            }
+            input.end_column(column);
+            work.tick().await?;
+        }
+        let first = decompose(input, rows, columns, RankPolicy::Relative, &mut work).await?;
+        let cod = completion(&first, true, &mut work).await?;
+        work.flush().await?;
+        drop(work);
+        Ok(Self { first, cod, fence })
+    }
     pub(in crate::builtins::math::linalg) async fn factor(
         sparse: &SparseTensor,
         runtime: &RuntimeContext,

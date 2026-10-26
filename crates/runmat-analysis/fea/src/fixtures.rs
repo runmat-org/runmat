@@ -713,8 +713,9 @@ fn isotropic_material(
         material_id: material_id.to_string(),
         name: name.to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3: (Some(mass_density_kg_per_m3))
-            .map(runmat_types::physical::MassDensity::new),
+        mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(
+            mass_density_kg_per_m3,
+        )),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
                 youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(youngs_modulus_pa),
@@ -1132,7 +1133,7 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
     mechanical.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(1.0e5);
     mechanical.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     model.materials[0].mass_density_kg_per_m3 =
-        (Some(1_000.0)).map(runmat_types::physical::MassDensity::new);
+        Some(runmat_types::physical::MassDensity::new(1_000.0));
     model.materials[0].damping = Some(MechanicalDampingModel::Rayleigh {
         mass_coefficient: RayleighMassCoefficient::new(0.2),
         stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),

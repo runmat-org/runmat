@@ -243,17 +243,23 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
     };
     #[cfg(all(feature = "native-accel", not(feature = "wgpu")))]
     let mut original_image_span: Option<runmat_accelerate::InstrSpan> = None;
-    // CPU-only bytecode must also yield real browser tasks. Checking a token
-    // alone cannot observe a worker cancellation message during a long loop.
-    // Native adapters retain their NeverYield instruction path.
-    let mut cpu_budget = matches!(
-        context.runtime.execution().cpu_cooperation_policy(),
-        runmat_runtime::execution::CpuCooperationPolicy::WorkQuantum(_)
-    ).then(|| context.runtime.cpu_cooperation());
+    // A browser adapter must regain its event loop even when every opcode
+    // completes synchronously. Native NeverYield keeps no task-turn owner.
+    let mut cpu_turn = match context.runtime.execution().cpu_cooperation_policy() {
+        runmat_runtime::execution::CpuCooperationPolicy::NeverYield => None,
+        runmat_runtime::execution::CpuCooperationPolicy::WorkQuantum(_) => {
+            Some(context.runtime.cpu_cooperation())
+        }
+    };
     while *pc < bytecode.instructions.len() {
         #[cfg(feature = "wgpu")]
         if let Some(route) = fusion_observations.take_completed_original() {
             route.complete().await;
+        }
+        if let Some(turn) = &mut cpu_turn {
+            turn.checkpoint(1)
+                .await
+                .map_err(|error| error.into_runtime_error_in_context(Some(&context.runtime)))?;
         }
         crate::runtime::workspace::reconcile_workspace_vars(&mut *vars);
         if let (Some(scope), Some(exception)) = (catch_entries.get(&*pc), last_exception.as_ref()) {
@@ -269,15 +275,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         #[cfg(feature = "native-accel")]
         set_current_pc(*pc);
         interp_engine::check_cancelled(&context.runtime)?;
-        if let Some(budget) = cpu_budget.as_mut() {
-            budget.checkpoint(1).await.map_err(|error| match error {
-                runmat_runtime::execution::ExecutionServiceError::Cancelled => interp_engine::cancellation_error(),
-                error => runmat_runtime::runtime_error::semantic_error_with_source(
-                    "ExecutionCooperation", format!("CPU instruction scheduling failed: {error}"), error,
-                ),
-            })?;
-        }
-
         let active_catch = bytecode
             .catch_scopes
             .get(*pc)

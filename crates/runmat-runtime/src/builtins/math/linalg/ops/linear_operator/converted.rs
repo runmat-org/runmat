@@ -7,8 +7,11 @@ use super::{
     TypedLinearOperator,
 };
 use crate::context::{host_allocation::HostAllocationReceipt, RuntimeContext};
+use crate::execution::CpuCooperationBudget;
 use num_complex::Complex64;
 use runmat_value::ComplexElement;
+mod work;
+use work::{BorrowedWork, ProductWork, UnmanagedWork};
 
 pub(in crate::builtins::math::linalg) trait SourceScalar:
     Copy
@@ -16,7 +19,7 @@ pub(in crate::builtins::math::linalg) trait SourceScalar:
     fn complex(self) -> Complex64;
 }
 #[derive(Clone, Copy)]
-pub(in crate::builtins::math::linalg) enum ProductOrientation {
+pub(crate) enum ProductOrientation {
     Normal,
     Adjoint,
 }
@@ -39,13 +42,6 @@ impl SourceScalar for ComplexElement<f64> {
     fn complex(self) -> Complex64 {
         Complex64::new(self.0, self.1)
     }
-}
-
-async fn tick(work: &mut Option<OperatorWork<'_>>) -> Result<(), CooperativeOperatorError> {
-    if let Some(work) = work {
-        work.tick().await?;
-    }
-    Ok(())
 }
 
 fn accumulate<T: LinearOperatorScalar>(
@@ -74,6 +70,7 @@ async fn product<S: SourceScalar, T: LinearOperatorScalar>(
     convert: fn(Complex64) -> Option<T>,
     runtime: Option<&RuntimeContext>,
     orientation: ProductOrientation,
+    budget: Option<&mut CpuCooperationBudget>,
 ) -> Result<(), CooperativeOperatorError> {
     let (rows, columns) = match orientation {
         ProductOrientation::Normal => (source.rows(), source.cols()),
@@ -85,13 +82,67 @@ async fn product<S: SourceScalar, T: LinearOperatorScalar>(
         ));
     }
     HostAllocationReceipt::policy(runtime)?;
-    let mut work = runtime.map(OperatorWork::new).transpose()?;
+    match (runtime, budget) {
+        (Some(runtime), Some(budget)) => {
+            if !budget
+                .cancellation_token()
+                .same_generation(&runtime.cancellation())
+            {
+                return Err(
+                    crate::context::host_allocation::HostAllocationError::StaleAuthority.into(),
+                );
+            }
+            budget
+                .checkpoint(0)
+                .await
+                .map_err(CooperativeOperatorError::Execution)?;
+            HostAllocationReceipt::policy(Some(runtime))?;
+            product_values(
+                source,
+                input,
+                output,
+                convert,
+                orientation,
+                &mut BorrowedWork { runtime, budget },
+            )
+            .await?;
+        }
+        (Some(runtime), None) => {
+            let mut work = OperatorWork::new(runtime)?;
+            product_values(source, input, output, convert, orientation, &mut work).await?;
+        }
+        (None, None) => {
+            product_values(
+                source,
+                input,
+                output,
+                convert,
+                orientation,
+                &mut UnmanagedWork,
+            )
+            .await?;
+        }
+        (None, Some(_)) => {
+            return Err(crate::context::host_allocation::HostAllocationError::StaleAuthority.into())
+        }
+    };
+    HostAllocationReceipt::policy(runtime)?;
+    Ok(())
+}
+async fn product_values<S: SourceScalar, T: LinearOperatorScalar>(
+    source: &TypedLinearOperator<'_, S>,
+    input: &[T],
+    output: &mut [T],
+    convert: fn(Complex64) -> Option<T>,
+    orientation: ProductOrientation,
+    work: &mut impl ProductWork,
+) -> Result<(), CooperativeOperatorError> {
     for value in output.iter_mut() {
         *value = T::zero();
-        tick(&mut work).await?;
+        work.tick().await?;
     }
     for column in 0..source.cols() {
-        tick(&mut work).await?;
+        work.tick().await?;
         match source {
             TypedLinearOperator::Scalar(value) => {
                 accumulate(value.complex(), 0, 0, input, output, convert, orientation)?
@@ -111,7 +162,7 @@ async fn product<S: SourceScalar, T: LinearOperatorScalar>(
                         convert,
                         orientation,
                     )?;
-                    tick(&mut work).await?;
+                    work.tick().await?;
                 }
             }
             TypedLinearOperator::Sparse(matrix) => {
@@ -126,18 +177,41 @@ async fn product<S: SourceScalar, T: LinearOperatorScalar>(
                         convert,
                         orientation,
                     )?;
-                    tick(&mut work).await?;
+                    work.tick().await?;
                 }
             }
         }
     }
-    if let Some(work) = work.as_mut() {
-        work.flush().await?;
-    }
-    HostAllocationReceipt::policy(runtime)?;
+    work.flush().await?;
     Ok(())
 }
 impl LinearOperator<'_> {
+    /// Borrow the invocation's existing budget and original numeric backing.
+    /// This entry has no complex-to-real coercion or new budget authority.
+    pub(crate) async fn apply_real_with_budget(
+        &self,
+        input: &[f64],
+        output: &mut [f64],
+        runtime: Option<&RuntimeContext>,
+        budget: Option<&mut CpuCooperationBudget>,
+        orientation: ProductOrientation,
+    ) -> Result<(), CooperativeOperatorError> {
+        fn real(value: Complex64) -> Option<f64> {
+            (value.im == 0.).then_some(value.re)
+        }
+        match self {
+            Self::RealF32(op) => {
+                product(op, input, output, real, runtime, orientation, budget).await
+            }
+            Self::RealF64(op) => {
+                product(op, input, output, real, runtime, orientation, budget).await
+            }
+            _ => Err(CooperativeOperatorError::Operator(
+                LinearOperatorError::UnsupportedClass,
+            )),
+        }
+    }
+
     pub(in crate::builtins::math::linalg) async fn apply_converted<T: LinearOperatorScalar>(
         &self,
         input: &[T],
@@ -159,10 +233,18 @@ impl LinearOperator<'_> {
         orientation: ProductOrientation,
     ) -> Result<(), CooperativeOperatorError> {
         match self {
-            Self::RealF32(op) => product(op, input, output, convert, runtime, orientation).await,
-            Self::RealF64(op) => product(op, input, output, convert, runtime, orientation).await,
-            Self::ComplexF32(op) => product(op, input, output, convert, runtime, orientation).await,
-            Self::ComplexF64(op) => product(op, input, output, convert, runtime, orientation).await,
+            Self::RealF32(op) => {
+                product(op, input, output, convert, runtime, orientation, None).await
+            }
+            Self::RealF64(op) => {
+                product(op, input, output, convert, runtime, orientation, None).await
+            }
+            Self::ComplexF32(op) => {
+                product(op, input, output, convert, runtime, orientation, None).await
+            }
+            Self::ComplexF64(op) => {
+                product(op, input, output, convert, runtime, orientation, None).await
+            }
         }
     }
 }

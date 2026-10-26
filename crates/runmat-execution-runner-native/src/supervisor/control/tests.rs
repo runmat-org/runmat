@@ -41,7 +41,17 @@ async fn original_control_absence_tamper_and_corruption_have_distinct_verdicts()
         } else {
             let mut foreign = request.clone();
             foreign.worker_id = runmat_execution::identity::WorkerId::derive(&[b"foreign-control"]);
-            crate::supervisor::filesystem::atomic_json(&path, &foreign).unwrap();
+            crate::supervisor::filesystem::atomic_json(
+                &path,
+                &crate::process_provider::cancellation::CancellationCommand {
+                    request: foreign,
+                    cause: runmat_execution_runner::TaskCancellationCause::Task {
+                        task_id: request.task_id,
+                        reason: runmat_execution::CancellationReason::User,
+                    },
+                },
+            )
+            .unwrap();
         }
         let delivered = super::watch(&path, &request).await;
         assert!(delivered.is_err());
@@ -61,7 +71,81 @@ async fn original_control_absence_tamper_and_corruption_have_distinct_verdicts()
         assert_eq!(report.worker_id, request.worker_id);
         assert!(report.execution.is_some());
     }
+    // A legacy/absent cause is a protocol fault, not an inferred user stop.
     crate::supervisor::filesystem::atomic_json(&path, &request).unwrap();
+    assert!(super::watch(&path, &request).await.is_err());
+    // Full fencing is insufficient without a usable original cause.
+    for cause in [
+        runmat_execution_runner::TaskCancellationCause::Provider {
+            attempt_id: request.id,
+        },
+        runmat_execution_runner::TaskCancellationCause::Task {
+            task_id: runmat_execution::TaskId::derive(&[b"foreign-task"]),
+            reason: runmat_execution::CancellationReason::User,
+        },
+    ] {
+        crate::supervisor::filesystem::atomic_json(
+            &path,
+            &crate::process_provider::cancellation::CancellationCommand {
+                request: request.clone(),
+                cause,
+            },
+        )
+        .unwrap();
+        assert!(super::watch(&path, &request).await.is_err());
+    }
+    for (cause, expected) in [
+        (
+            runmat_execution_runner::TaskCancellationCause::Task {
+                task_id: request.task_id,
+                reason: runmat_execution::CancellationReason::Quota,
+            },
+            runmat_execution::CancellationReason::Quota,
+        ),
+        (
+            runmat_execution_runner::TaskCancellationCause::Scope {
+                scope_id: request.scope_id,
+                reason: runmat_execution::CancellationReason::ParentScope,
+            },
+            runmat_execution::CancellationReason::ParentScope,
+        ),
+        (
+            runmat_execution_runner::TaskCancellationCause::WallTime {
+                attempt_id: request.id,
+            },
+            runmat_execution::CancellationReason::Deadline,
+        ),
+        (
+            runmat_execution_runner::TaskCancellationCause::Dependency {
+                task_id: runmat_execution::TaskId::derive(&[b"dependency"]),
+            },
+            runmat_execution::CancellationReason::DependencyFailed,
+        ),
+    ] {
+        crate::supervisor::filesystem::atomic_json(
+            &path,
+            &crate::process_provider::cancellation::CancellationCommand {
+                request: request.clone(),
+                cause,
+            },
+        )
+        .unwrap();
+        let control = super::DurableControl::default();
+        control.stop(super::watch(&path, &request).await);
+        assert_eq!(control.cancellation_reason(), Some(expected));
+        assert!(control.failure().is_none());
+    }
+    crate::supervisor::filesystem::atomic_json(
+        &path,
+        &crate::process_provider::cancellation::CancellationCommand {
+            request: request.clone(),
+            cause: runmat_execution_runner::TaskCancellationCause::Task {
+                task_id: request.task_id,
+                reason: runmat_execution::CancellationReason::User,
+            },
+        },
+    )
+    .unwrap();
     let control = super::DurableControl::default();
     control.stop(super::watch(&path, &request).await);
     let (_, report) = ObservedAttempt::not_started(

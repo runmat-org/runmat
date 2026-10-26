@@ -265,6 +265,7 @@ impl<'a> CallableTask<'a> {
 }
 
 pub(in crate::execution::value_codec::decode::machine) struct ImmutableTask<'a> {
+    workspace: crate::execution::value_codec::ValidationWorkspaceOwner,
     source: &'a RegisteredData,
     index: usize,
     field_name: Option<ObjectText<'a>>,
@@ -290,6 +291,9 @@ impl<'a> ImmutableTask<'a> {
             &path,
         )?;
         Ok(Self {
+            workspace: crate::execution::value_codec::ValidationWorkspaceOwner::for_runtime(
+                runtime,
+            ),
             source,
             index: 0,
             field_name: None,
@@ -345,7 +349,7 @@ impl<'a> ImmutableTask<'a> {
         match crate::execution::value_codec::immutable_class::schema_for_class(
             object.class_name().display_name(),
         )? {
-            Some(schema) => schema.validate_object(&object, &self.path)?,
+            Some(schema) => schema.validate_object(&object, &self.path, Some(&self.workspace))?,
             None => crate::parallel::codistributor::validate_definition(&object)
                 .map_err(|error| ValueCodecError::invalid(&self.path, error.to_string()))?,
         }

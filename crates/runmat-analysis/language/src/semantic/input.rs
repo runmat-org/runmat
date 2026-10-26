@@ -8,8 +8,8 @@ use crate::{
 use runmat_analysis_core::{
     AuthoredInputDefinition, AuthoredInputType, AuthoredInputValue, AuthoredMaterialRef,
 };
+use runmat_fea_syntax::{FeaBinaryOperator, FeaUnaryOperator};
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
-use runmat_parser::fea::{FeaBinaryOperator, FeaUnaryOperator};
 
 pub(super) fn lower_definitions(
     bound: &BoundFeaProgram,
@@ -73,7 +73,7 @@ pub(super) fn authored_type(value_type: &FeaType) -> Option<AuthoredInputType> {
         FeaType::Real => AuthoredInputType::Real,
         FeaType::Complex => AuthoredInputType::Complex,
         FeaType::String => AuthoredInputType::String,
-        FeaType::Quantity(dimension) => AuthoredInputType::Quantity((*dimension).into()),
+        FeaType::Quantity(dimension) => AuthoredInputType::Quantity(*dimension),
         FeaType::Declaration(FeaSymbolKind::Material) => AuthoredInputType::Material,
         FeaType::Region(role) => AuthoredInputType::Region(geometry_role(*role)),
         _ => return None,

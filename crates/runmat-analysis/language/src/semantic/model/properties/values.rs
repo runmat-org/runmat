@@ -3,7 +3,7 @@ use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
     CheckedFeaStatementKind, FeaDiagnostic, FeaType, PhysicalDimension,
 };
-use runmat_parser::fea::FeaAssignmentRelation;
+use runmat_fea_syntax::FeaAssignmentRelation;
 use std::collections::BTreeSet;
 
 pub(in crate::semantic::model) fn sole_kind_block<'a>(
@@ -340,8 +340,8 @@ pub(in crate::semantic::model) fn scalar(value: &CheckedExpression) -> Option<f6
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = scalar(operand)?;
             Some(match operator {
-                runmat_parser::fea::FeaUnaryOperator::Positive => value,
-                runmat_parser::fea::FeaUnaryOperator::Negative => -value,
+                runmat_fea_syntax::FeaUnaryOperator::Positive => value,
+                runmat_fea_syntax::FeaUnaryOperator::Negative => -value,
             })
         }
         _ => None,

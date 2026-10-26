@@ -32,8 +32,10 @@ pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_539;
 #[path = "request/graph.rs"]
 mod graph;
 pub use graph::{
-    AdmittedGraphUnitBundle, ArchiveAdmittedGraphExecutionRequest, GraphExecutionRequest,
-    GraphInvocationRoots, GraphResponseAuthority, ValidatedGraphExecutionRequest,
+    AdmittedGraphUnitBundle, ArchiveAdmittedCapturedGraphCode,
+    ArchiveAdmittedGraphExecutionRequest, CapturedGraphCode, GraphExecutionRequest,
+    GraphInvocationRoots, GraphResponseAuthority, ValidatedCapturedGraphCode,
+    ValidatedGraphExecutionRequest,
 };
 
 /// Direct V8 requests keep their exact public wire shape. Graph V10 is a
@@ -735,11 +737,11 @@ pub(super) fn validate_externalized_inventory(
 }
 
 #[cfg(test)]
-#[path = "request/tests.rs"]
-mod tests;
+#[path = "request/environment_tests.rs"]
+mod environment_tests;
 #[cfg(test)]
 #[path = "request/reservation_tests.rs"]
 mod reservation_tests;
 #[cfg(test)]
-#[path = "request/environment_tests.rs"]
-mod environment_tests;
+#[path = "request/tests.rs"]
+mod tests;

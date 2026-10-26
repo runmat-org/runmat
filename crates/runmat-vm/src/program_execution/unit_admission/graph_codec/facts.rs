@@ -163,17 +163,11 @@ pub(super) fn capture_proof(
 ) -> runmat_runtime::execution::value_codec::GraphCaptureProof {
     use runmat_runtime::execution::value_codec::{GraphCaptureProof, GraphNestedZeroCopy};
     if body.source_role == runmat_types::FunctionSourceRole::Nested {
-        let delegated_captures = !body.inherited_storage_slots.is_empty()
-            && body.capture_slots.iter().all(|slot| {
-                body.inherited_storage_slots
-                    .iter()
-                    .any(|storage| storage.slot == *slot)
-            });
         GraphCaptureProof::NestedShared {
             vm_copied: body.capture_slots.len(),
-            zero_copy: if activation_parent.is_some() {
+            zero_copy: if activation_parent.is_some() && body.captures_owned_without_copies(true) {
                 GraphNestedZeroCopy::SharedActivation
-            } else if delegated_captures {
+            } else if body.captures_owned_without_copies(false) {
                 GraphNestedZeroCopy::CanonicalStorage
             } else {
                 GraphNestedZeroCopy::RequiresCopies

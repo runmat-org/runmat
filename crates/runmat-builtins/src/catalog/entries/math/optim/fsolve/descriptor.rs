@@ -295,7 +295,7 @@ pub const FSOLVE_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensi
     id: "fsolve-resident-fallback",
     mode: BuiltinExtensionMode::RunMatOnly,
     description:
-        "fsolve with provider-resident numeric input or callback output is a RunMat extension",
+        "fsolve with explicitly GPU-resident numeric input or callback output is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:FsolveResidentExtension"),
 };
 pub const FSOLVE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [

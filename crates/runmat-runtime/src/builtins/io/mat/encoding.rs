@@ -36,7 +36,7 @@ mod scalars;
 use scalars::tensor_dtype_mat_class;
 
 mod writer;
-use writer::write_mat_bytes_cooperative;
+pub(in crate::builtins::io::mat) use writer::write_mat_bytes_cooperative;
 pub(super) use writer::write_mat_file;
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
     encode_workspace_to_mat_bytes_for_owner(entries, MatEncodingOwner::Save, None).await

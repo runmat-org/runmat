@@ -141,6 +141,313 @@ fn method_frame_context_requires_the_exact_current_binding() {
         error.identifier(),
         Some("RunMat:ObjectMethodFrameIdentityMismatch")
     );
+
+    let mut constructor = method("construct", MemberAccess::Public, false);
+    constructor.role = runmat_types::ClassMethodRole::Constructor;
+    constructor.function_name = format!("{class}.construct");
+    register(
+        class.clone(),
+        None,
+        [
+            constructor,
+            method("inspect", MemberAccess::Public, true),
+            method("subsref", MemberAccess::Public, false),
+            method("subsasgn", MemberAccess::Public, false),
+        ],
+    );
+    let receiver = Value::Object(ObjectInstance::new(class.clone()));
+    let bare_class = ObjectAccessContext {
+        caller_class: Some(class.clone()),
+        ..Default::default()
+    };
+    for protocol in [ObjectProtocol::Subsref, ObjectProtocol::Subsasgn] {
+        assert!(resolve_object_protocol(&receiver, protocol, &bare_class)
+            .unwrap()
+            .is_some());
+    }
+    for (name, is_static, role) in [
+        (
+            "construct",
+            false,
+            runmat_types::ClassMethodRole::Constructor,
+        ),
+        ("inspect", true, runmat_types::ClassMethodRole::Ordinary),
+    ] {
+        let bound = crate::class_registry::lookup_bound_method(&class, &MethodName::from(name))
+            .expect("own class method");
+        let owner = runmat_types::ClassMethodOwner {
+            declaring_class: class.clone(),
+            method: MethodName::from(name),
+            is_static,
+            role,
+        };
+        let access = ObjectAccessContext::from_method_frame(Some(&owner), &bound.callable)
+            .expect("actual own-class method frame");
+        for protocol in [ObjectProtocol::Subsref, ObjectProtocol::Subsasgn] {
+            assert!(resolve_object_protocol(&receiver, protocol, &access)
+                .unwrap()
+                .is_none());
+        }
+    }
+    let legacy =
+        ObjectAccessContext::from_legacy_function_name(Some(&format!("{class}.construct")));
+    assert!(
+        resolve_object_protocol(&receiver, ObjectProtocol::Subsasgn, &legacy)
+            .unwrap()
+            .is_none()
+    );
+    let mut replacement = method("construct", MemberAccess::Public, false);
+    replacement.role = runmat_types::ClassMethodRole::Constructor;
+    replacement.function_name = format!("{class}.replacement");
+    register(
+        class,
+        None,
+        [
+            replacement,
+            method("subsref", MemberAccess::Public, false),
+            method("subsasgn", MemberAccess::Public, false),
+        ],
+    );
+    let error = resolve_object_protocol(&receiver, ObjectProtocol::Subsasgn, &legacy)
+        .expect_err("ordinary constructor frame cannot bypass after redefinition");
+    assert_eq!(error.identifier(), Some("RunMat:StaleObjectMethodFrame"));
+
+    let class = class_name("selected_constructor");
+    let issuer = std::sync::Arc::new(());
+    let selected_facts = || {
+        let definition = std::sync::Arc::new(runmat_value::FunctionDefinitionOwner::default());
+        let binding = runmat_value::BoundFunctionBinding::local(
+            1,
+            std::sync::Arc::downgrade(&issuer),
+            runmat_value::FunctionDefinitionOwner::issue(&definition, 1),
+            Vec::new(),
+            runmat_value::LocalExport::Ephemeral,
+        );
+        let declarations = std::sync::Arc::new(
+            runmat_value::SelectedReceiverDeclarations::new(
+                class.clone(),
+                false,
+                vec![class.clone()],
+                HashMap::from([(
+                    class.clone(),
+                    runmat_value::SelectedReceiverClassDeclaration {
+                        parent: None,
+                        properties: HashMap::from([(
+                            "x".into(),
+                            runmat_value::SelectedReceiverPropertyDeclaration {
+                                is_static: false,
+                                is_constant: false,
+                                is_dependent: false,
+                                get_access: MemberAccess::Private,
+                                set_access: MemberAccess::Private,
+                            },
+                        )]),
+                        events: HashMap::new(),
+                    },
+                )]),
+                HashMap::new(),
+            )
+            .expect("selected constructor declarations"),
+        );
+        let (seal, key) = runmat_value::SelectedReceiverDeclarationSeal::issue();
+        assert!(definition.admit_selected_receiver_seal(std::sync::Arc::clone(&seal)));
+        assert!(seal.fill(&key, std::sync::Arc::clone(&declarations)));
+        std::rc::Rc::new(
+            runmat_value::SelectedObjectClassFacts::new(declarations, binding, HashMap::new())
+                .expect("selected constructor facts"),
+        )
+    };
+    let original = selected_facts();
+    let replacement = selected_facts();
+    let selected_owner = runmat_types::ClassMethodOwner {
+        declaring_class: class.clone(),
+        method: MethodName::from("construct"),
+        is_static: false,
+        role: runmat_types::ClassMethodRole::Constructor,
+    };
+    let selected_access =
+        ObjectAccessContext::from_selected_method_frame(&selected_owner, &original)
+            .expect("selected original constructor frame");
+    for (facts, matches) in [(original, true), (replacement, false)] {
+        let mut object = ObjectInstance::new(class.clone())
+            .with_selected_class(facts)
+            .expect("selected receiver");
+        object.replace_property_unbounded("x".into(), Value::Num(1.0));
+        let receiver = Value::Object(object);
+        let result = resolve_object_protocol(&receiver, ObjectProtocol::Subsasgn, &selected_access);
+        if matches {
+            assert!(result.expect("original binding").is_none());
+            let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+            let denied = futures::executor::block_on(
+                crate::object::resolve::store_member_traced_in_context(
+                    &runtime,
+                    receiver.clone(),
+                    "x".into(),
+                    Value::Num(3.0),
+                    None,
+                ),
+            )
+            .unwrap_err();
+            assert_eq!(denied.identifier(), Some("RunMat:PropertyPrivateAccess"));
+            let updated = futures::executor::block_on(
+                crate::object::resolve::store_member_traced_with_access(
+                    &runtime,
+                    receiver.clone(),
+                    "x".into(),
+                    Value::Num(7.0),
+                    None,
+                    &selected_access,
+                ),
+            )
+            .unwrap();
+            let value =
+                futures::executor::block_on(crate::object::resolve::load_member_with_access(
+                    Some(&runtime),
+                    updated.value().clone(),
+                    "x".into(),
+                    false,
+                    None,
+                    &selected_access,
+                ))
+                .unwrap();
+            assert_eq!(value.value(), &Value::Num(7.0));
+            // The typed proof must survive the default member-to-cell path,
+            // not just the first correct protocol resolution.
+            use crate::object::indexing::{
+                ObjectIndexComponent, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
+            };
+            let cell =
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(9.0)], 1, 1).unwrap());
+            let cell_object = futures::executor::block_on(
+                crate::object::resolve::store_member_traced_with_access(
+                    &runtime,
+                    updated.value().clone(),
+                    "x".into(),
+                    cell,
+                    None,
+                    &selected_access,
+                ),
+            )
+            .unwrap();
+            let path = ObjectSubscriptPath::new(vec![
+                ObjectSubscript::member("x"),
+                ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+                    components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                        ObjectIndexComponent::Value(Value::Num(1.0)),
+                    ]),
+                }),
+            ])
+            .unwrap();
+            let selected = futures::executor::block_on(
+                crate::object::protocol::read_subscript_path_with_access_in_context(
+                    &runtime,
+                    cell_object.value().clone(),
+                    path,
+                    selected_access.clone(),
+                ),
+            )
+            .unwrap();
+            assert_eq!(selected.value(), &Value::Num(9.0));
+            // A prepared comma-separated destination retains one exact frame
+            // through End, assignment cardinality, default prefix and writeback.
+            use crate::sequence::{
+                AssignmentStepSpec, SequenceDestinationBuilder, SequenceEndpointSpec,
+            };
+            let captures = std::cell::Cell::new(0);
+            let mut builder =
+                SequenceDestinationBuilder::new_in_context(&runtime, cell_object.value())
+                    .unwrap()
+                    .with_method_frame_factory_in_context(&runtime, || {
+                        captures.set(captures.get() + 1);
+                        Ok(selected_access.clone())
+                    })
+                    .unwrap();
+            futures::executor::block_on(builder.push_step_in_context(
+                &runtime,
+                AssignmentStepSpec::Member("x".into()),
+                None,
+            ))
+            .unwrap();
+            let end_receiver = futures::executor::block_on(
+                builder.prepare_current_receiver_for_end_in_context(&runtime, None),
+            )
+            .unwrap();
+            let end = futures::executor::block_on(
+                crate::object::protocol::resolve_subscript_end_in_context(
+                    &runtime,
+                    &end_receiver,
+                    0,
+                    1,
+                ),
+            )
+            .unwrap();
+            assert_eq!(end.value(), &Value::Num(1.0));
+            let endpoint = SequenceEndpointSpec::CellContents(
+                runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                    ObjectIndexComponent::Value(end.value().clone()),
+                ]),
+            );
+            let prepared =
+                futures::executor::block_on(builder.finish_in_context(&runtime, endpoint)).unwrap();
+            assert_eq!(prepared.cardinality(), 1);
+            let updated_cell = futures::executor::block_on(prepared.assign_in_context(
+                &runtime,
+                cell_object.value().clone(),
+                vec![Value::Num(11.0)],
+                None,
+            ))
+            .unwrap();
+            let selected =
+                futures::executor::block_on(crate::object::resolve::load_member_with_access(
+                    Some(&runtime),
+                    updated_cell.value().clone(),
+                    "x".into(),
+                    false,
+                    None,
+                    &selected_access,
+                ))
+                .unwrap();
+            let Value::Cell(cell) = selected.value() else {
+                panic!("retained cell destination");
+            };
+            assert_eq!(cell.data()[0], Value::Num(11.0));
+            assert_eq!(captures.get(), 1);
+
+            // Stored-callable dotted fallback uses that same proof too.
+            let callable_object = futures::executor::block_on(
+                crate::object::resolve::store_member_traced_with_access(
+                    &runtime,
+                    updated.value().clone(),
+                    "x".into(),
+                    Value::FunctionHandle("abs".into()),
+                    None,
+                    &selected_access,
+                ),
+            )
+            .unwrap();
+            let path = ObjectSubscriptPath::new(
+                ObjectSubscript::dotted_invoke("x", vec![Value::Num(-3.0)]).into(),
+            )
+            .unwrap();
+            let selected = futures::executor::block_on(
+                crate::object::protocol::read_subscript_path_with_access_in_context(
+                    &runtime,
+                    callable_object.value().clone(),
+                    path,
+                    selected_access.clone(),
+                ),
+            )
+            .unwrap();
+            assert_eq!(selected.value(), &Value::Num(3.0));
+        } else {
+            assert_eq!(
+                result
+                    .expect_err("same class and function number are not original binding")
+                    .identifier(),
+                Some("RunMat:ObjectMethodFrameIdentityMismatch")
+            );
+        }
+    }
 }
 
 #[test]

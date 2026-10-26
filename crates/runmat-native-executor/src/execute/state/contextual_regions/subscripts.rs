@@ -33,7 +33,9 @@ impl HostState {
                 .prepared_subscript_receivers
                 .prepare_one_more(&self.runtime, &metadata.gate)?;
         }
-        let receiver = self.arena.insert(prepared.receiver().clone());
+        let receiver = self
+            .arena
+            .insert(prepared.receiver().clone(), Some(&self.runtime))?;
         let previous = self
             .contextual_regions
             .metadata_mut()?

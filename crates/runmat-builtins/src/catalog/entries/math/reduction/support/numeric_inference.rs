@@ -9,6 +9,8 @@ pub(super) enum LiteralReductionControl {
     Missing,
     Output(LiteralReductionOutput),
     RequiresRuntimeValue,
+    /// One following concrete real numeric weight payload, not an axis.
+    NumericWeights,
 }
 
 #[derive(Clone, Copy)]
@@ -100,8 +102,23 @@ pub(super) fn admitted_literal_controls_with_axis_policy(
     let mut output_set = false;
     let mut output = None;
     let mut normalization_consumed = false;
+    let mut weights_pending = false;
+    let mut weights_seen = false;
     for index in option_start..argument_count {
         let literal = context.literal_args.get(index)?;
+        if weights_pending {
+            let known = match literal {
+                LiteralValue::Vector(values) => {
+                    !values.is_empty() && values.iter().all(known_weight)
+                }
+                value => known_weight(value),
+            };
+            if !known {
+                return None;
+            }
+            weights_pending = false;
+            continue;
+        }
         if let Some(control) = decode_control(literal) {
             match control {
                 LiteralReductionControl::All => {
@@ -123,6 +140,13 @@ pub(super) fn admitted_literal_controls_with_axis_policy(
                     output_set = true;
                 }
                 LiteralReductionControl::RequiresRuntimeValue => return None,
+                LiteralReductionControl::NumericWeights => {
+                    if weights_seen {
+                        return None;
+                    }
+                    weights_seen = true;
+                    weights_pending = true;
+                }
             }
             continue;
         }
@@ -148,7 +172,15 @@ pub(super) fn admitted_literal_controls_with_axis_policy(
         axes = selection;
         axes_set = true;
     }
+    if weights_pending {
+        return None;
+    }
     Some(KnownControls { axes, output })
+}
+
+fn known_weight(literal: &LiteralValue) -> bool {
+    ResolveContext::numeric_from_literal(literal)
+        .is_some_and(|value| value.is_finite() && value >= 0.0)
 }
 
 fn axes_literal(literal: &LiteralValue, empty_axes: EmptyAxesPolicy) -> Option<KnownAxes> {

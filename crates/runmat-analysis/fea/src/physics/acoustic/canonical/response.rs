@@ -163,7 +163,7 @@ pub(super) fn solve(
         .map(|(real, imaginary)| ProjectionScalar { real, imaginary })
         .collect();
     Ok(CanonicalAcousticResponse {
-        frequency_hz: frequency_hz,
+        frequency_hz,
         projection: assembly.projection,
         pressure_pa:
             runmat_types::physical::Quantity::<runmat_types::physical::kind::Pressure, _>::new(

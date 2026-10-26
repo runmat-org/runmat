@@ -1,5 +1,12 @@
+#[path = "graph/captured.rs"]
+mod captured;
+pub use captured::{
+    ArchiveAdmittedCapturedGraphCode, CapturedGraphCode, ValidatedCapturedGraphCode,
+};
 #[path = "graph/policy.rs"]
 mod policy;
+#[path = "graph/selection.rs"]
+mod selection;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -136,6 +143,38 @@ pub struct AdmittedGraphUnitBundle {
     admission: Arc<()>,
 }
 
+fn admitted_bundles(
+    bundles: Vec<Option<ExecutionBundle>>,
+    admission: &Arc<()>,
+) -> Vec<AdmittedGraphUnitBundle> {
+    bundles
+        .into_iter()
+        .enumerate()
+        .map(|(unit_index, bundle)| AdmittedGraphUnitBundle {
+            unit_index,
+            bundle,
+            admission: Arc::clone(admission),
+        })
+        .collect()
+}
+
+fn consume_admitted_bundle(
+    count: usize,
+    admission: &Arc<()>,
+    unit_index: usize,
+    admitted: AdmittedGraphUnitBundle,
+) -> ArtifactResult<Option<ExecutionBundle>> {
+    if unit_index >= count
+        || admitted.unit_index != unit_index
+        || !Arc::ptr_eq(admission, &admitted.admission)
+    {
+        return Err(ArtifactError::Invalid(
+            "selected Graph bundle differs from its admitted unit".into(),
+        ));
+    }
+    Ok(admitted.bundle)
+}
+
 /// Compact response authority issued only after the complete Graph request is
 /// admitted. A local process parent can retain it across attempts without
 /// re-reading or cloning the archive-bearing request for each response.
@@ -192,16 +231,7 @@ impl ValidatedGraphExecutionRequest {
         ArchiveAdmittedGraphExecutionRequest,
         Vec<AdmittedGraphUnitBundle>,
     ) {
-        let bundles = self
-            .bundles
-            .into_iter()
-            .enumerate()
-            .map(|(unit_index, bundle)| AdmittedGraphUnitBundle {
-                unit_index,
-                bundle,
-                admission: Arc::clone(&self.admission),
-            })
-            .collect();
+        let bundles = admitted_bundles(self.bundles, &self.admission);
         (
             ArchiveAdmittedGraphExecutionRequest {
                 request: self.request,
@@ -229,15 +259,12 @@ impl ArchiveAdmittedGraphExecutionRequest {
         unit_index: usize,
         admitted: AdmittedGraphUnitBundle,
     ) -> ArtifactResult<Option<ExecutionBundle>> {
-        if unit_index > self.request.retained_units.len()
-            || admitted.unit_index != unit_index
-            || !Arc::ptr_eq(&self.admission, &admitted.admission)
-        {
-            return Err(ArtifactError::Invalid(
-                "selected Graph bundle differs from its admitted unit".into(),
-            ));
-        }
-        Ok(admitted.bundle)
+        consume_admitted_bundle(
+            self.request.retained_units.len() + 1,
+            &self.admission,
+            unit_index,
+            admitted,
+        )
     }
 }
 
@@ -405,262 +432,29 @@ impl GraphExecutionRequest {
         Ok(bundles)
     }
 
+    fn selected_code(&self) -> selection::SelectedCode<'_> {
+        selection::SelectedCode {
+            primary_unit: &self.artifact.executable_bytes,
+            retained_units: &self.retained_units,
+            graph: &self.graph,
+            class_dependencies: &self.class_dependencies,
+            class_method_dependencies: &self.class_method_dependencies,
+            static_dependencies: &self.static_dependencies,
+            selected_bundle_archives: &self.selected_bundle_archives,
+            selected_foreign_policies: &self.selected_foreign_policies,
+            primary_policy: Some(&self.recipe.foreign_policy),
+        }
+    }
+
     fn validate_class_dependencies(&self) -> ArtifactResult<()> {
-        if self.class_dependencies.len() > runmat_execution::value::GRAPH_MAX_SELECTED_UNITS {
-            return Err(ArtifactError::Limit(
-                "graph class dependencies exceed their shared bound".into(),
-            ));
-        }
-        let units = std::iter::once(self.artifact.executable_bytes.as_slice())
-            .chain(self.retained_units.iter().map(Vec::as_slice))
-            .collect::<Vec<_>>();
-        let callers = self
-            .graph
-            .nodes
-            .iter()
-            .filter_map(|node| match node {
-                GraphNode::Callable(callable) => match callable.owner {
-                    GraphCallableOwner::Bound(owner) => Some(owner),
-                    _ => None,
-                },
-                GraphNode::SelectedObject(object) => Some(object.constructor),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-        let mut declarations = HashMap::new();
-        let mut selected = HashSet::new();
-        for edge in &self.class_dependencies {
-            let caller = usize::from(edge.caller.unit.0);
-            let declaration = usize::from(edge.declaration_unit.0);
-            if caller >= units.len() || declaration == 0 || declaration >= units.len() {
-                return Err(ArtifactError::Invalid(
-                    "graph class dependency selects an absent unit".into(),
-                ));
-            }
-            if !callers.contains(&edge.caller) {
-                return Err(ArtifactError::Invalid(
-                    "graph class dependency has no selected callable".into(),
-                ));
-            }
-            let (digest, class) = match declarations.entry(declaration) {
-                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    let bytes = units[declaration];
-                    let digest = runmat_execution::Digest::sha256(bytes);
-                    let unit = ExecutableUnitEnvelope::from_canonical_bytes(bytes)
-                        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-                    let class = match unit.manifest.identity.validated_entrypoint() {
-                        Ok(runmat_execution::ValidatedExecutableEntrypoint::DeclarationOnly(
-                            class,
-                        )) => class,
-                        _ => {
-                            return Err(ArtifactError::Invalid(
-                                "graph class dependency is not a declaration-only product".into(),
-                            ));
-                        }
-                    };
-                    entry.insert((digest, class))
-                }
-            };
-            if *digest != edge.declaration_digest {
-                return Err(ArtifactError::Invalid(
-                    "graph class dependency differs from its admitted bytes".into(),
-                ));
-            }
-            if !selected.insert((edge.caller, class.clone())) {
-                return Err(ArtifactError::Invalid(
-                    "graph callable repeats a class declaration dependency".into(),
-                ));
-            }
-        }
-        Ok(())
+        self.selected_code().validate_class_dependencies()
     }
 
     /// Prove unit-qualified structural coverage of sealed static imports.
     /// `target_body_digest` is a *claim* from the admitted caller section at
     /// this layer; the VM must compare it with the actual admitted target body.
     fn validate_static_dependencies(&self) -> ArtifactResult<()> {
-        let bytes = std::iter::once(self.artifact.executable_bytes.as_slice())
-            .chain(self.retained_units.iter().map(Vec::as_slice))
-            .collect::<Vec<_>>();
-        let units = bytes
-            .iter()
-            .map(|bytes| {
-                ExecutableUnitEnvelope::from_canonical_bytes(bytes)
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
-            })
-            .collect::<ArtifactResult<Vec<_>>>()?;
-        let revisions = units
-            .iter()
-            .map(|unit| {
-                unit.manifest
-                    .identity
-                    .program
-                    .identity_digest()
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
-            })
-            .collect::<ArtifactResult<Vec<_>>>()?;
-        let digests = bytes
-            .iter()
-            .map(runmat_execution::Digest::sha256)
-            .collect::<Vec<_>>();
-        let selected_code_bytes = bytes.iter().try_fold(0_usize, |total, bytes| {
-            total
-                .checked_add(bytes.len())
-                .ok_or_else(|| ArtifactError::Limit("graph selected code bytes overflow".into()))
-        })?;
-        self.validate_class_method_dependencies(&revisions, &digests, selected_code_bytes)?;
-        let sealed_bytes = units
-            .iter()
-            .flat_map(|unit| &unit.manifest.optional_sections)
-            .filter(|section| section.name == STATIC_IMPORT_SECTION)
-            .try_fold(0_usize, |total, section| {
-                total.checked_add(section.payload.len()).ok_or_else(|| {
-                    ArtifactError::Limit("graph sealed static section bytes overflow".into())
-                })
-            })?;
-        if self.static_dependencies.len() > sealed_bytes {
-            return Err(ArtifactError::Limit(
-                "graph static edges exceed their sealed section bound".into(),
-            ));
-        }
-        let mut content_digests = vec![None; units.len()];
-        let mut edges = HashMap::<(GraphStaticCaller, GraphStaticReferenceSite), _>::new();
-        for edge in &self.static_dependencies {
-            let caller_index = match edge.caller {
-                GraphStaticCaller::Script(unit) => usize::from(unit.0),
-                GraphStaticCaller::Function(owner) => usize::from(owner.unit.0),
-            };
-            let target_index = usize::from(edge.target.unit.0);
-            if caller_index >= units.len() || target_index >= units.len() {
-                return Err(ArtifactError::Invalid(
-                    "graph static dependency selects an absent unit".into(),
-                ));
-            }
-            if let GraphStaticCaller::Function(owner) = edge.caller {
-                if owner.origin.program != revisions[caller_index] {
-                    return Err(ArtifactError::Invalid(
-                        "graph static caller differs from its admitted revision".into(),
-                    ));
-                }
-            }
-            if edge.target.origin.program != revisions[target_index]
-                || edge.target_unit_digest != digests[target_index]
-            {
-                return Err(ArtifactError::Invalid(
-                    "graph static target differs from its admitted unit".into(),
-                ));
-            }
-            if edges.insert((edge.caller, edge.site), edge).is_some() {
-                return Err(ArtifactError::Invalid(
-                    "graph static dependency repeats a caller site".into(),
-                ));
-            }
-        }
-        for (index, unit) in units.iter().enumerate() {
-            let unit_id = runmat_execution::value::GraphProgramUnitId(
-                u16::try_from(index).map_err(|_| {
-                    ArtifactError::Limit("graph static caller unit exceeds its ordinal ABI".into())
-                })?,
-            );
-            let Some(section) = unit
-                .manifest
-                .optional_sections
-                .iter()
-                .find(|section| section.name == STATIC_IMPORT_SECTION)
-            else {
-                continue;
-            };
-            let imports = decode_static_imports(section)
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-            for import in imports {
-                let caller = match import.caller {
-                    ExecutableStaticCaller::Script => GraphStaticCaller::Script(unit_id),
-                    ExecutableStaticCaller::Function(origin) => {
-                        if origin.program != revisions[index] {
-                            return Err(ArtifactError::Invalid(
-                                "sealed static caller differs from its admitted revision".into(),
-                            ));
-                        }
-                        GraphStaticCaller::Function(runmat_execution::value::GraphBoundOwner {
-                            unit: unit_id,
-                            origin,
-                        })
-                    }
-                };
-                let edge = edges.remove(&(caller, import.site)).ok_or_else(|| {
-                    ArtifactError::Invalid("sealed static import has no selected graph edge".into())
-                })?;
-                let target_index = usize::from(edge.target.unit.0);
-                let content = match content_digests[target_index] {
-                    Some(content) => content,
-                    None => {
-                        let content = selected_unit_content_digest(&units[target_index])
-                            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-                        content_digests[target_index] = Some(content);
-                        content
-                    }
-                };
-                if edge.target.origin != import.target
-                    || edge.target_body_digest != import.target_body
-                    || content != import.target_content
-                {
-                    return Err(ArtifactError::Invalid(
-                        "graph static edge differs from its sealed target".into(),
-                    ));
-                }
-            }
-        }
-        if !edges.is_empty() {
-            return Err(ArtifactError::Invalid(
-                "graph static edge has no sealed caller site".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Structural coordinates only: the VM owns the exact constructor role,
-    /// selected method body and semantic-body fingerprint proof.
-    fn validate_class_method_dependencies(
-        &self,
-        revisions: &[runmat_execution::Digest],
-        unit_digests: &[runmat_execution::Digest],
-        selected_code_bytes: usize,
-    ) -> ArtifactResult<()> {
-        if self.class_method_dependencies.len() > selected_code_bytes {
-            return Err(ArtifactError::Limit(
-                "graph class method edges exceed their selected code bound".into(),
-            ));
-        }
-        let mut seen = HashSet::new();
-        for edge in &self.class_method_dependencies {
-            let caller = usize::from(edge.caller.unit.0);
-            let target = usize::from(edge.target.unit.0);
-            if caller >= revisions.len() || target >= revisions.len() {
-                return Err(ArtifactError::Invalid(
-                    "graph class method edge selects an absent unit".into(),
-                ));
-            }
-            if edge.caller.origin.program != revisions[caller]
-                || edge.target.origin.program != revisions[target]
-                || edge.target_unit_digest != unit_digests[target]
-            {
-                return Err(ArtifactError::Invalid(
-                    "graph class method edge differs from its admitted V3 unit".into(),
-                ));
-            }
-            if edge.method.role != runmat_types::ClassMethodRole::Ordinary {
-                return Err(ArtifactError::Invalid(
-                    "graph class method edge does not name an ordinary method".into(),
-                ));
-            }
-            if !seen.insert((edge.caller, edge.method.clone())) {
-                return Err(ArtifactError::Invalid(
-                    "graph class method edge repeats a constructor method".into(),
-                ));
-            }
-        }
-        Ok(())
+        self.selected_code().validate_static_dependencies()
     }
 
     /// Exact interop contracts in selected V3 unit order. A worker admits
@@ -669,22 +463,7 @@ impl GraphExecutionRequest {
     pub fn selected_unit_host_requirements(
         &self,
     ) -> ArtifactResult<Vec<SelectedUnitHostRequirement>> {
-        self.validate_selected_unit_bytes()?;
-        std::iter::once(&self.artifact.executable_bytes)
-            .chain(&self.retained_units)
-            .map(|bytes| {
-                let unit = ExecutableUnitEnvelope::from_canonical_bytes(bytes)
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-                unit.manifest
-                    .interop
-                    .validate()
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-                Ok(SelectedUnitHostRequirement {
-                    environment: unit.manifest.identity.program.environment(),
-                    interop: unit.manifest.interop.clone(),
-                })
-            })
-            .collect()
+        self.selected_code().selected_unit_host_requirements()
     }
 
     /// Admit one canonical foreign-object bundle for each selected V3 unit.
@@ -692,108 +471,7 @@ impl GraphExecutionRequest {
     /// admission proves their embedded V3 bytes, revision, and interop before
     /// any graph leaf decode or foreign effect.
     pub fn selected_bundle_admission(&self) -> ArtifactResult<Vec<Option<ExecutionBundle>>> {
-        self.validate_selected_unit_bytes()?;
-        let selected_count = self.retained_units.len() + 1;
-        if self.selected_bundle_archives.len() != selected_count {
-            return Err(ArtifactError::Invalid(
-                "graph bundle archive count differs from selected V3 units".into(),
-            ));
-        }
-        policy::validate_refs(self, selected_count)?;
-        let limits = ArchiveLimits::default();
-        let mut total_archive_bytes = 0_u64;
-        std::iter::once(&self.artifact.executable_bytes)
-            .chain(&self.retained_units)
-            .zip(&self.selected_bundle_archives)
-            .enumerate()
-            .map(|(index, (unit_bytes, archive))| {
-                let unit = ExecutableUnitEnvelope::from_canonical_bytes(unit_bytes)
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-                let has_interop = !unit.manifest.interop.adapters.is_empty()
-                    || !unit.manifest.interop.foreign_types.is_empty()
-                    || !unit.manifest.interop.adapter_contracts.is_empty();
-                let policy_ref = self.selected_foreign_policies.get(index).copied().flatten();
-                match (policy_ref, archive) {
-                    (None, None) if !has_interop => Ok(None),
-                    (Some(expected_policy), Some(bytes)) => {
-                        let length = u64::try_from(bytes.len()).map_err(|_| {
-                            ArtifactError::Limit("graph bundle archive cannot fit its ABI".into())
-                        })?;
-                        total_archive_bytes =
-                            total_archive_bytes.checked_add(length).ok_or_else(|| {
-                                ArtifactError::Limit("graph bundle archive lengths overflow".into())
-                            })?;
-                        if length > limits.max_total_bytes
-                            || total_archive_bytes > limits.max_total_bytes
-                        {
-                            return Err(ArtifactError::Limit(
-                                "graph bundle archives exceed their aggregate bound".into(),
-                            ));
-                        }
-                        let bundle = read_bundle(Cursor::new(bytes), limits)?;
-                        if bundle.manifest.program_revision != unit.manifest.identity.program {
-                            return Err(ArtifactError::Identity(
-                                "graph bundle revision differs from selected V3".into(),
-                            ));
-                        }
-                        if bundle.manifest.recipes.len() != 1
-                            || bundle.manifest.artifacts.len() != 1
-                        {
-                            return Err(ArtifactError::Identity(
-                                "graph bundle must contain one exact selected V3 recipe and artifact"
-                                    .into(),
-                            ));
-                        }
-                        let mut matching = bundle.manifest.artifacts.iter().filter(|artifact| {
-                            artifact.form == ExecutableForm::ExecutableUnitV4
-                                && artifact.executable_bytes.as_slice() == unit_bytes.as_slice()
-                        });
-                        let Some(matched) = matching.next() else {
-                            return Err(ArtifactError::Identity(
-                                "graph bundle has no exact selected V3 artifact".into(),
-                            ));
-                        };
-                        if matching.next().is_some() {
-                            return Err(ArtifactError::Identity(
-                                "graph bundle does not contain one exact selected V3 artifact"
-                                    .into(),
-                            ));
-                        }
-                        let recipe = bundle
-                            .manifest
-                            .recipes
-                            .iter()
-                            .find(|recipe| recipe.id().ok() == Some(matched.recipe_id))
-                            .ok_or_else(|| {
-                                ArtifactError::Identity(
-                                    "graph bundle selected V3 recipe is absent".into(),
-                                )
-                            })?;
-                        if recipe.interop != unit.manifest.interop {
-                            return Err(ArtifactError::Identity(
-                                "graph bundle interop differs from selected V3".into(),
-                            ));
-                        }
-                        policy::validate_archive(self, index, recipe, expected_policy)?;
-                        if bundle
-                            .manifest
-                            .recipes
-                            .iter()
-                            .any(|recipe| recipe.interop != unit.manifest.interop)
-                        {
-                            return Err(ArtifactError::Identity(
-                                "graph bundle contains foreign artifacts outside its selected V3 interop"
-                                    .into(),
-                            ));
-                        }
-                        Ok(Some(bundle))
-                    }
-                    _ => Err(ArtifactError::Invalid(
-                        "graph bundle presence differs from its issued policy ref or selected V3 interop".into(),
-                    )),
-                }
-            })
-            .collect()
+        self.selected_code().selected_bundle_admission()
     }
 
     /// Scheduler admission for every selected product, while the build recipe
@@ -840,54 +518,7 @@ impl GraphExecutionRequest {
     /// Both client and worker derive this same map from admitted V3 bytes.
     /// Program-local ordinals never enter the graph as unproved sidecar facts.
     pub fn selected_source_map(&self) -> ArtifactResult<ExecutableSourceMapV2> {
-        self.validate_selected_unit_bytes()?;
-        // The ordered unit position is part of the selected source basis.
-        // Two separately issued copies of identical V3 bytes may coexist in
-        // one invocation; coalescing by program digest would make a returned
-        // exception ordinal ambiguous to the client's exact result receipt.
-        let mut selected = Vec::new();
-        for bytes in std::iter::once(&self.artifact.executable_bytes).chain(&self.retained_units) {
-            let unit = ExecutableUnitEnvelope::from_canonical_bytes(bytes)
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-            let component = unit
-                .component(ExecutableComponentKind::SourceMap)
-                .ok_or_else(|| ArtifactError::Invalid("selected V3 source map is absent".into()))?;
-            let map = ExecutableSourceMapV2::decode(&component.bytes)
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-            for mut record in map.entries {
-                record.source_id =
-                    runmat_types::ProgramSourceId(u32::try_from(selected.len()).map_err(|_| {
-                        ArtifactError::Limit("graph source ordinals exceed their ABI".into())
-                    })?);
-                selected.push(record);
-            }
-        }
-        ExecutableSourceMapV2::new(selected)
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))
-    }
-
-    fn validate_selected_unit_bytes(&self) -> ArtifactResult<()> {
-        const MAX_SELECTED_UNITS: usize = runmat_execution::value::GRAPH_MAX_SELECTED_UNITS;
-        const MAX_SELECTED_BYTES: usize = runmat_execution::EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES;
-        if self.retained_units.len() >= MAX_SELECTED_UNITS {
-            return Err(ArtifactError::Limit(
-                "graph request has too many selected units".into(),
-            ));
-        }
-        let total = self.retained_units.iter().try_fold(
-            self.artifact.executable_bytes.len(),
-            |total, unit| {
-                total.checked_add(unit.len()).ok_or_else(|| {
-                    ArtifactError::Limit("graph selected-unit bytes overflow".into())
-                })
-            },
-        )?;
-        if total > MAX_SELECTED_BYTES {
-            return Err(ArtifactError::Limit(
-                "graph selected-unit bytes exceed their shared bound".into(),
-            ));
-        }
-        Ok(())
+        self.selected_code().selected_source_map()
     }
 
     pub fn validate_response(&self, response: &ProgramExecutionResponse) -> ArtifactResult<()> {

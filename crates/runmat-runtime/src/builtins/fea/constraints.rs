@@ -490,9 +490,9 @@ mod tests {
         assert!(matches!(
             bound.constraint.kind,
             ThermalConstraintKind::Prescribed {
-                value: PrescribedValue::Constant(kelvin),
+                value: PrescribedValue::Constant(temperature),
                 ..
-            } if kelvin.canonical_value() == 293.15
+            } if temperature.canonical_value() == 293.15
         ));
 
         let displacement = block_on(crate::builtins::fea::values::displacement_meters_builtin(
@@ -577,7 +577,7 @@ mod tests {
             StructuralConstraintKind::Periodic(PeriodicConstraint {
                 transform: PeriodicTransform::Translation(translation),
                 ..
-            }) if *translation.canonical_values() == [0.01, 0.0, 0.0]
+            }) if translation.canonical_value() == [0.01, 0.0, 0.0]
         ));
 
         let jump = block_on(
@@ -602,9 +602,9 @@ mod tests {
         assert!(matches!(
             affine.constraint.kind,
             ThermalConstraintKind::AffineJump {
-                temperature_jump: PrescribedValue::Constant(jump),
+                temperature_jump: PrescribedValue::Constant(temperature_jump),
                 ..
-            } if jump.canonical_value() == -15.0
+            } if temperature_jump.canonical_value() == -15.0
         ));
         let absolute_temperature = block_on(
             crate::builtins::fea::values::temperature_celsius_builtin(Value::Num(15.0)),

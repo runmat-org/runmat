@@ -2,12 +2,8 @@
 
 use crate::*;
 
-mod descriptor;
-mod inference;
 mod vector;
-#[cfg(test)]
-mod tests;
 
-pub use descriptor::*;
+pub use crate::FEA_DIRECTION_VECTOR_INTEGER_CAPABILITIES as FEA_DIRECTION_INTEGER_CAPABILITIES;
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&vector::ENTRY];

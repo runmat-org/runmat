@@ -9,6 +9,7 @@ mod plan;
 pub(crate) mod publication;
 mod response;
 mod selected;
+mod section_gc;
 mod toolchain;
 
 pub use crate::tree::{HostedNativeTree, NativeBuildTree, NativeStorageGrant, NativeTreeBlobRef};

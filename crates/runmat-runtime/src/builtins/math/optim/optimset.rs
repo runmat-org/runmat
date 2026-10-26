@@ -40,77 +40,206 @@ fn optimset_error_builder(
 #[runtime_builtin(
     name = "optimset",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::optim::optimset"
 )]
-async fn optimset_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+async fn optimset_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::context::host_allocation::require_unbounded_workspace(
+        runtime.as_ref(),
+        NAME,
+        "finite host-memory execution is unsupported for option metadata construction",
+    )?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::OPTIMSET_DESCRIPTOR,
         &OPTIMSET_ERROR_INVALID_ARGUMENT,
         NAME,
     )?;
+    let _sources = rest.fork();
     // All names and pair grammar are admitted before any resident gather.
+    let defaults = if rest.is_empty() {
+        Some(false)
+    } else if rest.len() == 1 {
+        let name = match &rest[0] {
+            Value::FunctionHandle(_) => {
+                let _entry = runtime.as_ref().map(crate::context::RuntimeContext::enter);
+                match crate::canonicalize_callback_handle_for_semantic_resolution(rest[0].clone())? {
+                    Value::FunctionHandle(handle)=>Some(handle.name().to_owned()),
+                    _=>return Err(optimset_error_with_detail(&OPTIMSET_ERROR_INVALID_ARGUMENT,"solver defaults require a builtin solver handle, not a selected user callback")),
+                }
+            }
+            value => crate::builtins::common::validation::value_text_scalar_string(value),
+        };
+        match name {
+            Some(name) if name.eq_ignore_ascii_case("fminsearch") => Some(true),
+            Some(_) => {
+                return Err(optimset_error_with_detail(
+                    &OPTIMSET_ERROR_INVALID_ARGUMENT,
+                    "solver defaults are currently available for fminsearch only",
+                ))
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    if let Some(solver_defaults) = defaults {
+        if rest.is_empty() && crate::output_count::current_output_count() == Some(0) {
+            let _entry = runtime.as_ref().map(crate::context::RuntimeContext::enter);
+            for field in runmat_builtins::FminsearchOptionName::ALL {
+                use runmat_builtins::FminsearchOptionName::*;
+                let choices = match field {
+                    Display => "off | none | notify | final | iter",
+                    FunValCheck => "off | on",
+                    OutputFcn => "function handle | cell of handles | []",
+                    PlotFcns => "function handle/name | cell of handles/names | []",
+                    TolX | TolFun => "positive floating scalar",
+                    MaxIter | MaxFunEvals => {
+                        "positive integer-valued floating scalar | 200*numberOfVariables"
+                    }
+                };
+                crate::console::record_console_line(
+                    crate::console::ConsoleStream::Stdout,
+                    format!("{}: {choices}", field.name()),
+                )?;
+            }
+        }
+        return default_options(solver_defaults, runtime.as_ref());
+    }
     let steps = admission::admit(rest)?;
     let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     for step in steps {
         match step {
-            admission::Step::Copy(existing) => {
+            admission::Step::Copy(existing, nonempty_only) => {
                 for (name, value) in existing.into_fields_unbounded() {
-                    fields.insert(name, prepare_optimset_payload(value).await?);
+                    if nonempty_only && value_is_empty(&value) {
+                        continue;
+                    }
+                    let name = admission::canonical_name(name);
+                    let value = prepare_optimset_payload(&name, value, runtime.as_ref()).await?;
+                    fields.insert(name, value);
                 }
             }
             admission::Step::Pair(name, value) => {
-                fields.insert(
-                    name.into_public_name(),
-                    prepare_optimset_payload(value).await?,
-                );
+                let name = name.into_public_name();
+                let value = prepare_optimset_payload(&name, value, runtime.as_ref()).await?;
+                fields.insert(name, value);
             }
         }
     }
     Ok(Value::Struct(fields.finish()))
 }
 
+fn callback_field(name: &str) -> bool {
+    matches!(runmat_builtins::OptimParameterName::resolve(name),runmat_builtins::OptimParameterLookup::Matched(field)if field.is_callback())
+}
+fn value_is_empty(value: &Value) -> bool {
+    crate::value_fact::value_fact(value).shape.element_count() == Some(0)
+}
+fn default_options(
+    solver: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let empty = super::common::output_callback::empty(runtime)?;
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    for field in runmat_builtins::FminsearchOptionName::ALL {
+        use runmat_builtins::FminsearchOptionName::*;
+        let value = if !solver {
+            empty.clone()
+        } else {
+            match field {
+                Display => Value::from("notify"),
+                FunValCheck => Value::from("off"),
+                MaxIter | MaxFunEvals => Value::from(runmat_builtins::FMINSEARCH_DEFAULT_BUDGET),
+                TolX | TolFun => Value::Num(1e-4),
+                OutputFcn | PlotFcns => empty.clone(),
+            }
+        };
+        fields.insert(field.name(), value);
+    }
+    Ok(Value::Struct(fields.finish()))
+}
 fn ensure_optimset_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
-    let mut payloads = Vec::new();
-    let mut pair_start = 0usize;
-    if let Some(Value::Struct(existing)) = args.first() {
-        payloads.extend(existing.fields.values());
-        pair_start = 1;
+    let mut integer = false;
+    let mut explicit = false;
+    let mut inspect = |name: &str, value: &Value| {
+        if callback_field(name) {
+            return;
+        }
+        integer |= crate::builtins::common::validation::value_contains_native_integer_class(value);
+        explicit |= crate::builtins::common::validation::value_contains_explicit_gpu(value);
+    };
+    let mut start = 0;
+    if let Some(value) = args.first() {
+        if let Value::Struct(value) = value {
+            for (name, value) in &value.fields {
+                inspect(name, value);
+            }
+            start = 1;
+        } else if matches!(value,Value::Tensor(value)if value.is_empty()) {
+            start = 1;
+        }
     }
-    let mut index = pair_start + 1;
-    while index < args.len() {
-        payloads.push(&args[index]);
-        index += 2;
+    if args.len() == 2 && start == 1 {
+        if let Value::Struct(value) = &args[1] {
+            for (name, value) in &value.fields {
+                inspect(name, value);
+            }
+        }
+    } else {
+        let mut index = start;
+        while index + 1 < args.len() {
+            let name = super::common::field_name(&args[index]).unwrap_or_default();
+            inspect(&name, &args[index + 1]);
+            index += 2;
+        }
     }
-    let integer = payloads.iter().any(|value| {
-        crate::builtins::common::validation::value_contains_native_integer_class(value)
-    });
     if integer {
         crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_OPTION_EXTENSION, NAME)?;
     }
-    let explicit = payloads
-        .iter()
-        .any(|value| crate::builtins::common::validation::value_contains_explicit_gpu(value));
     if explicit {
         crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_OPTION_EXTENSION, NAME)?;
     }
     Ok(())
 }
-
-async fn prepare_optimset_payload(value: Value) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+async fn prepare_optimset_payload(
+    name: &str,
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    // Callback payloads and captures retain their original execution authority.
+    if callback_field(name)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+    {
         return Ok(value);
     }
-    crate::dispatcher::gather_if_needed_async(&value)
+    let prepared = crate::dispatcher::gather_if_needed_in_context_async(&value, runtime)
         .await
-        .map_err(|error| {
+        .map_err(|mut error| {
+            if crate::runtime_error::error_has_control_cancellation_origin(&error) {
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return error;
+            }
+            let origin = error.failure_origin();
             optimset_error_builder(
                 &OPTIMSET_ERROR_INVALID_INPUT,
                 format!("failed to gather option value: {error}"),
             )
+            .with_failure_origin(origin)
             .with_source(error)
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
-        })
+        })?;
+    if let Some(runtime) = runtime {
+        let mut budget = runtime.cpu_cooperation();
+        budget
+            .checkpoint(0)
+            .await
+            .map_err(|source| source.into_runtime_error_in_context(Some(runtime)))?;
+    }
+    Ok(prepared)
 }
 
 #[cfg(test)]
@@ -125,6 +254,7 @@ mod tests {
     #[test]
     fn optimset_builds_struct_from_pairs() {
         let value = block_on(optimset_builtin(
+            None,
             crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("TolX"),
                 Value::Num(1.0e-8),
@@ -155,6 +285,8 @@ mod tests {
         assert_eq!(
             labels,
             vec![
+                "options = optimset('fminsearch')",
+                "options = optimset(oldopts, newopts)",
                 "options = optimset()",
                 "options = optimset(name, value, ...)",
                 "options = optimset(oldopts, name, value, ...)",
@@ -175,6 +307,7 @@ mod tests {
     #[test]
     fn optimset_odd_name_value_pairs_use_stable_identifier() {
         let err = block_on(optimset_builtin(
+            None,
             crate::builtins::common::test_support::builtin_arguments(vec![Value::from("TolX")]),
         ))
         .unwrap_err();
@@ -204,6 +337,7 @@ mod tests {
             let mut arguments = vec![Value::from("TolX"), Value::GpuTensor(handle.clone())];
             arguments.extend(bad_tail);
             let error = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(arguments),
             ))
             .unwrap_err();
@@ -230,6 +364,7 @@ mod tests {
         let value = Tensor::new_integer(IntegerStorage::I64(vec![17]), vec![1, 1]).unwrap();
 
         let error = block_on(optimset_builtin(
+            None,
             crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("MaxIter"),
                 Value::Tensor(value),
@@ -250,6 +385,7 @@ mod tests {
         let value = Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
         let result = block_on(optimset_builtin(
+            None,
             crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("MaxIter"),
                 Value::Tensor(value),
@@ -285,6 +421,7 @@ mod tests {
                 .expect("admit provenance view");
 
             let automatic_result = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("TolX"),
                     Value::GpuTensor(automatic),
@@ -310,6 +447,7 @@ mod tests {
             let physical = explicit.allocation_lease().downgrade();
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("TolX"),
                     Value::GpuTensor(explicit.clone()),
@@ -333,6 +471,7 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("admit provenance view");
             let explicit_result = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("TolX"),
                     Value::GpuTensor(explicit),
@@ -432,6 +571,7 @@ mod tests {
             ));
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("FutureOption"),
                     mixed.clone(),
@@ -444,6 +584,7 @@ mod tests {
             );
             drop(strict);
             let Value::Struct(result) = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("FutureOption"),
                     mixed.clone(),
@@ -485,6 +626,7 @@ mod tests {
             )));
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let Value::Struct(result) = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("FutureOption"),
                     automatic,
@@ -508,6 +650,7 @@ mod tests {
             ));
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("FutureOption"),
                     integer.clone(),
@@ -520,6 +663,7 @@ mod tests {
             );
             drop(strict);
             let Value::Struct(result) = block_on(optimset_builtin(
+                None,
                 crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::from("FutureOption"),
                     integer,
@@ -541,5 +685,132 @@ mod tests {
                 ));
             }
         });
+    }
+
+    #[test]
+    fn legacy_defaults_merge_reset_and_prefix_forms_are_real() {
+        let args = crate::builtins::common::test_support::builtin_arguments;
+        let Value::Struct(defaults) = block_on(optimset_builtin(None, args(vec![]))).unwrap()
+        else {
+            panic!("defaults")
+        };
+        assert_eq!(
+            defaults.fields.len(),
+            runmat_builtins::FminsearchOptionName::ALL.len()
+        );
+        assert!(defaults
+            .fields
+            .values()
+            .all(|value| matches!(value,Value::Tensor(value)if value.is_empty())));
+        let Value::Struct(solver) = block_on(optimset_builtin(
+            None,
+            args(vec![Value::from("fminsearch")]),
+        ))
+        .unwrap() else {
+            panic!("solver defaults")
+        };
+        assert!(matches!(solver.fields["TolX"], Value::Num(1e-4)));
+        assert_eq!(
+            crate::builtins::common::validation::value_text_scalar_string(
+                &solver.fields["MaxIter"]
+            )
+            .as_deref(),
+            Some(runmat_builtins::FMINSEARCH_DEFAULT_BUDGET)
+        );
+        let Value::Struct(old) = block_on(optimset_builtin(
+            None,
+            args(vec![
+                Value::from("tolx"),
+                Value::Num(0.01),
+                Value::from("MaxIt"),
+                Value::Num(5.0),
+            ]),
+        ))
+        .unwrap() else {
+            panic!("old")
+        };
+        let mut newer = runmat_value::UnboundedStructValueBuilder::new();
+        newer.insert(
+            "TolX",
+            super::super::common::output_callback::empty(None).unwrap(),
+        );
+        newer.insert("maxiter", Value::Num(9.0));
+        let Value::Struct(merged) = block_on(optimset_builtin(
+            None,
+            args(vec![Value::Struct(old), Value::Struct(newer.finish())]),
+        ))
+        .unwrap() else {
+            panic!("merge")
+        };
+        assert!(matches!(merged.fields["TolX"], Value::Num(0.01)));
+        assert!(matches!(merged.fields["MaxIter"], Value::Num(9.0)));
+        let Value::Struct(reset) = block_on(optimset_builtin(
+            None,
+            args(vec![
+                Value::Struct(merged),
+                Value::from("TolX"),
+                super::super::common::output_callback::empty(None).unwrap(),
+            ]),
+        ))
+        .unwrap() else {
+            panic!("reset")
+        };
+        assert!(matches!(&reset.fields["TolX"],Value::Tensor(value)if value.is_empty()));
+        let Value::Struct(from_empty) = block_on(optimset_builtin(
+            None,
+            args(vec![
+                super::super::common::output_callback::empty(None).unwrap(),
+                Value::from("Dis"),
+                Value::from("off"),
+            ]),
+        ))
+        .unwrap() else {
+            panic!("empty oldopts")
+        };
+        assert!(from_empty.fields.contains_key("Display"));
+    }
+    #[test]
+    fn callback_capture_identity_is_not_an_option_numeric_materialization() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let _lock = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(
+            crate::context::physical_test_support::OwnedPhysicalProvider::new(),
+        ));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let allocation = provider.allocate_f64(&[1, 1]);
+        let handle = allocation
+            .handle
+            .clone()
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
+        let callback = Value::Closure(runmat_value::Closure::new(
+            "callback_capture".into(),
+            None,
+            runmat_types::FunctionSourceRole::Anonymous,
+            None,
+            vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+                ),
+            ],
+            None,
+        ));
+        let instance = callback.callable_instance_key();
+        let args = crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("OutputFcn"),
+            callback,
+        ]);
+        let Value::Struct(result) = block_on(optimset_builtin(None, args)).unwrap() else {
+            panic!("options")
+        };
+        assert_eq!(result.fields["OutputFcn"].callable_instance_key(), instance);
+        let Value::Closure(stored) = &result.fields["OutputFcn"] else {
+            panic!("closure")
+        };
+        assert!(
+            matches!(&stored.captures[0],Value::GpuTensor(value)if value.view_identity()==handle.view_identity())
+        );
+        assert!(handle.allocation_lease().validate_live().is_ok());
     }
 }

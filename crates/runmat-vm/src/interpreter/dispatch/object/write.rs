@@ -25,12 +25,14 @@ pub(super) async fn store_member(request: Request<'_>) -> Result<bool, RuntimeEr
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let value = obj_resolve::store_member_traced_in_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::store_member_traced_with_access(
                 runtime,
                 base,
                 field.0.clone(),
                 rhs,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -63,12 +65,14 @@ pub(super) async fn store_member_or_init(request: Request<'_>) -> Result<bool, R
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let value = obj_resolve::store_member_traced_in_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::store_member_traced_with_access(
                 runtime,
                 base,
                 field.0.clone(),
                 rhs,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -106,12 +110,14 @@ pub(super) async fn store_member_dynamic(request: Request<'_>) -> Result<bool, R
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic_traced_in_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::store_member_traced_with_access(
                 runtime,
                 base,
                 name,
                 rhs,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -151,12 +157,14 @@ pub(super) async fn store_member_dynamic_or_init(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic_traced_in_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::store_member_traced_with_access(
                 runtime,
                 base,
                 name,
                 rhs,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -190,12 +198,14 @@ pub(super) async fn store_member_sequence(request: Request<'_>) -> Result<bool, 
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let updated = obj_resolve::store_member_sequence_traced_in_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let updated = obj_resolve::store_member_sequence_traced_with_access(
                 runtime,
                 base,
                 field.0.clone(),
                 values,
                 caller_function_name,
+                &access,
             )
             .await?;
             updated.with_owned(|value| stack.try_push(value))?;
@@ -236,12 +246,14 @@ pub(super) async fn store_member_dynamic_sequence(
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let updated = obj_resolve::store_member_sequence_traced_in_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let updated = obj_resolve::store_member_sequence_traced_with_access(
                 runtime,
                 base,
                 name,
                 values,
                 caller_function_name,
+                &access,
             )
             .await?;
             updated.with_owned(|value| stack.try_push(value))?;

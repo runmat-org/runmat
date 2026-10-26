@@ -66,12 +66,10 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
         CheckedExpressionKind::Unary { operator, operand } => {
             let operand = scalar(operand)?;
             Some(match operator {
-                runmat_parser::fea::FeaUnaryOperator::Positive => operand,
-                runmat_parser::fea::FeaUnaryOperator::Negative => {
-                    GeometryScalarExpression::Negate {
-                        value: Box::new(operand),
-                    }
-                }
+                runmat_fea_syntax::FeaUnaryOperator::Positive => operand,
+                runmat_fea_syntax::FeaUnaryOperator::Negative => GeometryScalarExpression::Negate {
+                    value: Box::new(operand),
+                },
             })
         }
         CheckedExpressionKind::Binary {
@@ -80,10 +78,10 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
             right,
         } => Some(GeometryScalarExpression::Binary {
             operator: match operator {
-                runmat_parser::fea::FeaBinaryOperator::Add => GeometryScalarOperator::Add,
-                runmat_parser::fea::FeaBinaryOperator::Subtract => GeometryScalarOperator::Subtract,
-                runmat_parser::fea::FeaBinaryOperator::Multiply => GeometryScalarOperator::Multiply,
-                runmat_parser::fea::FeaBinaryOperator::Divide => GeometryScalarOperator::Divide,
+                runmat_fea_syntax::FeaBinaryOperator::Add => GeometryScalarOperator::Add,
+                runmat_fea_syntax::FeaBinaryOperator::Subtract => GeometryScalarOperator::Subtract,
+                runmat_fea_syntax::FeaBinaryOperator::Multiply => GeometryScalarOperator::Multiply,
+                runmat_fea_syntax::FeaBinaryOperator::Divide => GeometryScalarOperator::Divide,
                 _ => return None,
             },
             left: Box::new(scalar(left)?),
@@ -173,12 +171,12 @@ pub(super) fn authoring_value(value: &CheckedExpression) -> Option<GeometryAutho
             Some(GeometryAuthoringValue::Parameter(path[1].clone()))
         }
         CheckedExpressionKind::List(values) if values.len() == 3 => {
-            Some(GeometryAuthoringValue::Vector(vector3(value)?))
+            Some(GeometryAuthoringValue::Vector(Box::new(vector3(value)?)))
         }
         CheckedExpressionKind::Quantity {
             value: components, ..
         } if matches!(&components.kind, CheckedExpressionKind::List(values) if values.len() == 3) => {
-            Some(GeometryAuthoringValue::Vector(vector3(value)?))
+            Some(GeometryAuthoringValue::Vector(Box::new(vector3(value)?)))
         }
         _ => scalar(value).map(GeometryAuthoringValue::Scalar),
     }

@@ -6,6 +6,7 @@ use runmat_analysis_core::{
     PrescribedValue, StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof,
     Traction, TranslationDofValue,
 };
+use runmat_types::physical::Quantity;
 
 fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifact) {
     // Exercise dimensional authored material lowering; the model/mesh below is a typed fixture.
@@ -28,8 +29,8 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
     assert_eq!(
         material.plastic,
         Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: runmat_types::physical::Quantity::new(5.0),
-            isotropic_hardening_modulus_pa: runmat_types::physical::Quantity::new(30.0),
+            yield_stress_pa: Quantity::new(5.0),
+            isotropic_hardening_modulus_pa: Quantity::new(30.0),
         })
     );
     let mut model = sample_solid_model();

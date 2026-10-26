@@ -9,12 +9,23 @@ pub(super) fn validate_capture_contract(
     captures: &[ValuePayload],
     facts: &[ValueFact],
 ) -> AnalysisBridgeResult<()> {
-    for (capture, fact) in captures.iter().zip(facts) {
+    validate_capture_contract_iter(captures.iter(), facts)
+}
+
+pub(super) fn validate_capture_contract_iter<'a>(
+    captures: impl IntoIterator<Item = &'a ValuePayload>,
+    facts: &[ValueFact],
+) -> AnalysisBridgeResult<()> {
+    for (capture, fact) in captures.into_iter().zip(facts) {
         let compatible = match (&fact.kind, capture) {
             (ValueKindFact::Unknown, _) => true,
-            (ValueKindFact::Logical, ValuePayload::Inline(value)) => {
-                matches!(value.as_ref(), InlineValue::Logical(_)) && accepts_scalar(&fact.shape)
-            }
+            (ValueKindFact::Logical, ValuePayload::Inline(value)) => match value.as_ref() {
+                InlineValue::Logical(_) => accepts_scalar(&fact.shape),
+                InlineValue::Dense(value) if value.element_type == ElementType::Logical => {
+                    dimensions_match(&value.shape, &fact.shape)
+                }
+                _ => false,
+            },
             (ValueKindFact::String, ValuePayload::Inline(value)) => {
                 matches!(value.as_ref(), InlineValue::String(_)) && accepts_scalar(&fact.shape)
             }

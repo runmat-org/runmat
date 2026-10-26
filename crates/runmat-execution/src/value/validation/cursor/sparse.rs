@@ -19,6 +19,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         value: &'a SparseValue,
         index: usize,
     ) -> Result<(), ContractError> {
+        self.budget.add_bytes(8)?;
         if index + 1 < value.column_offsets.len() {
             if value.column_offsets[index] > value.column_offsets[index + 1] {
                 return Err(invalid(
@@ -49,6 +50,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         index: usize,
     ) -> Result<(), ContractError> {
         if let Some(row) = value.row_indices.get(index) {
+            self.budget.add_bytes(8)?;
             if *row >= value.rows {
                 return Err(invalid(
                     "sparse payload",

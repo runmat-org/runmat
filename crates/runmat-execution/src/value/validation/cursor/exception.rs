@@ -111,12 +111,17 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         depth: u16,
     ) -> Result<(), ContractError> {
         if let Some(value) = values.get(index) {
-            self.budget.node(depth + 1)?;
+            let nested = depth.checked_add(1).ok_or(ContractError::Limit {
+                field: "value depth",
+                limit: self.budget.limits.max_depth.into(),
+            })?;
+            self.budget.node(nested)?;
             self.tasks
                 .push(Task::ExceptionCauses(values, index + 1, depth));
             self.budget.add_text(&value.identifier)?;
             self.budget.add_text(&value.message)?;
-            self.tasks.push(Task::ExceptionStack(value, 0, depth + 1));
+            self.budget.add_elements(value.stack.len() as u64)?;
+            self.tasks.push(Task::ExceptionStack(value, 0, nested));
         }
         Ok(())
     }

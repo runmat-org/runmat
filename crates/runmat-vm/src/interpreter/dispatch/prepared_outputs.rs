@@ -30,6 +30,7 @@ mod publication;
 mod support;
 
 pub(super) struct PreparedOutputContext<'a> {
+    pub bytecode: &'a crate::bytecode::Bytecode,
     pub authority: super::slot_authority::AssignmentSlotAuthority<'a>,
 }
 
@@ -120,6 +121,9 @@ fn suspend_legacy<'a>(
             request.stack,
             request.vars,
             request.state,
+            &context.runtime,
+            request.context.bytecode,
+            Some(request.context.authority.current_function_name),
         )
         .map(map)
     })

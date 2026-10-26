@@ -207,6 +207,9 @@ impl Drop for MaterializationGuard<'_> {
     }
 }
 
+mod batch;
+pub(super) use batch::{release as release_callback_batch, submit as submit_callback_batch};
+
 pub(super) fn spawn(
     service: &NativeExecutionService,
     future: &FutureHandle,
@@ -289,6 +292,7 @@ pub(super) fn spawn(
                     task_id,
                     request,
                     retry: call.retry,
+                    task: None,
                 })
                 .map(|completion| (completion, Some(receipt)))
         }
@@ -348,6 +352,8 @@ pub(super) fn spawn(
                     read: false,
                     claimed: false,
                     completion_order: None,
+                    retention: runmat_runtime::execution::TaskRetention::Refetchable,
+                    callback_completion: None,
                 },
             );
             (true, retired)

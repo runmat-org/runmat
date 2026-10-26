@@ -343,14 +343,23 @@ where
     let document = geometry
         .geometry_document()
         .map_err(|error| error.to_string())?;
-    let region_evidence = ImportedRegionEvidence { imported: &geometry };
+    let named = match &request.definition.source {
+        runmat_geometry_core::GeometryDefinitionSource::Imported(imported) => {
+            imported.named_selections.as_ref()
+        }
+        _ => None,
+    };
+    let region_evidence = ImportedRegionEvidence { named, imported: &geometry };
     let regions = resolve_geometry_regions_with_generated_outputs(
         &request.definition,
         &geometry.topology,
         &materialized.feature_history,
         &materialized.generated_region_outputs,
         &region_evidence,
-        geometry.healing_report.as_ref().map(|report| &report.revision_map),
+        geometry
+            .healing_report
+            .as_ref()
+            .map(|report| &report.revision_map),
     )
     .map_err(|error| error.to_string())?;
     let source_face_ids = geometry.source_face_ids.clone();
@@ -439,6 +448,7 @@ where
     }
 
     struct ImportedRegionEvidence<'a> {
+        named: Option<&'a runmat_geometry_core::GeometryNamedSelections>,
         /// The exact import, whose authored CAD names and presentation layers select regions.
         imported: &'a runmat_geometry_io::ImportedExactCad,
     }
@@ -451,8 +461,16 @@ where
             role: runmat_geometry_core::GeometryRegionRole,
             name: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            // Names are only those authored inside the exact CAD source (STEP/IGES labels);
-            // they resolve here, once, to canonical persistent entity ids.
+            if let Some(metadata) = self.named.filter(|metadata| metadata.regions.iter().any(|region| region.region_id == name)) {
+                let id = metadata.selection(name, role).map_err(|e| e.to_string())?;
+                return runmat_geometry_ops::resolve_persistent_region_selection(
+                    &self.imported.topology,
+                    role,
+                    id,
+                    self.imported.healing_report.as_ref().map(|r| &r.revision_map),
+                )
+                .map_err(|e| e.to_string());
+            }
             self.imported.entities_named(role, name)
         }
         fn by_tag(

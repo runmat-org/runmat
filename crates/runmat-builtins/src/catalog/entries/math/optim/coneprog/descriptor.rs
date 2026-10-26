@@ -10,7 +10,7 @@ const INTEGER_COUNT_INPUT: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerIn
     name: "options.MaxIter", classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Native integer structural counts are decoded exactly to platform usize; solver uses at least one iteration-budget unit.",
+    notes: "Native integer structural counts are decoded exactly; zero is honored and the iteration limit must fit the backend's u32 range.",
 }];
 const INTEGER_TOLERANCE_INPUT: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability {
     name: "options.TolX or options.TolFun", classes: &ALL_INTEGER_CLASSES,
@@ -116,7 +116,7 @@ const OUTPUT_ALL: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Lagrange multiplier compatibility struct.",
+        description: "Actual original-row and scalar cone dual multipliers at a verified optimum; empty otherwise.",
     },
 ];
 const OUTPUT_DIAGNOSTICS: [BuiltinParamDescriptor; 4] = [

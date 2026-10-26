@@ -304,7 +304,7 @@ fn logical_numeric_options_are_not_accepted_as_floating_controls() {
         let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert(field, value);
         let options = options.finish();
-        let error = FminbndOptions::from_struct(Some(&options))
+        let error = FminbndOptions::from_struct(Some(&options), None)
             .expect_err("logical numeric option must reject");
         assert_eq!(error.identifier(), Some("RunMat:fminbnd:InvalidArgument"));
     }
@@ -343,7 +343,7 @@ fn options_reject_nonpositive_typed_integer_storage_exactly() {
     opts.insert("MaxIter", Value::Tensor(max_iter));
     let opts = opts.finish();
 
-    assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
+    assert!(FminbndOptions::from_struct(Some(&opts), None).is_err());
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn options_reject_unrepresentable_double_integer_boundary() {
     opts.insert("MaxIter", Value::Num(boundary));
     let opts = opts.finish();
 
-    assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
+    assert!(FminbndOptions::from_struct(Some(&opts), None).is_err());
 }
 
 #[test]
@@ -365,7 +365,7 @@ fn max_fun_evals_default_is_independent_of_max_iter() {
     let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Num(1000.0));
     let opts = opts.finish();
-    let parsed = FminbndOptions::from_struct(Some(&opts)).unwrap();
+    let parsed = FminbndOptions::from_struct(Some(&opts), None).unwrap();
     assert_eq!(parsed.max_iter, 1000);
     assert_eq!(parsed.max_fun_evals, DEFAULT_MAX_FUN_EVALS);
 }

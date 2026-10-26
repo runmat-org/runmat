@@ -189,6 +189,7 @@ pub(crate) fn reopen_selected_native_pair(
         selected,
         admission,
         &NativeProgramLinkIdentity::from_products(pair.application(), runtime),
+        pair.application().manifest.runtime_binding_mode,
         application_commitment,
     )?;
     let tests = LinkedProgram::reopen_selected(
@@ -197,6 +198,7 @@ pub(crate) fn reopen_selected_native_pair(
         selected,
         admission,
         &NativeProgramLinkIdentity::from_products(pair.tests(), runtime),
+        pair.tests().manifest.runtime_binding_mode,
         test_commitment,
     )?;
     check_completed(

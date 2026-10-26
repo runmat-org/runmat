@@ -322,6 +322,66 @@ mod native {
     }
 
     #[test]
+    fn gpu_device_public_member_getters_preserve_issued_handle_identity() {
+        fixture(|runtime, supervisor, host| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let value = call(&runtime, &supervisor, &host, vec![]).unwrap();
+            let read = |context: &RuntimeContext, receiver: Value, name: &str| {
+                host.block_on(supervisor.drive_until(context.scope(
+                    crate::object::resolve::load_member_with_context(
+                        Some(context),
+                        receiver,
+                        name.into(),
+                        false,
+                        None,
+                    ),
+                )))
+                .unwrap()
+            };
+            for (name, expected) in [
+                (
+                    "Name",
+                    Value::CharArray(runmat_value::CharArray::new_row("typed fixture")),
+                ),
+                ("Index", Value::Num(1.0)),
+                ("TotalMemory", Value::Num(1024.0)),
+                ("SupportsDouble", Value::Bool(true)),
+                ("DeviceAvailable", Value::Bool(true)),
+                ("DeviceSelected", Value::Bool(true)),
+            ] {
+                let actual = read(&runtime, value.value().clone(), name)
+                    .expect("normal member getter receives issued handle");
+                assert_eq!(actual.value(), &expected, "property {name}");
+            }
+            assert!(
+                read(&runtime, value.value().clone(), "AvailableMemory").is_err(),
+                "missing backend measurements remain unsupported"
+            );
+            assert!(
+                read(
+                    &runtime,
+                    value.value().clone(),
+                    "__runmat_gpudevice_provider"
+                )
+                .is_err(),
+                "backing identity stays private"
+            );
+            assert!(
+                read(&super::runtime(), value.value().clone(), "Name").is_err(),
+                "public dispatch must not bypass session identity"
+            );
+            let Value::HandleObject(mut invalid) = value.value().clone() else {
+                panic!("handle")
+            };
+            invalid.valid = false;
+            assert!(
+                read(&runtime, Value::HandleObject(invalid), "Name").is_err(),
+                "invalid handle remains rejected before getter execution"
+            );
+        });
+    }
+
+    #[test]
     fn wait_rejects_already_stopped_before_installing_provider_work() {
         use runmat_execution::{cancellation::CancellationSource, CancellationReason};
         fixture(|runtime, supervisor, host| {

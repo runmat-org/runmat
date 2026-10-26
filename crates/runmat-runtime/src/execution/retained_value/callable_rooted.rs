@@ -22,7 +22,15 @@ impl RetainedValueReadLease {
                 source,
             )
         })?;
-        let quote = SharedValueGeneration::callable_quote(&value).map_err(|e| error(e.into()))?;
+        let quote = if let Value::ScopedFunctionHandle(handle) = &value {
+            crate::execution::scoped_callable::validate_target(context, handle)?;
+            // The scope's queue/capability metadata has no finite allocation
+            // certificate. Preserve the original rooted header only after the
+            // invocation owner has admitted the unmanaged path.
+            None
+        } else {
+            SharedValueGeneration::callable_quote(&value).map_err(|e| error(e.into()))?
+        };
         let (bytes, claims) = quote
             .map(|quote| (quote.requested_bytes, quote.retained_claims))
             .unwrap_or((SharedValueGeneration::requested_bytes(), 1));

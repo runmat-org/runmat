@@ -48,6 +48,12 @@ pub(crate) fn standard_normal_pdf(z: f64) -> f64 {
     INV_SQRT_2PI * (-0.5 * z * z).exp()
 }
 
+/// Log form for density compositions whose final scaling can recover a
+/// representable result even when the unscaled normal PDF underflows.
+pub(crate) fn standard_normal_log_pdf(z: f64) -> f64 {
+    INV_SQRT_2PI.ln() - 0.5 * z * z
+}
+
 pub(crate) fn student_t_pdf(t: f64, nu: f64) -> f64 {
     if t.is_nan() || nu.is_nan() || nu <= 0.0 {
         return f64::NAN;
@@ -213,6 +219,47 @@ pub(crate) fn regularized_beta(x: f64, a: f64, b: f64) -> f64 {
     }
 }
 
+/// Lower regularized beta with a logarithmic argument. Preserve a finite
+/// small probability when x, or the beta prefactor, is subnormal/underflows.
+/// Ordinary arguments still use the existing continued-fraction owner.
+pub(crate) fn regularized_beta_from_log_x(log_x: f64, a: f64, b: f64) -> f64 {
+    if log_x.is_nan() || log_x > 0.0 || !a.is_finite() || !b.is_finite() || a <= 0.0 || b <= 0.0 {
+        return f64::NAN;
+    }
+    if log_x == f64::NEG_INFINITY {
+        return 0.0;
+    }
+    if log_x == 0.0 {
+        return 1.0;
+    }
+    // B_x(a,1)/B(a,1)=x^a, without a gamma-difference cancellation.
+    if b == 1.0 {
+        return (a * log_x).exp();
+    }
+    let x = log_x.exp();
+    if x >= f64::MIN_POSITIVE {
+        return regularized_beta(x, a, b);
+    }
+    // DLMF8.17.7: I_x=x^a/(a B(a,b))*2F1(a,1-b;a+1;x).
+    // Retain log(x) rather than taking log of rounded/zero subnormal x.
+    // The existing fraction carries the higher-order terms whenever x is
+    // representable. If exp(log_x)==0, finite b times the lost x is below
+    // 5e-16, beneath the fraction's existing3e-14 tolerance.
+    if a == 1.0 {
+        // For subnormal x, -log(1-x)=x to much better than binary64
+        // precision, but b*x need not be small. Preserve that product in log.
+        let exponent = (log_x + b.ln()).exp();
+        return -(-exponent).exp_m1();
+    }
+    let normalization = gammaln_nonnegative_scalar(a + b)
+        - gammaln_nonnegative_scalar(a)
+        - gammaln_nonnegative_scalar(b);
+    let log_result =
+        normalization + a * log_x + b * (-x).ln_1p() + beta_continued_fraction(a, b, x).ln()
+            - a.ln();
+    log_result.exp().clamp(0.0, 1.0)
+}
+
 pub(crate) fn regularized_gamma_p(a: f64, x: f64) -> f64 {
     if a.is_nan() || x.is_nan() || a <= 0.0 {
         return f64::NAN;
@@ -344,4 +391,37 @@ fn beta_continued_fraction(a: f64, b: f64, x: f64) -> f64 {
         }
     }
     h
+}
+
+#[cfg(test)]
+mod log_argument_beta_tests {
+    use super::*;
+    #[test]
+    fn logarithmic_argument_preserves_closed_form_tails_below_the_x_frontier() {
+        for log_x in [-710.0, -1000.0, -1400.0] {
+            let actual = regularized_beta_from_log_x(log_x, 0.5, 1.0);
+            assert!((actual / (log_x * 0.5).exp() - 1.0).abs() < 1e-13);
+            let actual = regularized_beta_from_log_x(log_x, 0.5, 0.5);
+            let expected = 2.0 / std::f64::consts::PI * (log_x * 0.5).exp();
+            assert!((actual / expected - 1.0).abs() < 1e-12);
+        }
+        let actual = regularized_beta_from_log_x(-746.0, 1.0, 1e10);
+        assert!((actual / (-746.0 + 1e10f64.ln()).exp() - 1.0).abs() < 1e-12);
+        let log_x = f64::MIN_POSITIVE.ln() - 0.5;
+        let b = 1e308_f64;
+        let expected = -(-(log_x + b.ln()).exp()).exp_m1();
+        assert!((regularized_beta_from_log_x(log_x, 1.0, b) - expected).abs() < 1e-13);
+        assert_eq!(
+            regularized_beta_from_log_x(f64::NEG_INFINITY, 0.5, 1.0),
+            0.0
+        );
+        assert_eq!(regularized_beta_from_log_x(0.0, 0.5, 1.0), 1.0);
+        assert!(regularized_beta_from_log_x(f64::NAN, 0.5, 1.0).is_nan());
+        assert!(
+            (regularized_beta_from_log_x(0.25f64.ln(), 2.0, 3.0)
+                - regularized_beta(0.25, 2.0, 3.0))
+            .abs()
+                < 1e-14
+        );
+    }
 }

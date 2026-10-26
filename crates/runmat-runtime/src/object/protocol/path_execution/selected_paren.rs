@@ -49,18 +49,20 @@ pub(super) async fn execute(
             "parentheses require value arguments",
         ));
     };
-    if components
-        .iter()
-        .any(|component| matches!(component, ObjectIndexComponent::Colon))
-    {
+    if components.iter().any(|component| {
+        matches!(
+            component,
+            ObjectIndexComponent::Colon | ObjectIndexComponent::End
+        )
+    }) {
         return Err(match kind {
             SelectedParenKind::SymbolicFunction => semantic_error(
                 "UnsupportedSymbolicFunctionSelector",
-                "symbolic function calls do not support colon selector syntax",
+                "symbolic function calls do not support colon or contextual end selector syntax",
             ),
             SelectedParenKind::ForeignResource => semantic_error(
                 "InvalidObjectSubscriptPath",
-                "foreign item indices require values, not a colon selector",
+                "foreign item indices require values, not colon or contextual end syntax",
             ),
         });
     }

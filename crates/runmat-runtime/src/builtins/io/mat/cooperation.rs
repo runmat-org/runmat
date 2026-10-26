@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 pub(in crate::builtins::io::mat) struct MatCodecCooperation<'a> {
     runtime: Option<&'a RuntimeContext>,
-    budget: Option<CpuCooperationBudget>,
+    budget: Option<Budget<'a>>,
     source: Option<&'a MatFsPath>,
     resource_liveness: Option<Arc<dyn HostEffectResourceLivenessLease>>,
     workspace_liveness: Option<Rc<dyn crate::context::RuntimeWorkspaceService>>,
@@ -21,7 +21,63 @@ pub(in crate::builtins::io::mat) struct MatCodecCooperation<'a> {
     io_error: &'static BuiltinErrorDescriptor,
 }
 
+enum Budget<'a> {
+    Owned(CpuCooperationBudget),
+    Borrowed(&'a mut CpuCooperationBudget),
+}
+impl std::ops::Deref for Budget<'_> {
+    type Target = CpuCooperationBudget;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(budget) => budget,
+            Self::Borrowed(budget) => budget,
+        }
+    }
+}
+impl std::ops::DerefMut for Budget<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Owned(budget) => budget,
+            Self::Borrowed(budget) => budget,
+        }
+    }
+}
+
 impl<'a> MatCodecCooperation<'a> {
+    /// Reuse the actual caller's pending work and original cancellation turn.
+    pub(in crate::builtins::io::mat) fn from_original_budget(
+        runtime: Option<&'a RuntimeContext>,
+        budget: Option<&'a mut CpuCooperationBudget>,
+        source: Option<&'a MatFsPath>,
+        builtin: &'static str,
+        io_error: &'static BuiltinErrorDescriptor,
+    ) -> BuiltinResult<Self> {
+        match (runtime, budget.as_deref()) {
+            (Some(runtime), Some(budget))
+                if budget
+                    .cancellation_token()
+                    .same_generation(&runtime.cancellation()) => {}
+            (None, None) => {}
+            _ => {
+                return Err(build_runtime_error(
+                    "MAT codec cooperation differs from the original invocation",
+                )
+                .with_identifier("RunMat:Execution:CooperationOwner")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build())
+            }
+        }
+        Ok(Self {
+            runtime,
+            budget: budget.map(Budget::Borrowed),
+            source,
+            resource_liveness: None,
+            workspace_liveness: None,
+            builtin,
+            io_error,
+        })
+    }
+
     pub(in crate::builtins::io::mat) fn new(
         runtime: Option<&'a RuntimeContext>,
         source: Option<&'a MatFsPath>,
@@ -30,7 +86,7 @@ impl<'a> MatCodecCooperation<'a> {
     ) -> Self {
         Self {
             runtime,
-            budget: runtime.map(RuntimeContext::cpu_cooperation),
+            budget: runtime.map(|runtime| Budget::Owned(runtime.cpu_cooperation())),
             source,
             resource_liveness: None,
             workspace_liveness: None,
@@ -47,7 +103,7 @@ impl<'a> MatCodecCooperation<'a> {
     ) -> Self {
         Self {
             runtime: None,
-            budget: Some(budget),
+            budget: Some(Budget::Owned(budget)),
             source: None,
             resource_liveness: None,
             workspace_liveness: None,

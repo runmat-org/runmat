@@ -10,6 +10,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["writematrix", "readmatrix", "xlsread", "csvwrite", "dlmwrite"],
     sections: &[
         BuiltinDocumentationSection { heading: "Cell content and output formats", paragraphs: &[
+            "Delimited numeric text uses general formatting with 15 significant digits for double storage and 7 for single storage. Logical fields use 1 or 0; typed integers retain exact decimal values.",
             "Accepts 2-D cell arrays of numeric scalars, logical scalars, string scalars, row character vectors, and empty numeric/logical arrays. Scalar values from all eight native integer classes serialize from exact storage. Nested cells, complex values, and nonscalar member arrays produce errors instead of silent flattening.",
             "The filename extension selects the file type: `.xlsx` and `.xlsm` use OOXML spreadsheet output; `.xls`, `.xlsb`, and `.ods` are unsupported. Other extensions select delimited text unless `'FileType'` overrides the choice.",
             "Delimited text defaults to comma for `.csv`, tab for `.tsv` and `.tab`, whitespace for `.txt`, `.dat`, and `.dlm`, and comma otherwise. `'Delimiter'`, `'QuoteStrings'`, `'WriteMode'`, and `'LineEnding'` control text output. Strings are quoted by default with doubled embedded quotes; `'QuoteStrings', false` writes text verbatim. `'WriteMode','append'` appends rows to text files.",

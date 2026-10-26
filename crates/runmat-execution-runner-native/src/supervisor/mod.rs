@@ -14,6 +14,7 @@ pub(crate) use filesystem::unix_millis;
 mod model;
 mod ownership;
 mod program_store;
+mod retained;
 mod protocol;
 mod scheduler;
 mod server;
@@ -25,8 +26,8 @@ mod tests;
 pub use client::LocalSupervisorClient;
 pub use config::LocalSupervisorConfig;
 pub use driver::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_program_batch,
-    execute_graph_batch, prepare_batch_driver,
+    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_graph_batch,
+    execute_and_complete_program_batch, execute_graph_batch, prepare_batch_driver,
 };
 pub use model::{
     BatchDriverInvocation, BatchSubmission, DurableExecutionContext, DurableProgramAttempt,

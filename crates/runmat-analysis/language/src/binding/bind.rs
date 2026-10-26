@@ -6,7 +6,7 @@ use crate::{
     resolve_logical_path, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaModuleGraph,
     FeaRelatedDiagnostic, FunctionRequest, LogicalSourcePath, RunMatFunctionSource, SourceSymbol,
 };
-use runmat_parser::fea::{FeaDeclarationKind, FeaImportKind, FeaModuleItem};
+use runmat_fea_syntax::{FeaDeclarationKind, FeaImportKind, FeaModuleItem};
 use runmat_types::Span;
 use std::collections::BTreeMap;
 

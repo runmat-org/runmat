@@ -313,7 +313,7 @@ fn coordinate(
                 .value_type
                 .is_quantity(PhysicalDimension::DIMENSIONLESS.into()))
     } else {
-        (expression.value_type).is_quantity((dimension).into())
+        (expression.value_type).is_quantity(dimension)
     };
     if !valid_type {
         invalid(

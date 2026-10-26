@@ -9,6 +9,7 @@ use crate::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
 use std::rc::Rc;
+mod deferred_native;
 
 pub fn invoke_resolved_object_protocol<'resolution>(
     resolution: &'resolution ProtocolResolution,
@@ -16,7 +17,13 @@ pub fn invoke_resolved_object_protocol<'resolution>(
     path: ObjectSubscriptPath,
     requested_outputs: usize,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'resolution> {
-    invoke_resolved_object_protocol_with_context(None, resolution, base, path, requested_outputs)
+    invoke_resolved_object_protocol_with_runtime(
+        crate::context::legacy::active(),
+        resolution,
+        base,
+        path,
+        requested_outputs,
+    )
 }
 
 pub fn invoke_resolved_object_protocol_in_context<'runtime, 'resolution>(
@@ -35,20 +42,39 @@ pub fn invoke_resolved_object_protocol_in_context<'runtime, 'resolution>(
     )
 }
 
-fn invoke_resolved_object_protocol_with_context<'runtime, 'resolution>(
+pub(crate) fn invoke_resolved_object_protocol_with_context<'runtime, 'resolution>(
     runtime: Option<&'runtime RuntimeContext>,
     resolution: &'resolution ProtocolResolution,
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'resolution> {
-    let inputs = retain_protocol_inputs(runtime, &base, &path);
+    invoke_resolved_object_protocol_with_runtime(
+        runtime.cloned(),
+        resolution,
+        base,
+        path,
+        requested_outputs,
+    )
+}
+fn invoke_resolved_object_protocol_with_runtime<'resolution>(
+    runtime: Option<RuntimeContext>,
+    resolution: &'resolution ProtocolResolution,
+    base: Value,
+    path: ObjectSubscriptPath,
+    requested_outputs: usize,
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'resolution> {
+    let inputs = crate::context::with_original_scope(runtime.as_ref(), || {
+        retain_protocol_inputs(runtime.as_ref(), &base, &path)
+    });
+    let selected = runtime.clone();
     let work = async move {
+        let runtime = runtime.as_ref();
         let _inputs = inputs?;
         invoke_resolved_object_protocol_in_scope(runtime, resolution, base, path, requested_outputs)
             .await
     };
-    super::context::scope(runtime, work)
+    super::context::scope(selected.as_ref(), work)
 }
 
 async fn invoke_resolved_object_protocol_in_scope(
@@ -71,27 +97,35 @@ async fn invoke_resolved_object_protocol_in_scope(
 /// Invoke a prepared assignment protocol with the exact comma-separated RHS.
 /// The sequence remains an argument list and can never be stored as one
 /// language value.
-pub async fn invoke_resolved_object_assignment(
-    method: &ResolvedObjectMethod,
+pub fn invoke_resolved_object_assignment<'method>(
+    method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> Result<RootedValue, RuntimeError> {
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
     let values = runmat_value::ValueSequence::comma_separated(values)
-        .map_err(crate::sequence::sequence_error_to_runtime)?;
-    invoke_resolved_object_assignment_with_context(None, method, base, path, values).await
+        .map_err(crate::sequence::sequence_error_to_runtime);
+    invoke_resolved_object_assignment_result(
+        crate::context::legacy::active(),
+        method,
+        base,
+        path,
+        values,
+    )
 }
 
-pub async fn invoke_resolved_object_assignment_in_context(
-    runtime: &RuntimeContext,
-    method: &ResolvedObjectMethod,
+pub fn invoke_resolved_object_assignment_in_context<'runtime, 'method>(
+    runtime: &'runtime RuntimeContext,
+    method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> Result<RootedValue, RuntimeError> {
-    let values = runmat_value::ValueSequence::comma_separated(values)
-        .map_err(crate::sequence::sequence_error_to_runtime)?;
-    invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values).await
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
+    let values = crate::context::with_original_scope(Some(runtime), || {
+        runmat_value::ValueSequence::comma_separated(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)
+    });
+    invoke_resolved_object_assignment_result(Some(runtime.clone()), method, base, path, values)
 }
 
 pub(crate) fn invoke_resolved_object_assignment_sequence<'method>(
@@ -100,7 +134,13 @@ pub(crate) fn invoke_resolved_object_assignment_sequence<'method>(
     path: ObjectSubscriptPath,
     values: runmat_value::ValueSequence,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
-    invoke_resolved_object_assignment_with_context(None, method, base, path, values)
+    invoke_resolved_object_assignment_with_runtime(
+        crate::context::legacy::active(),
+        method,
+        base,
+        path,
+        values,
+    )
 }
 
 pub fn invoke_resolved_object_assignment_sequence_in_context<'runtime, 'method>(
@@ -113,23 +153,46 @@ pub fn invoke_resolved_object_assignment_sequence_in_context<'runtime, 'method>(
     invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values)
 }
 
-fn invoke_resolved_object_assignment_with_context<'runtime, 'method>(
+pub(crate) fn invoke_resolved_object_assignment_with_context<'runtime, 'method>(
     runtime: Option<&'runtime RuntimeContext>,
     method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: runmat_value::ValueSequence,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
-    let inputs = retain_protocol_inputs(runtime, &base, &path);
-    let values = match runtime {
-        Some(runtime) => RootedValueSequence::in_context(values, runtime),
-        None => RootedValueSequence::new(values).map_err(|e| e.into_runtime_error()),
-    };
+    invoke_resolved_object_assignment_with_runtime(runtime.cloned(), method, base, path, values)
+}
+fn invoke_resolved_object_assignment_with_runtime<'method>(
+    runtime: Option<RuntimeContext>,
+    method: &'method ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: runmat_value::ValueSequence,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
+    invoke_resolved_object_assignment_result(runtime, method, base, path, Ok(values))
+}
+fn invoke_resolved_object_assignment_result<'method>(
+    runtime: Option<RuntimeContext>,
+    method: &'method ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Result<runmat_value::ValueSequence, RuntimeError>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
+    let (inputs, values) = crate::context::with_original_scope(runtime.as_ref(), || {
+        let inputs = retain_protocol_inputs(runtime.as_ref(), &base, &path);
+        let values = values.and_then(|values| match runtime.as_ref() {
+            Some(runtime) => RootedValueSequence::in_context(values, runtime),
+            None => RootedValueSequence::new(values).map_err(|e| e.into_runtime_error()),
+        });
+        (inputs, values)
+    });
+    let selected = runtime.clone();
     let work = async move {
+        let runtime = runtime.as_ref();
         let _inputs = inputs?;
         invoke_resolved_object_assignment_in_scope(runtime, method, base, path, values?).await
     };
-    super::context::scope(runtime, work)
+    super::context::scope(selected.as_ref(), work)
 }
 
 async fn invoke_resolved_object_assignment_in_scope(
@@ -139,6 +202,9 @@ async fn invoke_resolved_object_assignment_in_scope(
     path: ObjectSubscriptPath,
     values: RootedValueSequence,
 ) -> Result<RootedValue, RuntimeError> {
+    if path.has_deferred_end() {
+        return deferred_native::assign(runtime, method, base, path, values).await;
+    }
     let arguments = invocation_arguments(runtime, method, base, path)?;
     let count = arguments
         .len()
@@ -161,7 +227,12 @@ pub fn invoke_resolved_object_method<'method>(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'method> {
-    invoke_resolved_object_method_with_context(None, method, arguments, requested_outputs)
+    invoke_resolved_object_method_with_runtime(
+        crate::context::legacy::active(),
+        method,
+        arguments,
+        requested_outputs,
+    )
 }
 
 pub fn invoke_resolved_object_method_in_context<'runtime, 'method>(
@@ -179,11 +250,28 @@ fn invoke_resolved_object_method_with_context<'runtime, 'method>(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'method> {
-    let arguments = retained_arguments(runtime, arguments);
+    invoke_resolved_object_method_with_runtime(
+        runtime.cloned(),
+        method,
+        arguments,
+        requested_outputs,
+    )
+}
+fn invoke_resolved_object_method_with_runtime<'method>(
+    runtime: Option<RuntimeContext>,
+    method: &'method ResolvedObjectMethod,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'method> {
+    let arguments = crate::context::with_original_scope(runtime.as_ref(), || {
+        retained_arguments(runtime.as_ref(), arguments)
+    });
+    let selected = runtime.clone();
     let work = async move {
+        let runtime = runtime.as_ref();
         invoke_resolved_object_method_in_scope(runtime, method, arguments?, requested_outputs).await
     };
-    super::context::scope(runtime, work)
+    super::context::scope(selected.as_ref(), work)
 }
 
 pub(crate) fn invoke_resolved_object_method_retained<'a>(
@@ -322,7 +410,17 @@ pub fn invoke_object_end<'access>(
     component_count: usize,
     access: &'access super::ObjectAccessContext,
 ) -> impl Future<Output = Result<Option<RootedValue>, RuntimeError>> + use<'access> {
-    invoke_object_end_with_context(None, receiver, component_index, component_count, access)
+    let runtime = crate::context::legacy::active();
+    async move {
+        invoke_object_end_with_context(
+            runtime.as_ref(),
+            receiver,
+            component_index,
+            component_count,
+            access,
+        )
+        .await
+    }
 }
 
 pub fn invoke_object_end_in_context<'runtime, 'access>(
@@ -381,13 +479,20 @@ pub fn invoke_prepared_object_end<'method>(
     component_index: usize,
     component_count: usize,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
-    invoke_prepared_object_end_with_context(
-        None,
-        method,
-        receiver,
-        component_index,
-        component_count,
-    )
+    let runtime = crate::context::legacy::active();
+    async move {
+        super::context::scope(
+            runtime.as_ref(),
+            invoke_prepared_object_end_with_context(
+                runtime.as_ref(),
+                method,
+                receiver,
+                component_index,
+                component_count,
+            ),
+        )
+        .await
+    }
 }
 
 pub(super) async fn invoke_prepared_object_end_with_context(
@@ -435,7 +540,7 @@ pub(super) async fn invoke_prepared_object_end_with_context(
         .try_into_single()
 }
 
-fn retain_protocol_inputs(
+pub(crate) fn retain_protocol_inputs(
     runtime: Option<&RuntimeContext>,
     base: &Value,
     path: &ObjectSubscriptPath,
@@ -447,7 +552,8 @@ fn retain_protocol_inputs(
         };
         components.iter().filter_map(|component| match component {
             crate::object::indexing::ObjectIndexComponent::Value(value) => Some(value),
-            crate::object::indexing::ObjectIndexComponent::Colon => None,
+            crate::object::indexing::ObjectIndexComponent::Colon
+            | crate::object::indexing::ObjectIndexComponent::End => None,
         })
     }));
     match runtime {

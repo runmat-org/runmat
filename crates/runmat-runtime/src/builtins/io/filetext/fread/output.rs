@@ -236,7 +236,7 @@ pub(super) async fn finalize_numeric(
     count_read: usize,
     mut values: NumericStorage,
     cooperation: &mut super::super::cooperation::FileCooperation,
-) -> Result<(NumericStorage, usize, usize), ReadFailure> {
+) -> BuiltinResult<(NumericStorage, usize, usize)> {
     let (rows, cols, target) = match size_spec {
         SizeSpec::All | SizeSpec::Count(_) => (count_read, 1, count_read),
         SizeSpec::Matrix {
@@ -264,26 +264,21 @@ pub(super) async fn resize_numeric_storage(
     storage: &mut NumericStorage,
     len: usize,
     cooperation: &mut super::super::cooperation::FileCooperation,
-) -> Result<(), ReadFailure> {
+) -> BuiltinResult<()> {
     macro_rules! resize {
         ($values:expr, $zero:expr, $width:expr) => {{
             if $values.len() < len {
                 $values.try_reserve(len - $values.len()).map_err(|error| {
-                    ReadFailure::from(
-                        build_runtime_error("fread: output storage cannot be allocated")
-                            .with_builtin(BUILTIN_NAME)
-                            .with_source(error)
-                            .build(),
-                    )
+                    build_runtime_error("fread: output storage cannot be allocated")
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(error)
+                        .build()
                 })?;
                 while $values.len() < len {
                     let end = len.min($values.len().saturating_add(STORAGE_FILL_CHUNK));
                     let added = end - $values.len();
                     $values.resize(end, $zero);
-                    cooperation
-                        .completed(added.saturating_mul($width))
-                        .await
-                        .map_err(ReadFailure::from)?;
+                    cooperation.completed(added.saturating_mul($width)).await?;
                 }
             } else {
                 $values.truncate(len);

@@ -41,6 +41,8 @@ pub struct RuntimeContextState {
     /// this session's service cannot revoke their common global owner.
     pub(crate) host_effect_generation: Arc<AtomicU64>,
     pub(crate) resource_cleanup: SessionResourceCleanup,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) worker_invocation_resources: Cell<bool>,
     /// A lifecycle host is the strong owner. Cloneable runtime contexts see
     /// only its weak registry, so callback tasks cannot own their host.
     pub(crate) cleanup_registry: RefCell<
@@ -100,6 +102,8 @@ impl RuntimeContextState {
             session_lease: Arc::new(()),
             host_effect_generation: Arc::new(AtomicU64::new(0)),
             resource_cleanup: SessionResourceCleanup::default(),
+            #[cfg(target_arch = "wasm32")]
+            worker_invocation_resources: Cell::new(false),
             cleanup_registry: RefCell::new(None),
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),

@@ -111,7 +111,8 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::StructArray(array) => struct_ops::flip(array, 1)
             .map(Value::StructArray)
             .map_err(|error| struct_ops::remap(error, |message| fliplr_error(message))),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

@@ -140,6 +140,10 @@ pub(in crate::builtins::io::tabular) fn append_sheet_cell_xml(
             "      <c r=\"{reference}\"><v>{}</v></c>\n",
             format_numeric(*value)
         )),
+        CellValue::Single(value) => xml.push_str(&format!(
+            "      <c r=\"{reference}\"><v>{}</v></c>\n",
+            format_numeric(f64::from(*value))
+        )),
         CellValue::Integer(value) => xml.push_str(&format!(
             "      <c r=\"{reference}\"><v>{}</v></c>\n",
             value.decimal_string()

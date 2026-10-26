@@ -124,4 +124,51 @@ fn public_option_spellings_decode_to_closed_identities() {
         Some(OdeOptionField::MaxSteps)
     );
     assert_eq!(OdeOptionField::from_public_name("Events"), None);
+    assert_eq!(
+        OdeOptionField::from_public_name("rEfInE"),
+        Some(OdeOptionField::Refine)
+    );
+    assert!(!OdeOptionField::Refine.is_floating_control());
+    assert_eq!(OdeOptionField::ALL.len(), 6);
+}
+
+#[test]
+fn scalar_single_controls_and_empty_numeric_defaults_match_solver_admission() {
+    let fields = BTreeMap::from([
+        (
+            "RelTol".into(),
+            numeric(NumericClass::Single, ShapeFact::Scalar),
+        ),
+        (
+            "Refine".into(),
+            numeric(NumericClass::Double, ShapeFact::Scalar),
+        ),
+        (
+            "AbsTol".into(),
+            numeric(
+                NumericClass::Double,
+                ShapeFact::from(vec![Some(0), Some(0)]),
+            ),
+        ),
+    ]);
+    let request = CallRequest {
+        arguments: vec![
+            ValueFact::unknown(DynamicReason::UnresolvedCallable),
+            numeric(
+                NumericClass::Double,
+                ShapeFact::from(vec![Some(1), Some(2)]),
+            ),
+            numeric(NumericClass::Double, ShapeFact::Scalar),
+            ValueFact::proven(
+                ValueKindFact::Struct(StructFact::scalar(fields, true)),
+                ShapeFact::Scalar,
+                StorageFact::Scalar,
+            ),
+        ],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+    };
+    assert!(crate::infer_catalog_call(&ODE45_CATALOG_ENTRY, &request)
+        .diagnostics
+        .is_empty());
 }

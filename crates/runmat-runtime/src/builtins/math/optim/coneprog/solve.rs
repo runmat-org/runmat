@@ -1,200 +1,262 @@
-//! Cooperative transitions retain the original barrier/relaxation arithmetic.
+//! Domain outcomes from one shared cooperative sparse numerical substrate.
 use super::*;
-use crate::builtins::math::optim::common::ScalarCooperation;
+use clarabel::solver::{DefaultInfo, DefaultSettingsBuilder, DefaultSolver, SolverStatus};
+use model::ConicModel;
 
+struct Progress<'a> {
+    cooperation: &'a mut ScalarCooperation,
+    controls: &'a mut options::Controls,
+    previous: u32,
+    work: u64,
+    scale: f64,
+}
+async fn run(
+    model: &ConicModel,
+    feasibility: bool,
+    controls: &mut options::Controls,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<DefaultSolver<f64>> {
+    cooperation.completed(0).await?;
+    controls.begin_phase(feasibility, cooperation.runtime())?;
+    let tol = controls.tol.min(1e-9);
+    let settings = DefaultSettingsBuilder::default()
+        .verbose(false)
+        .direct_solve_method("qdldl".into())
+        .max_iter(controls.limit())
+        .tol_gap_abs(tol)
+        .tol_gap_rel(tol)
+        .tol_feas(tol)
+        .tol_infeas_abs(tol)
+        .tol_infeas_rel(tol)
+        .build()
+        .map_err(|source| {
+            build_runtime_error("coneprog: invalid backend settings")
+                .with_builtin(CONEPROG)
+                .with_source(source)
+                .build()
+        })?;
+    let original = model.view();
+    let mut progress = Progress {
+        cooperation,
+        controls,
+        previous: 0,
+        work: original.work_units().max(1),
+        scale: if feasibility {
+            1.0
+        } else {
+            model.objective_scale
+        },
+    };
+    conic::backend::run(
+        &original,
+        feasibility,
+        settings,
+        &mut progress,
+        async |progress: &mut Progress<'_>, info: &DefaultInfo<f64>| {
+            progress.cooperation.completed(0).await?;
+            progress.controls.record(
+                &mut progress.previous,
+                info,
+                progress.scale,
+                progress.cooperation.runtime(),
+            )?;
+            progress.cooperation.completed(progress.work).await
+        },
+    )
+    .await
+}
 pub(super) async fn solve_coneprog(
-    problem: &ConeProgram,
+    problem: ConeProgram,
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<ConeOutcome> {
     cooperation.completed(0).await?;
-    if let Some(reason) = impossible_bounds(problem) {
-        return Ok(ConeOutcome::infeasible(problem, reason));
+    for (&lower, &upper) in problem.lb.iter().zip(&problem.ub) {
+        if lower > upper || lower == f64::INFINITY || upper == f64::NEG_INFINITY {
+            let outcome = ConeOutcome::failure(
+                -2,
+                0,
+                "No finite feasible point exists within the supplied bounds.",
+            );
+            problem.options.summary(&outcome, cooperation.runtime())?;
+            return Ok(outcome);
+        }
     }
-    if problem.soc.is_empty()
-        && problem.a_ineq.is_empty()
-        && problem.a_eq.is_empty()
-        && problem.lb.iter().all(|v| !v.is_finite())
-        && problem.ub.iter().all(|v| !v.is_finite())
-        && norm(&problem.f) > problem.options.tol
-    {
-        return Ok(ConeOutcome::unbounded(problem));
-    }
-
-    let mut linear_rows = problem.a_ineq.clone();
-    let mut linear_rhs = problem.b_ineq.clone();
-    append_bound_rows(problem, &mut linear_rows, &mut linear_rhs);
-
-    let Some(mut x) = initial_strict_point(problem, &linear_rows, &linear_rhs, cooperation).await?
-    else {
-        return Ok(ConeOutcome::infeasible(problem, "No feasible point found."));
-    };
-    if constraint_violation(problem, &x) > 1.0e-5 {
-        return Ok(ConeOutcome::infeasible(problem, "No feasible point found."));
-    }
-    if !is_strictly_feasible(problem, &linear_rows, &linear_rhs, &x) {
-        relax_into_interior(problem, &linear_rows, &linear_rhs, &mut x, cooperation).await?;
-    }
-    if !is_strictly_feasible(problem, &linear_rows, &linear_rhs, &x)
-        && norm(&problem.f) <= problem.options.tol
-    {
-        let fval = dot(&problem.f, &x);
-        return finish_optimal(problem, x, fval, 0, cooperation).await;
-    }
-    if !is_strictly_feasible(problem, &linear_rows, &linear_rhs, &x) {
-        return Ok(ConeOutcome::infeasible(
-            problem,
-            "No strict feasible point found.",
-        ));
-    }
-
-    let mut iterations = 0usize;
-    let outer = 9usize;
-    let inner = (problem.options.max_iter / outer.max(1)).max(8);
-    let mut t = 1.0;
-    for _ in 0..outer {
-        for _ in 0..inner {
-            cooperation.completed(0).await?;
-            iterations = iterations.checked_add(1).ok_or_else(|| {
-                coneprog_error(
-                    &ERROR_INVALID_INPUT,
-                    "coneprog: iteration count exceeds platform limits",
-                )
-            })?;
-            let grad = barrier_gradient(problem, &linear_rows, &linear_rhs, &x, t);
-            let projected = project_gradient(&problem.a_eq, &grad);
-            cooperation.completed(1).await?;
-            let grad_norm = norm(&projected);
-            if grad_norm <= problem.options.tol {
-                break;
+    let (model, mut controls) = ConicModel::new(problem, cooperation).await?;
+    let outcome = solve_model(&model, &mut controls, cooperation).await?;
+    controls.summary(&outcome, cooperation.runtime())?;
+    Ok(outcome)
+}
+async fn solve_model(
+    model: &ConicModel,
+    controls: &mut options::Controls,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<ConeOutcome> {
+    let mut solver = run(model, false, controls, cooperation).await?;
+    match solver.solution.status {
+        SolverStatus::Solved | SolverStatus::AlmostSolved => {
+            let mut z = std::mem::take(&mut solver.solution.z);
+            for chunk in z.chunks_mut(1024) {
+                for value in chunk.iter_mut() {
+                    *value *= model.objective_scale;
+                }
+                cooperation.completed(chunk.len() as u64).await?;
             }
-            let current = barrier_value(problem, &linear_rows, &linear_rhs, &x, t);
-            let mut step = 1.0 / (1.0 + grad_norm);
-            let mut accepted = false;
-            for _ in 0..40 {
-                let mut candidate = x
-                    .iter()
-                    .zip(&projected)
-                    .map(|(xi, gi)| xi - step * gi)
-                    .collect::<Vec<_>>();
-                cooperation.completed(0).await?;
-                project_to_equalities(&problem.a_eq, &problem.b_eq, &mut candidate);
-                cooperation.completed(1).await?;
-                if is_strictly_feasible(problem, &linear_rows, &linear_rhs, &candidate)
-                    && barrier_value(problem, &linear_rows, &linear_rhs, &candidate, t)
-                        <= current - 1.0e-4 * step * grad_norm * grad_norm
+            let checked =
+                validation::optimum(model, &solver.solution.x, &z, controls.tol, cooperation)
+                    .await?;
+            if let Some(checked) = checked.filter(|value| value.valid) {
+                let lambda = if crate::output_count::current_output_count()
+                    .is_some_and(|count| count >= 5)
                 {
-                    x = candidate;
-                    accepted = true;
-                    break;
-                }
-                step *= 0.5;
-            }
-            if !accepted {
-                break;
+                    Some(model.multipliers(&z, cooperation).await?)
+                } else {
+                    None
+                };
+                let x = std::mem::take(&mut solver.solution.x);
+                drop(solver);
+                Ok(ConeOutcome{x:Some(x),fval:Some(checked.point.objective),lambda,exitflag:1,iterations:controls.iterations(),
+                    constrviolation:checked.point.violation,primalfeasibility:checked.point.normalized,dualfeasibility:checked.dual,dualitygap:checked.gap,
+                    message:"Optimal solution found; original primal, dual and cone complementarity checks passed.".into()})
+            } else {
+                Ok(ConeOutcome::failure(
+                    -10,
+                    controls.iterations(),
+                    "Numerical result did not satisfy original conic optimality checks.",
+                ))
             }
         }
-        t *= 10.0;
+        SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible => {
+            if conic::terminal::primal_infeasible(&model.view(), &solver.solution.z, cooperation)
+                .await?
+            {
+                Ok(ConeOutcome::failure(
+                    -2,
+                    controls.iterations(),
+                    "Problem is infeasible; original conic certificate verified.",
+                ))
+            } else {
+                Ok(ConeOutcome::failure(
+                    -10,
+                    controls.iterations(),
+                    "Infeasibility certificate could not be verified against the original cones.",
+                ))
+            }
+        }
+        SolverStatus::DualInfeasible | SolverStatus::AlmostDualInfeasible => {
+            if !conic::terminal::descent_ray(&model.view(), &solver.solution.x, cooperation).await?
+            {
+                return Ok(ConeOutcome::failure(
+                    -10,
+                    controls.iterations(),
+                    "Descent certificate could not be verified against the original cones.",
+                ));
+            }
+            if conic::terminal::feasible_point(&model.view(), &model.seed, cooperation).await? {
+                return Ok(ConeOutcome::failure(
+                    -3,
+                    controls.iterations(),
+                    "Problem is feasible and unbounded below.",
+                ));
+            }
+            // No overlapping kernels: the auxiliary problem proves genuine
+            // feasibility, sharing the same total iteration/context budget.
+            drop(solver);
+            if controls.remaining() == 0 {
+                return Ok(ConeOutcome::failure(
+                    0,
+                    controls.iterations(),
+                    "Iteration limit reached before primal feasibility was established.",
+                ));
+            }
+            let auxiliary = run(model, true, controls, cooperation).await?;
+            if conic::terminal::feasible_point(&model.view(), &auxiliary.solution.x, cooperation)
+                .await?
+            {
+                Ok(ConeOutcome::failure(
+                    -3,
+                    controls.iterations(),
+                    "Problem is feasible and unbounded below.",
+                ))
+            } else if matches!(
+                auxiliary.solution.status,
+                SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible
+            ) && conic::terminal::primal_infeasible(
+                &model.view(),
+                &auxiliary.solution.z,
+                cooperation,
+            )
+            .await?
+            {
+                Ok(ConeOutcome::failure(
+                    -2,
+                    controls.iterations(),
+                    "Problem is infeasible; auxiliary original-cone certificate verified.",
+                ))
+            } else {
+                let stopped = matches!(
+                    auxiliary.solution.status,
+                    SolverStatus::MaxIterations
+                        | SolverStatus::MaxTime
+                        | SolverStatus::CallbackTerminated
+                );
+                Ok(ConeOutcome::failure(
+                    if stopped { 0 } else { -10 },
+                    controls.iterations(),
+                    "Primal feasibility was not established; no unbounded conclusion is published.",
+                ))
+            }
+        }
+        SolverStatus::MaxIterations | SolverStatus::MaxTime | SolverStatus::CallbackTerminated => {
+            incumbent(
+                model,
+                std::mem::take(&mut solver.solution.x),
+                0,
+                controls,
+                "Iteration limit reached before conic convergence.",
+                cooperation,
+            )
+            .await
+        }
+        SolverStatus::InsufficientProgress => {
+            incumbent(
+                model,
+                std::mem::take(&mut solver.solution.x),
+                -7,
+                controls,
+                "Search direction became too small for further progress.",
+                cooperation,
+            )
+            .await
+        }
+        SolverStatus::Unsolved | SolverStatus::NumericalError => Ok(ConeOutcome::failure(
+            -10,
+            controls.iterations(),
+            "Numerical instability prevented a verified conic result.",
+        )),
     }
-
-    let violation = constraint_violation(problem, &x);
-    if violation > 1.0e-4 {
-        return Ok(ConeOutcome::infeasible(problem, "No feasible point found."));
-    }
-    let fval = dot(&problem.f, &x);
-    finish_optimal(problem, x, fval, iterations, cooperation).await
 }
-
-async fn initial_strict_point(
-    problem: &ConeProgram,
-    linear_rows: &[Vec<f64>],
-    linear_rhs: &[f64],
-    cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<Option<Vec<f64>>> {
-    cooperation.completed(0).await?;
-    let n = problem.f.len();
-    let mut x = if problem.a_eq.is_empty() {
-        vec![0.0; n]
-    } else {
-        let result = pseudo_solve(&problem.a_eq, &problem.b_eq, n);
-        cooperation.completed(1).await?;
-        let Some(result) = result else {
-            return Ok(None);
-        };
-        result
-    };
-    for i in 0..n {
-        x[i] = match (problem.lb[i].is_finite(), problem.ub[i].is_finite()) {
-            (true, true) => 0.5 * (problem.lb[i] + problem.ub[i]),
-            (true, false) if x[i] <= problem.lb[i] => problem.lb[i] + 1.0,
-            (false, true) if x[i] >= problem.ub[i] => problem.ub[i] - 1.0,
-            _ => x[i],
-        };
-        cooperation.completed(1).await?;
-    }
-    cooperation.completed(0).await?;
-    project_to_equalities(&problem.a_eq, &problem.b_eq, &mut x);
-    cooperation.completed(1).await?;
-    relax_into_interior(problem, linear_rows, linear_rhs, &mut x, cooperation).await?;
-    Ok(Some(x))
-}
-
-async fn relax_into_interior(
-    problem: &ConeProgram,
-    linear_rows: &[Vec<f64>],
-    linear_rhs: &[f64],
-    x: &mut [f64],
-    cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<()> {
-    for _ in 0..800 {
-        cooperation.completed(0).await?;
-        let mut changed = false;
-        for (row, rhs) in linear_rows.iter().zip(linear_rhs) {
-            let slack = rhs - dot(row, x);
-            if slack <= STRICT_MARGIN {
-                let denom = dot(row, row).max(STRICT_MARGIN);
-                let correction = (STRICT_MARGIN - slack) / denom;
-                for (xi, ai) in x.iter_mut().zip(row) {
-                    *xi -= correction * ai;
-                }
-                changed = true;
-            }
-            cooperation.completed(1).await?;
-        }
-        for constraint in &problem.soc {
-            let z = cone_z(constraint, x);
-            let z_norm = norm(&z);
-            let q = dot(&constraint.d, x) + constraint.gamma;
-            let violation = z_norm - q + STRICT_MARGIN;
-            if violation > 0.0 {
-                let grad = cone_violation_gradient(constraint, &z, z_norm);
-                let denom = dot(&grad, &grad).max(STRICT_MARGIN);
-                for (xi, gi) in x.iter_mut().zip(&grad) {
-                    *xi -= violation * gi / denom;
-                }
-                changed = true;
-            }
-            cooperation.completed(1).await?;
-        }
-        cooperation.completed(0).await?;
-        project_to_equalities(&problem.a_eq, &problem.b_eq, x);
-        cooperation.completed(1).await?;
-        if !changed {
-            break;
-        }
-    }
-    Ok(())
-}
-
-async fn finish_optimal(
-    problem: &ConeProgram,
+async fn incumbent(
+    model: &ConicModel,
     x: Vec<f64>,
-    fval: f64,
-    iterations: usize,
+    flag: i32,
+    controls: &options::Controls,
+    message: &str,
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<ConeOutcome> {
-    cooperation.completed(0).await?;
-    // The KKT multiplier SVD keeps its existing arithmetic and atomic boundary.
-    let outcome = optimal_outcome(problem, x, fval, iterations);
-    cooperation.completed(1).await?;
+    let mut outcome = ConeOutcome::failure(flag, controls.iterations(), message);
+    if let Some(point) = validation::primal(model, &x, cooperation)
+        .await?
+        .filter(|point| point.normalized <= controls.tol)
+    {
+        outcome.x = Some(x);
+        outcome.fval = Some(point.objective);
+        outcome.constrviolation = point.violation;
+        outcome.primalfeasibility = point.normalized;
+        outcome.message.push_str(" Returned x is feasible to the requested tolerance; no optimality or multiplier claim is made.");
+    } else {
+        outcome
+            .message
+            .push_str(" No tolerance-feasible incumbent is available.");
+    }
     Ok(outcome)
 }

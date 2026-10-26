@@ -24,6 +24,10 @@ async fn request_for_source(
     filename: &str,
     source: &str,
 ) -> ProgramExecutionRequest {
+    // Source compilation uses the filesystem that the JavaScript host normally installs.
+    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let unit = session
         .compile_executable_unit(
@@ -32,10 +36,10 @@ async fn request_for_source(
         )
         .await
         .unwrap();
-    let mut envelope = unit
+    let envelope = unit
         .portable_envelope_for_with_interop(None, interop.clone())
         .unwrap();
-    envelope.manifest.capabilities.0.extend(capabilities);
+    assert!(capabilities.is_subset(&envelope.manifest.capabilities.0));
     let accelerators = runmat_execution::resource::accelerator_requirements_for_capabilities(
         &envelope.manifest.capabilities,
     )
@@ -80,6 +84,8 @@ async fn request_for_source(
     )
     .unwrap();
     ProgramExecutionRequest {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
@@ -102,16 +108,8 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
     let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
         runmat_filesystem::MemoryFsProvider::new(),
     ));
-    let request = request_with_contract(
-        runmat_types::InteropManifest::empty(),
-        BTreeSet::from([
-            runmat_types::CapabilityRequirement::HostRuntime,
-            runmat_types::CapabilityRequirement::Filesystem,
-            runmat_types::CapabilityRequirement::UserInterface,
-            runmat_types::CapabilityRequirement::ParallelRuntime,
-        ]),
-    )
-    .await;
+    let request =
+        request_with_contract(runmat_types::InteropManifest::empty(), BTreeSet::new()).await;
 
     let response =
         runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
@@ -119,7 +117,7 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
             .unwrap();
     let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
     let ProgramExecutionResponse::Success { outputs } = response else {
-        panic!("browser rejected an exact portable program artifact");
+        panic!("browser rejected an exact portable program artifact: {response:?}");
     };
     let [ValuePayload::Inline(value)] = outputs.as_slice() else {
         panic!("browser returned an invalid output vector");
@@ -175,11 +173,14 @@ async fn browser_executes_deal_requested_discarded_and_zero_outputs_exactly() {
 
 #[wasm_bindgen_test]
 async fn browser_deal_count_error_keeps_identifier_and_evaluates_input_once() {
+    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
     let request = request_for_source(
         runmat_types::InteropManifest::empty(),
         BTreeSet::new(),
         "dealCountProbe.m",
-        "function result = dealCountProbe()\nglobal dealCalls; dealCalls = 0; caught = false;\ntry\n operation = @deal;\n [a,b,c] = operation(nextDealInput(), uint16(8));\ncatch failure\n caught = strcmp(failure.identifier, 'RunMat:deal:InputOutputCountMismatch');\nend\nassert(caught);\nresult = dealCalls;\nend\nfunction value = nextDealInput()\nglobal dealCalls; dealCalls = dealCalls + 1;\nvalue = uint64(9007199254740992) + uint64(1);\nend\n",
+        "function result = dealCountProbe()\nglobal dealCalls; dealCalls = 0; caught = false;\ntry\n operation = @deal;\n [a,b,c] = operation(nextDealInput(), uint16(8));\ncatch failure\n caught = strcmp(failure.identifier, 'RunMat:deal:InputOutputCountMismatch');\n assert(caught, failure.identifier);\nend\nassert(caught);\nresult = dealCalls;\nend\nfunction value = nextDealInput()\nglobal dealCalls; dealCalls = dealCalls + 1;\nvalue = uint64(9007199254740992) + uint64(1);\nend\n",
     )
     .await;
     let response =
@@ -202,9 +203,11 @@ async fn browser_filesystem_admission_tracks_the_installed_read_provider() {
 
     use runmat_filesystem::{MemoryFsProvider, PlaceholderFsProvider};
 
-    let request = request_with_contract(
+    let request = request_for_source(
         runmat_types::InteropManifest::empty(),
         BTreeSet::from([runmat_types::CapabilityRequirement::Filesystem]),
+        "read-provider.m",
+        "ans = fileread('fixture.txt');",
     )
     .await;
     {
@@ -220,7 +223,11 @@ async fn browser_filesystem_admission_tracks_the_installed_read_provider() {
         assert!(message.contains("browser host rejected unavailable executable capabilities"));
     }
     {
-        let _provider = runmat_filesystem::replace_provider(Arc::new(MemoryFsProvider::new()));
+        let provider = MemoryFsProvider::new();
+        provider
+            .write_project_path("fixture.txt", b"original browser file")
+            .unwrap();
+        let _provider = runmat_filesystem::replace_provider(Arc::new(provider));
         let response =
             runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
                 .await

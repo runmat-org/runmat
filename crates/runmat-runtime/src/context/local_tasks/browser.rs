@@ -2,10 +2,12 @@
 //! abandoned child immediately without waiting for a later browser callback.
 
 use super::*;
+use std::collections::BTreeMap;
+use std::ops::Bound::{Excluded, Unbounded};
 struct BrowserInner {
     token: LocalTaskOwnerToken,
     closed: Cell<bool>,
-    tasks: RefCell<HashMap<u64, Rc<TaskSlot>>>,
+    tasks: RefCell<BTreeMap<u64, Rc<TaskSlot>>>,
     next_task: Cell<u64>,
 }
 
@@ -83,6 +85,7 @@ impl BrowserPort {
         };
         let state = Rc::new(TaskState {
             outcome: Cell::new(None),
+            retired: Cell::new(false),
             waiters: RefCell::new(HashMap::new()),
             next_waiter: Cell::new(0),
         });
@@ -124,7 +127,7 @@ impl BrowserLocalTaskSupervisor {
         Self(Rc::new(BrowserInner {
             token: LocalTaskOwnerToken::new(),
             closed: Cell::new(false),
-            tasks: RefCell::new(HashMap::new()),
+            tasks: RefCell::new(BTreeMap::new()),
             next_task: Cell::new(0),
         }))
     }
@@ -145,9 +148,49 @@ impl BrowserLocalTaskSupervisor {
         if self.0.closed.replace(true) {
             return;
         }
-        let tasks = std::mem::take(&mut *self.0.tasks.borrow_mut());
-        for slot in tasks.into_values() {
+        let mut previous = None;
+        loop {
+            // Keep the existing table authoritative throughout destruction.
+            // cancel/drop/wake may synchronously reenter retirement; an empty
+            // temporary table would falsely prove that no child remains.
+            let next = {
+                let tasks = self.0.tasks.borrow();
+                let entry = match previous {
+                    None => tasks.first_key_value(),
+                    Some(id) => tasks.range((Excluded(id), Unbounded)).next(),
+                };
+                entry.map(|(id, slot)| (*id, slot.clone()))
+            };
+            let Some((id, slot)) = next else {
+                break;
+            };
+            previous = Some(id);
             slot.cancel();
+        }
+    }
+
+    /// Close admission, then await the actual drop fence of every admitted
+    /// child, including a child already being polled when shutdown began.
+    pub async fn shutdown_and_retire(&self) {
+        self.shutdown();
+        loop {
+            let next = self
+                .0
+                .tasks
+                .borrow()
+                .first_key_value()
+                .map(|(id, slot)| (*id, slot.clone()));
+            let Some((id, slot)) = next else {
+                break;
+            };
+            slot.wait_for_retirement().await;
+            let mut tasks = self.0.tasks.borrow_mut();
+            if tasks
+                .get(&id)
+                .is_some_and(|current| Rc::ptr_eq(current, &slot) && slot.is_retired())
+            {
+                tasks.remove(&id);
+            }
         }
     }
 }
@@ -176,6 +219,48 @@ mod tests {
 
     fn owner() -> RuntimeContextLocalId {
         RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).local_identity()
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn reentrant_shutdown_cannot_prove_retirement_during_child_drop() {
+        struct Probe {
+            supervisor: Weak<BrowserLocalTaskSupervisor>,
+            observed_pending: Rc<Cell<bool>>,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                let supervisor = self.supervisor.upgrade().expect("host is live");
+                let mut retirement = Box::pin(supervisor.shutdown_and_retire());
+                let wake = futures::task::noop_waker();
+                let mut context = Context::from_waker(&wake);
+                self.observed_pending
+                    .set(retirement.as_mut().poll(&mut context).is_pending());
+            }
+        }
+        let supervisor = Rc::new(BrowserLocalTaskSupervisor::new());
+        let observed_pending = Rc::new(Cell::new(false));
+        let probe = Probe {
+            supervisor: Rc::downgrade(&supervisor),
+            observed_pending: observed_pending.clone(),
+        };
+        let owner = owner();
+        let _lease = supervisor
+            .submission_port(owner)
+            .spawn_local(
+                owner,
+                Box::pin(async move {
+                    let _probe = probe;
+                    std::future::pending::<()>().await;
+                }),
+            )
+            .expect("child admission");
+        supervisor.shutdown();
+        assert!(
+            observed_pending.get(),
+            "the exact dropping slot must stay visible"
+        );
+        supervisor.shutdown_and_retire().await;
+        assert!(supervisor.0.tasks.borrow().is_empty());
     }
 
     fn profiled_runtime(
@@ -225,6 +310,9 @@ mod tests {
             )
             .expect("active admission");
         assert_eq!(active.join().await, RuntimeLocalTaskOutcome::Cancelled);
+        supervisor.shutdown_and_retire().await;
+        assert!(active.state.retired.get());
+        assert!(supervisor.0.tasks.borrow().is_empty());
         assert_eq!(cancelled.seal().deferred_work.expect("valid").missing, 1);
     }
 

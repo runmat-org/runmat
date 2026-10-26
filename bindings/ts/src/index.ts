@@ -1,6 +1,30 @@
 export { physicalLengthUnit, physicalLengthUnitName, isPhysicalLengthUnit, resolvedSourceLengthUnit, sourceLengthUnitLabel, PHYSICAL_LENGTH_UNITS } from "./physical.js";
 export type { LengthUnit, LengthUnitEvidence } from "./physical.js";
 import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
+import type {
+  RunMatProgramTaskCancellation,
+  RunMatProgramTaskTerminal,
+  RunMatWorkerProgramInvocation,
+  RunMatProgramWorkerInventory,
+} from "./execution/program-terminal.js";
+export type {
+  RunMatProgramExecutionAssignment,
+  RunMatProgramAcceleratorLease,
+  RunMatWorkerAcceleratorDevice,
+  RunMatWorkerHostCapability,
+  RunMatProgramWorkerInventory,
+  RunMatProgramCancellationReason,
+  RunMatProgramTaskCancellation,
+  RunMatProgramTaskRetirement,
+  RunMatProgramTaskTerminal,
+  RunMatProgramRuntimeFailure,
+  RunMatProgramExecutionResponse,
+  RunMatWorkerProgramInvocation,
+} from "./execution/program-terminal.js";
+export {
+  sameProgramAssignment,
+  isRetiredProgramTerminal,
+} from "./execution/program-terminal.js";
 import type { InputManifest } from "./generated/collaboration-contracts.js";
 export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
 export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
@@ -410,7 +434,7 @@ export interface BrowserExecutionHostCapabilities {
   maxWorkers: number;
   /** Exact owned builtin route; successful launch responses and cancelOwned acknowledgments certify task settlement. */
   ownedBuiltinWork?: boolean;
-  /** Assignment-bound program invocations with verified Runtime retirement. */
+  /** Selected Direct/Graph route with an exact Runtime-owned retirement terminal. Rejection is not proof. */
   selectedProgramWork?: boolean;
 }
 
@@ -422,65 +446,18 @@ export interface BrowserProgramLaunchRequest {
 
 export interface RunMatExecutionHost {
   capabilities: BrowserExecutionHostCapabilities;
+  /** Actual module/factory host+device inventory; required for selectedProgramWork. */
   workerInventory?: RunMatProgramWorkerInventory;
-  launchProgram?(request: BrowserProgramLaunchRequest): Promise<RunMatProgramTaskTerminal>;
-  cancelProgram?(request: RunMatProgramTaskCancellation): Promise<RunMatProgramTaskTerminal>;
   launch(request: BrowserProgramLaunchRequest): Promise<Record<string, unknown>>;
   cancel(taskId: string): void | Promise<void>;
-  /** Required when ownedBuiltinWork is true. Only this task-bound physical-exit acknowledgment releases retained work. */
+  /** Required only for ownedBuiltinWork: literal task-bound physical-exit proof. */
   cancelOwned?(taskId: string): Promise<{
     taskId: string;
     state: "terminated" | "notRunning";
   }>;
-}
-
-/** The scheduler's exact identity, including its fenced resource leases. */
-export interface RunMatProgramExecutionAssignment {
-  scope_id: string;
-  pool_id: string;
-  task_id: string;
-  attempt_id: string;
-  worker_id: string;
-  backend: string;
-  resources: { accelerator_leases: readonly unknown[] };
-}
-export interface RunMatProgramWorkerInventory {
-  schema_version: 1;
-  host: Record<string, unknown>;
-  accelerators: readonly Record<string, unknown>[];
-}
-export interface RunMatProgramTaskCancellation {
-  schema_version: 1;
-  assignment: RunMatProgramExecutionAssignment;
-  reason: "user" | "deadline" | "dependency_failed" | "parent_scope" | "quota" | "shutdown";
-}
-export interface RunMatProgramTaskTerminal {
-  schema_version: 1;
-  assignment: RunMatProgramExecutionAssignment;
-  response: { outcome: string; [key: string]: unknown };
-  retirement: { state: "retired" } | { state: "unverified"; diagnostic: string };
-}
-export interface RunMatWorkerProgramInvocation {
-  readonly assignment: RunMatProgramExecutionAssignment;
-  run(): Promise<RunMatProgramTaskTerminal>;
-  cancel(request: RunMatProgramTaskCancellation): void;
-  free(): void;
-}
-
-function sameWireValue(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
-  if (Array.isArray(left) !== Array.isArray(right)) return false;
-  const a = Object.keys(left), b = Object.keys(right);
-  return a.length === b.length && a.every(key => Object.prototype.hasOwnProperty.call(right, key)
-    && sameWireValue((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
-}
-export function sameProgramAssignment(left: RunMatProgramExecutionAssignment, right: RunMatProgramExecutionAssignment): boolean {
-  return sameWireValue(left, right);
-}
-export function isRetiredProgramTerminal(assignment: RunMatProgramExecutionAssignment, terminal: RunMatProgramTaskTerminal): boolean {
-  return terminal.schema_version === 1 && sameProgramAssignment(assignment, terminal.assignment)
-    && terminal.retirement?.state === "retired";
+  /** Required for selectedProgramWork. The terminal must preserve the actual assignment. */
+  launchProgram?(request: BrowserProgramLaunchRequest): Promise<RunMatProgramTaskTerminal>;
+  cancelProgram?(request: RunMatProgramTaskCancellation): Promise<RunMatProgramTaskTerminal>;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -1503,8 +1480,6 @@ interface RunMatNativeModule {
       | Promise<WasmInitInput>
   ) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
-  workerProgramInventory?: () => RunMatProgramWorkerInventory;
-  createWorkerProgramInvocation?: (request: Record<string, unknown>) => RunMatWorkerProgramInvocation;
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
@@ -1512,6 +1487,10 @@ interface RunMatNativeModule {
   executeWorkerProgram?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  createWorkerProgramInvocation?: (
+    request: Record<string, unknown>
+  ) => RunMatWorkerProgramInvocation;
+  workerProgramInventory?: () => RunMatProgramWorkerInventory;
   buildGitSnapshot?: (
     repository: string,
     subdir: string,
@@ -1724,20 +1703,6 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   return new WebRunMatSession(session, packageCache.close);
 }
 
-/** Inspect this physical worker's Runtime, never another realm's providers. */
-export async function workerProgramInventory(wasmModule?: WasmInitInput): Promise<RunMatProgramWorkerInventory> {
-  const native = await loadNativeModule(wasmModule);
-  if (!native.workerProgramInventory) throw new Error("The loaded Runtime lacks selected-program worker inventory. Rebuild the SDK and WASM together.");
-  return native.workerProgramInventory();
-}
-
-/** Owns one admitted invocation; run settles only with its original retirement receipt. */
-export async function createWorkerProgramInvocation(request: Record<string, unknown>, wasmModule?: WasmInitInput): Promise<RunMatWorkerProgramInvocation> {
-  const native = await loadNativeModule(wasmModule);
-  if (!native.createWorkerProgramInvocation) throw new Error("The loaded Runtime lacks selected-program invocation control. Rebuild the SDK and WASM together.");
-  return native.createWorkerProgramInvocation(request);
-}
-
 export async function executeProgramArtifact(
   request: Record<string, unknown>,
   wasmModule?: WasmInitInput
@@ -1765,6 +1730,29 @@ export async function executeWorkerProgram(
     throw new Error("The loaded RunMat module does not support worker program execution.");
   }
   return native.executeWorkerProgram(request);
+}
+
+/** Construct one selected invocation inside an actual isolated CPU worker. */
+export async function createWorkerProgramInvocation(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<RunMatWorkerProgramInvocation> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.createWorkerProgramInvocation !== "function") {
+    throw new Error("The loaded RunMat module does not support controlled worker programs.");
+  }
+  return native.createWorkerProgramInvocation(request);
+}
+
+/** Describe the stock CPU worker factory from this exact loaded module. */
+export async function workerProgramInventory(
+  wasmModule?: WasmInitInput
+): Promise<RunMatProgramWorkerInventory> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.workerProgramInventory !== "function") {
+    throw new Error("The loaded RunMat module has no qualified worker factory inventory.");
+  }
+  return native.workerProgramInventory();
 }
 
 export async function fetchGitSnapshot(

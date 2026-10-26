@@ -28,6 +28,31 @@ pub enum TaskCancellationCause {
     },
 }
 
+impl TaskCancellationCause {
+    /// A provider observation is not authority to manufacture a user stop.
+    /// Preserve the scheduler's original cause and its actual attempt fence.
+    pub fn reason_for_attempt(
+        self,
+        request: &super::AttemptRequest,
+    ) -> Result<CancellationReason, String> {
+        match self {
+            Self::Task { task_id, reason } if task_id == request.task_id => Ok(reason),
+            Self::Scope { reason, .. } => Ok(reason),
+            Self::Deadline if request.task.deadline_unix_millis.is_some() => {
+                Ok(CancellationReason::Deadline)
+            }
+            Self::WallTime { attempt_id } if attempt_id == request.id => {
+                Ok(CancellationReason::Deadline)
+            }
+            Self::Dependency { .. } => Ok(CancellationReason::DependencyFailed),
+            Self::Provider { .. } => {
+                Err("provider observation is not a scheduler cancellation command".into())
+            }
+            _ => Err("scheduler cancellation cause contradicts its fenced attempt".into()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskCancellation {

@@ -2,7 +2,7 @@
 //! A worker response alone cannot override cancellation, rejection or retry fences.
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::state::TaskState;
@@ -35,6 +35,8 @@ struct PersistedCompletion {
 
 /// Exact staged Graph authority; the child receives only these scalars.
 pub(crate) struct GraphAttemptAuthority {
+    /// Exact caller-visible source identity, distinct from private store key.
+    pub(super) request_artifact_id: ArtifactId,
     pub(super) artifact_id: ArtifactId,
     pub(super) stored_digest: Digest,
     pub(super) stored_length: u64,
@@ -46,8 +48,10 @@ pub(crate) struct GraphAttemptAuthority {
 
 pub(crate) struct TaskCompletion {
     value: Mutex<Option<PersistedCompletion>>,
+    terminal_wake: Arc<tokio::sync::Notify>,
     progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
     cancellation: runmat_execution::cancellation::CancellationSource,
+    control_failure: Mutex<Option<String>>,
     /// 0 idle, 1 attempt launched, 2 cancelled before any launch.
     pub(super) launch_state: AtomicU8,
     completion_order: AtomicU64,
@@ -58,8 +62,10 @@ impl TaskCompletion {
     pub(super) fn new() -> Self {
         Self {
             value: Mutex::new(None),
+            terminal_wake: Arc::new(tokio::sync::Notify::new()),
             progress: Mutex::new(VecDeque::new()),
             cancellation: runmat_execution::cancellation::CancellationSource::new(),
+            control_failure: Mutex::new(None),
             launch_state: AtomicU8::new(0),
             completion_order: AtomicU64::new(NO_COMPLETION_ORDER),
             graph_authority: None,
@@ -68,6 +74,7 @@ impl TaskCompletion {
 
     pub(super) fn new_graph(
         stored: StreamedGraphArtifact,
+        request_artifact_id: ArtifactId,
         context: ProgramInvocationContext,
         requested_outputs: u16,
         callable: ProgramCallable,
@@ -75,6 +82,7 @@ impl TaskCompletion {
     ) -> Self {
         let mut completion = Self::new();
         completion.graph_authority = Some(GraphAttemptAuthority {
+            request_artifact_id,
             artifact_id: stored.id,
             stored_digest: stored.digest,
             stored_length: stored.length,
@@ -173,6 +181,20 @@ impl TaskCompletion {
         self.cancel_with_reason(CancellationReason::User);
     }
 
+    pub(crate) fn fail_control(&self, message: String) {
+        *self.control_failure.lock().expect("task control poisoned") = Some(message);
+        // Shutdown stops the physical owner but is not reported as user
+        // cancellation; process::execute_attempt retains the protocol failure.
+        self.cancel_with_reason(CancellationReason::Shutdown);
+    }
+
+    pub(crate) fn control_failure(&self) -> Option<String> {
+        self.control_failure
+            .lock()
+            .expect("task control poisoned")
+            .clone()
+    }
+
     pub(crate) fn cancel_with_reason(&self, reason: CancellationReason) {
         self.cancellation.cancel(reason);
         // A Graph worker may still be executing foreign shutdown callbacks.
@@ -212,6 +234,20 @@ impl TaskCompletion {
             .collect()
     }
 
+    pub(crate) async fn wait_terminal(self: Arc<Self>) {
+        // Exactly one terminal publication; notify_one retains the permit if
+        // publication races the first poll. No timer or worker polling loop.
+        if self
+            .value
+            .lock()
+            .expect("task completion poisoned")
+            .is_some()
+        {
+            return;
+        }
+        self.terminal_wake.clone().notified_owned().await;
+    }
+
     pub(super) fn complete(&self, value: CompletedTask, checkpoint: NativeCheckpointEvidence) {
         let mut result = self.value.lock().expect("task completion poisoned");
         if result.is_none() {
@@ -220,6 +256,8 @@ impl TaskCompletion {
                 checkpoint,
             });
             self.mark_completed();
+            drop(result);
+            self.terminal_wake.notify_one();
         }
     }
 
@@ -285,6 +323,22 @@ pub(super) fn from_task_snapshot(
             })
         }
     };
+    let unresolved = evidence.attempts.iter().find_map(|attempt| {
+        attempt
+            .unverified_retirement
+            .as_ref()
+            .filter(|evidence| evidence.retired_at_driver_millis.is_none())
+    });
+    if let Some(uncertainty) = unresolved {
+        return Some(CompletedTask {
+            result: Err(TransferFailure::RetirementUnverified(
+                observed
+                    .err()
+                    .map_or_else(|| uncertainty.diagnostic.clone(), |error| error.to_string()),
+            )),
+            evidence: Some(evidence),
+        });
+    }
     if evidence
         .attempts
         .iter()
@@ -305,7 +359,7 @@ pub(super) fn from_task_snapshot(
         })),
         TaskState::Cancelled => Err(TransferFailure::Cancelled),
         TaskState::Indeterminate => Err(match observed {
-            Err(failure @ TransferFailure::WorkerLost(_)) => failure,
+            Err(failure) => failure,
             _ => TransferFailure::WorkerLost("local task outcome is indeterminate".into()),
         }),
         _ => unreachable!("terminal task checked above"),

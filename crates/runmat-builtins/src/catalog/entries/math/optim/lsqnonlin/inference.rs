@@ -96,26 +96,70 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         scalar_facts::callback_invocation_with_arguments(&callback_request, vec![x.clone()]);
     let value = callback.as_ref().and_then(|c| c.outputs.first());
     facts::numeric(value, 0, false, &mut diagnostics);
+    let may_have = |field: crate::OptimOptionField| match options.map(|value| &value.kind) {
+        None => false,
+        Some(ValueKindFact::Struct(options)) => {
+            !options.fields_complete
+                || options.fields.keys().any(|name| {
+                    crate::OptimOptionField::parse_for_solver(name, crate::OptimSolver::Lsqnonlin)
+                        == Some(field)
+                })
+        }
+        Some(ValueKindFact::Numeric(_))
+            if options.and_then(|value| value.shape.element_count()) == Some(0) =>
+        {
+            false
+        }
+        _ => true,
+    };
+    let may_stop_before_evaluation = may_have(crate::OptimOptionField::MaxFunEvals);
+    let supplied_may_be_selected = may_have(crate::OptimOptionField::SpecifyObjectiveGradient);
     let residual = facts::double(
-        value.map(|v| v.shape.clone()).unwrap_or(ShapeFact::Unknown),
+        if may_stop_before_evaluation {
+            ShapeFact::Unknown
+        } else {
+            value.map(|v| v.shape.clone()).unwrap_or(ShapeFact::Unknown)
+        },
         StorageFact::Dense,
     );
     let m = value.and_then(|v| v.shape.element_count());
+    let shape = if may_stop_before_evaluation {
+        ShapeFact::Unknown
+    } else {
+        ShapeFact::from(vec![m, n])
+    };
+    let jacobian = if supplied_may_be_selected {
+        // The option value is not retained in a StructFact. An accepted
+        // supplied matrix may keep native single/double and CSC storage.
+        let mut fact = ValueFact::unknown(DynamicReason::RuntimeValue);
+        fact.shape = shape;
+        fact.residency = ResidencyFact::Host;
+        fact
+    } else {
+        facts::double(shape, StorageFact::Dense)
+    };
+    let mut information = facts::diagnostics(&[
+        "iterations",
+        "funcCount",
+        "firstorderopt",
+        "stepsize",
+        "cgiterations",
+        "lssteplength",
+    ]);
+    if may_stop_before_evaluation {
+        // not-started adds requestedalgorithm; do not assert a closed inventory.
+        if let ValueKindFact::Struct(fields) = &mut information.kind {
+            fields.fields_complete = false;
+        }
+    }
     let outputs = vec![
         x.clone(),
         facts::scalar(),
         residual,
         facts::scalar(),
-        facts::diagnostics(&[
-            "iterations",
-            "funcCount",
-            "firstorderopt",
-            "stepsize",
-            "cgiterations",
-            "lssteplength",
-        ]),
-        facts::lambda(&x),
-        facts::matrix(m, n),
+        information,
+        facts::lambda(&facts::double(ShapeFact::Unknown, StorageFact::Unknown)),
+        jacobian,
     ];
     facts::finish(request, entry, outputs, diagnostics, callback)
 }

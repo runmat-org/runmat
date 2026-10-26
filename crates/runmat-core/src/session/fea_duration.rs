@@ -33,7 +33,6 @@ pub enum FeaTimingRoute {
 #[derive(Clone)]
 pub struct FeaExecutionTimingProfile {
     placement: Rc<PlacementSession>,
-    /// `None` when the session has no timing service; no key (and no estimate) exists then.
     clock: Option<Rc<dyn RuntimeTimingService>>,
     authority: Digest,
 }
@@ -53,6 +52,8 @@ pub struct FeaExecutionTimingObservation {
 }
 
 impl RunMatSession {
+    /// Missing Clock authority leaves advisory estimates unavailable; it does
+    /// not install a fallback clock or prevent untimed execution.
     pub fn fea_execution_timing_profile(&self) -> FeaExecutionTimingProfile {
         FeaExecutionTimingProfile {
             placement: self.placement_session.clone(),
@@ -87,7 +88,7 @@ impl FeaExecutionTimingProfile {
         let clock = self
             .clock
             .clone()
-            .ok_or_else(|| "This session has no timing service".to_string())?;
+            .ok_or_else(|| "Timing is unavailable for this session".to_owned())?;
         if cores == 0
             || cores
                 > u32::from(runmat_analysis_fea::planning::resource::MAX_LOCAL_EXECUTION_THREADS)
@@ -200,12 +201,7 @@ impl FeaExecutionTimingObservation {
                 });
             return;
         }
-        let Some(elapsed) = self
-            .key
-            .clock
-            .monotonic_elapsed()
-            .checked_sub(self.started)
-        else {
+        let Some(elapsed) = self.key.clock.monotonic_elapsed().checked_sub(self.started) else {
             return;
         };
         let Ok(elapsed) = u64::try_from(elapsed.as_nanos()) else {

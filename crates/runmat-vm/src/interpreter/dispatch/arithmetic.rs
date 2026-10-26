@@ -300,13 +300,7 @@ pub(super) fn suspend_arithmetic<'a>(
                             let args = [a, b];
                             return crate::call::call_builtin_async(runtime, "power", &args).await;
                         }
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(runtime, AutoBinaryOp::MatrixPower, &a, &b)
-                                .await?;
-                        RootedValue::new(
-                            runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)?,
-                        )
-                        .map_err(|error| error.into_runtime_error())
+                        crate::call::call_builtin_async(runtime, "mpower", &[a, b]).await
                     },
                 )
                 .await?;
@@ -355,7 +349,8 @@ pub(super) fn suspend_arithmetic<'a>(
         crate::bytecode::Instr::Transpose => {
             runmat_runtime::execution::admit_stack_mutation(runtime, async move {
                 arithmetic_ops::unary(stack, |value| async move {
-                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
+                    let promoted =
+                        accel_promote_unary(runtime, AutoUnaryOp::Transpose, &value).await?;
                     crate::call::call_builtin_async(runtime, "transpose", &[promoted]).await
                 })
                 .await?;
@@ -365,7 +360,8 @@ pub(super) fn suspend_arithmetic<'a>(
         crate::bytecode::Instr::ConjugateTranspose => {
             runmat_runtime::execution::admit_stack_mutation(runtime, async move {
                 arithmetic_ops::unary(stack, |value| async move {
-                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
+                    let promoted =
+                        accel_promote_unary(runtime, AutoUnaryOp::Transpose, &value).await?;
                     crate::call::call_builtin_async(runtime, "ctranspose", &[promoted]).await
                 })
                 .await?;

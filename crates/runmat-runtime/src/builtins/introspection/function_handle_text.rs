@@ -82,6 +82,7 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
         | Value::MethodFunctionHandle(name) => Ok(Value::String(name.into_text_owner())),
         Value::BoundFunctionHandle(handle) => Ok(Value::String(handle.name.clone())),
         Value::Closure(closure) => Ok(Value::String(closure.function_name.clone())),
+        Value::ScopedFunctionHandle(_) => Ok(Value::from("<invocation-scoped callable>")),
         other => Err(crate::runtime_descriptor_error_with_detail(
             "func2str",
             &FUNC2STR_ERROR_HANDLE_TYPE_INVALID,

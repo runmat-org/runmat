@@ -220,13 +220,17 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
         GeometryRegionDefinition {
             region_id: "body".into(),
             role: GeometryRegionRole::Solid,
-            selector: GeometryRegionSelector::PersistentId(expected_solid.analysis_selection_id().unwrap()),
+            selector: GeometryRegionSelector::PersistentId(
+                expected_solid.analysis_selection_id().unwrap(),
+            ),
             cardinality: GeometryRegionCardinality::ExactlyOne,
         },
         GeometryRegionDefinition {
             region_id: "support".into(),
             role: GeometryRegionRole::Face,
-            selector: GeometryRegionSelector::PersistentId(expected_face.analysis_selection_id().unwrap()),
+            selector: GeometryRegionSelector::PersistentId(
+                expected_face.analysis_selection_id().unwrap(),
+            ),
             cardinality: GeometryRegionCardinality::ExactlyOne,
         },
     ];
@@ -429,6 +433,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     );
     let function = FunctionAnalysis {
         function: ProgramFunctionId(4),
+        captures: Vec::new(),
         callable: CallableFact {
             capabilities: Default::default(),
             identity: None,
@@ -443,6 +448,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
         },
         outputs: vec![output],
         effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+        cooperative_suspension: false,
         capabilities: CapabilitySet::default(),
         convergence: FunctionConvergence::Exact,
     };
@@ -455,7 +461,19 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
         },
         revision(),
         callable,
-        Digest::sha256(b"executable"),
+        runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(
+            &runmat_execution::ExecutableIdentity {
+                program: revision(),
+                root_package: "examples".into(),
+                entrypoint: "makeBoredBlock".into(),
+                entrypoint_function: Some(function.function),
+                entrypoint_kind: runmat_execution::ExecutableEntrypointKind::Function,
+                declaration_class: None,
+                source_digest: Digest::sha256(b"executable"),
+            },
+            "makeBoredBlock",
+        )
+        .unwrap(),
         &function,
         &BTreeSet::new(),
     )
@@ -626,7 +644,9 @@ fn imported_request(
             module_path: "examples/imported.fea".into(),
             geometry_id: "box".into(),
             parameters: Vec::new(),
-            source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+            source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
+                preview_extent_m: None,
+                named_selections: None,
                 unit_evidence: Default::default(),
                 logical_path: "box.brep".into(),
                 format: GeometrySourceFormat::Brep,
@@ -639,8 +659,7 @@ fn imported_request(
                     ..Default::default()
                 },
                 exchange: None,
-                shared_interfaces: false,
-            }),
+                shared_interfaces: false,            })),
             regions: body_region(),
             cad_parameters: Vec::new(),
         },

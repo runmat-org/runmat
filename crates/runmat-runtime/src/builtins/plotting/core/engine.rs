@@ -441,11 +441,7 @@ pub async fn render_figure_snapshot_with_camera_state(
 #[path = "engine/geometry_export.rs"]
 mod geometry_export;
 #[cfg(feature = "plot-core")]
-pub use geometry_export::{
-    measure_geometry_scene_observation, render_geometry_observation_snapshot,
-    render_geometry_scene_observation_snapshot, render_geometry_scene_snapshot,
-    render_geometry_scene_snapshot_with_camera_state,
-};
+pub use geometry_export::{measure_geometry_scene_observation, render_geometry_scene_observation_snapshot, render_geometry_observation_snapshot, render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state};
 
 #[cfg(feature = "plot-core")]
 fn surface_plot_camera_to_core_camera(
@@ -498,7 +494,7 @@ pub(crate) mod native {
     static PLOTTING_MODE_OVERRIDE: OnceCell<RwLock<Option<PlottingMode>>> = OnceCell::new();
 
     #[derive(Debug, Clone, Copy)]
-    enum PlottingMode {
+    pub(super) enum PlottingMode {
         Auto,
         Interactive,
         Static,
@@ -521,9 +517,27 @@ pub(crate) mod native {
         });
     }
 
-    pub fn render(handle: FigureHandle, mut figure: Figure) -> BuiltinResult<String> {
+    pub fn render(handle: FigureHandle, figure: Figure) -> BuiltinResult<String> {
         ensure_figure_event_bridge();
-        match detect_mode() {
+        render_in_mode(handle, figure, detect_mode())
+    }
+
+    /// Automatic presentation is separate from explicit print/snapshot export.
+    /// Hidden figures still close an existing window; metadata-only construction
+    /// in static mode waits for content instead of trying to export a blank scene.
+    pub(super) fn render_in_mode(
+        handle: FigureHandle,
+        mut figure: Figure,
+        mode: PlottingMode,
+    ) -> BuiltinResult<String> {
+        if !figure.visible {
+            runmat_plot::gui::lifecycle::request_close(handle.as_u32());
+            return Ok(format!("Figure {} is hidden", handle.as_u32()));
+        }
+        if matches!(mode, PlottingMode::Static) && figure.is_empty() {
+            return Ok(format!("Figure {} updated", handle.as_u32()));
+        }
+        match mode {
             PlottingMode::Interactive => interactive_export(handle, &mut figure),
             PlottingMode::Static => static_export(&mut figure, "plot.png"),
             PlottingMode::Auto => interactive_export(handle, &mut figure),
@@ -581,6 +595,10 @@ pub(crate) mod native {
         });
     }
 }
+
+#[cfg(all(test, feature = "gui", not(target_arch = "wasm32")))]
+#[path = "engine/native_presentation_tests.rs"]
+mod native_presentation_tests;
 
 #[cfg(all(test, feature = "plot-core"))]
 mod tests {

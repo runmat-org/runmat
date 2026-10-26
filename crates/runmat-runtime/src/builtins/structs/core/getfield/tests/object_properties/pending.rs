@@ -18,11 +18,13 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let wrong = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
+    wrong.set_error_namespace("EnclosingGetfield");
     let cancellation = runmat_execution::cancellation::CancellationSource::new();
     let selected = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ))
     .with_cancellation_token(cancellation.token());
+    selected.set_error_namespace("SelectedGetfield");
     selected.set_runmat_extensions_enabled(true);
     let expected_session = selected.session_lease();
     let _wrong_scope = wrong.enter();
@@ -127,7 +129,18 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let Poll::Ready(Err(error)) = cancelled_work.as_mut().poll(&mut context) else {
         panic!("selected cancelled getter must finish with a typed error")
     };
-    assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+    // The admitted continuation fences cancellation before repolling the
+    // getter. Its captured selected namespace, not the enclosing scope or
+    // the inner cooperation adapter's default namespace, owns this error.
+    assert_eq!(error.identifier(), Some("SelectedGetfield:Cancelled"));
+    assert!(crate::runtime_error::error_has_control_cancellation_origin(
+        &error
+    ));
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
     drop(cancelled_work);
     assert_eq!(dropped.load(Ordering::SeqCst), 2);
     assert_eq!(crate::output_count::current_output_count(), Some(2));

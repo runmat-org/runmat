@@ -70,6 +70,14 @@ fn compile_with_bound_analysis(
     entrypoint: EntrypointId,
     analysis: &runmat_mir::analysis::AnalysisStore,
 ) -> Result<Bytecode, CompileError> {
+    // Retain the typed context failure before layout's broader structural
+    // validation formats its diagnostic as text.
+    for body in mir.bodies.values() {
+        body.validate_prepared_assignment_index_contexts()
+            .map_err(|error| {
+                CompileError::new(error.to_string()).with_identifier(error.identifier())
+            })?;
+    }
     #[cfg(feature = "native-accel")]
     let stage_analysis = crate::bytecode::fusion_stage::OrderedFusionStageAnalysis::new(analysis);
     let layout = derive_layout(hir, mir)
@@ -1147,6 +1155,40 @@ mod tests {
         body: &mut MirBody,
         mut mutation: impl FnMut(&mut MirPlace) -> bool,
     ) -> bool {
+        // A fixed target is represented by one source occurrence shared by
+        // its preparation phases and commit. Mutate that same contract in
+        // every phase so the negative case reaches the context validator,
+        // rather than failing because two copies disagree.
+        let mut prepared = None;
+        'select: for block in &body.blocks {
+            for statement in &block.statements {
+                let assignment = match &statement.kind {
+                    MirStmtKind::PrepareFixedAssignment(phase) => &phase.assignment,
+                    MirStmtKind::PreparedAssign { preparation, .. } => preparation,
+                    _ => continue,
+                };
+                let mut place = assignment.mutation.place.clone();
+                if mutation(&mut place) {
+                    prepared = Some((assignment.source_statement, place));
+                    break 'select;
+                }
+            }
+        }
+        if let Some((source, place)) = prepared {
+            for block in &mut body.blocks {
+                for statement in &mut block.statements {
+                    let assignment = match &mut statement.kind {
+                        MirStmtKind::PrepareFixedAssignment(phase) => &mut phase.assignment,
+                        MirStmtKind::PreparedAssign { preparation, .. } => preparation,
+                        _ => continue,
+                    };
+                    if assignment.source_statement == source {
+                        assignment.mutation.place = place.clone();
+                    }
+                }
+            }
+            return true;
+        }
         for block in &mut body.blocks {
             for statement_index in 0..block.statements.len() {
                 let (original, replacement) = {

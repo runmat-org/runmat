@@ -237,6 +237,7 @@ pub(crate) fn is_allocation_free_workspace_alias(value: &Value) -> bool {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::OutputList(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

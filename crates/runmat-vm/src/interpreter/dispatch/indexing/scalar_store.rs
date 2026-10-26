@@ -117,7 +117,8 @@ pub(super) async fn dispatch(
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
                 | Value::BoundFunctionHandle(_)
-                | Value::Closure(_) => {
+                | Value::Closure(_)
+                | Value::ScopedFunctionHandle(_) => {
                     return Err(crate::interpreter::errors::mex(
                         "UnsupportedFunctionHandleSelector",
                         "Function handle call does not support assignment selector syntax",

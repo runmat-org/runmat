@@ -303,6 +303,7 @@ pub fn record_value_output(label: Option<&str>, value: &Value) -> Result<(), cra
     let displaced = with_console_state(|state| state.last_value_output.replace(retained));
     drop(displaced);
     let value_text = match value {
+        Value::Struct(_) => crate::builtins::io::disp::format_for_display(value).join("\n"),
         Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::datetime_display_text(value)
                 .ok()

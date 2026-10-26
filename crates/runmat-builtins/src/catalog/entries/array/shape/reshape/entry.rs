@@ -14,7 +14,7 @@ pub const RESHAPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             inference::infer,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        async_behavior: BuiltinAsyncBehavior::MaySuspendLocally,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Reshape),
         workspace_effect: None,

@@ -10,7 +10,7 @@ use runmat_builtins::{
     HAMMING_ERROR_INTERNAL, HAMMING_ERROR_PROVIDER_FAILED, HANN_ERROR_INTERNAL,
     HANN_ERROR_PROVIDER_FAILED,
 };
-use runmat_types::{WindowOutputType, WindowSampling};
+use runmat_builtins::{WindowOutputType, WindowSampling};
 use runmat_value::Value;
 
 use crate::builtins::common::gpu_helpers;

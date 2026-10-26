@@ -174,15 +174,15 @@ impl CanonicalFluidProblem<'_> {
             ));
         }
         Ok(CanonicalFluidInitialState {
-            velocity_m_per_s: velocity_m_per_s,
+            velocity_m_per_s,
             pressure_reference_pa: runmat_types::physical::Quantity::<
                 runmat_types::physical::kind::Pressure,
                 _,
             >::new(
                 self.pressure_reference_pa.canonical_values().clone()
             ),
-            pressure_fluctuation_pa: pressure_fluctuation_pa,
-            face_volume_flux_m3_per_s: face_volume_flux_m3_per_s,
+            pressure_fluctuation_pa,
+            face_volume_flux_m3_per_s,
             applied_condition_ids,
             default_velocity_nodes,
         })

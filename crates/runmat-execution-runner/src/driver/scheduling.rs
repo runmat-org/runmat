@@ -124,6 +124,7 @@ impl Driver {
                 state: AttemptState::Assigned,
                 assigned_at_millis: self.snapshot.now_millis,
                 terminal: None,
+                unverified_retirement: None,
                 cancellation_requested_at: None,
                 cancellation_escalation: None,
             },

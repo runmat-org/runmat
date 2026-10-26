@@ -418,6 +418,7 @@ fn unwind_drops_owned_future_before_deferred_missing_settlement() {
         .expect("admitted deferred owner");
     let state = Rc::new(TaskState {
         outcome: Cell::new(None),
+        retired: Cell::new(false),
         waiters: RefCell::new(HashMap::new()),
         next_waiter: Cell::new(0),
     });
@@ -429,4 +430,55 @@ fn unwind_drops_owned_future_before_deferred_missing_settlement() {
     assert!(result.is_err());
     assert_eq!(drops.get(), 1);
     assert_eq!(deferred_counts(command).missing, 1);
+}
+
+#[test]
+fn cancellation_retirement_fence_follows_reentrant_future_drop() {
+    struct ReentrantDrop {
+        slot: Rc<RefCell<std::rc::Weak<TaskSlot>>>,
+        state: Rc<TaskState>,
+        observed: Rc<Cell<bool>>,
+    }
+    impl Future for ReentrantDrop {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            Poll::Pending
+        }
+    }
+    impl Drop for ReentrantDrop {
+        fn drop(&mut self) {
+            let slot = self.slot.borrow().upgrade().expect("slot is live");
+            slot.cancel();
+            assert_eq!(
+                self.state.outcome.get(),
+                Some(RuntimeLocalTaskOutcome::Cancelled)
+            );
+            assert!(
+                !self.state.retired.get(),
+                "reentrant cancellation is not a drop fence"
+            );
+            self.observed.set(true);
+        }
+    }
+    let state = Rc::new(TaskState {
+        outcome: Cell::new(None),
+        retired: Cell::new(false),
+        waiters: RefCell::new(HashMap::new()),
+        next_waiter: Cell::new(0),
+    });
+    let weak = Rc::new(RefCell::new(std::rc::Weak::new()));
+    let observed = Rc::new(Cell::new(false));
+    let slot = Rc::new(TaskSlot::new(
+        Box::pin(ReentrantDrop {
+            slot: weak.clone(),
+            state: state.clone(),
+            observed: observed.clone(),
+        }),
+        state.clone(),
+        None,
+    ));
+    *weak.borrow_mut() = Rc::downgrade(&slot);
+    slot.cancel();
+    assert!(observed.get());
+    assert!(state.retired.get());
 }

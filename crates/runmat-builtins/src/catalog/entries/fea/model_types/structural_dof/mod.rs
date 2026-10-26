@@ -3,15 +3,12 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod rx;
 mod ry;
 mod rz;
 mod ux;
 mod uy;
 mod uz;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

@@ -11,7 +11,8 @@ use crate::RuntimeError;
 pub(super) fn is_callable_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)
@@ -38,18 +39,20 @@ pub(super) fn component_arguments(
     runtime: Option<&RuntimeContext>,
     components: runmat_value::ExactArrayStorage<ObjectIndexComponent>,
 ) -> Result<crate::execution::RootedValues, RuntimeError> {
-    if components
-        .iter()
-        .any(|component| matches!(component, ObjectIndexComponent::Colon))
-    {
+    if components.iter().any(|component| {
+        matches!(
+            component,
+            ObjectIndexComponent::Colon | ObjectIndexComponent::End
+        )
+    }) {
         return Err(semantic_error(
             "UnsupportedFunctionHandleSelector",
-            "function handle call does not support colon selector syntax",
+            "function handle call does not support colon or contextual end selector syntax",
         ));
     }
     let values = components.iter().filter_map(|component| match component {
         ObjectIndexComponent::Value(value) => Some(value),
-        ObjectIndexComponent::Colon => None,
+        ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
     });
     let _roots = match runtime {
         Some(runtime) => {
@@ -64,11 +67,15 @@ pub(super) fn component_arguments(
         Ok(match &mut source {
             Ok(owner) => match owner.next().expect("exact selector count") {
                 ObjectIndexComponent::Value(value) => value,
-                ObjectIndexComponent::Colon => unreachable!("colon rejected"),
+                ObjectIndexComponent::Colon | ObjectIndexComponent::End => {
+                    unreachable!("syntax selectors rejected")
+                }
             },
             Err(owner) => match &owner[index] {
                 ObjectIndexComponent::Value(value) => value.clone(),
-                ObjectIndexComponent::Colon => unreachable!("colon rejected"),
+                ObjectIndexComponent::Colon | ObjectIndexComponent::End => {
+                    unreachable!("syntax selectors rejected")
+                }
             },
         })
     };

@@ -24,7 +24,8 @@ pub use bytecode::program::{
     SelectedStaticProductTarget, SelectedStaticSiteOwner,
 };
 pub use graph_schema::{
-    selected_graph_code_required_schema, selected_graph_execution_required_schema,
+    selected_callable_capture_required_schema, selected_graph_code_required_schema,
+    selected_graph_execution_required_schema,
 };
 
 pub use bytecode::{
@@ -110,6 +111,9 @@ pub use layout::{
     derive_layout, remap_layout_function_ids, LayoutError, VmAssemblyLayout, VmEntrypointLayout,
     VmFrameAbi, VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,
 };
+pub use program_execution::callable_admission::{
+    select_retained_worker_callable, select_worker_callable,
+};
 pub use program_execution::{
     admit_executable_unit, prepare_retained_callable_units, selected_graph_callable_facts,
     selected_graph_callable_facts_for_owner, AdmittedExecutableUnit, ExecutableUnitAdmissionError,
@@ -118,14 +122,15 @@ pub use program_execution::{
     SelectedFingerprintInvariant, SelectedGraphCallableFacts, SelectedUnitInteropReceipt,
 };
 pub use program_execution::{
-    encode_portable_region_sources_v1, execute_deferred_program_in_context, execute_graph_request,
-    execute_graph_request_with_context, execute_graph_request_with_context_recording,
+    compiled_graph_execution_capabilities, encode_portable_region_sources_v1,
+    execute_deferred_program_in_context, execute_graph_request, execute_graph_request_with_context,
+    execute_graph_request_with_context_recording,
     execute_graph_request_with_selected_foreign_ports_recording, execute_prepared_graph_request,
     execute_program_request, execute_program_request_with_context,
     execute_program_request_with_context_and_bundle, materialize_deferred_call,
     materialize_deferred_graph_call, prepare_graph_request_with_selected_foreign_ports_recording,
     runtime_failure_response, GraphFailureSourceRecorder, PreparedSelectedGraph,
-    SelectedGraphCleanupContexts, SelectedGraphForeignPorts,
+    RestoredSelectedGraph, SelectedGraphCleanupContexts, SelectedGraphForeignPorts,
 };
 pub use runtime::workspace::{
     take_updated_workspace_assigned_report, take_updated_workspace_state, workspace_admission,

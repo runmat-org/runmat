@@ -193,6 +193,7 @@ pub(super) fn begin_sequence_output_target<'a>(
                             &seed,
                             Some(seed.clone()),
                             *root_creation,
+                            context.bytecode,
                         )?,
                         None => state.begin_destination(
                             &context.authority.context.runtime,
@@ -200,6 +201,7 @@ pub(super) fn begin_sequence_output_target<'a>(
                             &original,
                             None,
                             *root_creation,
+                            context.bytecode,
                         )?,
                     }
                 }

@@ -28,13 +28,12 @@ pub fn read_subscript_path<'a>(
     path: ObjectSubscriptPath,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
-    super::context::admit_future_with(None, move || async move {
-        let request = SubscriptReadRequest::require_single(access);
-        let sequence =
-            read_subscript_path_sequence(None, base, path, request, caller_function_name).await?;
-        resolve_single(sequence)
-    })
+    read_subscript_path_with_runtime(
+        crate::context::legacy::active(),
+        base,
+        path,
+        caller_function_name,
+    )
 }
 
 pub fn read_subscript_path_in_context<'a>(
@@ -43,12 +42,27 @@ pub fn read_subscript_path_in_context<'a>(
     path: ObjectSubscriptPath,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
-    super::context::admit_future_with(Some(runtime), move || async move {
-        let request = SubscriptReadRequest::require_single(access);
-        let sequence =
-            read_subscript_path_sequence(Some(runtime), base, path, request, caller_function_name)
-                .await?;
+    read_subscript_path_with_runtime(Some(runtime.clone()), base, path, caller_function_name)
+}
+
+/// Explicit original authority; None never selects a foreign ambient session.
+pub(crate) fn read_subscript_path_with_runtime<'a>(
+    runtime: Option<RuntimeContext>,
+    base: Value,
+    path: ObjectSubscriptPath,
+    caller_function_name: Option<&'a str>,
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
+    let admission = runtime.clone();
+    super::context::admit_future_with(admission.as_ref(), move || async move {
+        let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
+        let sequence = read_subscript_path_sequence(
+            runtime,
+            base,
+            path,
+            SubscriptReadRequest::require_single(access),
+            caller_function_name,
+        )
+        .await?;
         resolve_single(sequence)
     })
 }
@@ -58,35 +72,55 @@ pub fn read_subscript_path_with_access(
     path: ObjectSubscriptPath,
     access: super::ObjectAccessContext,
 ) -> crate::execution::RuntimeContinuationFuture<'static, RootedValue> {
-    super::context::admit_future_with(None, move || async move {
-        let sequence = read_subscript_path_sequence(
-            None,
-            base,
-            path,
-            SubscriptReadRequest::require_single(access),
-            None,
-        )
-        .await?;
-        resolve_single(sequence)
-    })
+    read_single_with_access(crate::context::legacy::active(), base, path, access)
 }
-
 pub fn read_subscript_path_with_access_in_context<'a>(
     runtime: &'a RuntimeContext,
     base: Value,
     path: ObjectSubscriptPath,
     access: super::ObjectAccessContext,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    super::context::admit_future_with(Some(runtime), move || async move {
-        let sequence = read_subscript_path_sequence(
-            Some(runtime),
-            base,
-            path,
-            SubscriptReadRequest::require_single(access),
-            None,
+    read_single_with_access(Some(runtime.clone()), base, path, access)
+}
+fn read_single_with_access<'a>(
+    runtime: Option<RuntimeContext>,
+    base: Value,
+    path: ObjectSubscriptPath,
+    access: super::ObjectAccessContext,
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
+    let admission = runtime.clone();
+    super::context::admit_future_with(admission.as_ref(), move || async move {
+        resolve_single(
+            read_subscript_path_sequence(
+                runtime,
+                base,
+                path,
+                SubscriptReadRequest::require_single(access),
+                None,
+            )
+            .await?,
         )
-        .await?;
-        resolve_single(sequence)
+    })
+}
+
+pub(super) fn read_single_with_borrowed_access<'a>(
+    runtime: Option<&'a RuntimeContext>,
+    base: Value,
+    path: ObjectSubscriptPath,
+    access: &'a super::ObjectAccessContext,
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
+    let owned_runtime = runtime.cloned();
+    super::context::admit_future_with(runtime, move || async move {
+        resolve_single(
+            read_subscript_path_sequence(
+                owned_runtime,
+                base,
+                path,
+                SubscriptReadRequest::single(access),
+                None,
+            )
+            .await?,
+        )
     })
 }
 
@@ -95,29 +129,29 @@ pub fn read_subscript_path_sequence_with_access(
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
 ) -> crate::execution::RuntimeContinuationFuture<'static, RootedValueSequence> {
-    read_subscript_path_sequence(None, base, path, request, None)
+    read_subscript_path_sequence(crate::context::legacy::active(), base, path, request, None)
 }
-
 pub fn read_subscript_path_sequence_with_access_in_context<'a>(
     runtime: &'a RuntimeContext,
     base: Value,
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
-    read_subscript_path_sequence(Some(runtime), base, path, request, None)
+    read_subscript_path_sequence(Some(runtime.clone()), base, path, request, None)
 }
-
-fn read_subscript_path_sequence<'a>(
-    runtime: Option<&'a RuntimeContext>,
+fn read_subscript_path_sequence<'a, A: std::borrow::Borrow<super::ObjectAccessContext> + 'a>(
+    runtime: Option<RuntimeContext>,
     base: Value,
     path: ObjectSubscriptPath,
-    request: SubscriptReadRequest,
+    request: SubscriptReadRequest<A>,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
-    super::context::admit_future_with(runtime, move || async move {
+    let admission = runtime.clone();
+    super::context::admit_future_with(admission.as_ref(), move || async move {
+        let runtime = runtime.as_ref();
         let _base_root = crate::execution::RootedValueLease::for_values(std::iter::once(&base))
             .map_err(|error| error.into_runtime_error())?;
-        match resolve_object_protocol(&base, ObjectProtocol::Subsref, &request.access)? {
+        match resolve_object_protocol(&base, ObjectProtocol::Subsref, request.access())? {
             Some(method) => invoke_prepared_subsref(runtime, base, path, method, &request).await,
             None => {
                 read_default_steps(
@@ -139,9 +173,14 @@ pub fn assign_subscript_path<'a>(
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    assign_subscript_path_with_context(None, base, path, values, caller_function_name)
+    assign_subscript_path_with_runtime(
+        crate::context::legacy::active(),
+        base,
+        path,
+        values,
+        caller_function_name,
+    )
 }
-
 pub fn assign_subscript_path_in_context<'a>(
     runtime: &'a RuntimeContext,
     base: Value,
@@ -149,17 +188,24 @@ pub fn assign_subscript_path_in_context<'a>(
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    assign_subscript_path_with_context(Some(runtime), base, path, values, caller_function_name)
+    assign_subscript_path_with_runtime(
+        Some(runtime.clone()),
+        base,
+        path,
+        values,
+        caller_function_name,
+    )
 }
-
-fn assign_subscript_path_with_context<'a>(
-    runtime: Option<&'a RuntimeContext>,
+pub(crate) fn assign_subscript_path_with_runtime<'a>(
+    runtime: Option<RuntimeContext>,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    super::context::admit_future_with(runtime, move || async move {
+    let admission = runtime.clone();
+    super::context::admit_future_with(admission.as_ref(), move || async move {
+        let runtime = runtime.as_ref();
         let _inputs_root = crate::execution::RootedValueLease::for_values(
             std::iter::once(&base).chain(values.iter()),
         )
@@ -189,18 +235,18 @@ fn assign_subscript_path_with_context<'a>(
     })
 }
 
-fn read_default_steps<'a>(
+fn read_default_steps<'a, A: std::borrow::Borrow<super::ObjectAccessContext> + 'a>(
     runtime: Option<&'a RuntimeContext>,
     base: Value,
     mut steps: ExactArrayIntoIter<ObjectSubscript>,
-    request: SubscriptReadRequest,
+    request: SubscriptReadRequest<A>,
     caller_function_name: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
     super::context::admit_future_with(runtime, move || async move {
         let mut base = RootedValue::new(base).map_err(|error| error.into_runtime_error())?;
         while steps.len() != 0 {
             if let Some(method) =
-                resolve_object_protocol(base.value(), ObjectProtocol::Subsref, &request.access)?
+                resolve_object_protocol(base.value(), ObjectProtocol::Subsref, request.access())?
             {
                 let remaining = ObjectSubscriptPath::from_remaining_in_context(runtime, steps)?;
                 return invoke_prepared_subsref(
@@ -298,11 +344,18 @@ fn read_default_steps<'a>(
                     base.value().clone(),
                     &step,
                     caller_function_name,
+                    Some(request.access()),
                 )
                 .await;
             }
-            base = read_default_step(runtime, base.value().clone(), &step, caller_function_name)
-                .await?;
+            base = read_default_step(
+                runtime,
+                base.value().clone(),
+                &step,
+                caller_function_name,
+                Some(request.access()),
+            )
+            .await?;
         }
         base.try_map_owned(
             |base| ValueSequence::single(base).map_err(crate::sequence::sequence_error_to_runtime),
@@ -311,12 +364,12 @@ fn read_default_steps<'a>(
     })
 }
 
-async fn invoke_prepared_subsref(
+async fn invoke_prepared_subsref<A: std::borrow::Borrow<super::ObjectAccessContext>>(
     runtime: Option<&RuntimeContext>,
     base: Value,
     path: ObjectSubscriptPath,
     method: super::ResolvedObjectMethod,
-    request: &SubscriptReadRequest,
+    request: &SubscriptReadRequest<A>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let requested_outputs = match request.known_requested_outputs()? {
         Some(count) => count,
@@ -327,7 +380,7 @@ async fn invoke_prepared_subsref(
                     &base,
                     &path,
                     request.indexing_context,
-                    &request.access,
+                    request.access(),
                 )
                 .await?
                 .count
@@ -337,7 +390,7 @@ async fn invoke_prepared_subsref(
                     &base,
                     &path,
                     request.indexing_context,
-                    &request.access,
+                    request.access(),
                 )
                 .await?
                 .count

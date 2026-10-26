@@ -53,7 +53,7 @@ pub enum GeometryScalarOperator {
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum GeometryAuthoringValue {
     Scalar(GeometryScalarExpression),
-    Vector([GeometryScalarExpression; 3]),
+    Vector(Box<[GeometryScalarExpression; 3]>),
     Matrix(Vec<GeometryScalarExpression>),
     Text(String),
     Boolean(bool),
@@ -152,7 +152,7 @@ impl GeometryAuthoringValue {
     ) -> Result<(), GeometryContractError> {
         match self {
             Self::Scalar(value) => value.validate(parameters),
-            Self::Vector(values) => validate_expressions(values, parameters),
+            Self::Vector(values) => validate_expressions(values.as_slice(), parameters),
             Self::Matrix(values) => validate_expressions(values, parameters),
             Self::Text(value) | Self::Parameter(value) if value.trim().is_empty() => Err(
                 GeometryContractError::invalid("geometry value", "must not be empty"),

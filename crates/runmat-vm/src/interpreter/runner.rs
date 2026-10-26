@@ -28,6 +28,8 @@ use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span, Instrument};
 
+#[path = "runner/bound_invocation.rs"]
+mod bound_invocation;
 #[path = "runner/instruction_loop.rs"]
 mod instruction_loop;
 #[path = "runner/super_constructor.rs"]
@@ -231,7 +233,7 @@ pub async fn invoke_semantic_function_with_rooted_arguments_and_dynamic_admissio
             function,
             arguments,
             requested_outputs,
-            function_registry,
+            function_registry.clone(),
             runtime,
             driver,
             lexical_environment,
@@ -300,7 +302,7 @@ async fn invoke_semantic_function_with_captures(
         function,
         arguments,
         requested_outputs,
-        function_registry,
+        function_registry.clone(),
         runtime,
         driver,
         lexical_environment,
@@ -312,7 +314,7 @@ async fn invoke_semantic_function_with_rooted_captures(
     function: usize,
     arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
-    function_registry: &FunctionRegistry,
+    function_registry: FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
     driver: Option<ProcessDriverHandle>,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
@@ -338,7 +340,7 @@ async fn invoke_semantic_function_with_rooted_captures(
             )
         })
         .transpose()?;
-    let registry = function_registry.clone();
+    let registry = function_registry;
     let runtime = with_default_acceleration_service(runtime);
     let owner = if driver.is_none() {
         Some(ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None)?)
@@ -423,7 +425,8 @@ async fn invoke_semantic_function_with_captures_inner(
     };
     let runtime = runtime.with_selected_static_caller(func.binding_origin);
     lexical_storage::validate_inherited_storage(func, function_registry)?;
-    if arguments.len() < func.capture_slots.len() {
+    let has_callable = arguments.callable().is_some();
+    if !has_callable && arguments.len() < func.capture_slots.len() {
         let message = format!(
             "semantic function {} received too few arguments",
             func.display_name
@@ -434,6 +437,15 @@ async fn invoke_semantic_function_with_captures_inner(
         return Err(mex(
             "SemanticFunctionArity",
             "selected callable capture count does not match its function frame",
+        ));
+    }
+    if has_callable
+        && arguments.capture_count() == 0
+        && !func.captures_owned_without_copies(lexical_environment.is_some())
+    {
+        return Err(mex(
+            "SemanticFunctionArity",
+            "selected callable omits captures without an admitted alternative owner",
         ));
     }
     let mut vars = if arguments.capture_count() == 0 {
@@ -454,7 +466,6 @@ async fn invoke_semantic_function_with_captures_inner(
             ));
         }
     }
-    let has_callable = arguments.callable().is_some();
     let mut supplied = arguments.into_supplied_arguments();
     if !has_callable {
         for slot in func.capture_slots.iter().copied() {
@@ -728,7 +739,7 @@ async fn invoke_semantic_function_with_owned_inputs(
         let future = interpret_function_with_counts_in_context_with_driver(
             FunctionExecutionInvocation {
                 bytecode: Cow::Borrowed(&bytecode),
-                name: FunctionExecutionName::Borrowed(&func.display_name),
+                name: FunctionExecutionName::ActiveFunction,
                 arity: RuntimeInvocationArity::function(prepared.nargin, requested_outputs),
                 missing_input_slots,
                 runtime: runtime.clone(),
@@ -1814,7 +1825,7 @@ async fn run_interpreter_inner(
                             function,
                             args,
                             requested_outputs,
-                            &function_registry,
+                            function_registry.as_ref().clone(),
                             runtime,
                             driver,
                             lexical_environment,
@@ -1836,71 +1847,19 @@ async fn run_interpreter_inner(
                 let driver = bound_driver.clone();
                 runmat_runtime::execution::admit_executable_sequence_with(
                     &runtime.clone(),
-                    move || async move {
-                        let function = runmat_hir::FunctionId(binding.function);
-                        if let runmat_value::BoundFunctionAuthority::Portable { origin } =
-                            &binding.authority
-                        {
-                            if registry
-                                .get_current(function)
-                                .filter(|body| body.binding_origin == Some(*origin))
-                                .is_some()
-                            {
-                                return super_constructor::invoke_selected_bound(
-                                    runtime,
-                                    binding,
-                                    args,
-                                    requested_outputs,
-                                    registry.as_ref().clone(),
-                                    driver.clone(),
-                                    lexical_environment,
-                                )
-                                .await;
-                            }
-                        }
-                        let view = registry.owned_view(function, &binding.authority);
-                        if let Some(view) = view {
-                            return super_constructor::invoke_selected_bound(
+                    move || {
+                        bound_invocation::prepare(
+                            bound_invocation::Invocation {
                                 runtime,
                                 binding,
                                 args,
                                 requested_outputs,
-                                view,
                                 driver,
                                 lexical_environment,
-                            )
-                            .await;
-                        }
-                        if let Some(previous) = previous {
-                            let selected_runtime = runtime.clone();
-                            let environment_roots = if driver.is_some() {
-                                lexical_environment
-                                    .as_ref()
-                                    .map(runmat_runtime::call::lexical::root_environment)
-                                    .transpose()?
-                            } else {
-                                None
-                            };
-                            return await_prior_bound_invoker(
-                                driver,
-                                selected_runtime,
-                                environment_roots,
-                                move || {
-                                    previous(
-                                        runtime,
-                                        binding,
-                                        args,
-                                        requested_outputs,
-                                        lexical_environment,
-                                    )
-                                },
-                            )
-                            .await;
-                        }
-                        Err(mex(
-                            "UnavailableBoundFunction",
-                            "bound function definition is unavailable in this execution owner",
-                        ))
+                            },
+                            registry,
+                            previous,
+                        )
                     },
                 )
             },

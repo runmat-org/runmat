@@ -26,7 +26,31 @@ pub(crate) fn validate_bounded_outputs(
     error: &'static BuiltinErrorDescriptor,
     builtin: &str,
 ) -> crate::BuiltinResult<()> {
-    let Some(requested) = super::current_output_count() else {
+    validate_bounded_count(descriptor, error, builtin, super::current_output_count())
+}
+
+/// Same descriptor bound under an explicitly selected invocation authority.
+pub(crate) fn validate_bounded_outputs_in(
+    descriptor: &'static BuiltinDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    builtin: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<()> {
+    validate_bounded_count(
+        descriptor,
+        error,
+        builtin,
+        super::current_output_count_in(runtime),
+    )
+}
+
+fn validate_bounded_count(
+    descriptor: &'static BuiltinDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    builtin: &str,
+    requested: Option<usize>,
+) -> crate::BuiltinResult<()> {
+    let Some(requested) = requested else {
         return Ok(());
     };
     if descriptor.signatures.iter().any(|signature| {

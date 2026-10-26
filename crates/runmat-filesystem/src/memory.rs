@@ -14,6 +14,7 @@ use std::{
     },
 };
 
+pub(crate) mod scope;
 mod bounded;
 pub(crate) mod scope;
 mod handle_commit;

@@ -32,6 +32,13 @@ impl ExecutableUnitDraft {
         mut bytecode: runmat_vm::Bytecode,
     ) -> Result<Self, String> {
         source_map.validate_content_revisions()?;
+        mir.validate_class_sources(|source| {
+            usize::try_from(source.0)
+                .ok()
+                .and_then(|ordinal| source_map.entries().get(ordinal))
+                .is_some_and(|entry| entry.source_id == source)
+        })?;
+        analysis.validate_class_sources(&mir)?;
         let source_count = source_map.entries().len();
         let outside = |source: runmat_vm::BytecodeSourceRef| {
             source

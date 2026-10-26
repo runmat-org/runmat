@@ -33,7 +33,9 @@ pub(super) fn evaluate(
             MirShortCircuitOp::Or => truth,
         };
         if skipped {
-            let result = state.arena.insert(Value::Bool(truth));
+            let result = state
+                .arena
+                .insert(Value::Bool(truth), Some(&state.runtime))?;
             state.finish_contextual_region(region, result);
             return Ok(vec![result]);
         }
@@ -58,7 +60,9 @@ pub(super) fn evaluate(
         call_suspension::ShortCircuitTruthStage::Right { step },
     )?;
     state.finish_contextual_step(region, step, step + 1)?;
-    let result = state.arena.insert(Value::Bool(truth));
+    let result = state
+        .arena
+        .insert(Value::Bool(truth), Some(&state.runtime))?;
     state.finish_contextual_region(region, result);
     Ok(vec![result])
 }

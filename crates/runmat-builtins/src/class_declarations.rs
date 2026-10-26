@@ -5,7 +5,13 @@ use runmat_types::{
 };
 
 mod arrays;
+mod equation_problem;
 mod layers;
+mod lsqlin_warm_start;
+mod optimization_exitflag;
+mod optimization_model;
+mod optimization_problem;
+mod optimization_variable;
 pub use arrays::{
     CALENDAR_DAYS_PROPERTY, CALENDAR_MONTHS_PROPERTY, DATETIME_SERIAL_PROPERTY,
     DLARRAY_DATA_PROPERTY, DURATION_DAYS_PROPERTY,
@@ -24,6 +30,24 @@ pub fn standard_class_array_shape(
 /// Mutable runtime registrations and static property values are intentionally
 /// not visible through this interface.
 pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalClassDeclaration> {
+    if let Some(declaration) = lsqlin_warm_start::declaration(identity) {
+        return Some(declaration);
+    }
+    if let Some(declaration) = optimization_exitflag::declaration(identity) {
+        return Some(declaration);
+    }
+    if let Some(declaration) = equation_problem::declaration(identity) {
+        return Some(declaration);
+    }
+    if let Some(declaration) = optimization_problem::declaration(identity) {
+        return Some(declaration);
+    }
+    if let Some(declaration) = optimization_model::declaration(identity) {
+        return Some(declaration);
+    }
+    if let Some(declaration) = optimization_variable::declaration(identity) {
+        return Some(declaration);
+    }
     if let Some(declaration) = arrays::declaration(identity) {
         return Some(declaration);
     }

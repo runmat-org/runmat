@@ -92,7 +92,11 @@ pub(super) async fn complete(
     loop {
         match work {
             AwaitWork::Poll(value) => {
-                yield_once().await;
+                if let Some(waiting) = runtime.execution().wait_pending(&value) {
+                    waiting.await.map_err(execution_error)?;
+                } else {
+                    yield_once().await;
+                }
                 match runtime
                     .execution()
                     .begin_await_in_context(value, &runtime)

@@ -89,16 +89,19 @@ fn jumping_fence_preserves_committed_authority_and_reconciles_only_live_attempts
         before.attempts[&completed_request.id]
     );
     let task = &after.tasks[&active_request.task_id];
-    assert_eq!(task.state, TaskState::Ready);
+    assert_eq!(task.state, TaskState::Indeterminate);
     assert_eq!(
         task.submission,
         before.tasks[&active_request.task_id].submission
     );
     assert_eq!(task.attempt_count, 1);
-    assert_eq!(task.active_attempt, None);
+    assert_eq!(task.active_attempt, Some(active_request.id));
     assert_eq!(after.attempts[&active_request.id].request, active_request);
-    assert_eq!(after.attempts[&active_request.id].state, AttemptState::Lost);
-    assert_eq!(after.deadlines, before.deadlines);
+    assert_eq!(
+        after.attempts[&active_request.id].state,
+        AttemptState::Assigned
+    );
+    assert_ne!(after.deadlines, before.deadlines);
     assert_eq!(
         &after.events[..before.events.len()],
         before.events.as_slice()
@@ -113,7 +116,7 @@ fn higher_authority_does_not_replenish_retry_budget_or_replay_unknown_effects() 
     for (retry, terminal) in [
         (
             RetryPolicy::ExplicitlyIdempotent { max_attempts: 1 },
-            TaskState::Failed,
+            TaskState::Indeterminate,
         ),
         (RetryPolicy::Never, TaskState::Indeterminate),
     ] {
@@ -130,6 +133,6 @@ fn higher_authority_does_not_replenish_retry_budget_or_replay_unknown_effects() 
         assert_eq!(task.attempt_count, 1);
         assert_eq!(task.submission, before.tasks[&request.task_id].submission);
         assert_eq!(after.attempts[&request.id].request, request);
-        assert_eq!(after.attempts[&request.id].state, AttemptState::Lost);
+        assert_eq!(after.attempts[&request.id].state, AttemptState::Assigned);
     }
 }

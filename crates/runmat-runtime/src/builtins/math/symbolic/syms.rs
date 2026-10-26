@@ -7,7 +7,9 @@ use runmat_builtins::{
     BuiltinErrorDescriptor, SYMS_DESCRIPTOR, SYMS_ERRORS, SYMS_ERROR_TOO_MANY_OUTPUTS,
 };
 
-use runmat_types::{parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration};
+use runmat_builtins::{
+    parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration,
+};
 use runmat_value::{SymbolicExpr, Value};
 
 use crate::{build_runtime_error, workspace, BuiltinResult, RuntimeError};

@@ -61,12 +61,13 @@ impl Writeback {
         context: Option<&crate::context::RuntimeContext>,
         mut updated: RootedValue,
         caller: Option<&str>,
+        access: Option<&crate::object::protocol::ObjectAccessContext>,
     ) -> Result<RootedValue, RuntimeError> {
         self.control.check_owner(context)?;
         while let Some(Ancestor { base, step, roots }) = self.ancestors.pop() {
             self.control.check_owner(context)?;
             let (rhs, rhs_roots) = updated.into_value_and_lease();
-            updated = super::write_step(context, base, step, rhs, caller).await?;
+            updated = super::write_step(context, base, step, rhs, caller, access).await?;
             self.control.check_owner(context)?;
             // The successor is rooted before either original generation may
             // retire, exactly as the old with_owned_async writeback.
@@ -84,6 +85,7 @@ pub(in crate::sequence::destination::path) fn assign_path<'a>(
     endpoint: PreparedSequenceEndpoint,
     values: ValueSequence,
     caller: Option<&'a str>,
+    access: Option<&'a crate::object::protocol::ObjectAccessContext>,
     roots: RootedValueLease,
 ) -> RuntimeContinuationFuture<'a, RootedValue> {
     match context {
@@ -94,6 +96,7 @@ pub(in crate::sequence::destination::path) fn assign_path<'a>(
             endpoint,
             values,
             caller,
+            access,
             roots,
         ),
         None => assign_path_with_scope(
@@ -103,6 +106,7 @@ pub(in crate::sequence::destination::path) fn assign_path<'a>(
             endpoint,
             values,
             caller,
+            access,
             roots,
         ),
     }
@@ -115,13 +119,14 @@ fn assign_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
     endpoint: PreparedSequenceEndpoint,
     values: ValueSequence,
     caller: Option<&'a str>,
+    access: Option<&'a crate::object::protocol::ObjectAccessContext>,
     mut roots: RootedValueLease,
 ) -> RuntimeContinuationFuture<'a, RootedValue> {
     let context = scope.runtime();
     crate::sequence::destination::control::admit_future(context, move || async move {
         if steps.len() == 0 {
             let result = endpoint
-                .assign_sequence_with_scope(scope, current, values, caller)
+                .assign_sequence_with_scope(scope, current, values, caller, access)
                 .await;
             drop(roots);
             return result;
@@ -132,16 +137,16 @@ fn assign_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
         let mut ancestors = Writeback::new(context, steps.len())?;
         for step in steps {
             ancestors.check(context)?;
-            let child = super::read_step(context, current.clone(), &step, caller).await?;
+            let child = super::read_step(context, current.clone(), &step, caller, access).await?;
             // Reserved capacity makes this a move, not another allocation.
             ancestors.push(context, current, step, roots)?;
             (current, roots) = child.into_value_and_lease();
         }
 
         let updated = endpoint
-            .assign_sequence_with_scope(scope, current, values, caller)
+            .assign_sequence_with_scope(scope, current, values, caller, access)
             .await?;
         drop(roots);
-        ancestors.finish(context, updated, caller).await
+        ancestors.finish(context, updated, caller, access).await
     })
 }

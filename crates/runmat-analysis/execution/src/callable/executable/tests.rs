@@ -67,6 +67,7 @@ pub(crate) fn analysis() -> AnalysisStore {
     AnalysisStore {
         functions: vec![FunctionAnalysis {
             function: ProgramFunctionId(7),
+            captures: Vec::new(),
             callable: CallableFact {
                 capabilities: CapabilitySet::default(),
                 identity: None,
@@ -81,6 +82,7 @@ pub(crate) fn analysis() -> AnalysisStore {
             },
             outputs: vec![output],
             effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+            cooperative_suspension: false,
             capabilities: CapabilitySet::default(),
             convergence: FunctionConvergence::Exact,
         }],
@@ -189,7 +191,11 @@ fn recovers_exact_named_admission_from_authenticated_analysis_component() {
         &signal(),
         revision(),
         callable(),
-        executable.manifest.identity.source_digest,
+        crate::named_callable::CompiledCallableBinding::from_selected_identity(
+            &executable.manifest.identity,
+            "loads.pulse",
+        )
+        .unwrap(),
         &analysis.functions[0],
         &BTreeSet::new(),
     )
@@ -199,6 +205,28 @@ fn recovers_exact_named_admission_from_authenticated_analysis_component() {
         ExecutableUnitEnvelope::from_canonical_bytes(&executable.canonical_bytes().unwrap())
             .unwrap();
     assert_eq!(admit(&reopened).unwrap(), admitted);
+}
+
+#[test]
+fn descriptor_compares_original_registry_binding_not_qualified_label_or_candidate() {
+    let executable = envelope(&analysis());
+    let admitted = admit(&executable).unwrap();
+    assert_eq!(admitted.callable.qualified_name, "loads.pulse");
+    assert_eq!(executable.manifest.identity.entrypoint, "pulse");
+    crate::prepare_generator_descriptor(&admitted, executable.clone()).unwrap();
+    // Keep the exact function/program/root/source metadata: only the registry
+    // name changes. Rejection must come from the real name check.
+    let mut other_name = executable.clone();
+    other_name.manifest.identity.entrypoint = "other".into();
+    assert!(matches!(
+        crate::prepare_generator_descriptor(&admitted, other_name),
+        Err(AnalysisBridgeError::Identity(
+            "portable executable registry entrypoint differs from the admitted frozen callable"
+        ))
+    ));
+    let mut other_function = executable;
+    other_function.manifest.identity.entrypoint_function = Some(ProgramFunctionId(8));
+    assert!(crate::prepare_generator_descriptor(&admitted, other_function).is_err());
 }
 
 #[test]

@@ -320,8 +320,8 @@ pub fn measure_scene(scene: &GeometryScene, kind: &str, ids: &[String]) -> Resul
             let a = cross.iter().map(|x| x * x).sum::<f64>().sqrt() * 0.5;
             area += a;
             triangles += 1;
-            for axis in 0..3 {
-                weighted_center[axis] += a * (p[0][axis] + p[1][axis] + p[2][axis]) / 3.0;
+            for (axis, component) in weighted_center.iter_mut().enumerate() {
+                *component += a * (p[0][axis] + p[1][axis] + p[2][axis]) / 3.0;
             }
         }
     }

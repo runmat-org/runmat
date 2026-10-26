@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "support/typed_reduction_graph.rs"]
 mod typed_reduction_graph;
+#[path = "typed_fusion_reduction_wgpu/operators.rs"]
+mod operators;
 #[path = "support/typed_reduction_placement.rs"]
 mod typed_reduction_placement;
 use typed_reduction_graph::{

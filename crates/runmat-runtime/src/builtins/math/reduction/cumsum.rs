@@ -308,7 +308,7 @@ fn default_dimension(tensor: &Tensor) -> usize {
     default_dimension_from_shape(tensor.shape())
 }
 
-fn default_dimension_from_shape(shape: &[usize]) -> usize {
+pub(in crate::builtins::math::reduction) fn default_dimension_from_shape(shape: &[usize]) -> usize {
     if shape.is_empty() {
         return 1;
     }
@@ -318,6 +318,10 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .map(|idx| idx + 1)
         .unwrap_or(1)
 }
+
+pub(in crate::builtins::math) use super::cumulative::geometry::{
+    scan_geometry, ScanGeometry, ScanRows,
+};
 
 #[cfg(test)]
 pub(crate) mod tests {

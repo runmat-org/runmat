@@ -291,7 +291,9 @@ fn check(source: &str, host: &TestHost) -> CheckedFeaProgram {
 }
 
 fn parameterized_geometry_inspection() -> GeometryInspection {
-    GeometryInspection {preview_extent_m: None, 
+    GeometryInspection {
+        preview_extent_m: None,
+        named_selections: None,
         unit_evidence: Default::default(),
         content_digest: SourceDigest([8; 32]),
         topology_digest: SourceDigest([9; 32]),

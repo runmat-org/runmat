@@ -94,7 +94,7 @@ pub(super) async fn execute_graph_root(
     };
     let completion = pool.submit_graph_program(submission, request, encoded_bytes, transfer)?;
     match completion.wait().await {
-        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph }) => Ok(
+        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph, .. }) => Ok(
             RemotePoolExecutionOutcome::Completed(RemotePoolExecutionResult::without_objects(
                 ProgramExecutionResponse::GraphSuccess { graph },
             )),

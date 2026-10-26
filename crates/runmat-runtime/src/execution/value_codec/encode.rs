@@ -87,7 +87,13 @@ impl CodecPurpose {
 
 pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
     crate::builtins::ensure_builtin_value_classes_registered();
-    encode(value, "$", CodecPurpose::ExecutionV2, None)
+    encode(
+        value,
+        "$",
+        CodecPurpose::ExecutionV2,
+        None,
+        Some(&super::ValidationWorkspaceOwner::ordinary()),
+    )
 }
 
 pub fn encode_inline_value_in_context(
@@ -95,19 +101,38 @@ pub fn encode_inline_value_in_context(
     runtime: &crate::context::RuntimeContext,
 ) -> Result<ValuePayload, ValueCodecError> {
     crate::builtins::ensure_builtin_value_classes_registered();
-    encode(value, "$", CodecPurpose::ExecutionV2, Some(runtime))
+    encode(
+        value,
+        "$",
+        CodecPurpose::ExecutionV2,
+        Some(runtime),
+        Some(&super::ValidationWorkspaceOwner::capture(runtime)),
+    )
 }
 
 pub(super) fn encode_inline_value_with_authority(
     value: &Value,
     issuer: &dyn InlineSourceAuthority,
+    workspace: Option<&super::ValidationWorkspaceOwner>,
 ) -> Result<ValuePayload, ValueCodecError> {
     crate::builtins::ensure_builtin_value_classes_registered();
-    encode(value, "$", CodecPurpose::ExecutionV2, Some(issuer))
+    encode(
+        value,
+        "$",
+        CodecPurpose::ExecutionV2,
+        Some(issuer),
+        workspace,
+    )
 }
 
 pub(super) fn encode_durable_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
-    encode(value, "$", CodecPurpose::DurablePreference, None)
+    encode(
+        value,
+        "$",
+        CodecPurpose::DurablePreference,
+        None,
+        Some(&super::ValidationWorkspaceOwner::ordinary()),
+    )
 }
 
 /// Apply the same durable grammar before resident leaves are downloaded. The
@@ -115,7 +140,13 @@ pub(super) fn encode_durable_inline_value(value: &Value) -> Result<ValuePayload,
 pub(super) fn encode_durable_preparation_value(
     value: &Value,
 ) -> Result<ValuePayload, ValueCodecError> {
-    encode(value, "$", CodecPurpose::DurablePreferencePreparing, None)
+    encode(
+        value,
+        "$",
+        CodecPurpose::DurablePreferencePreparing,
+        None,
+        Some(&super::ValidationWorkspaceOwner::ordinary()),
+    )
 }
 
 fn encode(
@@ -123,6 +154,7 @@ fn encode(
     path: &str,
     purpose: CodecPurpose,
     runtime: Option<&dyn InlineSourceAuthority>,
+    workspace: Option<&super::ValidationWorkspaceOwner>,
 ) -> Result<ValuePayload, ValueCodecError> {
     let inline = match value {
         Value::Int(value) => encode_integer_scalar(value),
@@ -173,7 +205,9 @@ fn encode(
                 .data()
                 .iter()
                 .enumerate()
-                .map(|(index, value)| encode(value, &index_path(path, index), purpose, runtime))
+                .map(|(index, value)| {
+                    encode(value, &index_path(path, index), purpose, runtime, workspace)
+                })
                 .collect::<Result<_, _>>()?,
         },
         Value::Struct(value) => {
@@ -183,7 +217,7 @@ fn encode(
                 .map(|(name, value)| {
                     Ok(StructField {
                         name: name.to_owned(),
-                        value: encode(value, &field_path(path, name), purpose, runtime)?,
+                        value: encode(value, &field_path(path, name), purpose, runtime, workspace)?,
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
@@ -194,9 +228,9 @@ fn encode(
                 InlineValue::Struct(fields)
             }
         }
-        Value::StructArray(value) if purpose.durable() => {
-            InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose, runtime)?)
-        }
+        Value::StructArray(value) if purpose.durable() => InlineValue::DurableStructArray(
+            aggregate::struct_array(value, path, purpose, runtime, workspace)?,
+        ),
         Value::StructArray(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
@@ -212,12 +246,12 @@ fn encode(
                 "GPU buffers require an object reference fenced to a worker and device",
             ))
         }
-        Value::Object(value) if purpose.durable() => {
-            InlineValue::DurablePlainObject(aggregate::plain_object(value, path, purpose, runtime)?)
-        }
-        Value::ObjectArray(value) if purpose.durable() => {
-            InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose, runtime)?)
-        }
+        Value::Object(value) if purpose.durable() => InlineValue::DurablePlainObject(
+            aggregate::plain_object(value, path, purpose, runtime, workspace)?,
+        ),
+        Value::ObjectArray(value) if purpose.durable() => InlineValue::DurableObjectArray(
+            aggregate::object_array(value, path, purpose, runtime, workspace)?,
+        ),
         Value::Object(value)
             if crate::parallel::codistributor::is_supported_class(value.class_name()) =>
         {
@@ -229,7 +263,7 @@ fn encode(
                 .map(|(name, value)| {
                     Ok(RegisteredField {
                         name: name.to_owned(),
-                        value: encode(value, &field_path(path, name), purpose, runtime)?,
+                        value: encode(value, &field_path(path, name), purpose, runtime, workspace)?,
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
@@ -244,7 +278,7 @@ fn encode(
             if super::immutable_class::schema_for_class(value.class_name().display_name())?
                 .is_some() =>
         {
-            encode_immutable_class(value, path, purpose, runtime)?
+            encode_immutable_class(value, path, purpose, runtime, workspace)?
         }
         Value::ObjectArray(_) => {
             return Err(ValueCodecError::unsupported(
@@ -271,6 +305,12 @@ fn encode(
             ))
         }
         Value::OutputList(_) => return Err(ValueCodecError::transient_not_portable(path)),
+        Value::ScopedFunctionHandle(_) => {
+            return Err(ValueCodecError::unsupported(
+                path,
+                "invocation-scoped callable is not portable",
+            ))
+        }
         Value::FunctionHandle(name) => callable(
             CallableOwner::Workspace,
             name,
@@ -322,7 +362,13 @@ fn encode(
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
-                    encode(value, &format!("{path}.capture[{index}]"), purpose, runtime)
+                    encode(
+                        value,
+                        &format!("{path}.capture[{index}]"),
+                        purpose,
+                        runtime,
+                        workspace,
+                    )
                 })
                 .collect::<Result<_, _>>()?;
             let owner = match &closure.binding {
@@ -400,6 +446,7 @@ fn encode_immutable_class(
     path: &str,
     purpose: CodecPurpose,
     runtime: Option<&dyn InlineSourceAuthority>,
+    workspace: Option<&super::ValidationWorkspaceOwner>,
 ) -> Result<InlineValue, ValueCodecError> {
     let schema = super::immutable_class::schema_for_class(object.class_name().display_name())?
         .ok_or_else(|| {
@@ -408,7 +455,7 @@ fn encode_immutable_class(
                 "value classes require an explicitly registered immutable class codec",
             )
         })?;
-    schema.validate_object(object, path)?;
+    schema.validate_object(object, path, workspace)?;
     let mut fields = object.properties().iter().collect::<Vec<_>>();
     fields.sort_by(|left, right| left.0.cmp(right.0));
     let fields = fields
@@ -416,7 +463,7 @@ fn encode_immutable_class(
         .map(|(name, value)| {
             Ok(RegisteredField {
                 name: name.to_owned(),
-                value: encode(value, &field_path(path, name), purpose, runtime)?,
+                value: encode(value, &field_path(path, name), purpose, runtime, workspace)?,
             })
         })
         .collect::<Result<Vec<_>, ValueCodecError>>()?;

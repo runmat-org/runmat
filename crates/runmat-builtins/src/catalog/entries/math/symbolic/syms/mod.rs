@@ -1,8 +1,13 @@
 use crate::*;
 mod contract;
+mod declaration;
 mod documentation;
 mod inference;
 pub use contract::*;
+pub use declaration::{
+    is_valid_symbolic_identifier, parse_symbolic_declaration, symbolic_declaration_tokens,
+    SymbolicDeclaration, SymbolicDeclarationError,
+};
 pub const SYMS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

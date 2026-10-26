@@ -4,6 +4,13 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Matrix product", paragraphs: &["`mtimes(A, B)` and `A * B` multiply scalars, vectors, and matrices. For nonscalar matrices, `size(A, 2)` must equal `size(B, 1)`. Row-by-column produces a scalar dot product, while column-by-row produces an outer product.", "Scalars multiply every element without changing the other operand's shape. Logical and character operands enter floating-point arithmetic. An integer operand is supported only when the other operand is scalar; the result preserves the integer class and saturates."] },
     BuiltinDocumentationSection { heading: "Complex and empty arrays", paragraphs: &["Real and complex operands use full complex multiplication when either input is complex. Trailing singleton dimensions are accepted by the runtime's matrix view.", "An `m`-by-0 matrix multiplied by a 0-by-`n` matrix produces an `m`-by-`n` zero matrix. Incompatible inner dimensions return a matrix-dimension error."] },
+    BuiltinDocumentationSection {
+        heading: "Sparse CPU operands",
+        paragraphs: &[
+            "CPU sparse matrix products accept real or complex single and double values, and logical operands enter numeric arithmetic. Two sparse matrix operands produce a numeric sparse result; a sparse matrix paired with a full matrix produces a full result. Scalar products follow the scalar multiplication rules.",
+            "Nonscalar sparse matrix products require an unbounded host-memory policy. Calls with finite host-memory quotas are rejected because these sparse output and workspace bounds are not available.",
+        ],
+    },
     BuiltinDocumentationSection { heading: "Acceleration", paragraphs: &["A provider-resident product uses the exact owner of the resident operands. Compatible host operands may be uploaded to that owner. A typed unsupported-operation response permits host fallback; provider failures and invalid output metadata are reported.", "Supported provider results retain device residency. Exact integer scalar fallback gathers authoritative typed storage and restores the result to the resident input's provider."] },
 ];
 

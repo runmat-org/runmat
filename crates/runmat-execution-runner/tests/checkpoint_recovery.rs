@@ -20,12 +20,12 @@ fn recovery_fences_old_attempts_and_marks_unknown_effects_indeterminate() {
     let snapshot = recovered.snapshot();
     assert_eq!(snapshot.driver_fence, old_fence + 1);
     assert_eq!(snapshot.tasks[&task_id].state, TaskState::Indeterminate);
-    assert_eq!(snapshot.attempts[&request.id].state, AttemptState::Lost);
-    assert_eq!(snapshot.pools[&fixture.pool].active_attempts, 0);
+    assert_eq!(snapshot.attempts[&request.id].state, AttemptState::Assigned);
+    assert_eq!(snapshot.pools[&fixture.pool].active_attempts, 1);
 }
 
 #[test]
-fn recovery_requeues_only_explicitly_replayable_work() {
+fn recovery_retains_even_explicitly_replayable_work_until_retirement() {
     let mut fixture = common::fixture(1, 1);
     let submission = common::task(
         "recover-safe",
@@ -36,11 +36,14 @@ fn recovery_requeues_only_explicitly_replayable_work() {
     let task_id = submission.request.id;
     let _request = common::submit(&mut fixture.driver, submission);
     let recovered = reconcile_snapshot(fixture.driver.snapshot()).unwrap();
-    assert_eq!(recovered.snapshot().tasks[&task_id].state, TaskState::Ready);
+    assert_eq!(
+        recovered.snapshot().tasks[&task_id].state,
+        TaskState::Indeterminate
+    );
 }
 
 #[test]
-fn exclusive_continuation_preserves_original_assignment_while_replacement_closes_it() {
+fn exclusive_continuation_preserves_original_assignment_while_replacement_retains_it() {
     use runmat_execution_runner::port::BackendReport;
     use runmat_execution_runner::recovery::DriverCheckpoint;
     use runmat_execution_runner::{AttemptReport, DriverCommand};
@@ -68,6 +71,6 @@ fn exclusive_continuation_preserves_original_assignment_while_replacement_closes
     assert_eq!(replaced.snapshot().driver_fence, original.driver_fence + 1);
     assert_eq!(
         replaced.snapshot().attempts[&request.id].state,
-        AttemptState::Lost
+        AttemptState::Assigned
     );
 }

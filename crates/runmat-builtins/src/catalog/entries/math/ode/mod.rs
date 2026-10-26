@@ -4,6 +4,7 @@ mod options;
 mod ode15s;
 mod ode23;
 mod ode45;
+mod odeset;
 #[cfg(test)]
 mod tests;
 
@@ -25,10 +26,17 @@ pub use ode45::{
     ODE45_INTEGER_CAPABILITIES, ODE45_INTEGER_OPTION_EXTENSION, ODE45_INTEGER_TSPAN_EXTENSION,
     ODE45_INTEGER_Y0_EXTENSION, ODE45_LOGICAL_NUMERIC_EXTENSION, ODE45_RESIDENT_INPUT_EXTENSION,
 };
+pub use odeset::{
+    ODESET_CATALOG_ENTRY, ODESET_DESCRIPTOR, ODESET_ERROR_INVALID_ARGUMENT,
+    ODESET_ERROR_INVALID_INPUT, ODESET_ERROR_UNKNOWN_OPTION, ODESET_EXTENSIONS,
+    ODESET_INTEGER_CAPABILITIES, ODESET_INTEGER_OPTION_EXTENSION, ODESET_MAX_STEPS_EXTENSION,
+    ODESET_RESIDENT_OPTION_EXTENSION,
+};
 pub use options::OdeOptionField;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(ode15s::ENTRIES.iter().copied());
     values.extend(ode23::ENTRIES.iter().copied());
     values.extend(ode45::ENTRIES.iter().copied());
+    values.extend(odeset::ENTRIES.iter().copied());
 }

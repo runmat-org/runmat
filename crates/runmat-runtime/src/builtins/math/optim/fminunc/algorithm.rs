@@ -1,326 +1,336 @@
 //! Existing BFGS, line-search, and Hessian algorithms with invocation cooperation.
 
+use super::reporting::{Progress, TerminationReason};
 use super::*;
+use crate::builtins::math::optim::common::output_callback::{notify, IterationValues, OutputState};
+pub(super) mod finite_difference;
+pub(super) mod vectors;
+use finite_difference::Refinement;
 
-#[derive(Debug, Clone)]
-struct ObjectiveState {
-    x: Vec<f64>,
-    f: f64,
-    grad: Vec<f64>,
-}
+use super::evaluation::{ObjectiveEvaluator, ObjectiveState};
 
-#[derive(Debug, Clone)]
 pub(super) struct MinimizeOutcome {
     x: Vec<f64>,
     fval: f64,
     grad: Vec<f64>,
-    inverse_hessian: Vec<f64>,
+    hessian: Option<crate::execution::RootedValue>,
+    algorithm: &'static str,
     iterations: usize,
     func_count: usize,
     exitflag: i32,
     firstorderopt: f64,
     stepsize: f64,
     message: String,
+    termination: TerminationReason,
 }
 
-struct ObjectiveEvaluator<'a> {
-    cooperation: &'a mut crate::builtins::math::optim::common::ScalarCooperation,
-    function: &'a Value,
-    shape: Vec<usize>,
-    scalar: bool,
-    specify_gradient: bool,
-    max_fun_evals: usize,
-    func_count: usize,
-}
-
-impl<'a> ObjectiveEvaluator<'a> {
-    fn new(
-        function: &'a Value,
-        shape: &[usize],
-        scalar: bool,
-        specify_gradient: bool,
-        max_fun_evals: usize,
-        cooperation: &'a mut crate::builtins::math::optim::common::ScalarCooperation,
-    ) -> Self {
-        Self {
-            cooperation,
-            function,
-            shape: shape.to_vec(),
-            scalar,
-            specify_gradient,
-            max_fun_evals,
-            func_count: 0,
-        }
+impl MinimizeOutcome {
+    pub(super) fn candidate(&self) -> &[f64] {
+        &self.x
     }
-
-    async fn evaluate(&mut self, x: &[f64]) -> BuiltinResult<ObjectiveState> {
-        self.ensure_state_budget(x.len())?;
-        if self.specify_gradient {
-            self.evaluate_with_gradient(x).await
-        } else {
-            let f = self.evaluate_value(x).await?;
-            let grad = self.forward_difference_gradient(x, f).await?;
-            Ok(ObjectiveState {
-                x: x.to_vec(),
-                f,
-                grad,
-            })
-        }
+    pub(super) fn value(&self) -> f64 {
+        self.fval
     }
-
-    async fn evaluate_value(&mut self, x: &[f64]) -> BuiltinResult<f64> {
-        self.cooperation.completed(x.len() as u64).await?;
-        self.ensure_value_budget()?;
-        let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
-        let value = call_function(self.function, vec![arg]).await?;
-        self.func_count += 1;
-        value
-            .with_owned_async(|value| {
-                crate::builtins::math::optim::common::value_to_scalar_with_extensions(
-                    NAME,
-                    value,
-                    &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
-                    &FMINUNC_RESIDENT_EXTENSION,
-                    "objective value",
-                )
-            })
-            .await
+    pub(super) fn reason(&self) -> TerminationReason {
+        self.termination
     }
-
-    async fn evaluate_with_gradient(&mut self, x: &[f64]) -> BuiltinResult<ObjectiveState> {
-        self.cooperation.completed(x.len() as u64).await?;
-        let callback =
-            crate::canonicalize_callback_handle_for_semantic_resolution(self.function.clone())?;
-        let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
-        let value = crate::call_feval_async_with_outputs(callback, &[arg], 2).await?;
-        self.func_count += 1;
-        let cooperation = &mut *self.cooperation;
-        let (f, grad) = value
-            .with_owned_async(|value| async move {
-                let Value::OutputList(outputs) = value else {
-                    return Err(fminunc_error_with_detail(
-                        &FMINUNC_ERROR_INVALID_INPUT,
-                        "objective must return [f, g] when SpecifyObjectiveGradient is true",
-                    ));
-                };
-                if outputs.len() < 2 {
-                    return Err(fminunc_error_with_detail(
-                        &FMINUNC_ERROR_INVALID_INPUT,
-                        "objective must return both objective value and gradient",
-                    ));
-                }
-                let outputs = outputs.try_into_owned().map_err(|_| {
-                    crate::sequence::sequence_error_to_runtime(
-                        runmat_value::ValueSequenceError::SharedOutputStorage,
-                    )
-                })?;
-                let mut outputs = outputs.into_iter();
-                let objective = outputs.next().expect("validated objective output");
-                let gradient = outputs.next().expect("validated gradient output");
-                let f = crate::builtins::math::optim::common::value_to_scalar_with_extensions(
-                    NAME,
-                    objective,
-                    &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
-                    &FMINUNC_RESIDENT_EXTENSION,
-                    "objective value",
-                )
-                .await?;
-                let grad =
-                    crate::builtins::math::optim::common::value_to_real_vector_with_extensions(
-                        NAME,
-                        gradient,
-                        &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
-                        &FMINUNC_RESIDENT_EXTENSION,
-                        "objective gradient",
-                        cooperation,
-                    )
-                    .await?;
-                Ok::<_, crate::RuntimeError>((f, grad))
-            })
-            .await?;
-        if grad.len() != x.len() {
-            return Err(fminunc_error_with_detail(
-                &FMINUNC_ERROR_INVALID_INPUT,
-                format!(
-                    "objective gradient length {} does not match x length {}",
-                    grad.len(),
-                    x.len()
-                ),
-            ));
-        }
-        Ok(ObjectiveState {
-            x: x.to_vec(),
-            f,
-            grad,
-        })
-    }
-
-    async fn forward_difference_gradient(&mut self, x: &[f64], f0: f64) -> BuiltinResult<Vec<f64>> {
-        let mut grad = vec![0.0; x.len()];
-        for i in 0..x.len() {
-            let step = finite_difference_step(x[i]);
-            let mut trial = x.to_vec();
-            trial[i] += step;
-            let f_step = self.evaluate_value(&trial).await?;
-            grad[i] = (f_step - f0) / step;
-        }
-        Ok(grad)
-    }
-
-    fn state_evaluation_cost(&self, variables: usize) -> Option<usize> {
-        if self.specify_gradient {
-            Some(1)
-        } else {
-            variables.checked_add(1)
-        }
-    }
-
-    fn remaining_func_evals(&self) -> usize {
-        self.max_fun_evals.saturating_sub(self.func_count)
-    }
-
-    fn can_evaluate_state(&self, variables: usize) -> bool {
-        self.state_evaluation_cost(variables)
-            .is_some_and(|cost| cost <= self.remaining_func_evals())
-    }
-
-    fn can_evaluate_value(&self) -> bool {
-        self.remaining_func_evals() >= 1
-    }
-
-    fn ensure_state_budget(&self, variables: usize) -> BuiltinResult<()> {
-        if self.can_evaluate_state(variables) {
-            return Ok(());
-        }
-        Err(fminunc_error_with_detail(
-            &FMINUNC_ERROR_INVALID_INPUT,
-            format!(
-                "MaxFunEvals exceeded before completing objective/gradient evaluation (FuncCount {}, MaxFunEvals {})",
-                self.func_count, self.max_fun_evals
-            ),
-        ))
-    }
-
-    fn ensure_value_budget(&self) -> BuiltinResult<()> {
-        if self.can_evaluate_value() {
-            return Ok(());
-        }
-        Err(fminunc_error_with_detail(
-            &FMINUNC_ERROR_INVALID_INPUT,
-            format!(
-                "MaxFunEvals exceeded before objective evaluation (FuncCount {}, MaxFunEvals {})",
-                self.func_count, self.max_fun_evals
-            ),
-        ))
+    pub(super) fn information(&self) -> StructValue {
+        publication::build_output_struct(self)
     }
 }
 
-fn finite_difference_step(x: f64) -> f64 {
-    f64::EPSILON.sqrt() * x.abs().max(1.0)
+mod preparation;
+pub(super) enum HessianProduct {
+    Omit,
+    Requested,
 }
-
-pub(super) async fn minimize(
-    function: &Value,
+struct Prepared<'a> {
+    evaluator: ObjectiveEvaluator<'a>,
     x0: Vec<f64>,
-    shape: &[usize],
+    shape: &'a [usize],
     scalar: bool,
-    options: &FminuncOptions,
-    cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
-) -> BuiltinResult<MinimizeOutcome> {
-    let n = x0.len();
-    validate_problem_size(n)?;
-    let mut evaluator = ObjectiveEvaluator::new(
-        function,
+    options: &'a FminuncOptions,
+    callback: Option<&'a Value>,
+    products: HessianProduct,
+}
+pub(super) fn minimize<'a>(
+    function: &'a Value,
+    x0: Vec<f64>,
+    shape: &'a [usize],
+    scalar: bool,
+    options: &'a FminuncOptions,
+    output_callback: Option<&'a Value>,
+    cooperation: &'a mut crate::builtins::math::optim::common::ScalarCooperation,
+) -> impl std::future::Future<Output = BuiltinResult<MinimizeOutcome>> + 'a {
+    crate::execution::after_result(
+        preparation::callable(
+            function,
+            x0,
+            shape,
+            scalar,
+            options,
+            output_callback,
+            cooperation,
+        ),
+        run,
+    )
+}
+pub(in crate::builtins::math::optim::fminunc) fn minimize_internal<'a>(
+    oracle: &'a mut dyn crate::builtins::math::optim::fmincon::compiled::Oracle,
+    x0: Vec<f64>,
+    shape: &'a [usize],
+    options: &'a FminuncOptions,
+    output_callback: Option<&'a Value>,
+    cooperation: &'a mut crate::builtins::math::optim::common::ScalarCooperation,
+) -> impl std::future::Future<Output = BuiltinResult<MinimizeOutcome>> + 'a {
+    crate::execution::after_result(
+        preparation::internal(oracle, x0, shape, options, output_callback, cooperation),
+        run,
+    )
+}
+async fn run(prepared: Prepared<'_>) -> BuiltinResult<MinimizeOutcome> {
+    let Prepared {
+        mut evaluator,
+        x0,
         shape,
         scalar,
-        options.specify_objective_gradient,
-        options.max_fun_evals,
-        cooperation,
-    );
+        options,
+        callback: output_callback,
+        products,
+    } = prepared;
+    let n = x0.len();
     let mut state = evaluator.evaluate(&x0).await?;
-    let mut inverse_hessian = identity(n)?;
+    let mut firstorderopt = vectors::norm_inf(&state.grad, evaluator.cooperation).await?;
+    let mut model = quasi_newton::Model::new(options.update, n, options.max_iter)?;
     let mut iterations = 0usize;
     let mut stepsize = 0.0f64;
-    let mut exitflag = 0i32;
-    let mut line_search_failed = false;
+    let mut last_direction = Vec::new();
+    let mut last_alpha = None;
+    let mut termination = None;
 
-    if norm_inf(&state.grad) <= options.tol_fun {
-        exitflag = 1;
+    if notify(
+        output_callback,
+        OutputState::Init,
+        IterationValues {
+            x: &state.x,
+            shape,
+            scalar,
+            iteration: iterations,
+            func_count: evaluator.func_count,
+            fval: state.f,
+            gradient: &state.grad,
+            first_order_optimality: firstorderopt,
+            step_size: stepsize,
+            search_direction: &[],
+            line_step_length: None,
+            directional_derivative: None,
+        },
+        evaluator.cooperation,
+    )
+    .await?
+    {
+        termination = Some(TerminationReason::OutputFunction);
+    }
+    reporting::initial(
+        options.display,
+        Progress {
+            iteration: iterations,
+            func_count: evaluator.func_count,
+            fval: state.f,
+            firstorderopt,
+            line_step: None,
+        },
+        evaluator.cooperation.runtime(),
+    )?;
+    if termination.is_none() && state.f <= options.objective_limit {
+        termination = Some(TerminationReason::ObjectiveLimit);
+    }
+    if termination.is_none() && firstorderopt <= options.tol_fun {
+        termination = Some(TerminationReason::Optimality);
     }
 
-    while exitflag == 0
+    while termination.is_none()
         && iterations < options.max_iter
         && evaluator.func_count < options.max_fun_evals
     {
-        let mut direction =
-            mat_vec(&inverse_hessian, &state.grad, n, evaluator.cooperation).await?;
-        for value in &mut direction {
-            *value = -*value;
-        }
-        if dot(&direction, &state.grad) >= -1.0e-14 || !all_finite(&direction) {
-            inverse_hessian = identity(n)?;
-            direction = state.grad.iter().map(|value| -value).collect();
+        let mut direction = model.direction(&state.grad, evaluator.cooperation).await?;
+        if vectors::dot(&direction, &state.grad, evaluator.cooperation).await? >= -1.0e-14
+            || !vectors::all_finite(&direction, evaluator.cooperation).await?
+        {
+            model.reset(n, evaluator.cooperation).await?;
+            direction = vectors::negated(&state.grad, evaluator.cooperation).await?;
         }
 
-        let next = match line_search(&mut evaluator, &state, &direction).await? {
-            LineSearchResult::Step(next) => next,
-            LineSearchResult::BudgetExhausted => {
-                exitflag = 0;
-                break;
-            }
-            LineSearchResult::Failed => {
-                line_search_failed = true;
-                exitflag = -3;
-                break;
-            }
+        let (next, alpha) =
+            match line_search(&mut evaluator, &state, &direction, options.objective_limit).await? {
+                LineSearchResult::Step(next, alpha) => (next, alpha),
+                LineSearchResult::BudgetExhausted => {
+                    termination = Some(TerminationReason::Limit);
+                    break;
+                }
+                LineSearchResult::Failed => {
+                    match evaluator.refine_gradient(&mut state).await? {
+                        Refinement::Updated => {
+                            firstorderopt =
+                                vectors::norm_inf(&state.grad, evaluator.cooperation).await?;
+                            // No accepted iteration or observer replay is invented.
+                            // The refined derivative belongs to the same current x/f.
+                            if firstorderopt <= options.tol_fun {
+                                termination = Some(TerminationReason::Optimality);
+                            }
+                            continue;
+                        }
+                        Refinement::BudgetLimit => {
+                            termination = Some(TerminationReason::Limit);
+                            break;
+                        }
+                        Refinement::Unavailable => {}
+                    }
+                    termination = Some(TerminationReason::NumericalFailure);
+                    break;
+                }
+            };
+
+        let s = vectors::subtract(&next.x, &state.x, evaluator.cooperation).await?;
+        stepsize = vectors::norm_inf(&s, evaluator.cooperation).await?;
+        let y = if options.update == runmat_builtins::OptimQuasiNewtonUpdate::Steepest {
+            Vec::new()
+        } else {
+            vectors::subtract(&next.grad, &state.grad, evaluator.cooperation).await?
         };
-
-        let s = subtract(&next.x, &state.x);
-        stepsize = norm_inf(&s);
-        let y = subtract(&next.grad, &state.grad);
-        update_inverse_hessian(&mut inverse_hessian, &s, &y, n, evaluator.cooperation).await?;
-        let f_delta = (state.f - next.f).abs();
-        let x_scale = 1.0 + norm_inf(&state.x);
-        let f_scale = 1.0 + state.f.abs();
+        model.update(s, y, evaluator.cooperation).await?;
+        let x_scale = 1.0 + vectors::norm_inf(&state.x, evaluator.cooperation).await?;
         state = next;
+        firstorderopt = vectors::norm_inf(&state.grad, evaluator.cooperation).await?;
         iterations += 1;
+        last_direction = direction;
+        last_alpha = Some(alpha);
+        reporting::iteration(
+            options.display,
+            Progress {
+                iteration: iterations,
+                func_count: evaluator.func_count,
+                fval: state.f,
+                firstorderopt,
+                line_step: Some(alpha),
+            },
+            evaluator.cooperation.runtime(),
+        )?;
+        if notify(
+            output_callback,
+            OutputState::Iter,
+            IterationValues {
+                x: &state.x,
+                shape,
+                scalar,
+                iteration: iterations,
+                func_count: evaluator.func_count,
+                fval: state.f,
+                gradient: &state.grad,
+                first_order_optimality: firstorderopt,
+                step_size: stepsize,
+                search_direction: &last_direction,
+                line_step_length: Some(alpha),
+                directional_derivative: Some(
+                    vectors::dot(&state.grad, &last_direction, evaluator.cooperation).await?,
+                ),
+            },
+            evaluator.cooperation,
+        )
+        .await?
+        {
+            termination = Some(TerminationReason::OutputFunction);
+            break;
+        }
 
-        if norm_inf(&state.grad) <= options.tol_fun {
-            exitflag = 1;
+        if state.f <= options.objective_limit {
+            termination = Some(TerminationReason::ObjectiveLimit);
+        } else if firstorderopt <= options.tol_fun {
+            termination = Some(TerminationReason::Optimality);
         } else if stepsize <= options.tol_x * x_scale {
-            exitflag = 2;
-        } else if f_delta <= options.tol_fun * f_scale {
-            exitflag = 3;
+            termination = Some(TerminationReason::Step);
         }
     }
 
-    let firstorderopt = norm_inf(&state.grad);
-    let message = build_message(
-        exitflag,
-        iterations,
-        evaluator.func_count,
-        line_search_failed,
-    );
-    emit_summary(
-        &state,
-        exitflag,
-        &message,
-        options,
-        iterations,
-        evaluator.func_count,
+    drop(model);
+    let reason = termination.unwrap_or(TerminationReason::Limit);
+    let hessian = match (
+        matches!(products, HessianProduct::Requested),
+        options.update,
+    ) {
+        (false, _) => None,
+        (true, runmat_builtins::OptimQuasiNewtonUpdate::LimitedMemory { .. }) => {
+            let runtime = evaluator.cooperation.runtime();
+            Some(crate::execution::RootedValue::in_optional_context(
+                crate::builtins::math::optim::common::output_callback::empty(runtime)?,
+                runtime,
+            )?)
+        }
+        (
+            true,
+            runmat_builtins::OptimQuasiNewtonUpdate::Bfgs
+            | runmat_builtins::OptimQuasiNewtonUpdate::Dfp
+            | runmat_builtins::OptimQuasiNewtonUpdate::Steepest,
+        ) => {
+            if reason == TerminationReason::ObjectiveLimit {
+                return Err(quasi_newton::hessian_unavailable(
+                    "ObjectiveLimit stopped the solve before optional Hessian probes",
+                ));
+            }
+            Some(trust_region::requested_hessian(&state,&mut evaluator).await?.ok_or_else(||quasi_newton::hessian_unavailable("remaining MaxFunctionEvaluations cannot fund the complete final Hessian estimate"))?)
+        }
+    };
+    notify(
+        output_callback,
+        OutputState::Done,
+        IterationValues {
+            x: &state.x,
+            shape,
+            scalar,
+            iteration: iterations,
+            func_count: evaluator.func_count,
+            fval: state.f,
+            gradient: &state.grad,
+            first_order_optimality: firstorderopt,
+            step_size: stepsize,
+            search_direction: &last_direction,
+            line_step_length: last_alpha,
+            directional_derivative: if last_alpha.is_some() {
+                Some(vectors::dot(&state.grad, &last_direction, evaluator.cooperation).await?)
+            } else {
+                None
+            },
+        },
+        evaluator.cooperation,
+    )
+    .await?;
+    let exitflag = reason.flag();
+    let message = reporting::finish(
+        options.display,
+        reason,
+        Progress {
+            iteration: iterations,
+            func_count: evaluator.func_count,
+            fval: state.f,
+            firstorderopt,
+            line_step: last_alpha,
+        },
+        evaluator.cooperation.runtime(),
     )?;
 
     Ok(MinimizeOutcome {
         x: state.x,
         fval: state.f,
         grad: state.grad,
-        inverse_hessian,
+        hessian,
+        algorithm: options.update.algorithm(),
         iterations,
         func_count: evaluator.func_count,
         exitflag,
         firstorderopt,
         stepsize,
         message,
+        termination: reason,
     })
 }
 
@@ -328,8 +338,9 @@ async fn line_search(
     evaluator: &mut ObjectiveEvaluator<'_>,
     state: &ObjectiveState,
     direction: &[f64],
+    objective_limit: f64,
 ) -> BuiltinResult<LineSearchResult> {
-    let dphi0 = dot(&state.grad, direction);
+    let dphi0 = vectors::dot(&state.grad, direction, evaluator.cooperation).await?;
     if dphi0 >= 0.0 || !dphi0.is_finite() {
         return Ok(LineSearchResult::Failed);
     }
@@ -341,27 +352,51 @@ async fn line_search(
         if !evaluator.can_evaluate_state(state.x.len()) {
             return Ok(LineSearchResult::BudgetExhausted);
         }
-        let trial_x = add_scaled(&state.x, direction, alpha);
+        let trial_x =
+            vectors::add_scaled(&state.x, direction, alpha, evaluator.cooperation).await?;
         let trial = evaluator.evaluate(&trial_x).await?;
-        if trial.f > state.f + C1 * alpha * dphi0 || (iter > 0 && trial.f >= f_prev) {
-            return zoom(evaluator, state, direction, alpha_prev, alpha).await;
+        if trial.f <= objective_limit {
+            return Ok(LineSearchResult::Step(trial, alpha));
         }
-        let dphi = dot(&trial.grad, direction);
+        if trial.f > state.f + C1 * alpha * dphi0 || (iter > 0 && trial.f >= f_prev) {
+            return zoom(
+                evaluator,
+                state,
+                direction,
+                alpha_prev,
+                alpha,
+                f_prev,
+                objective_limit,
+            )
+            .await;
+        }
+        let dphi = vectors::dot(&trial.grad, direction, evaluator.cooperation).await?;
         if dphi.abs() <= -C2 * dphi0 {
-            return Ok(LineSearchResult::Step(trial));
+            return Ok(LineSearchResult::Step(trial, alpha));
         }
         if dphi >= 0.0 {
-            return zoom(evaluator, state, direction, alpha, alpha_prev).await;
+            return zoom(
+                evaluator,
+                state,
+                direction,
+                alpha,
+                alpha_prev,
+                trial.f,
+                objective_limit,
+            )
+            .await;
         }
         alpha_prev = alpha;
         f_prev = trial.f;
-        alpha = (alpha * 2.0).min(64.0);
+        // The trial-count owner already bounds expansion. A fixed alpha cap
+        // repeats an identical point and invents a collapsed zoom bracket.
+        alpha *= 2.0;
     }
     Ok(LineSearchResult::Failed)
 }
 
 enum LineSearchResult {
-    Step(ObjectiveState),
+    Step(ObjectiveState, f64),
     BudgetExhausted,
     Failed,
 }
@@ -372,30 +407,27 @@ async fn zoom(
     direction: &[f64],
     mut lo: f64,
     mut hi: f64,
+    mut f_lo: f64,
+    objective_limit: f64,
 ) -> BuiltinResult<LineSearchResult> {
-    let dphi0 = dot(&state.grad, direction);
-    let mut f_lo = if lo == 0.0 {
-        state.f
-    } else {
-        if !evaluator.can_evaluate_value() {
-            return Ok(LineSearchResult::BudgetExhausted);
-        }
-        let x_lo = add_scaled(&state.x, direction, lo);
-        evaluator.evaluate_value(&x_lo).await?
-    };
+    let dphi0 = vectors::dot(&state.grad, direction, evaluator.cooperation).await?;
     for _ in 0..MAX_LINE_SEARCH_ITERS {
         if !evaluator.can_evaluate_state(state.x.len()) {
             return Ok(LineSearchResult::BudgetExhausted);
         }
         let alpha = 0.5 * (lo + hi);
-        let trial_x = add_scaled(&state.x, direction, alpha);
+        let trial_x =
+            vectors::add_scaled(&state.x, direction, alpha, evaluator.cooperation).await?;
         let trial = evaluator.evaluate(&trial_x).await?;
+        if trial.f <= objective_limit {
+            return Ok(LineSearchResult::Step(trial, alpha));
+        }
         if trial.f > state.f + C1 * alpha * dphi0 || trial.f >= f_lo {
             hi = alpha;
         } else {
-            let dphi = dot(&trial.grad, direction);
+            let dphi = vectors::dot(&trial.grad, direction, evaluator.cooperation).await?;
             if dphi.abs() <= -C2 * dphi0 {
-                return Ok(LineSearchResult::Step(trial));
+                return Ok(LineSearchResult::Step(trial, alpha));
             }
             if dphi * (hi - lo) >= 0.0 {
                 hi = lo;
@@ -405,7 +437,7 @@ async fn zoom(
         }
         if (hi - lo).abs() <= 1.0e-12 * (1.0 + lo.abs() + hi.abs()) {
             if trial.f <= state.f + C1 * alpha * dphi0 {
-                return Ok(LineSearchResult::Step(trial));
+                return Ok(LineSearchResult::Step(trial, alpha));
             }
             return Ok(LineSearchResult::Failed);
         }
@@ -413,166 +445,8 @@ async fn zoom(
     Ok(LineSearchResult::Failed)
 }
 
-async fn update_inverse_hessian(
-    h: &mut [f64],
-    s: &[f64],
-    y: &[f64],
-    n: usize,
-    cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
-) -> BuiltinResult<()> {
-    let ys = dot(y, s);
-    if ys <= 1.0e-14 || !ys.is_finite() {
-        return Ok(());
-    }
-    let rho = 1.0 / ys;
-    let hy = mat_vec(h, y, n, cooperation).await?;
-    let yhy = dot(y, &hy);
-    let coeff = (1.0 + yhy * rho) * rho;
-    for row in 0..n {
-        cooperation.completed(n as u64).await?;
-        for col in 0..n {
-            h[row * n + col] +=
-                coeff * s[row] * s[col] - rho * (s[row] * hy[col] + hy[row] * s[col]);
-        }
-    }
-    Ok(())
-}
-
-pub(super) async fn finalize(
-    outcome: MinimizeOutcome,
-    shape: &[usize],
-    scalar: bool,
-    _options: &FminuncOptions,
-    cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
-) -> BuiltinResult<Value> {
-    let requested = match crate::output_count::current_output_count() {
-        None => return vector_to_value(NAME, outcome.x, shape, scalar),
-        Some(0) => return Ok(Value::output_list(Vec::new())),
-        Some(count @ 1..=6) => count,
-        Some(_) => {
-            return Err(fminunc_error_with_detail(
-                &FMINUNC_ERROR_INVALID_ARGUMENT,
-                "too many output arguments; maximum is 6",
-            ))
-        }
-    };
-    let mut outputs = Vec::with_capacity(requested);
-    outputs.push(vector_to_value(NAME, outcome.x.clone(), shape, scalar)?);
-    if requested >= 2 {
-        outputs.push(Value::Num(outcome.fval));
-    }
-    if requested >= 3 {
-        outputs.push(Value::Num(outcome.exitflag as f64));
-    }
-    if requested >= 4 {
-        outputs.push(Value::Struct(build_output_struct(&outcome)));
-    }
-    if requested >= 5 {
-        outputs.push(vector_to_value(NAME, outcome.grad.clone(), shape, scalar)?);
-    }
-    if requested >= 6 {
-        outputs.push(
-            hessian_value(
-                &outcome.inverse_hessian,
-                outcome.grad.len(),
-                scalar,
-                cooperation,
-            )
-            .await?,
-        );
-    }
-    Ok(crate::output_count::output_list_with_padding(
-        requested, outputs,
-    ))
-}
-
-async fn hessian_value(
-    inverse_hessian: &[f64],
-    n: usize,
-    scalar: bool,
-    cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
-) -> BuiltinResult<Value> {
-    let hessian = match invert_matrix(inverse_hessian, n, cooperation).await? {
-        Some(hessian) => hessian,
-        None => identity(n)?,
-    };
-    if scalar {
-        Ok(Value::Num(hessian[0]))
-    } else {
-        Tensor::new(hessian, vec![n, n])
-            .map(Value::Tensor)
-            .map_err(|e| fminunc_error_with_detail(&FMINUNC_ERROR_INVALID_INPUT, e))
-    }
-}
-
-fn build_output_struct(outcome: &MinimizeOutcome) -> StructValue {
-    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
-    fields.insert("iterations", Value::Num(outcome.iterations as f64));
-    fields.insert("funcCount", Value::Num(outcome.func_count as f64));
-    fields.insert("algorithm", Value::from(ALGORITHM));
-    fields.insert("firstorderopt", Value::Num(outcome.firstorderopt));
-    fields.insert("stepsize", Value::Num(outcome.stepsize));
-    fields.insert("message", Value::from(outcome.message.clone()));
-    fields.finish()
-}
-
-fn build_message(
-    exitflag: i32,
-    iterations: usize,
-    func_count: usize,
-    line_search_failed: bool,
-) -> String {
-    match exitflag {
-        1 => format!(
-            "Optimization terminated: first-order optimality is below OPTIONS.TolFun. Iterations: {iterations}, FuncCount: {func_count}."
-        ),
-        2 => format!(
-            "Optimization terminated: step size is below OPTIONS.TolX. Iterations: {iterations}, FuncCount: {func_count}."
-        ),
-        3 => format!(
-            "Optimization terminated: objective change is below OPTIONS.TolFun. Iterations: {iterations}, FuncCount: {func_count}."
-        ),
-        -3 if line_search_failed => format!(
-            "Exiting: line search could not find a point satisfying the strong Wolfe conditions. Iterations: {iterations}, FuncCount: {func_count}."
-        ),
-        _ => format!(
-            "Exiting: Maximum number of function evaluations or iterations has been exceeded. Iterations: {iterations}, FuncCount: {func_count}."
-        ),
-    }
-}
-
-fn emit_summary(
-    state: &ObjectiveState,
-    exitflag: i32,
-    message: &str,
-    options: &FminuncOptions,
-    iterations: usize,
-    func_count: usize,
-) -> crate::BuiltinResult<()> {
-    let should_emit = match options.display {
-        DisplayMode::Off | DisplayMode::None => false,
-        DisplayMode::Final | DisplayMode::Iter => true,
-        DisplayMode::Notify => exitflag <= 0,
-    };
-    if !should_emit {
-        return Ok(());
-    }
-    crate::console::record_console_line(
-        crate::console::ConsoleStream::Stdout,
-        format!(
-            "fminunc: fval = {fval:.6e}, firstorderopt = {opt:.6e}, exitflag = {exitflag}. {message}",
-            fval = state.f,
-            opt = norm_inf(&state.grad),
-        ),
-    )?;
-    if matches!(options.display, DisplayMode::Iter) {
-        crate::console::record_console_line(
-            crate::console::ConsoleStream::Stdout,
-            format!("fminunc: iterations = {iterations}, funcCount = {func_count}"),
-        )?;
-    }
-    Ok(())
-}
+pub(in crate::builtins::math::optim::fminunc) mod publication;
+pub(super) use publication::finalize;
 
 pub(super) fn dense_len(n: usize) -> BuiltinResult<usize> {
     n.checked_mul(n).ok_or_else(|| {
@@ -583,7 +457,7 @@ pub(super) fn dense_len(n: usize) -> BuiltinResult<usize> {
     })
 }
 
-fn identity(n: usize) -> BuiltinResult<Vec<f64>> {
+pub(super) fn identity(n: usize) -> BuiltinResult<Vec<f64>> {
     let len = dense_len(n)?;
     let mut out = vec![0.0; len];
     for i in 0..n {
@@ -592,57 +466,7 @@ fn identity(n: usize) -> BuiltinResult<Vec<f64>> {
     Ok(out)
 }
 
-async fn invert_matrix(
-    matrix: &[f64],
-    n: usize,
-    cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
-) -> BuiltinResult<Option<Vec<f64>>> {
-    let mut a = matrix.to_vec();
-    let mut inv = identity(n)?;
-    for col in 0..n {
-        cooperation.completed(n as u64).await?;
-        let mut pivot = col;
-        let mut pivot_abs = a[col * n + col].abs();
-        for row in (col + 1)..n {
-            let candidate = a[row * n + col].abs();
-            if candidate > pivot_abs {
-                pivot = row;
-                pivot_abs = candidate;
-            }
-        }
-        if pivot_abs <= 1.0e-14 || !pivot_abs.is_finite() {
-            return Ok(None);
-        }
-        if pivot != col {
-            for j in 0..n {
-                a.swap(col * n + j, pivot * n + j);
-                inv.swap(col * n + j, pivot * n + j);
-            }
-        }
-        let diag = a[col * n + col];
-        for j in 0..n {
-            a[col * n + j] /= diag;
-            inv[col * n + j] /= diag;
-        }
-        for row in 0..n {
-            cooperation.completed(n as u64).await?;
-            if row == col {
-                continue;
-            }
-            let factor = a[row * n + col];
-            if factor == 0.0 {
-                continue;
-            }
-            for j in 0..n {
-                a[row * n + j] -= factor * a[col * n + j];
-                inv[row * n + j] -= factor * inv[col * n + j];
-            }
-        }
-    }
-    Ok(Some(inv))
-}
-
-async fn mat_vec(
+pub(super) async fn mat_vec(
     matrix: &[f64],
     vector: &[f64],
     n: usize,
@@ -656,66 +480,4 @@ async fn mat_vec(
         }
     }
     Ok(out)
-}
-
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
-
-fn norm_inf(values: &[f64]) -> f64 {
-    values.iter().fold(0.0, |acc, value| acc.max(value.abs()))
-}
-
-fn all_finite(values: &[f64]) -> bool {
-    values.iter().all(|value| value.is_finite())
-}
-
-fn subtract(a: &[f64], b: &[f64]) -> Vec<f64> {
-    a.iter().zip(b.iter()).map(|(x, y)| x - y).collect()
-}
-
-fn add_scaled(x: &[f64], direction: &[f64], alpha: f64) -> Vec<f64> {
-    x.iter()
-        .zip(direction.iter())
-        .map(|(xi, di)| xi + alpha * di)
-        .collect()
-}
-
-#[cfg(test)]
-mod publication_tests {
-    use super::*;
-    use futures::executor::block_on;
-
-    #[test]
-    fn one_output_does_not_invert_unused_hessian() {
-        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let outcome = MinimizeOutcome {
-            x: vec![2.0],
-            fval: 0.0,
-            grad: vec![0.0],
-            inverse_hessian: vec![],
-            iterations: 0,
-            func_count: 1,
-            exitflag: 1,
-            firstorderopt: 0.0,
-            stepsize: 0.0,
-            message: String::new(),
-        };
-        let options = FminuncOptions {
-            tol_x: 1.0e-6,
-            tol_fun: 1.0e-6,
-            max_iter: 1,
-            max_fun_evals: 1,
-            display: DisplayMode::Off,
-            specify_objective_gradient: false,
-        };
-        let mut cooperation = crate::builtins::math::optim::common::ScalarCooperation::new(
-            runmat_builtins::OptimSolver::Fminunc,
-            None,
-        );
-        let value = block_on(finalize(outcome, &[1, 1], true, &options, &mut cooperation)).unwrap();
-        assert!(
-            matches!(value, Value::OutputList(values) if matches!(values.as_slice(), [Value::Num(number)] if *number == 2.0))
-        );
-    }
 }

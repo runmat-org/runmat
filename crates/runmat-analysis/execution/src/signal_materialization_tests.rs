@@ -85,8 +85,14 @@ fn admitted() -> AdmittedSignalGenerator {
             source_digest: digest("loads.m"),
         },
         executable_source_digest: digest("executable-source"),
+        compiled_binding: crate::named_callable::CompiledCallableBinding::fixture(
+            "loads.pulse",
+            "loads.pulse",
+            ProgramFunctionId(7),
+            digest("executable-source"),
+        ),
         function: ProgramFunctionId(7),
-        captures: Vec::new(),
+        frozen_inputs: crate::FrozenGeneratorInputs::DirectCaptures(Vec::new()),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),
             digest("captures"),
@@ -197,9 +203,10 @@ fn planning_chunks_large_histories_and_preserves_typed_argument_order() {
 fn planning_places_frozen_closure_captures_before_the_sample_axis() {
     let signal = signal(SignalShape::Scalar, SignalPrecision::Real64);
     let mut admitted = admitted();
-    admitted.captures = vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
-        7.0_f64.to_bits(),
-    )))];
+    admitted.frozen_inputs =
+        crate::FrozenGeneratorInputs::DirectCaptures(vec![ValuePayload::Inline(Box::new(
+            InlineValue::F64Bits(7.0_f64.to_bits()),
+        ))]);
     let chunks = plan_signal_generator_chunks(
         &signal,
         &admitted,
@@ -209,7 +216,7 @@ fn planning_places_frozen_closure_captures_before_the_sample_axis() {
     )
     .unwrap();
     assert!(chunks.chunks.iter().all(|chunk| {
-        chunk.arguments.first() == admitted.captures.first()
+        chunk.arguments.first() == admitted.frozen_inputs.direct_captures().first()
             && matches!(
                 chunk.arguments.get(1),
                 Some(ValuePayload::Inline(value)) if matches!(value.as_ref(), InlineValue::Dense(_))

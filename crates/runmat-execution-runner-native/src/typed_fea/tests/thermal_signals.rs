@@ -174,12 +174,79 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         })
         .collect::<Vec<_>>();
     assert_eq!(prepared.len(), 2);
+    // Cold transport has only one canonical Direct representation: descriptor
+    // reconstruction. Retained per-chunk requests belong exclusively to Graph.
+    let input = &prepared[0];
+    let transport =
+        crate::input_materialization_contract::InputMaterializationRequest::from_prepared(input)
+            .unwrap();
+    let wire = serde_json::to_value(&transport).unwrap();
+    let reopened: crate::input_materialization_contract::InputMaterializationRequest =
+        serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(reopened.to_prepared().unwrap().program(), input.program());
+    let mut altered = wire;
+    altered.get_mut("signal").expect("original signal DTO")["invocations"] = serde_json::to_value(
+        input
+            .program()
+            .chunks
+            .iter()
+            .map(|chunk| chunk.request.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let altered: crate::input_materialization_contract::InputMaterializationRequest =
+        serde_json::from_value(altered).unwrap();
+    assert!(
+        altered.to_prepared().is_err(),
+        "Direct requests cannot override cold descriptor reconstruction"
+    );
+    let substitutions: [fn(&mut runmat_execution_artifact::ProgramExecutionRequest); 3] = [
+        |request| {
+            request.console = Some(runmat_execution::console::ConsoleLimits {
+                max_records: 1,
+                max_text_bytes: 16,
+            })
+        },
+        |request| {
+            request.environment = runmat_execution::EnvironmentSnapshot::new(vec![(
+                "RUNMAT_PUBLIC_INPUT".into(),
+                "different".into(),
+            )])
+            .unwrap()
+        },
+        |request| {
+            request.job_id = Some(runmat_execution::JobId::derive(&[
+                b"different-generator-job",
+            ]))
+        },
+    ];
+    for substitute in substitutions {
+        let runmat_analysis_execution::PreparedInputMaterialization::Signal(mut changed) =
+            (*input).clone()
+        else {
+            panic!("original signal")
+        };
+        let runmat_execution_artifact::WorkerProgramRequest::Direct(request) =
+            &mut changed.program.chunks[0].request
+        else {
+            panic!("original Direct invocation")
+        };
+        substitute(request);
+        request
+            .validate_for_portable_host()
+            .expect("individually valid invocation metadata");
+        assert!(
+            changed.validate().is_err(),
+            "generator invocation must retain descriptor controls and unassigned state"
+        );
+    }
     let mut completed = Vec::new();
     for input in &prepared {
         let mut outputs = Vec::new();
         for chunk in &input.program().chunks {
-            let response = crate::execute_host_program_request(chunk.request.clone()).await;
-            response.validate_against(&chunk.request).unwrap();
+            let request = chunk.direct_request().unwrap();
+            let response = crate::execute_host_program_request(request.clone()).await;
+            response.validate_against(request).unwrap();
             let ProgramExecutionResponse::Success {
                 outputs: mut response_outputs,
             } = response

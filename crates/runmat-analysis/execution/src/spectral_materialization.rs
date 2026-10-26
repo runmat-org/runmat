@@ -56,7 +56,7 @@ impl PreparedNumericalMaterialization {
         let invocation = validate_source_admission(&self.authored, &self.admitted)?;
         validate_generator_chunks(
             invocation,
-            &self.admitted.invocation.captures,
+            self.admitted.invocation.frozen_inputs.direct_captures(),
             self.admitted.materialization_identity.digest(),
             self.admitted.sample_points.canonical_values(),
             &self
@@ -138,7 +138,7 @@ pub fn plan_response_spectrum_generator_chunks(
     let invocation = matching_response_generator(spectrum, admitted)?;
     plan_generator_chunks(
         invocation,
-        &admitted.invocation.captures,
+        admitted.invocation.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
         admitted.sample_points.canonical_values(),
         1,
@@ -163,7 +163,7 @@ pub fn plan_random_spectrum_generator_chunks(
         })?;
     plan_generator_chunks(
         invocation,
-        &admitted.invocation.captures,
+        admitted.invocation.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
         admitted.sample_points.canonical_values(),
         values_per_sample,
@@ -319,7 +319,7 @@ fn validate_outputs(
 ) -> AnalysisBridgeResult<()> {
     validate_generator_chunks(
         invocation,
-        &admitted.invocation.captures,
+        admitted.invocation.frozen_inputs.direct_captures(),
         admitted.materialization_identity.digest(),
         admitted.sample_points.canonical_values(),
         chunks,

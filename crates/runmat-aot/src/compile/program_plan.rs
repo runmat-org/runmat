@@ -7,9 +7,9 @@ use crate::{
     AotError, AotResult,
 };
 
-use super::CompilationPolicy;
+use super::{CompilationPolicy, RuntimeComposition};
 
-pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 6;
+pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 7;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,7 +33,7 @@ pub struct ProgramLinkPlan {
     pub reachability: ReachabilityReport,
     /// Canonical MIR identities; report node strings are presentation only.
     pub retained_function_ids: BTreeSet<runmat_types::FunctionId>,
-    pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+    pub runtime_composition: RuntimeComposition,
     pub interop: runmat_types::InteropManifest,
     pub retained_runtime_families: Vec<RuntimeFamilyRetention>,
     pub omitted_runtime_families: Vec<String>,
@@ -77,18 +77,12 @@ pub fn build_program_link_plan_with_interop(
         .validate_environment(&unit.revision().program_revision.environment())?;
     let (reachability, retained_functions) = unit.reachability_analysis();
     let retained_function_ids = retained_functions;
-    if policy == CompilationPolicy::ClosedWorld && reachability.has_unknown_edges {
-        return Err(AotError::contract(
-            "aot.compile.reachability_unknown",
-            "closed-world compilation cannot retain an unbounded runtime call target",
-        ));
-    }
-    let retained_builtin_bindings = retained_builtin_bindings(policy, &reachability)?;
+    let runtime_composition =
+        RuntimeComposition::select(policy, &runtime.manifest.capabilities, &reachability)?;
     let (retained_runtime_families, omitted_runtime_families) = runtime_families(
-        policy,
+        &runtime_composition,
         &runtime.manifest.capabilities,
         &reachability,
-        &retained_builtin_bindings,
     );
     Ok(ProgramLinkPlan {
         schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
@@ -102,7 +96,7 @@ pub fn build_program_link_plan_with_interop(
         runtime_capabilities: runtime.manifest.capabilities.clone(),
         reachability,
         retained_function_ids,
-        retained_builtin_bindings,
+        runtime_composition,
         interop,
         retained_runtime_families,
         omitted_runtime_families,
@@ -110,10 +104,9 @@ pub fn build_program_link_plan_with_interop(
 }
 
 fn runtime_families(
-    policy: CompilationPolicy,
+    composition: &RuntimeComposition,
     capabilities: &RuntimeArchiveCapabilities,
     reachability: &ReachabilityReport,
-    builtin_bindings: &[runmat_native_codegen::aot::AotBuiltinBinding],
 ) -> (Vec<RuntimeFamilyRetention>, Vec<String>) {
     let mut retained = vec![
         family("runmat-value", "program value ABI"),
@@ -145,10 +138,10 @@ fn runtime_families(
         .iter()
         .any(|node| node.builtin_id().is_some())
     {
-        let reason = if policy == CompilationPolicy::ClosedWorld {
+        let reason = if composition.is_selected() {
             format!(
                 "{} exact reachable runtime binding(s)",
-                builtin_bindings.len()
+                composition.bindings().len()
             )
         } else {
             "runtime-discovered builtin symbols".into()
@@ -169,15 +162,13 @@ fn runtime_families(
             "reachable provider or extension boundary",
         ));
     }
-    match policy {
-        CompilationPolicy::NativeSpecialized | CompilationPolicy::DynamicRuntime => {}
-        CompilationPolicy::ClosedWorld => omitted.extend(["runmat-vm".into(), "runmat-jit".into()]),
-        CompilationPolicy::Portable => {}
+    if composition.is_selected() {
+        omitted.extend(["runmat-vm".into(), "runmat-jit".into()]);
     }
     let plot_is_reachable = reachability.nodes.iter().any(|node| {
         node.kind == ReachabilityNodeKind::ArtifactDependency && node.symbol == "runmat-plot-core"
     });
-    if capabilities.plot_core && (policy != CompilationPolicy::ClosedWorld || plot_is_reachable) {
+    if capabilities.plot_core && (!composition.is_selected() || plot_is_reachable) {
         retained.push(family(
             "runmat-plot-core",
             "runtime archive plot capability",
@@ -189,77 +180,6 @@ fn runtime_families(
     omitted.sort();
     omitted.dedup();
     (retained, omitted)
-}
-
-fn retained_builtin_bindings(
-    policy: CompilationPolicy,
-    reachability: &ReachabilityReport,
-) -> AotResult<Vec<runmat_native_codegen::aot::AotBuiltinBinding>> {
-    if policy != CompilationPolicy::ClosedWorld {
-        return Ok(Vec::new());
-    }
-    let mut bindings = Vec::new();
-    for (node, builtin) in reachability
-        .nodes
-        .iter()
-        .filter_map(|node| node.builtin_id().map(|builtin| (node, builtin)))
-    {
-        let entry = runmat_builtins::builtin_catalog_entry_by_name(&builtin.0).ok_or_else(|| {
-            AotError::contract(
-                "aot.compile.closed_world_builtin",
-                format!(
-                    "closed-world compilation requires builtin `{}` to have a canonical catalog runtime binding",
-                    node.symbol
-                ),
-            )
-        })?;
-        if !matches!(
-            entry.link.reachability,
-            runmat_builtins::BuiltinReachability::Always
-        ) {
-            return Err(AotError::contract(
-                "aot.compile.closed_world_builtin_dynamic",
-                format!(
-                    "closed-world compilation cannot prove the complete runtime target set for builtin `{}`",
-                    node.symbol
-                ),
-            ));
-        }
-        if entry.bindings.is_empty() {
-            return Err(AotError::contract(
-                "aot.compile.closed_world_builtin",
-                format!(
-                    "closed-world builtin `{}` has no runtime binding declaration",
-                    node.symbol
-                ),
-            ));
-        }
-        if entry.bindings.iter().any(|binding| {
-            binding.availability == runmat_builtins::BuiltinBindingAvailability::TargetConditional
-        }) {
-            return Err(AotError::contract(
-                "aot.compile.closed_world_builtin_target",
-                format!(
-                    "closed-world compilation cannot select target-conditional runtime bindings for builtin `{}`",
-                    node.symbol
-                ),
-            ));
-        }
-        bindings.extend(entry.bindings.iter().map(|binding| {
-            let identity = entry.binding_identity(binding);
-            runmat_native_codegen::aot::AotBuiltinBinding {
-                name: identity.builtin.name.to_string(),
-                variant: identity.variant.to_string(),
-                native_symbol: runmat_builtins::native_binding_symbol(
-                    identity.builtin.name,
-                    identity.variant,
-                ),
-            }
-        }));
-    }
-    bindings.sort_by(|left, right| (&left.name, &left.variant).cmp(&(&right.name, &right.variant)));
-    bindings.dedup_by(|left, right| left.name == right.name && left.variant == right.variant);
-    Ok(bindings)
 }
 
 fn family(module: &str, reason: &str) -> RuntimeFamilyRetention {
@@ -278,10 +198,7 @@ mod tests {
         REACHABILITY_SCHEMA_VERSION,
     };
 
-    use super::{
-        retained_builtin_bindings, CompilationPolicy, ProgramLinkPlan,
-        PROGRAM_LINK_PLAN_SCHEMA_VERSION,
-    };
+    use super::{CompilationPolicy, ProgramLinkPlan, PROGRAM_LINK_PLAN_SCHEMA_VERSION};
 
     fn builtin_report(name: &str) -> ReachabilityReport {
         ReachabilityReport {
@@ -306,9 +223,8 @@ mod tests {
             "real", "realmax", "realmin", "realsqrt", "sign", "single", "sqrt", "uint8", "uint16",
             "uint32", "uint64",
         ] {
-            let bindings =
-                retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report(name))
-                    .expect("catalog-backed closed-world binding");
+            let bindings = super::super::composition::closed_world_bindings(&builtin_report(name))
+                .expect("catalog-backed closed-world binding");
             assert_eq!(bindings.len(), 1);
             assert_eq!(bindings[0].name, name);
             assert_eq!(bindings[0].variant, "default");
@@ -321,10 +237,9 @@ mod tests {
 
     #[test]
     fn closed_world_rejects_unregistered_and_unbounded_builtin_authorities() {
-        let unregistered = retained_builtin_bindings(
-            CompilationPolicy::ClosedWorld,
-            &builtin_report("unregistered_aot_fixture"),
-        )
+        let unregistered = super::super::composition::closed_world_bindings(&builtin_report(
+            "unregistered_aot_fixture",
+        ))
         .expect_err("an undeclared builtin must not imply exact retention");
         assert!(matches!(
             unregistered,
@@ -334,14 +249,79 @@ mod tests {
             }
         ));
 
-        let dynamic =
-            retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report("feval"))
-                .expect_err("dynamic builtin target set must be proven");
+        let dynamic = super::super::composition::closed_world_bindings(&builtin_report("feval"))
+            .expect_err("dynamic builtin target set must be proven");
         assert!(matches!(
             dynamic,
             crate::AotError::Contract {
                 code: "aot.compile.closed_world_builtin_dynamic",
                 ..
+            }
+        ));
+
+        use super::super::{DynamicCompositionReason, RuntimeComposition};
+        let mut capabilities = super::RuntimeArchiveCapabilities::standalone_host();
+        let selected = RuntimeComposition::select(
+            CompilationPolicy::NativeSpecialized,
+            &capabilities,
+            &builtin_report("abs"),
+        )
+        .unwrap();
+        assert!(selected.is_selected());
+        assert_eq!(selected.bindings()[0].name, "abs");
+        let dynamic = RuntimeComposition::select(
+            CompilationPolicy::NativeSpecialized,
+            &capabilities,
+            &builtin_report("feval"),
+        )
+        .unwrap();
+        assert!(matches!(
+            dynamic,
+            RuntimeComposition::Dynamic {
+                reason: DynamicCompositionReason::DynamicBuiltin { .. }
+            }
+        ));
+        let mut unknown = builtin_report("abs");
+        unknown.has_unknown_edges = true;
+        assert!(matches!(
+            RuntimeComposition::select(
+                CompilationPolicy::NativeSpecialized,
+                &capabilities,
+                &unknown
+            )
+            .unwrap(),
+            RuntimeComposition::Dynamic {
+                reason: DynamicCompositionReason::UnknownTargets
+            }
+        ));
+        assert!(RuntimeComposition::select(
+            CompilationPolicy::ClosedWorld,
+            &capabilities,
+            &unknown,
+        )
+        .is_err());
+        capabilities.closed_world_linking = false;
+        assert!(matches!(
+            RuntimeComposition::select(
+                CompilationPolicy::NativeSpecialized,
+                &capabilities,
+                &builtin_report("abs")
+            )
+            .unwrap(),
+            RuntimeComposition::Dynamic {
+                reason: DynamicCompositionReason::ArchiveCapability
+            }
+        ));
+        capabilities.dynamic_source_loading = true;
+        assert!(matches!(
+            RuntimeComposition::select(
+                CompilationPolicy::DynamicRuntime,
+                &capabilities,
+                &builtin_report("abs")
+            )
+            .unwrap(),
+            RuntimeComposition::Dynamic {
+                reason: DynamicCompositionReason::Requested
             }
         ));
 
@@ -381,7 +361,9 @@ mod tests {
                 has_unknown_edges: false,
             },
             retained_function_ids: retained.clone(),
-            retained_builtin_bindings: Vec::new(),
+            runtime_composition: super::RuntimeComposition::Selected {
+                bindings: Vec::new(),
+            },
             interop: runmat_types::InteropManifest::empty(),
             retained_runtime_families: Vec::new(),
             omitted_runtime_families: Vec::new(),

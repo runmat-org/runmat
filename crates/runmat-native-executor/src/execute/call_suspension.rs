@@ -392,7 +392,11 @@ pub(super) async fn complete(
             reconciliation?;
             let (next, reservation) = restored?;
             let next = next.map_err(NativeExecutorError::from)?;
-            let next = next.map(|value| value.with_owned(|value| state.arena.insert(value)));
+            let next = next
+                .map(|value| {
+                    value.with_owned(|value| state.arena.insert(value, Some(&state.runtime)))
+                })
+                .transpose()?;
             CompletedPayload::Terminator(
                 reservation.allocate(&state.runtime, TerminatorReady::for_next(next))?,
             )
@@ -432,10 +436,10 @@ pub(super) async fn complete(
                         state.apply_lexical_captures(result.captures)?;
                         super::call::normalize_sequence_outputs(result.outputs, requested_outputs)
                             .and_then(|values| {
-                                Ok(own_output_storage(values)?
+                                own_output_storage(values)?
                                     .into_iter()
-                                    .map(|value| state.arena.insert(value))
-                                    .collect())
+                                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                                    .collect::<NativeExecutorResult<_>>()
                             })
                     })?;
                     CompletedPayload::Values(outputs)
@@ -449,7 +453,9 @@ pub(super) async fn complete(
                     CompletedPayload::SequenceRead(stage)
                 }
                 CallCompletion::PreparedReceiver(prepared) => {
-                    let receiver = state.arena.insert(prepared.receiver().clone());
+                    let receiver = state
+                        .arena
+                        .insert(prepared.receiver().clone(), Some(&state.runtime))?;
                     CompletedPayload::PreparedReceiver { prepared, receiver }
                 }
                 CallCompletion::SequenceStage(stage) => CompletedPayload::SequenceStage(stage),

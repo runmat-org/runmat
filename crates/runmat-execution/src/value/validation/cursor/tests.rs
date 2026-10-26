@@ -38,6 +38,44 @@ fn scalar_batch_is_incremental_and_shares_limits() {
             limit: 255
         }
     ));
+    let exception = inline(InlineValue::Exception(ExceptionValue {
+        identifier: String::new(),
+        message: String::new(),
+        stack: vec![String::new(), String::new()],
+        causes: Vec::new(),
+        runtime: None,
+    }));
+    assert!(matches!(
+        exception.validate(ValueLimits {
+            max_elements: 1,
+            ..ValueLimits::default()
+        }),
+        Err(ContractError::Limit {
+            field: "value elements",
+            limit: 1
+        })
+    ));
+    let dense = inline(InlineValue::Dense(crate::value::DenseValue {
+        element_type: ElementType::U8,
+        shape: vec![1, 1],
+        little_endian_data: vec![7],
+    }));
+    dense
+        .validate(ValueLimits {
+            max_inline_bytes: 17,
+            ..ValueLimits::default()
+        })
+        .unwrap();
+    assert!(matches!(
+        dense.validate(ValueLimits {
+            max_inline_bytes: 16,
+            ..ValueLimits::default()
+        }),
+        Err(ContractError::Limit {
+            field: "inline value bytes",
+            limit: 16
+        })
+    ));
 }
 
 #[test]

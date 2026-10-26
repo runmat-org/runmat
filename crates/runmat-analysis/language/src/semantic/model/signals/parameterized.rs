@@ -7,7 +7,7 @@ use runmat_analysis_core::{
     AuthoredNumericExpressionKind, AuthoredNumericOperator, AuthoredParameterizedSignal,
     AuthoredSignalExpression, CoordinateFrame, PhysicalQuantityKind, SignalId,
 };
-use runmat_parser::fea::{FeaBinaryOperator, FeaUnaryOperator};
+use runmat_fea_syntax::{FeaBinaryOperator, FeaUnaryOperator};
 
 pub(super) fn depends_on_model_input(value: &CheckedExpression) -> bool {
     match &value.kind {

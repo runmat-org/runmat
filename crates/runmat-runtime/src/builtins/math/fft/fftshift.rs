@@ -185,6 +185,7 @@ async fn fftshift_builtin(
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::SparseTensor(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

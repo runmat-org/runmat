@@ -326,7 +326,7 @@ async fn tripuls_gpu(
         |value| tripuls_scalar(value, width, skew),
         cooperation,
     )
-    .await
+    .await?
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))?;
     let protected: Vec<_> = resident_inputs.iter().collect();
     let restored = gpu_helpers::restore_class_preserving_value_protecting(
@@ -355,7 +355,7 @@ async fn tripuls_real(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
-        .await
+        .await?
         .map_err(|error| {
             error.into_runtime_error(
                 BUILTIN_NAME,
@@ -369,7 +369,7 @@ async fn tripuls_real(
         |sample| tripuls_scalar(sample, width, skew),
         cooperation,
     )
-    .await
+    .await?
     .map(tensor_into_value)
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))
 }

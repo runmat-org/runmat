@@ -33,6 +33,12 @@ use crate::builtins::math::optim::common::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod bracket;
+mod initial;
+use initial::initial_bracket;
+#[cfg(test)]
+use initial::{bracket_from_endpoints, expand_bracket};
+pub(in crate::builtins::math::optim) mod compiled;
 const NAME: &str = "fzero";
 const ALGORITHM: &str = "bisection, interpolation";
 const DEFAULT_TOL_X: f64 = f64::EPSILON;
@@ -152,7 +158,7 @@ async fn fzero_in_runtime(
     validate_requested_outputs()?;
     let options = parse_options(rest.into_iter().next())
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
-    let mut opts = FzeroOptions::from_struct(options.as_ref())
+    let mut opts = FzeroOptions::from_struct(options.as_ref(), runtime)
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
     crate::call::admission::admit_feval_target(&function)?;
     preflight_scalar_operand(
@@ -162,14 +168,16 @@ async fn fzero_in_runtime(
         "initial point or interval",
         &FZERO_INPUT_NUMERIC_EXTENSION,
         &FZERO_RESIDENT_EXTENSION,
+        runtime,
     )
     .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
-    let x = crate::builtins::math::optim::common::prepare_floating_value(
+    let x = crate::builtins::math::optim::common::prepare_floating_value_with_cooperation(
         NAME,
         x,
         &FZERO_INPUT_NUMERIC_EXTENSION,
         &FZERO_RESIDENT_EXTENSION,
         "initial point or interval",
+        &mut cooperation,
     )
     .await
     .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
@@ -225,9 +233,9 @@ fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
         Some(Value::Struct(options)) => Ok(Some(options)),
-        Some(other) => Err(fzero_error_with_detail(
+        Some(_) => Err(fzero_error_with_detail(
             &FZERO_ERROR_INVALID_ARGUMENT,
-            format!("options must be a struct, got {other:?}"),
+            "options must be a struct",
         )),
     }
 }
@@ -242,12 +250,16 @@ struct FzeroOptions {
 }
 
 impl FzeroOptions {
-    fn from_struct(options: Option<&StructValue>) -> BuiltinResult<Self> {
-        crate::builtins::math::optim::common::ensure_option_extensions(
-            NAME,
+    fn from_struct(
+        options: Option<&StructValue>,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
+        crate::builtins::math::optim::common::ensure_selected_option_extensions(
+            OptimSolver::Fzero,
             options,
             &FZERO_OPTION_EXTENSION,
             &FZERO_RESIDENT_EXTENSION,
+            runtime,
         )?;
         let fields = ScalarOptionFields::from_struct(options);
         let display = parse_display(&option_string_value(
@@ -290,12 +302,14 @@ impl FzeroOptions {
 }
 
 fn parse_display(text: &str) -> BuiltinResult<OptimDisplay> {
-    let display = OptimDisplay::parse(text).ok_or_else(|| {
-        fzero_error_with_detail(
-            &FZERO_ERROR_INVALID_ARGUMENT,
-            format!("option Display must be 'off', 'none', 'final', or 'iter', got '{text}'"),
-        )
-    })?;
+    let display = OptimDisplay::parse(text)
+        .filter(|display| runmat_builtins::OptimSolver::Fzero.accepts_display(*display))
+        .ok_or_else(|| {
+            fzero_error_with_detail(
+                &FZERO_ERROR_INVALID_ARGUMENT,
+                format!("option Display must be 'off', 'none', 'final', or 'iter', got '{text}'"),
+            )
+        })?;
     match display {
         OptimDisplay::None => Ok(OptimDisplay::Off),
         OptimDisplay::Notify => Err(fzero_error_with_detail(
@@ -304,244 +318,6 @@ fn parse_display(text: &str) -> BuiltinResult<OptimDisplay> {
         )),
         other => Ok(other),
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Bracket {
-    a: f64,
-    b: f64,
-    fa: f64,
-    fb: f64,
-    evals: usize,
-    function_single: bool,
-}
-
-async fn initial_bracket(
-    function: &Value,
-    x: Value,
-    options: &FzeroOptions,
-    single: bool,
-    cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<Bracket> {
-    match x {
-        Value::Tensor(tensor) => match tensor.len() {
-            2 => {
-                bracket_from_endpoints(
-                    function,
-                    tensor::tensor_value_f64(&tensor, 0),
-                    tensor::tensor_value_f64(&tensor, 1),
-                    single,
-                    cooperation,
-                )
-                .await
-            }
-            1 => {
-                expand_bracket(
-                    function,
-                    tensor::tensor_value_f64(&tensor, 0),
-                    options,
-                    single,
-                    cooperation,
-                )
-                .await
-            }
-            _ => Err(fzero_error_with_detail(
-                &FZERO_ERROR_INVALID_INPUT,
-                "initial point must be a scalar or two-element bracket",
-            )),
-        },
-        Value::Num(n) => expand_bracket(function, n, options, single, cooperation).await,
-        Value::Int(i) => expand_bracket(function, i.to_f64(), options, single, cooperation).await,
-        Value::Bool(b) => {
-            expand_bracket(
-                function,
-                if b { 1.0 } else { 0.0 },
-                options,
-                single,
-                cooperation,
-            )
-            .await
-        }
-        Value::LogicalArray(array) => match array.data.as_slice() {
-            [guess] => {
-                expand_bracket(
-                    function,
-                    if *guess != 0 { 1.0 } else { 0.0 },
-                    options,
-                    single,
-                    cooperation,
-                )
-                .await
-            }
-            [a, b] => {
-                bracket_from_endpoints(
-                    function,
-                    if *a != 0 { 1.0 } else { 0.0 },
-                    if *b != 0 { 1.0 } else { 0.0 },
-                    single,
-                    cooperation,
-                )
-                .await
-            }
-            _ => Err(fzero_error_with_detail(
-                &FZERO_ERROR_INVALID_INPUT,
-                "initial point must be a scalar or two-element bracket",
-            )),
-        },
-        other => Err(fzero_error_with_detail(
-            &FZERO_ERROR_INVALID_INPUT,
-            format!("initial point must be a scalar or two-element bracket, got {other:?}"),
-        )),
-    }
-}
-
-async fn bracket_from_endpoints(
-    function: &Value,
-    a: f64,
-    b: f64,
-    single: bool,
-    cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<Bracket> {
-    cooperation.completed(0).await?;
-    if !a.is_finite() || !b.is_finite() || a == b {
-        return Err(fzero_error_with_detail(
-            &FZERO_ERROR_INVALID_INPUT,
-            "bracket endpoints must be finite and distinct",
-        ));
-    }
-    let (fa, fa_single) =
-        call_scalar_function_with_precision_info(NAME, OptimSolver::Fzero, function, a, single)
-            .await?;
-    cooperation.completed(1).await?;
-    if fa == 0.0 {
-        return Ok(Bracket {
-            a,
-            b: a,
-            fa,
-            fb: fa,
-            evals: 1,
-            function_single: fa_single,
-        });
-    }
-    let (fb, fb_single) =
-        call_scalar_function_with_precision_info(NAME, OptimSolver::Fzero, function, b, single)
-            .await?;
-    cooperation.completed(1).await?;
-    if fb == 0.0 || fa.signum() != fb.signum() {
-        Ok(Bracket {
-            a,
-            b,
-            fa,
-            fb,
-            evals: 2,
-            function_single: fa_single || fb_single,
-        })
-    } else {
-        Err(fzero_error_with_detail(
-            &FZERO_ERROR_INVALID_INPUT,
-            "function values at bracket endpoints must differ in sign",
-        ))
-    }
-}
-
-async fn expand_bracket(
-    function: &Value,
-    x0: f64,
-    options: &FzeroOptions,
-    single: bool,
-    cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<Bracket> {
-    cooperation.completed(0).await?;
-    if !x0.is_finite() {
-        return Err(fzero_error_with_detail(
-            &FZERO_ERROR_INVALID_INPUT,
-            "initial point must be finite",
-        ));
-    }
-    let (f0, function_single) =
-        call_scalar_function_with_precision_info(NAME, OptimSolver::Fzero, function, x0, single)
-            .await?;
-    cooperation.completed(1).await?;
-    if f0 == 0.0 {
-        return Ok(Bracket {
-            a: x0,
-            b: x0,
-            fa: f0,
-            fb: f0,
-            evals: 1,
-            function_single,
-        });
-    }
-
-    let mut evals = 1usize;
-    let mut step = (x0.abs() * 0.01).max(0.01);
-    let mut previous_interval = None;
-    while evals + 2 <= options.max_fun_evals {
-        cooperation.completed(1).await?;
-        // A finite initial point may be only one representable step from a
-        // numerical boundary. Search through the finite domain, never pass
-        // an overflowed abscissa to user code, and stop once expansion can
-        // no longer reach a new pair of endpoints.
-        let a = (x0 - step).max(-f64::MAX);
-        let b = (x0 + step).min(f64::MAX);
-        if previous_interval == Some((a, b)) {
-            break;
-        }
-        previous_interval = Some((a, b));
-        let fa = call_scalar_function_with_precision(NAME, OptimSolver::Fzero, function, a, single)
-            .await?;
-        cooperation.completed(1).await?;
-        let fb = call_scalar_function_with_precision(NAME, OptimSolver::Fzero, function, b, single)
-            .await?;
-        cooperation.completed(1).await?;
-        evals += 2;
-        if fa == 0.0 {
-            return Ok(Bracket {
-                a,
-                b: a,
-                fa,
-                fb: fa,
-                evals,
-                function_single,
-            });
-        }
-        if fa.signum() != f0.signum() {
-            return Ok(Bracket {
-                a,
-                b: x0,
-                fa,
-                fb: f0,
-                evals,
-                function_single,
-            });
-        }
-        if fb.signum() != f0.signum() {
-            return Ok(Bracket {
-                a: x0,
-                b,
-                fa: f0,
-                fb,
-                evals,
-                function_single,
-            });
-        }
-        if fb == 0.0 || fa.signum() != fb.signum() {
-            return Ok(Bracket {
-                a,
-                b,
-                fa,
-                fb,
-                evals,
-                function_single,
-            });
-        }
-        step *= 1.6;
-    }
-
-    Err(fzero_error_with_detail(
-        &FZERO_ERROR_INVALID_INPUT,
-        "could not find a sign-changing bracket around the initial point",
-    ))
 }
 
 fn finalize(result: BrentZeroResult, options: &FzeroOptions, single: bool) -> BuiltinResult<Value> {

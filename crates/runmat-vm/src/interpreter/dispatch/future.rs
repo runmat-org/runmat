@@ -248,6 +248,7 @@ fn suspend_prepared_output<'a>(
             vars: state.vars,
             state: state.sequence_register,
             context: prepared_outputs::PreparedOutputContext {
+                bytecode: meta.bytecode,
                 authority: slot_authority::AssignmentSlotAuthority {
                     context: state.context,
                     global_aliases: state.global_aliases,

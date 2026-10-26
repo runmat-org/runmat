@@ -335,7 +335,7 @@ pub(super) fn prepare_sequence_assignment(
     let (writeback, base) = continuation::prepare_place_write(state, base_place)?;
     let count = runmat_runtime::object::resolve::member_sequence_cardinality(&base)
         .map_err(NativeExecutorError::from)?;
-    let base = state.arena.insert(base);
+    let base = state.arena.insert(base, Some(&state.runtime))?;
     Ok((
         PreparedSequenceDestination {
             writeback,

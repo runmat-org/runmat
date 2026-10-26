@@ -4,15 +4,16 @@
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 pub mod abi;
+mod callable_selection;
 mod diagnostic_path;
 mod error;
 mod executable;
 mod execution;
-mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod foreign_artifacts;
 #[cfg(not(target_arch = "wasm32"))]
 mod foreign_unit_host;
+mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
 mod generic_native;
 mod parallel_runtime;

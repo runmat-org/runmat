@@ -1225,7 +1225,6 @@ async fn generated_box_workload(
         )
         .cloned()
         .expect("pulse static facts");
-    let executable_source_digest = unit.revision().source_digest.parse::<Digest>().unwrap();
     let admitted = admit_named_signal_generator(
         &authored,
         revision,
@@ -1234,7 +1233,11 @@ async fn generated_box_workload(
             qualified_name: "loads.pulse".into(),
             source_digest: Digest::sha256(source_text),
         },
-        executable_source_digest,
+        runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(
+            &executable.manifest.identity,
+            "loads.pulse",
+        )
+        .unwrap(),
         &function,
         &BTreeSet::new(),
     )

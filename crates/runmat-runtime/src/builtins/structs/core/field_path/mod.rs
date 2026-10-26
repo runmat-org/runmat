@@ -2,6 +2,7 @@
 
 mod parse;
 mod plan;
+pub(in crate::builtins::structs::core) mod native;
 
 #[cfg(test)]
 mod tests;

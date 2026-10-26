@@ -7,9 +7,15 @@ use std::sync::{Arc, Mutex};
 fn one_output_does_not_publish_unused_jacobian() {
     let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = LeastSquaresResult {
+        point_evidence: crate::builtins::math::optim::least_squares::PointEvidence::Evaluated,
+        gradient: None,
+        cg_iterations: 0,
+        jacobian_source:
+            crate::builtins::math::optim::least_squares::JacobianSource::FiniteDifference,
+        method: crate::builtins::math::optim::least_squares::Method::LevenbergMarquardt,
         x: vec![2.0],
         residual: vec![0.0],
-        jacobian: vec![],
+        jacobian: crate::builtins::math::optim::least_squares::PublishedJacobian::RowMajor(vec![]),
         residual_len: 1,
         variable_len: 1,
         resnorm: 0.0,
@@ -49,6 +55,9 @@ fn residual_shape_cannot_change_at_constant_element_count() {
         scalar: false,
         residual_shape: None,
         residual_scalar: false,
+        specify_objective_gradient: false,
+        jacobian: None,
+        accepted_jacobian: None,
     };
     evaluator.accept_residual_shape(vec![1, 2], false).unwrap();
     assert!(evaluator.accept_residual_shape(vec![2, 1], false).is_err());
@@ -153,7 +162,10 @@ fn fsolve_vector_system_via_semantic_resolver() {
     ))
     .expect("call-port scope");
     drop(entry);
-    let x0 = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
+    // On the symmetric diagonal both Jacobian rows are parallel, and a
+    // stationary least-squares point need not be a root of this system.
+    // The separate stationary-non-root case covers that terminal behavior.
+    let x0 = Tensor::new(vec![1.5, 0.5], vec![2, 1]).unwrap();
     let root = block_on(runtime.scope(fsolve_builtin(
         Value::FunctionHandle("system".into()),
         Value::Tensor(x0),

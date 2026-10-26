@@ -1,7 +1,9 @@
 //! A unique owner moves slots; aliases project one canonical Value at a time.
 //! Both routes retain the original physical allocation and its claims. There
 //! is no replacement Vec, iterator Box, or second root registration.
-use runmat_value::{OutputListIntoIter, OutputListStorage, Value, ValueSequence};
+use runmat_value::{
+    OutputListIntoIter, OutputListStorage, Value, ValueSequence, ValueSequenceStorage,
+};
 #[derive(Debug)]
 pub(crate) enum RootedValuesIteration {
     Single(Option<Value>),
@@ -16,9 +18,9 @@ impl RootedValuesIteration {
     /// The caller retains the original sequence's root lease. Only physical
     /// storage moves here; an inline single value needs no collection.
     pub(crate) fn from_sequence(values: ValueSequence) -> Self {
-        match values.into_legacy_value() {
-            Value::OutputList(values) => Self::new(values),
-            value => Self::Single(Some(value)),
+        match values.into_storage() {
+            ValueSequenceStorage::CommaSeparated(values) => Self::new(values),
+            ValueSequenceStorage::Single(value) => Self::Single(Some(value)),
         }
     }
 

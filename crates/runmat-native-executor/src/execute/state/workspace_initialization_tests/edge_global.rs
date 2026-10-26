@@ -87,10 +87,16 @@ fn inherited_global_alias_survives_every_edge_without_replaying_saved_ssa() {
             let runtime = state.runtime.clone();
             let _scope = runtime.enter();
             state.declare_global(0, "x".into()).unwrap();
-            let stale = state.arena.insert(Value::Num(0.0));
+            let stale = state
+                .arena
+                .insert(Value::Num(0.0), Some(&state.runtime))
+                .unwrap();
             state.set_local(0, stale).unwrap();
             state.locals.push(NativeValueRef::NULL);
-            let transferred = state.arena.insert(Value::Num(19.0));
+            let transferred = state
+                .arena
+                .insert(Value::Num(19.0), Some(&state.runtime))
+                .unwrap();
             state.values.insert(NativeValueId(40), stale);
             state.values.insert(NativeValueId(41), transferred);
             let edge = edge_to_first_block(
@@ -147,7 +153,10 @@ fn explicit_edge_overrides_publish_to_global_and_persistent_aliases() {
                 let runtime = state.runtime.clone();
                 let _scope = runtime.enter();
                 declare_alias(&mut state, alias);
-                let incoming = state.arena.insert(Value::Num(19.0));
+                let incoming = state
+                    .arena
+                    .insert(Value::Num(19.0), Some(&state.runtime))
+                    .unwrap();
                 let edge = edge_to_first_block(
                     &mut state,
                     vec![case.argument(NativeLocalId(0), NativeValueId(40))],
@@ -182,7 +191,10 @@ fn persistent_local_read_refreshes_selected_context_without_rewriting_old_ssa() 
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
         state.declare_persistent(0, "x".into()).unwrap();
-        let old = state.arena.insert(Value::Num(0.0));
+        let old = state
+            .arena
+            .insert(Value::Num(0.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, old).unwrap();
         assert_eq!(
             canonical_alias(&state, AliasCase::Persistent),
@@ -228,7 +240,10 @@ fn inherited_persistent_alias_keeps_nested_write_and_old_ssa() {
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
         state.declare_persistent(0, "x".into()).unwrap();
-        let stale = state.arena.insert(Value::Num(0.0));
+        let stale = state
+            .arena
+            .insert(Value::Num(0.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, stale).unwrap();
         state.values.insert(NativeValueId(40), stale);
         let edge = edge_to_first_block(
@@ -264,7 +279,10 @@ fn persistent_deoptimization_refreshes_only_local_not_evaluated_operand() {
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
         state.declare_persistent(0, "x".into()).unwrap();
-        let old = state.arena.insert(Value::Num(0.0));
+        let old = state
+            .arena
+            .insert(Value::Num(0.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, old).unwrap();
         state.values.insert(NativeValueId(40), old);
         let terminator = state.function.blocks[0].terminator.clone();
@@ -292,7 +310,10 @@ fn cleared_persistent_deoptimization_retains_tombstone_and_old_ssa_operand() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();
         state.declare_persistent(0, "x".into()).unwrap();
-        let old = state.arena.insert(Value::Num(7.0));
+        let old = state
+            .arena
+            .insert(Value::Num(7.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, old).unwrap();
         state.values.insert(NativeValueId(40), old);
         let terminator = state.function.blocks[0].terminator.clone();

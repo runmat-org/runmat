@@ -382,7 +382,7 @@ impl JobStore {
         &self,
         job_id: JobId,
     ) -> NativeExecutionResult<Option<DriverCompletion>> {
-        if self.program_submission(job_id)?.is_some() {
+        if self.retained_submission(job_id)?.is_some() {
             return Ok(None);
         }
         let path = self.job_dir(job_id).join("completion.json");

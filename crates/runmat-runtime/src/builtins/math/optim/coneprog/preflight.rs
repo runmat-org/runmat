@@ -19,9 +19,9 @@ pub(super) fn arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinR
             cones(&value)?;
         }
         for (label, alias, role) in [
-            ("Aineq", "A", Role::OptionalMatrix),
+            ("Aineq", "A", Role::OptionalSparseMatrix),
             ("bineq", "b", Role::OptionalVector),
-            ("Aeq", "Aeq", Role::OptionalMatrix),
+            ("Aeq", "Aeq", Role::OptionalSparseMatrix),
             ("beq", "beq", Role::OptionalVector),
             ("lb", "lb", Role::OptionalVector),
             ("ub", "ub", Role::OptionalVector),
@@ -33,6 +33,9 @@ pub(super) fn arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinR
             }
         }
         if let Some(value) = optional_field(problem, "options") {
+            if is_empty_value(&value) {
+                return Ok(());
+            }
             let Value::Struct(options) = value else {
                 return Err(coneprog_error(
                     &ERROR_INVALID_INPUT,
@@ -50,11 +53,18 @@ pub(super) fn arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinR
         ));
     }
     let mut end = args.len();
-    if let Some(Value::Struct(options)) = args.last().filter(|_| args.len() > 2) {
-        if is_options_struct(options) {
-            controls(options)?;
-            end -= 1;
+    if args.len() > 2 && args.len() % 2 == 1 {
+        match args.last().expect("nonempty arguments") {
+            Value::Struct(options) => controls(options)?,
+            value if is_empty_value(value) => {}
+            _ => {
+                return Err(coneprog_error(
+                    &ERROR_INVALID_ARGUMENT,
+                    "coneprog: options must be a scalar struct or []",
+                ))
+            }
         }
+        end -= 1;
     }
     if !matches!(end, 2 | 4 | 6 | 8) {
         return Err(coneprog_error(
@@ -69,9 +79,9 @@ pub(super) fn arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinR
     )?;
     cones(args.get(1).expect("validated coneprog constraints"))?;
     for (index, label, role) in [
-        (2, "A", Role::OptionalMatrix),
+        (2, "A", Role::OptionalSparseMatrix),
         (3, "b", Role::OptionalVector),
-        (4, "Aeq", Role::OptionalMatrix),
+        (4, "Aeq", Role::OptionalSparseMatrix),
         (5, "beq", Role::OptionalVector),
         (6, "lb", Role::OptionalVector),
         (7, "ub", Role::OptionalVector),
@@ -89,6 +99,12 @@ fn cones(value: &Value) -> BuiltinResult<()> {
     }
     match value {
         Value::Struct(constraint) => cone(constraint),
+        Value::StructArray(array) => {
+            for element in array.elements() {
+                cone(&element.to_owned())?;
+            }
+            Ok(())
+        }
         Value::Cell(cell) => {
             for value in cell.data() {
                 descriptor(value)?;
@@ -126,7 +142,7 @@ fn descriptor(value: &Value) -> BuiltinResult<()> {
 
 fn cone(constraint: &StructValue) -> BuiltinResult<()> {
     for (field, role) in [
-        ("A", Role::NonemptyMatrix),
+        ("A", Role::NonemptySparseMatrix),
         ("b", Role::OptionalVector),
         ("d", Role::OptionalVector),
         ("gamma", Role::Scalar),
@@ -137,24 +153,5 @@ fn cone(constraint: &StructValue) -> BuiltinResult<()> {
 }
 
 fn controls(options: &StructValue) -> BuiltinResult<()> {
-    // Validate every consumed host control now; resident controls are checked
-    // descriptively here and decoded only after their authentic gather.
-    for field in [
-        runmat_builtins::OptimOptionField::TolFun,
-        runmat_builtins::OptimOptionField::TolX,
-        runmat_builtins::OptimOptionField::MaxIter,
-    ] {
-        if let Some(value) = lookup_option(options, field.name()) {
-            if matches!(value, Value::GpuTensor(_)) {
-                crate::builtins::math::optim::common::preflight_option_scalar(
-                    CONEPROG, value, field,
-                )?;
-            } else if field == runmat_builtins::OptimOptionField::MaxIter {
-                option_usize(CONEPROG, Some(options), field.name(), DEFAULT_MAX_ITER)?;
-            } else {
-                option_f64(CONEPROG, Some(options), field.name(), DEFAULT_TOL)?;
-            }
-        }
-    }
-    Ok(())
+    options::Controls::validate(options)
 }

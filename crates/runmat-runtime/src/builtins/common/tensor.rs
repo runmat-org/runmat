@@ -1,3 +1,5 @@
+pub(crate) mod character_numeric;
+
 use std::{borrow::Cow, convert::TryFrom};
 
 use num_complex::Complex64;

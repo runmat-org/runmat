@@ -6,15 +6,12 @@ use crate::{
 use runmat_types::*;
 use std::collections::BTreeMap;
 
-const FIELDS: &[Field] = &[
-    Field::TolX,
-    Field::TolFun,
-    Field::MaxIter,
-    Field::MaxFunEvals,
-    Field::Display,
-    Field::Algorithm,
-    Field::SpecifyObjectiveGradient,
-];
+mod annealing;
+mod genetic;
+mod quadratic;
+mod surrogate;
+
+const FIELDS: &[Field] = &Field::ALL;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -22,6 +19,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut complete = true;
     let mut explicit_solver = false;
     let mut solver = None;
+    let mut quadratic = quadratic::Selection::default();
     match request.arguments.first() {
         None => diagnostics.push(argument_error(
             "RM-CATALOG-OPTIONS-ARITY",
@@ -33,6 +31,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             storage: StorageFact::Scalar | StorageFact::Unknown,
             ..
         }) => {
+            quadratic.merge(options);
             let has_solver = options
                 .fields
                 .keys()
@@ -52,6 +51,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }) => {
             complete = false;
         }
+        Some(ValueFact {
+            kind: ValueKindFact::Callable(_),
+            ..
+        }) => {
+            explicit_solver = true;
+            complete = false;
+            fields.insert("Solver".into(), ValueFact::scalar(ValueKindFact::String));
+        }
         Some(first) if text(first) => {
             explicit_solver = true;
             solver = request
@@ -66,8 +73,25 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 ));
             }
             if let Some(solver) = solver {
-                for &field in FIELDS.iter().filter(|&&field| solver.accepts(field)) {
-                    fields.insert(field.name().into(), normalized(field, None));
+                for &field in FIELDS
+                    .iter()
+                    .filter(|&&field| solver.accepts(field) && field != Field::HessUpdate)
+                {
+                    let fact = if matches!(
+                        solver,
+                        OptimSolver::Lsqnonlin
+                            | OptimSolver::Fmincon
+                            | OptimSolver::Fminunc
+                            | OptimSolver::Fseminf
+                            | OptimSolver::Fminimax
+                            | OptimSolver::Fgoalattain
+                    ) && field == Field::MaxFunEvals
+                    {
+                        ValueFact::unknown(DynamicReason::RuntimeValue)
+                    } else {
+                        normalized(field, Some(solver), None)
+                    };
+                    fields.insert(field.name().into(), fact);
                 }
             } else {
                 complete = false;
@@ -83,6 +107,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut index = 1;
     while index < request.arguments.len() {
         if matches!(request.arguments[index].kind, ValueKindFact::Unknown) {
+            quadratic.unknown();
             // Unknown kind can be a one-argument struct merge or a name/value
             // pair, so subsequent argument positions are not statically bound.
             if !explicit_solver {
@@ -94,6 +119,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             break;
         }
         if let ValueKindFact::Struct(options) = &request.arguments[index].kind {
+            quadratic.merge(options);
             if !matches!(
                 request.arguments[index].storage,
                 StorageFact::Scalar | StorageFact::Unknown
@@ -155,10 +181,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             break;
         };
         if let Some(name) = request.literals.literal_string_at(index) {
-            match Field::parse(&name) {
-                Some(field) if solver.is_none_or(|solver| solver.accepts(field)) => {
+            match solver.map_or_else(
+                || Field::parse(&name).filter(|field| *field != Field::HessUpdate),
+                |solver| Field::parse_for_constructor(&name, solver),
+            ) {
+                Some(field) => {
+                    quadratic.record(request, field, value, index + 1);
                     inspect_value(request, field, solver, value, index + 1, &mut diagnostics);
-                    fields.insert(field.name().into(), normalized(field, Some(value)));
+                    fields.insert(field.name().into(), normalized(field, solver, Some(value)));
                 }
                 _ => diagnostics.push(argument_error(
                     "RM-CATALOG-OPTIONS-FIELD",
@@ -167,11 +197,22 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 )),
             }
         } else {
+            quadratic.unknown();
             complete = false;
             invalidate_fields(&mut fields, solver);
         }
         index += 2;
     }
+    if matches!(
+        solver,
+        Some(OptimSolver::Fminunc | OptimSolver::Fmincon | OptimSolver::Lsqnonlin)
+    ) {
+        fields.remove(Field::TolFun.name());
+    }
+    if solver == Some(OptimSolver::Quadprog) {
+        quadratic.finish(&mut fields, &mut complete);
+    }
+    value_facts::public_names(solver, &mut fields);
     facts::finish(
         entry,
         request,
@@ -183,10 +224,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 fn invalidate_fields(fields: &mut BTreeMap<String, ValueFact>, solver: Option<OptimSolver>) {
-    for field in FIELDS
-        .iter()
-        .filter(|&&field| solver.is_none_or(|solver| solver.accepts(field)))
-    {
+    for field in FIELDS.iter().filter(|&&field| {
+        solver.is_none_or(|solver| solver.accepts(field) && field != Field::HessUpdate)
+    }) {
         fields.remove(field.name());
     }
 }
@@ -210,16 +250,19 @@ fn inspect_struct(
             fields.insert("Solver".into(), ValueFact::scalar(ValueKindFact::String));
             continue;
         }
-        match Field::parse(name) {
-            Some(field) if solver.is_none_or(|solver| solver.accepts(field)) => {
-                if !value_metadata(field, value) {
+        match solver.map_or_else(
+            || Field::parse(name).filter(|field| *field != Field::HessUpdate),
+            |solver| Field::parse_for_constructor(name, solver),
+        ) {
+            Some(field) => {
+                if !solver_value_metadata(field, solver, value) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-OPTIONS-TYPE",
                         "option value has unsupported class or geometry",
                         index,
                     ));
                 }
-                fields.insert(field.name().into(), normalized(field, Some(value)));
+                fields.insert(field.name().into(), normalized(field, solver, Some(value)));
             }
             _ => diagnostics.push(argument_error(
                 "RM-CATALOG-OPTIONS-FIELD",
@@ -230,135 +273,10 @@ fn inspect_struct(
     }
 }
 
-fn inspect_value(
-    request: &CallRequest,
-    field: Field,
-    solver: Option<OptimSolver>,
-    value: &ValueFact,
-    index: usize,
-    diagnostics: &mut Vec<InferenceDiagnostic>,
-) {
-    if !value_metadata(field, value) {
-        diagnostics.push(argument_error(
-            "RM-CATALOG-OPTIONS-TYPE",
-            "option value has unsupported class or geometry",
-            index,
-        ));
-    }
-    match field {
-        Field::Display | Field::Algorithm => {
-            if let Some(text) = request.literals.literal_string_at(index) {
-                let valid = if field == Field::Display {
-                    OptimDisplay::parse(&text).is_some_and(|display| {
-                        solver.is_none_or(|solver| solver.accepts_display(display))
-                    })
-                } else {
-                    OptimAlgorithm::parse(&text).is_some_and(|algorithm| {
-                        solver.is_none_or(|solver| solver.accepts_algorithm(algorithm))
-                    })
-                };
-                if !valid {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-OPTIONS-CONTROL",
-                        "unsupported solver control value",
-                        index,
-                    ));
-                }
-            }
-        }
-        Field::TolX | Field::TolFun | Field::MaxIter | Field::MaxFunEvals => {
-            if request.literals.numeric_at(index).is_some_and(|number| {
-                !number.is_finite()
-                    || number <= 0.0
-                    || (matches!(field, Field::MaxIter | Field::MaxFunEvals)
-                        && number.fract() != 0.0)
-            }) {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-OPTIONS-RANGE",
-                    "option must be a finite positive scalar and counts must be integral",
-                    index,
-                ));
-            }
-            if matches!(field, Field::TolX | Field::TolFun)
-                && request
-                    .literals
-                    .literal_args
-                    .get(index)
-                    .is_some_and(|literal| literal.integer_is_exact_binary64() == Some(false))
-            {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-OPTIONS-EXACT",
-                    "integer tolerances must be exactly representable as binary64",
-                    index,
-                ));
-            }
-        }
-        Field::SpecifyObjectiveGradient => {
-            if request
-                .literals
-                .numeric_at(index)
-                .is_some_and(|value| value != 0.0 && value != 1.0)
-                || request
-                    .literals
-                    .literal_string_at(index)
-                    .is_some_and(|text| crate::OptimSwitch::parse(&text).is_none())
-            {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-OPTIONS-FLAG",
-                    "gradient control must be logical 0/1 or a supported on/off spelling",
-                    index,
-                ));
-            }
-        }
-    }
-}
-
-fn value_metadata(field: Field, value: &ValueFact) -> bool {
-    if matches!(value.kind, ValueKindFact::Unknown) {
-        return true;
-    }
-    if matches!(field, Field::Display | Field::Algorithm) {
-        return text(value);
-    }
-    if field == Field::SpecifyObjectiveGradient && text(value) {
-        return true;
-    }
-    value.shape.element_count().is_none_or(|count| count == 1)
-        && value.storage != StorageFact::Sparse
-        && match value.kind {
-            ValueKindFact::Numeric(numeric) => numeric.domain == NumericDomain::Real,
-            ValueKindFact::Logical => {
-                field == Field::SpecifyObjectiveGradient || value.storage != StorageFact::Scalar
-            }
-            _ => false,
-        }
-}
-
-fn normalized(field: Field, source: Option<&ValueFact>) -> ValueFact {
-    match field {
-        Field::Display | Field::Algorithm => ValueFact::scalar(ValueKindFact::String),
-        Field::SpecifyObjectiveGradient => ValueFact::scalar(ValueKindFact::Logical),
-        Field::MaxIter | Field::MaxFunEvals => match source.map(|value| &value.kind) {
-            Some(ValueKindFact::Numeric(numeric)) if numeric.class.integer_class().is_some() => {
-                ValueFact::scalar(ValueKindFact::Numeric(*numeric))
-            }
-            Some(ValueKindFact::Unknown) => ValueFact::scalar(ValueKindFact::Unknown),
-            _ => facts::double(ShapeFact::Scalar, StorageFact::Scalar),
-        },
-        _ => facts::double(ShapeFact::Scalar, StorageFact::Scalar),
-    }
-}
-
-fn text(value: &ValueFact) -> bool {
-    match value.kind {
-        ValueKindFact::Unknown => true,
-        ValueKindFact::String => value.shape.element_count().is_none_or(|count| count == 1),
-        ValueKindFact::Character => value.shape.known_dims().is_none_or(|dims| {
-            dims.len() == 1
-                || dims
-                    .first()
-                    .is_some_and(|rows| rows.is_none_or(|rows| rows == 1))
-        }),
-        _ => false,
-    }
-}
+mod inspect;
+mod pattern;
+mod semi_infinite;
+use inspect::inspect_value;
+mod swarm;
+mod value_facts;
+use value_facts::{normalized, solver_value_metadata, text};

@@ -36,7 +36,7 @@ impl LocalSupervisor {
                 "durable cancellation handle differs from its original admission".into(),
             ));
         }
-        if store.program_submission(job_id)?.is_some() {
+        if store.retained_submission(job_id)?.is_some() {
             return self.cancel_program(&mut store, record, reason).await;
         }
         // The legacy script path has no admitted task/cause authority. Do not

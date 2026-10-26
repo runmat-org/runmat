@@ -30,6 +30,9 @@ impl NativeTaskFailure {
         let Err(diagnostic) = result else {
             return None;
         };
+        if evidence.task.state == runmat_execution::state::TaskState::Indeterminate {
+            return Some(Self::Scheduler(diagnostic.clone()));
+        }
         match evidence.task.cancellation {
             Some(cancellation) => Some(Self::Cancelled {
                 task_id: evidence.task.id(),

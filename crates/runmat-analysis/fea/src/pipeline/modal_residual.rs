@@ -147,7 +147,7 @@ pub(super) fn build_directional_residual_vectors(
         }
         residuals.push(ModalResidualVector {
             direction,
-            frequency_hz: frequency_hz,
+            frequency_hz,
             modal_mass,
             modal_stiffness,
             participation_factor,

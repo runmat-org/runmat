@@ -51,6 +51,11 @@ impl Utf8TextAdmissionError {
 }
 
 impl Utf8Text {
+    pub fn shared_storage_identity(
+        &self,
+    ) -> Option<crate::exact_array_storage::SharedStorageIdentity> {
+        self.0.shared_storage_identity()
+    }
     /// Move an existing String's bytes into the canonical exact text owner.
     /// Both the original byte capacity and new shared header are reserved
     /// before the header allocation; no intermediate text copy is made.

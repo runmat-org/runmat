@@ -48,6 +48,7 @@ pub(crate) fn classify_mat_load_restoration(value: Value) -> MatLoadRestoration 
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::Future(_)
         | Value::Task(_)

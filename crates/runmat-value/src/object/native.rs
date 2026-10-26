@@ -1,13 +1,23 @@
+mod equation;
 use runmat_execution::resource::ExactShared;
 use runmat_gc_api::{Trace, Tracer};
 use std::sync::OnceLock;
 
-use super::{
-    ContainersMapStorage, GraphicsReceiverRef, MemmapReceiverAuthority, MemmapReceiverState,
-    NumericFactorData, ObjectInstance,
+use super::optimization_model::storage::{Backing, MetadataRef};
+use super::optimization_model::{
+    EquationProblemData, OptimizationModelPayload, OptimizationProblemData,
 };
+use super::warm_start::ActiveSetWarmStartData;
+use super::{
+    optimization_variable::OptimizationVariablePayload, ContainersMapStorage, GraphicsReceiverRef,
+    MemmapReceiverAuthority, MemmapReceiverState, NumericFactorData, ObjectInstance,
+};
+use crate::optimization_model::PreparedOptimizationNative;
+use crate::{ExactArrayClaimPromotionError, SharedStorageIdentity};
 use crate::{ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError};
 use crate::{ForeignRef, Value};
+#[path = "native/warm_start.rs"]
+mod warm_start;
 
 #[derive(Debug)]
 struct SharedNativePayload<T> {
@@ -86,6 +96,22 @@ impl<T> SharedNativeState<T> {
         Ok(())
     }
 }
+impl<T> Backing for SharedNativeState<T> {
+    fn identity(&self) -> Option<SharedStorageIdentity> {
+        Some(SharedStorageIdentity::of(self.0.get()))
+    }
+    fn quote(&self) -> Result<Option<usize>, ExactArrayClaimPromotionError> {
+        Ok((!self.has_retained_claim())
+            .then_some(ExactShared::<SharedNativePayload<T>>::requested_bytes()))
+    }
+    fn promote(
+        &self,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<(), ExactArrayClaimPromotionError> {
+        self.try_admit_exact(0, permit)
+            .map_err(ExactArrayClaimPromotionError::Allocation)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum NativeObjectPayload {
@@ -97,9 +123,24 @@ pub(super) enum NativeObjectPayload {
     TcpAuthority(ForeignRef),
     GraphicsReceiver(GraphicsReceiverRef),
     NumericFactor(SharedNativeState<NumericFactorData>),
+    OptimizationVariable(SharedNativeState<OptimizationVariablePayload>),
+    OptimizationModel(SharedNativeState<OptimizationModelPayload>),
+    OptimizationProblem(SharedNativeState<OptimizationProblemData>),
+    ActiveSetWarmStart(SharedNativeState<ActiveSetWarmStartData>),
+    EquationProblem(SharedNativeState<EquationProblemData>),
 }
 
 impl NativeObjectPayload {
+    pub(in crate::object) fn optimization_native_requested_bytes() -> usize {
+        ExactShared::<SharedNativePayload<OptimizationVariablePayload>>::requested_bytes()
+    }
+    pub(in crate::object) fn optimization_native_exact(
+        input: PreparedOptimizationNative,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        SharedNativeState::try_new_exact(input.0.into_payload(), 0, permit)
+            .map(Self::OptimizationVariable)
+    }
     pub(super) fn numeric_factor_requested_bytes() -> usize {
         ExactShared::<SharedNativePayload<NumericFactorData>>::requested_bytes()
     }
@@ -161,6 +202,11 @@ impl NativeObjectPayload {
             Self::TcpAuthority(value) => Self::TcpAuthority(value.clone()),
             Self::GraphicsReceiver(value) => Self::GraphicsReceiver(value.clone()),
             Self::NumericFactor(value) => Self::NumericFactor(value.clone()),
+            Self::OptimizationVariable(value) => Self::OptimizationVariable(value.clone()),
+            Self::OptimizationModel(value) => Self::OptimizationModel(value.clone()),
+            Self::OptimizationProblem(value) => Self::OptimizationProblem(value.clone()),
+            Self::ActiveSetWarmStart(value) => Self::ActiveSetWarmStart(value.clone()),
+            Self::EquationProblem(value) => Self::EquationProblem(value.clone()),
         }
     }
 }
@@ -178,6 +224,8 @@ pub enum ObjectPersistencePayloadKind {
     TcpAuthority,
     GraphicsReceiver,
     NumericFactor,
+    OptimizationVariable,
+    OptimizationModel,
 }
 
 impl Trace for NativeObjectPayload {
@@ -195,16 +243,40 @@ impl Trace for NativeObjectPayload {
             | Self::TcpAuthority(_)
             | Self::GraphicsReceiver(_) => {}
             Self::NumericFactor(_) => {}
+            Self::OptimizationVariable(value) => value.get().trace(tracer),
+            Self::OptimizationModel(value) => value.get().trace(tracer),
+            Self::OptimizationProblem(value) => value.get().trace(tracer),
+            Self::ActiveSetWarmStart(value) => value.get().trace(tracer),
+            Self::EquationProblem(value) => value.get().trace(tracer),
         }
     }
 }
 
 impl ObjectInstance {
+    pub fn optimization_native_storage_identity(&self) -> Option<SharedStorageIdentity> {
+        match self.generation().native_payload.as_ref()? {
+            NativeObjectPayload::OptimizationVariable(value) => value.identity(),
+            _ => None,
+        }
+    }
+    pub(in crate::object) fn optimization_metadata_header(&self) -> Option<MetadataRef<'_>> {
+        match self.generation().native_payload.as_ref()? {
+            NativeObjectPayload::OptimizationVariable(value) => Some(MetadataRef::new(value)),
+            _ => None,
+        }
+    }
     pub(super) fn native_is_admitted_for_copy(&self) -> bool {
         match self.generation().native_payload.as_ref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => storage.has_retained_claim(),
             Some(NativeObjectPayload::MemmapReceiver(storage)) => storage.has_retained_claim(),
             Some(NativeObjectPayload::NumericFactor(storage)) => storage.has_retained_claim(),
+            Some(NativeObjectPayload::OptimizationVariable(storage)) => {
+                storage.has_retained_claim()
+            }
+            Some(NativeObjectPayload::OptimizationModel(storage)) => storage.has_retained_claim(),
+            Some(NativeObjectPayload::OptimizationProblem(storage)) => storage.has_retained_claim(),
+            Some(NativeObjectPayload::ActiveSetWarmStart(storage)) => storage.has_retained_claim(),
+            Some(NativeObjectPayload::EquationProblem(storage)) => storage.has_retained_claim(),
             _ => true,
         }
     }
@@ -216,6 +288,21 @@ impl ObjectInstance {
             return Ok((0, 0));
         };
         match native {
+            NativeObjectPayload::EquationProblem(storage) if !storage.has_retained_claim() => {
+                Err(ExactHostNumericAllocationError::UnsupportedClass)
+            }
+            NativeObjectPayload::ActiveSetWarmStart(_) => {
+                Err(ExactHostNumericAllocationError::UnsupportedClass)
+            }
+            NativeObjectPayload::OptimizationProblem(storage) if !storage.has_retained_claim() => {
+                Err(ExactHostNumericAllocationError::UnsupportedClass)
+            }
+            NativeObjectPayload::OptimizationModel(storage) if !storage.has_retained_claim() => {
+                Err(ExactHostNumericAllocationError::UnsupportedClass)
+            }
+            NativeObjectPayload::OptimizationVariable(storage) if !storage.has_retained_claim() => {
+                Err(ExactHostNumericAllocationError::UnsupportedClass)
+            }
             NativeObjectPayload::NumericFactor(storage) if !storage.has_retained_claim() => {
                 Ok((NativeObjectPayload::numeric_factor_requested_bytes(), 1))
             }
@@ -236,6 +323,18 @@ impl ObjectInstance {
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<(), ExactHostNumericAllocationError> {
         match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::OptimizationVariable(storage))
+                if storage.has_retained_claim() =>
+            {
+                Ok(())
+            }
+            Some(
+                NativeObjectPayload::OptimizationVariable(_)
+                | NativeObjectPayload::OptimizationModel(_)
+                | NativeObjectPayload::OptimizationProblem(_)
+                | NativeObjectPayload::ActiveSetWarmStart(_)
+                | NativeObjectPayload::EquationProblem(_),
+            ) => Err(ExactHostNumericAllocationError::UnsupportedClass),
             Some(NativeObjectPayload::NumericFactor(storage)) => storage.try_admit_exact(0, permit),
             Some(NativeObjectPayload::ContainersMap(storage)) => {
                 storage.try_admit_exact(storage.get().retained_physical_bytes()?, permit)
@@ -281,6 +380,15 @@ impl ObjectInstance {
             Some(NativeObjectPayload::NumericFactor(_)) => {
                 ObjectPersistencePayloadKind::NumericFactor
             }
+            Some(NativeObjectPayload::OptimizationVariable(_)) => {
+                ObjectPersistencePayloadKind::OptimizationVariable
+            }
+            Some(
+                NativeObjectPayload::OptimizationModel(_)
+                | NativeObjectPayload::OptimizationProblem(_)
+                | NativeObjectPayload::ActiveSetWarmStart(_)
+                | NativeObjectPayload::EquationProblem(_),
+            ) => ObjectPersistencePayloadKind::OptimizationModel,
         }
     }
 
@@ -300,6 +408,85 @@ impl ObjectInstance {
         self.with_native(NativeObjectPayload::ContainersMap(SharedNativeState::new(
             storage,
         )))
+    }
+    /// Runtime must admit the complete definition/reference storage before
+    /// calling this unmanaged factory. Exact adoption is deliberately refused
+    /// until every retained child and metadata allocation has an owner.
+    pub fn with_optimization_variable_payload(self, data: OptimizationVariablePayload) -> Self {
+        self.with_native(NativeObjectPayload::OptimizationVariable(
+            SharedNativeState::new(data),
+        ))
+    }
+    /// Runtime validates every child edge and admits the complete native model
+    /// before this ordinary factory; exact finite adoption remains unsupported.
+    pub fn with_optimization_problem_payload(self, data: OptimizationProblemData) -> Self {
+        self.with_native(NativeObjectPayload::OptimizationProblem(
+            SharedNativeState::new(data),
+        ))
+    }
+    pub fn optimization_problem_payload(&self) -> Option<&OptimizationProblemData> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::OptimizationProblem(value)) => Some(value.get()),
+            _ => None,
+        }
+    }
+    pub fn with_optimization_model_payload(self, data: OptimizationModelPayload) -> Self {
+        self.with_native(NativeObjectPayload::OptimizationModel(
+            SharedNativeState::new(data),
+        ))
+    }
+    pub fn optimization_model_payload(&self) -> Option<&OptimizationModelPayload> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::OptimizationModel(value)) => Some(value.get()),
+            _ => None,
+        }
+    }
+    pub fn optimization_model_shape(&self) -> Option<&crate::SharedShape> {
+        if self.selected_class().is_some() {
+            return None;
+        }
+        match self.optimization_model_payload() {
+            Some(OptimizationModelPayload::Expression(value))
+                if self
+                    .class_name()
+                    .is(runmat_types::standard::OPTIMIZATION_EXPRESSION) =>
+            {
+                Some(&value.shape)
+            }
+            Some(OptimizationModelPayload::Constraint(value))
+                if self
+                    .class_name()
+                    .is(runmat_types::standard::OPTIMIZATION_CONSTRAINT)
+                    || self
+                        .class_name()
+                        .is(runmat_types::standard::OPTIMIZATION_EQUALITY)
+                    || self
+                        .class_name()
+                        .is(runmat_types::standard::OPTIMIZATION_INEQUALITY) =>
+            {
+                Some(&value.shape)
+            }
+            _ => None,
+        }
+    }
+    pub fn optimization_variable_shape(&self) -> Option<&crate::SharedShape> {
+        if !self
+            .class_name()
+            .is(runmat_types::standard::OPTIMIZATION_VARIABLE)
+            || self.selected_class().is_some()
+        {
+            return None;
+        }
+        match self.optimization_variable_payload() {
+            Some(OptimizationVariablePayload::Reference(value)) => Some(value.shape()),
+            _ => None,
+        }
+    }
+    pub fn optimization_variable_payload(&self) -> Option<&OptimizationVariablePayload> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::OptimizationVariable(value)) => Some(value.get()),
+            _ => None,
+        }
     }
     pub fn with_numeric_factor_data(self, data: NumericFactorData) -> Self {
         self.with_native(NativeObjectPayload::numeric_factor_unbounded(data))
@@ -398,6 +585,43 @@ impl ObjectInstance {
     }
 
     pub fn for_each_native_value<'a>(&'a self, mut visitor: impl FnMut(&'a Value)) {
+        if let Some(warm) = self.active_set_warm_start_payload() {
+            visitor(warm.x());
+            visitor(warm.options());
+            return;
+        }
+        if let Some(variable) = self.optimization_variable_payload() {
+            let mut index = 0;
+            while let Some(value) = variable.value_at(index) {
+                visitor(value);
+                index += 1;
+            }
+            return;
+        }
+        if let Some(problem) = self.equation_problem_payload() {
+            let mut index = 0;
+            while let Some(value) = problem.value_at(index) {
+                visitor(value);
+                index += 1;
+            }
+            return;
+        }
+        if let Some(problem) = self.optimization_problem_payload() {
+            let mut index = 0;
+            while let Some(value) = problem.value_at(index) {
+                visitor(value);
+                index += 1;
+            }
+            return;
+        }
+        if let Some(model) = self.optimization_model_payload() {
+            let mut index = 0;
+            while let Some(value) = model.value_at(index) {
+                visitor(value);
+                index += 1;
+            }
+            return;
+        }
         match self.generation().native_payload.as_ref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => {
                 storage.get().for_each_value(&mut visitor)
@@ -411,7 +635,37 @@ impl ObjectInstance {
         }
     }
 
+    /// Direct native GC edges participate in the same iterative Value tracer
+    /// as native child Values; no fabricated HandleObject wrapper is needed.
+    pub(crate) fn trace_native_handle_at(&self, index: usize) -> Option<runmat_gc_api::GcHandle> {
+        if let Some(model) = self.optimization_model_payload() {
+            return model.handle_at(index);
+        }
+        if index != 0 {
+            return None;
+        }
+        match self.optimization_variable_payload() {
+            Some(OptimizationVariablePayload::Reference(value)) => Some(value.definition()),
+            _ => None,
+        }
+    }
     pub(crate) fn trace_native_value_at(&self, index: usize) -> Option<&Value> {
+        if let Some(warm) = self.active_set_warm_start_payload() {
+            return warm.value_at(index);
+        }
+        if let Some(variable) = self.optimization_variable_payload() {
+            return variable.value_at(index);
+        }
+        if let Some(problem) = self.equation_problem_payload() {
+            return problem.value_at(index);
+        }
+        if let Some(problem) = self.optimization_problem_payload() {
+            return problem.value_at(index);
+        }
+
+        if let Some(model) = self.optimization_model_payload() {
+            return model.value_at(index);
+        }
         match self.generation().native_payload.as_ref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => {
                 storage.get().trace_value_at(index)

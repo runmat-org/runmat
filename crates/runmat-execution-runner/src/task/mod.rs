@@ -22,4 +22,4 @@ pub use lifecycle::{TaskRecord, TaskSubmission};
 pub use result_commit::{CommitDecision, ResultCommit};
 pub use retry::{maximum_attempts, retry_decision, RetryCause, RetryDecision};
 pub use retry_envelope::RetryResourceEnvelope;
-pub use terminal::{AttemptDisposition, AttemptTerminal};
+pub use terminal::{AttemptDisposition, AttemptRetirementUnverified, AttemptTerminal};

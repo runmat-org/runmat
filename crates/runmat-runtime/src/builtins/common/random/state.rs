@@ -8,7 +8,7 @@ use crate::BuiltinResult;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum RngAlgorithm {
     Twister,
     RunMatLcgV1,

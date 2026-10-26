@@ -3,7 +3,10 @@
 use serde::{de, Deserializer, Serializer};
 use std::fmt;
 
-pub(super) fn serialize<S: Serializer>(value: &u128, serializer: S) -> Result<S::Ok, S::Error> {
+pub(in crate::resource) fn serialize<S: Serializer>(
+    value: &u128,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     if !serializer.is_human_readable() {
         return serializer.serialize_u128(*value);
     }
@@ -13,7 +16,9 @@ pub(super) fn serialize<S: Serializer>(value: &u128, serializer: S) -> Result<S:
     }
 }
 
-pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u128, D::Error> {
+pub(in crate::resource) fn deserialize<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u128, D::Error> {
     struct Counter;
     impl de::Visitor<'_> for Counter {
         type Value = u128;

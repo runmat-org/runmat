@@ -158,7 +158,7 @@ const ZEROS_LINKS: &[BuiltinDocumentationLink] = &[
 pub(in super::super) const ZEROS_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("zeros"), slug: Some("zeros"), summary: "Create zero-filled arrays with a selected shape, class, storage, and residency.",
-    description: "`zeros` creates scalar, matrix, or N-D zero values from dimensions or a size vector. Class names and `like` prototypes select typed storage and supported placement.",
+    description: "`zeros` creates scalar, matrix, or N-D zero values from dimensions or a size vector. Numeric class names and `like` prototypes select typed storage and supported placement. For an object prototype, `zeros(..., 'like', prototype)` invokes its `zerosLike(prototype, ...)` method, or its static `zeros(...)` method if `zerosLike` is absent. Dimension arguments retain their original order and form. Method errors are returned without trying another creation method.",
     keywords: &["zeros", "array", "preallocation", "logical", "integer", "gpu", "like", "size"],
     related: &["eye", "false", "gather", "gpuArray", "ones", "sparse"],
     sections: ZEROS_SECTIONS, examples: ZEROS_EXAMPLES, example_exemption: None, faqs: ZEROS_FAQS,

@@ -28,13 +28,15 @@ type CompletionResult = Result<AttemptSuccess, crate::NativeProgramFailure>;
 /// Signed transfer authority for one already-admitted, immutable Graph
 /// Program. The scheduler retains the source for retries; attempt frames carry
 /// only the digest and length issued by a worker after authentication.
-pub(super) struct SignedGraphTransfer {
+pub struct RemoteGraphTransfer {
     pub(super) encrypted_manifest: Arc<[u8]>,
     pub(super) ordered_downloads: Arc<[DriverArtifactDownload]>,
     pub(super) maximum_program_bytes: u64,
     pub(super) program_digest: Digest,
     pub(super) program_length: u64,
 }
+pub(super) type SignedGraphTransfer = RemoteGraphTransfer;
+mod graph_transfer;
 
 mod admission;
 mod attempt_execution;

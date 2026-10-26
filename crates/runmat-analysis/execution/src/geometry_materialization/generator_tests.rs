@@ -91,6 +91,7 @@ fn analysis() -> FunctionAnalysis {
     let output = geometry_output();
     FunctionAnalysis {
         function: ProgramFunctionId(7),
+        captures: Vec::new(),
         callable: CallableFact {
             capabilities: CapabilitySet::default(),
             identity: None,
@@ -105,6 +106,7 @@ fn analysis() -> FunctionAnalysis {
         },
         outputs: vec![output],
         effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+        cooperative_suspension: false,
         capabilities: CapabilitySet::default(),
         convergence: FunctionConvergence::Exact,
     }
@@ -115,7 +117,12 @@ fn admitted() -> AdmittedGeometryGenerator {
         request(),
         revision(),
         callable(),
-        digest("executable"),
+        crate::named_callable::CompiledCallableBinding::fixture(
+            "makeBracket",
+            "makeBracket",
+            ProgramFunctionId(7),
+            digest("executable"),
+        ),
         &analysis(),
         &BTreeSet::new(),
     )
@@ -219,7 +226,12 @@ fn admission_rejects_mutable_or_effectful_generator_contracts() {
         request(),
         revision(),
         callable(),
-        digest("executable"),
+        crate::named_callable::CompiledCallableBinding::fixture(
+            "makeBracket",
+            "makeBracket",
+            ProgramFunctionId(7),
+            digest("executable")
+        ),
         &mutable,
         &BTreeSet::new(),
     )
@@ -231,7 +243,12 @@ fn admission_rejects_mutable_or_effectful_generator_contracts() {
         request(),
         revision(),
         callable(),
-        digest("executable"),
+        crate::named_callable::CompiledCallableBinding::fixture(
+            "makeBracket",
+            "makeBracket",
+            ProgramFunctionId(7),
+            digest("executable")
+        ),
         &effectful,
         &BTreeSet::new(),
     )

@@ -1,7 +1,7 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
-use runmat_types::WindowOption;
-pub(crate) use runmat_types::{WindowOutputType, WindowSampling};
+use runmat_builtins::WindowOption;
+pub(crate) use runmat_builtins::{WindowOutputType, WindowSampling};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -57,14 +57,7 @@ pub(crate) enum WindowArgError {
     Text(runmat_value::Utf16DecodeError),
     UnknownOption(String),
     Allocation(std::collections::TryReserveError),
-    Execution(Box<RuntimeError>),
     TensorBuild(String),
-}
-
-impl From<RuntimeError> for WindowArgError {
-    fn from(error: RuntimeError) -> Self {
-        Self::Execution(Box::new(error))
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -700,6 +693,7 @@ mod tests {
             |_, _| panic!("capacity overflow must precede coefficients"),
             &mut SignalCooperation::new(None, "hann"),
         ))
+        .expect("capacity validation is a domain failure")
         .expect_err("impossible host vector capacity") else {
             panic!("expected original allocation error");
         };

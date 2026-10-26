@@ -221,7 +221,8 @@ pub(super) fn summarize_for_cell(value: &Value) -> String {
             dims_to_string(&canonical_dims(array.shape()))
         ),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

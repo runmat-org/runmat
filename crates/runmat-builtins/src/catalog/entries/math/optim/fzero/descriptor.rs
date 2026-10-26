@@ -307,7 +307,7 @@ pub const FZERO_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensio
     id: "fzero-resident-fallback",
     mode: BuiltinExtensionMode::RunMatOnly,
     description:
-        "fzero with provider-resident numeric input or callback output is a RunMat extension",
+        "fzero with explicitly GPU-resident numeric input or callback output is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:FzeroResidentExtension"),
 };
 pub const FZERO_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [

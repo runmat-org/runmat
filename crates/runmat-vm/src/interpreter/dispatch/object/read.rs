@@ -22,12 +22,14 @@ pub(super) async fn load_member(request: Request<'_>) -> Result<bool, RuntimeErr
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let value = obj_resolve::load_member_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::load_member_with_access(
                 Some(runtime),
                 base,
                 field.0.clone(),
                 false,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -55,12 +57,14 @@ pub(super) async fn load_member_or_init(request: Request<'_>) -> Result<bool, Ru
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let value = obj_resolve::load_member_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::load_member_with_access(
                 Some(runtime),
                 base,
                 field.0.clone(),
                 true,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -93,12 +97,14 @@ pub(super) async fn load_member_dynamic(request: Request<'_>) -> Result<bool, Ru
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::load_member_dynamic_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::load_member_with_access(
                 Some(runtime),
                 base,
                 name,
                 false,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -133,12 +139,14 @@ pub(super) async fn load_member_dynamic_or_init(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::load_member_dynamic_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let value = obj_resolve::load_member_with_access(
                 Some(runtime),
                 base,
                 name,
                 true,
                 caller_function_name,
+                &access,
             )
             .await?;
             value.with_owned(|value| stack.try_push(value))?;
@@ -166,12 +174,14 @@ pub(super) async fn load_member_sequence(request: Request<'_>) -> Result<bool, R
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let values = obj_resolve::read_member_sequence_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let values = obj_resolve::read_member_sequence_with_access(
                 Some(runtime),
                 base,
                 member.0.clone(),
                 false,
                 caller_function_name,
+                &access,
             )
             .await?;
             values.with_owned_sequence(|values| {
@@ -209,12 +219,14 @@ pub(super) async fn load_member_dynamic_sequence(
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let values = obj_resolve::read_member_sequence_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let values = obj_resolve::read_member_sequence_with_access(
                 Some(runtime),
                 base,
                 name,
                 false,
                 caller_function_name,
+                &access,
             )
             .await?;
             values.with_owned_sequence(|values| {
@@ -277,12 +289,14 @@ pub(super) async fn load_member_sequence_using_output_slot(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let count = super::super::requested_outputs_from_slot(vars, *output_count_slot)?;
-            let sequence = obj_resolve::read_member_sequence_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let sequence = obj_resolve::read_member_sequence_with_access(
                 Some(runtime),
                 base,
                 member.0.clone(),
                 false,
                 caller_function_name,
+                &access,
             )
             .await?;
             sequence.with_owned_sequence(|sequence| {
@@ -326,12 +340,14 @@ pub(super) async fn load_member_dynamic_sequence_using_output_slot(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let count = super::super::requested_outputs_from_slot(vars, *output_count_slot)?;
-            let sequence = obj_resolve::read_member_sequence_with_context(
+            let access = super::frame_access(context.bytecode, runtime)?;
+            let sequence = obj_resolve::read_member_sequence_with_access(
                 Some(runtime),
                 base,
                 name,
                 false,
                 caller_function_name,
+                &access,
             )
             .await?;
             sequence.with_owned_sequence(|sequence| {

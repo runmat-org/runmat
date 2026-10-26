@@ -16,7 +16,7 @@ pub(super) fn summarize(
     total_elapsed_ns: u128,
     total_squared_elapsed_ns: u128,
 ) -> Option<DurationSummary> {
-    if samples < 3 || samples > MAX_SAFE_WIRE_INTEGER || failures != 0 {
+    if !(3..=MAX_SAFE_WIRE_INTEGER).contains(&samples) || failures != 0 {
         return None;
     }
     let count = samples as f64;

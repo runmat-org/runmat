@@ -10,7 +10,7 @@ use runmat_analysis_core::{
     SignalSamplingPolicy, SignalShape, SignalValue, TabulatedSignal,
 };
 use runmat_analysis_execution::{
-    admit_callable_signal_generator, build_generator_task_submission,
+    admit_graph_callable_signal_generator, build_generator_task_submission,
     canonical_tabulated_signal_content_digest, canonicalize_signal_generator_outputs,
     materialize_signal_for_solver, plan_signal_generator_chunks, prepare_signal_materialization,
     GeneratorChunkOutput, GeneratorExecutionContext, PreparedSignalMaterialization,
@@ -18,14 +18,15 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::CanonicalSignalRealization;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::value::{CallableValue, DenseValue, ElementType, ValuePayload};
+use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{BundleCallable, ExecutionBundleBuilder, ProgramExecutionResponse};
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
-    run_remote_worker_quic, NativeExecutionConfig, NativeProgramSession, QuicRemoteWorkerChannel,
-    RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    run_remote_worker_quic_ready_v1, NativeExecutionConfig, NativeProgramSession,
+    QuicRemoteWorkerChannel, RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig,
+    RemoteWorkerQuicRequest,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
@@ -34,6 +35,11 @@ use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlay
 mod acoustic;
 #[path = "signal/compilation.rs"]
 mod compilation;
+#[path = "signal/graph.rs"]
+mod graph;
+#[path = "signal/graph_transfer.rs"]
+mod graph_transfer;
+use graph::{graph_descriptor, success_output};
 #[path = "signal/fields.rs"]
 mod fields;
 #[path = "signal/named.rs"]
@@ -83,20 +89,38 @@ impl SignalFixture {
         let source = format!("function pulse = makePulse()\nscale = [{}];\npulse = @sample;\n    function y = sample(t)\n    arguments\n        t (:,1) double\n    end\n    y = t * scale;\n    end\nend\n",
             scale.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
         let compilation::CompiledSignalFixture {
+            session,
             project_root,
             project,
             revision,
             unit,
             owner_identity,
         } = compilation::compile(&source).await;
-        let anonymous = unit
+        let (anonymous_id, anonymous) = unit
             .mir()
             .functions
-            .values()
-            .find(|function| !function.captures.is_empty())
+            .iter()
+            .find(|(_, function)| !function.captures.is_empty())
             .expect("fixture must compile one capturing anonymous function");
-        let anonymous_name = anonymous.name.0.clone();
-        let executable = unit.portable_envelope_for(Some(&anonymous_name)).unwrap();
+        let facts = unit
+            .analysis()
+            .function_for_local(*anonymous_id)
+            .expect("capturing MIR coordinate must retain its exact semantic owner");
+        assert_eq!(
+            facts.callable.identity,
+            Some(runmat_types::CallableIdentity::BoundFunction(*anonymous_id))
+        );
+        assert!(
+            unit.portable_envelope_for(Some(&anonymous.name.0)).is_err(),
+            "capturing nested body must not become a textual registry entrypoint"
+        );
+        let executable = unit
+            .portable_envelope_for_function(facts.function)
+            .expect("export the capturing body through its original immutable binding");
+        assert_eq!(
+            executable.manifest.identity.entrypoint_function,
+            Some(facts.function)
+        );
         let function = unit
             .function_analysis(
                 executable
@@ -123,46 +147,25 @@ impl SignalFixture {
             PhysicalSignal::Temperature(signal) => bind(signal, callable),
             _ => unreachable!("only the declared fixture quantities"),
         }
-        let capture = ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Dense(
-            DenseValue {
-                element_type: ElementType::F64,
-                shape: vec![1, scale.len() as u64],
-                little_endian_data: scale
-                    .iter()
-                    .flat_map(|value| value.to_bits().to_le_bytes())
-                    .collect(),
-            },
-        )));
-        let owner = runmat_execution::value::CallableOwner::Bound(
-            runmat_execution::FunctionBindingOrigin::from_revision(&revision, function.function)
-                .unwrap(),
+        let graph = compilation::snapshot_factory(&session, &unit, &revision).await;
+        let frozen_callable = graph_descriptor(
+            &revision,
+            &owner_identity,
+            &source,
+            &function,
+            &executable,
+            graph,
         );
-        let form = runmat_execution::value::CallableForm::Closure;
-        let source_role = anonymous.source_role;
-        let source_file = unit
-            .source_map()
-            .entries()
-            .iter()
-            .find(|entry| entry.source_id == anonymous.source)
-            .expect("capturing signal source")
-            .full_path
-            .clone();
-        let frozen_callable = CallableValue {
-            owner,
-            form,
-            source_role,
-            source_file: source_file.clone(),
-            qualified_name: "loads.pulse".into(),
-            callable_digest: CallableValue::identity_digest(
-                owner,
-                "loads.pulse",
-                form,
-                source_role,
-                source_file.as_deref(),
-            ),
-            captures: vec![capture],
-        };
-        let admitted = admit_callable_signal_generator(
+        graph::assert_capture_source_controls(
+            &authored,
+            &revision,
+            &owner_identity,
+            &source,
+            &function,
+            &executable,
+            &frozen_callable,
+        );
+        let admitted = admit_graph_callable_signal_generator(
             &authored,
             revision.clone(),
             BundleCallable {
@@ -170,7 +173,7 @@ impl SignalFixture {
                 qualified_name: "loads.pulse".into(),
                 source_digest: Digest::sha256(&source),
             },
-            unit.revision().source_digest.parse::<Digest>().unwrap(),
+            runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(&executable.manifest.identity, "loads.pulse").unwrap(),
             &function,
             frozen_callable,
             &BTreeSet::new(),
@@ -195,6 +198,7 @@ impl SignalFixture {
             None,
         )
         .unwrap();
+        graph::assert_frozen_capture_controls(&prepared);
         Self {
             _project_root: project_root,
             project,
@@ -209,8 +213,17 @@ impl SignalFixture {
         for chunk in &self.prepared.program.chunks {
             outputs.push(response_output(
                 chunk.plan.identity,
-                runmat_execution_runner_native::execute_host_program_request(chunk.request.clone())
-                    .await,
+                match &chunk.request {
+                    runmat_execution_artifact::WorkerProgramRequest::Direct(request) => {
+                        runmat_execution_runner_native::execute_host_program_request(
+                            request.clone(),
+                        )
+                        .await
+                    }
+                    runmat_execution_artifact::WorkerProgramRequest::Graph(request) => {
+                        runmat_vm::execute_graph_request(request.clone()).await
+                    }
+                },
             ));
         }
         self.canonicalize(outputs)
@@ -227,18 +240,13 @@ impl SignalFixture {
         let mut outputs = Vec::new();
         for chunk in &self.prepared.program.chunks {
             let task = session
-                .submit(
+                .submit_worker(
                     chunk.request.clone(),
                     signal_submission(&self.prepared, chunk, session.scope_id(), session.pool_id()),
                 )
                 .unwrap();
             let success = super::wait_for_native_task(&task).await;
-            assert!(success.result_objects().is_empty());
-            assert_eq!(success.values().expect("signal value result").0.len(), 1);
-            outputs.push(GeneratorChunkOutput {
-                chunk_identity: chunk.plan.identity,
-                value: success.values().expect("signal value result").0[0].clone(),
-            });
+            outputs.push(success_output(chunk.plan.identity, success));
         }
         self.canonicalize(outputs)
     }
@@ -266,18 +274,24 @@ impl SignalFixture {
             let context = supervisor.execution_context(Some(&key)).await.unwrap();
             let original_task =
                 signal_submission(&self.prepared, chunk, context.scope_id, context.pool_id);
-            let (record, duplicate) = supervisor
-                .submit_program(
+            let (record, duplicate) = match &chunk.request {
+                runmat_execution_artifact::WorkerProgramRequest::Direct(request)=>supervisor.submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
-                        chunk.request.clone(),
+                        request.clone(),
                         original_task.clone(),
                         Some(key),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     ),
-                )
-                .await
-                .unwrap();
+                ).await.unwrap(),
+                runmat_execution_artifact::WorkerProgramRequest::Graph(request)=>supervisor.submit_graph(
+                    runmat_execution_runner_native::supervisor::GraphBatchSubmission{
+                        request:request.clone(),task:Some(original_task.clone()),idempotency_key:Some(key),
+                        retention_millis:runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
+                    },
+                ).await.unwrap(),
+            };
             assert!(!duplicate);
+            let mut last_pending = None;
             let response = tokio::time::timeout(Duration::from_secs(15), async {
                 loop {
                     supervisor.reconcile().await.unwrap();
@@ -302,11 +316,21 @@ impl SignalFixture {
                             panic!("durable signal failed: {:?}", attachment.record.message)
                         });
                     }
+                    last_pending = Some((attachment.record.state, attachment.record.message));
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
             })
-            .await
-            .expect("durable signal completion timeout");
+            .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    let preserved = directory.keep();
+                    panic!(
+                        "durable signal completion timeout: {error}; last job state: {last_pending:?}; retained diagnostic store: {}",
+                        preserved.display(),
+                    );
+                }
+            };
             outputs.push(response_output(chunk.plan.identity, response));
         }
         self.canonicalize(outputs)
@@ -331,7 +355,7 @@ impl SignalFixture {
             memory_bytes: 512 * 1024 * 1024,
             scratch_bytes: 128 * 1024 * 1024,
             accelerators: Vec::new(),
-            capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            capabilities: graph::capabilities(&self.prepared.program.chunks[0].request),
         };
         let worker = WorkerSpec {
             host: super::phase_execution_support::worker_host_inventory(),
@@ -341,7 +365,7 @@ impl SignalFixture {
         };
         let run_key =
             runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([79; 32]).unwrap();
-        let server = run_remote_worker_quic(RemoteWorkerQuicRequest {
+        let server = run_remote_worker_quic_ready_v1(RemoteWorkerQuicRequest {
             listener,
             run_identity: "signal-conformance".into(),
             worker: worker.clone(),
@@ -350,19 +374,25 @@ impl SignalFixture {
             run_key: run_key.clone(),
             limits: FrameLimits::default(),
         });
-        let request = self.prepared.program.chunks[0].request.clone();
-        let bundle = ExecutionBundleBuilder::native(&self.project, self.revision.clone())
-            .unwrap()
-            .with_compiled_package_closure()
-            .with_materialized_program(
-                request.recipe.clone(),
-                request.artifact.form,
-                request.artifact.executable_bytes.clone(),
-            )
-            .build()
-            .unwrap();
-        let mut bundle_bytes = Vec::new();
-        write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
+        let bundle_bytes = if let runmat_execution_artifact::WorkerProgramRequest::Direct(request) =
+            &self.prepared.program.chunks[0].request
+        {
+            let bundle = ExecutionBundleBuilder::native(&self.project, self.revision.clone())
+                .unwrap()
+                .with_compiled_package_closure()
+                .with_materialized_program(
+                    request.recipe.clone(),
+                    request.artifact.form,
+                    request.artifact.executable_bytes.clone(),
+                )
+                .build()
+                .unwrap();
+            let mut bundle_bytes = Vec::new();
+            write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
+            Some(bundle_bytes)
+        } else {
+            None
+        };
         let prepared = &self.prepared;
         let client = async {
             let channel = QuicRemoteWorkerChannel::connect(
@@ -372,7 +402,7 @@ impl SignalFixture {
                     worker: worker.clone(),
                     driver_fence: 83,
                     session_id: [89; 16],
-                    run_key,
+                    run_key: run_key.clone(),
                     limits: FrameLimits::default(),
                 },
                 &PinnedQuicEndpoint {
@@ -383,50 +413,106 @@ impl SignalFixture {
             )
             .await
             .unwrap();
-            let pool = RemotePoolDriver::new_with_value_scope(
-                scope_id,
-                PoolSpec {
-                    id: pool_id,
-                    min_workers: 1,
-                    max_workers: 1,
-                    max_in_flight: 1,
-                    resource_limit: inventory,
-                },
-                83,
-                bundle_bytes,
-                "signal-conformance",
-            )
-            .unwrap();
-            pool.add_worker(channel.clone()).await.unwrap();
-            let completions = pool
-                .submit_graph(
-                    prepared
-                        .program
-                        .chunks
-                        .iter()
-                        .map(|chunk| {
-                            (
-                                chunk.request.clone(),
-                                signal_submission(prepared, chunk, scope_id, pool_id),
-                            )
-                        })
-                        .collect(),
+            let pool_spec = PoolSpec {
+                id: pool_id,
+                min_workers: 1,
+                max_workers: 1,
+                max_in_flight: 1,
+                resource_limit: inventory,
+            };
+            let pool = match bundle_bytes {
+                Some(bytes) => RemotePoolDriver::new_with_value_scope(
+                    scope_id,
+                    pool_spec,
+                    83,
+                    bytes,
+                    "signal-conformance",
                 )
-                .unwrap();
+                .unwrap(),
+                None => RemotePoolDriver::new_graph(scope_id, pool_spec, 83, "signal-conformance")
+                    .unwrap(),
+            };
+            pool.add_worker(channel.clone()).await.unwrap();
+            if let runmat_execution_artifact::WorkerProgramRequest::Graph(request) =
+                &prepared.program.chunks[0].request
+            {
+                let required = runmat_execution::value::GraphRequiredSchema::from_version(
+                    request.schema_version,
+                )
+                .unwrap()
+                .required_capability()
+                .expect("selected Graph schema has a software capability");
+                // Static allocation metadata cannot authorize Graph software.
+                // Match production reconciliation: wait for the encrypted route's
+                // authenticated ReadyV1 before submitting the original task.
+                tokio::time::timeout(Duration::from_secs(15), async {
+                    loop {
+                        pool.refresh_worker_software_capabilities().await.unwrap();
+                        if pool.snapshot().pools[&pool_id]
+                            .spec
+                            .resource_limit
+                            .capabilities
+                            .contains(&required)
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .expect("signal worker must authenticate its selected Graph software readiness");
+            }
+            let mut completions = Vec::new();
+            let mut sources = Vec::new();
+            for chunk in &prepared.program.chunks {
+                let transfer = match &chunk.request {
+                    runmat_execution_artifact::WorkerProgramRequest::Graph(request) => {
+                        let mut source = graph_transfer::prepare(request, &run_key).await;
+                        let transfer = source.admitted.take();
+                        sources.push(source);
+                        transfer
+                    }
+                    _ => None,
+                };
+                let submission = signal_submission(prepared, chunk, scope_id, pool_id);
+                submission
+                    .request
+                    .host
+                    .is_satisfied_by(&worker.host)
+                    .expect("signal worker must support the original selected program host");
+                assert!(
+                    runmat_execution_runner::scheduler::fits(
+                        &worker.resources,
+                        &Default::default(),
+                        &submission.request.resources,
+                    ),
+                    "signal worker resource inventory must satisfy the original task: request={:?}, inventory={:?}",
+                    submission.request.resources,
+                    worker.resources,
+                );
+                completions.push(
+                    pool.submit_worker(chunk.request.clone(), submission, transfer)
+                        .unwrap(),
+                );
+            }
             let mut outputs = Vec::with_capacity(completions.len());
             for (chunk, completion) in prepared.program.chunks.iter().zip(completions) {
                 let success = tokio::time::timeout(Duration::from_secs(15), completion.wait())
                     .await
-                    .expect("remote signal completion timeout")
+                    .unwrap_or_else(|_| {
+                        let snapshot = pool.snapshot();
+                        panic!(
+                            "remote signal completion timeout: original tasks={:#?}; attempts={:#?}; pools={:#?}",
+                            snapshot.tasks, snapshot.attempts, snapshot.pools
+                        )
+                    })
                     .unwrap();
-                assert!(success.result_objects().is_empty());
-                assert_eq!(success.values().expect("signal value result").0.len(), 1);
-                outputs.push(GeneratorChunkOutput {
-                    chunk_identity: chunk.plan.identity,
-                    value: success.values().expect("signal value result").0[0].clone(),
-                });
+                outputs.push(success_output(chunk.plan.identity, success));
             }
             channel.drain().await.unwrap();
+            for source in sources {
+                source.finish().await;
+            }
             outputs
         };
         let (server_result, outputs) = tokio::join!(server, client);
@@ -467,7 +553,7 @@ fn signal_submission(
         chunk,
         BTreeSet::new(),
         GeneratorExecutionContext {
-            host: super::phase_execution_support::host_requirement(&chunk.request),
+            host: graph::host(&chunk.request),
             scope_id,
             pool_id,
             resources: ResourceRequest {
@@ -479,7 +565,7 @@ fn signal_submission(
                 max_egress_bytes: 0,
                 max_relay_bytes: 0,
                 accelerators: Vec::new(),
-                required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+                required_capabilities: graph::capabilities(&chunk.request),
             },
             retry: RetryPolicy::IdempotentInfrastructure,
             deadline_unix_millis: None,
@@ -490,6 +576,12 @@ fn signal_submission(
 }
 
 fn response_output(identity: Digest, response: ProgramExecutionResponse) -> GeneratorChunkOutput {
+    if let ProgramExecutionResponse::GraphSuccess { graph } = response {
+        return GeneratorChunkOutput {
+            chunk_identity: identity,
+            value: graph::value(graph),
+        };
+    }
     let ProgramExecutionResponse::Success { mut outputs } = response else {
         panic!("signal generator did not return an inline value: {response:?}")
     };

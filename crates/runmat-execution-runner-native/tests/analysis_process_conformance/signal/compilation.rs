@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) struct CompiledSignalFixture {
+    pub session: runmat_core::RunMatSession,
     pub project_root: tempfile::TempDir,
     pub project: runmat_package::FrozenProject,
     pub revision: ProgramRevision,
@@ -57,10 +58,70 @@ pub(super) async fn compile(source: &str) -> CompiledSignalFixture {
         .await
         .unwrap();
     CompiledSignalFixture {
+        session,
         project_root,
         project,
         revision,
         unit,
         owner_identity,
     }
+}
+
+pub(super) async fn snapshot_factory(
+    session: &runmat_core::RunMatSession,
+    unit: &runmat_core::ExecutableUnit,
+    revision: &ProgramRevision,
+) -> runmat_execution::value::PayloadGraph {
+    let (local, _) = unit
+        .mir()
+        .functions
+        .iter()
+        .find(|(_, function)| function.source_role == runmat_types::FunctionSourceRole::Primary)
+        .expect("original factory primary function");
+    let factory = unit
+        .analysis()
+        .function_for_local(*local)
+        .expect("exact factory semantic owner")
+        .function;
+    let envelope = unit.portable_envelope_for_function(factory).unwrap();
+    let admitted = runmat_vm::admit_executable_unit(&envelope.canonical_bytes().unwrap()).unwrap();
+    let runtime = session.execution_runtime_context(revision.clone());
+    let bound = admitted.bind_runtime_sources(runtime).unwrap();
+    let values = runmat_vm::invoke_semantic_function_value_in_context(
+        bound.entrypoint_function().unwrap().0,
+        &[],
+        1,
+        bound.registry(),
+        bound.runtime().clone(),
+    )
+    .await
+    .unwrap()
+    .try_into_single()
+    .unwrap();
+    let runmat_value::Value::Closure(closure) = values.value() else {
+        panic!("original makePulse must construct one nested closure");
+    };
+    assert!(
+        closure.lexical_environment.is_some(),
+        "actual compiler-issued shared activation"
+    );
+    assert!(
+        runmat_runtime::execution::value_codec::encode_inline_value(values.value()).is_err(),
+        "shared activation must not be flattened through the legacy value codec"
+    );
+    let graph = bound
+        .graph_codec_admission()
+        .unwrap()
+        .snapshot(
+            std::slice::from_ref(values.value()),
+            runmat_execution::value::ValueLimits::default(),
+        )
+        .unwrap();
+    assert!(graph
+        .nodes
+        .iter()
+        .any(|node| matches!(node, runmat_execution::value::GraphNode::Activation(_))));
+    // The rooted factory output and exact selected source owner remain alive
+    // through the complete snapshot; no raw closure/cell is returned.
+    graph
 }

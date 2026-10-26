@@ -202,7 +202,7 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
         },
     )))
     .expect("call-port scope");
-    let options = FzeroOptions::from_struct(None).unwrap();
+    let options = FzeroOptions::from_struct(None, None).unwrap();
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
     let bracket = block_on(bracket_from_endpoints(
         &crate::user_functions::test_support::exact_local_value("single_result", binding),
@@ -285,7 +285,7 @@ fn fzero_scalar_initial_guess_uses_center_sign_for_bracket() {
 fn scalar_expansion_near_both_finite_extremes_never_calls_nonfinite_abscissa() {
     for start in [-f64::MAX, f64::MAX, f64::from_bits(1)] {
         let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
-        let options = FzeroOptions::from_struct(None).unwrap();
+        let options = FzeroOptions::from_struct(None, None).unwrap();
         let bracket = block_on(expand_bracket(
             &Value::FunctionHandle("sign".into()),
             start,
@@ -303,7 +303,7 @@ fn scalar_expansion_near_both_finite_extremes_never_calls_nonfinite_abscissa() {
     let zero = block_on(expand_bracket(
         &Value::FunctionHandle("sign".into()),
         0.0,
-        &FzeroOptions::from_struct(None).unwrap(),
+        &FzeroOptions::from_struct(None, None).unwrap(),
         false,
         &mut cooperation,
     ))
@@ -335,7 +335,7 @@ fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
     .expect("call-port scope");
     let function =
         crate::user_functions::test_support::exact_local_value("constant_positive", binding);
-    let mut options = FzeroOptions::from_struct(None).unwrap();
+    let mut options = FzeroOptions::from_struct(None, None).unwrap();
     options.max_fun_evals = 3;
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
     let limited = block_on(expand_bracket(

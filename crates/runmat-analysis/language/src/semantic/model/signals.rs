@@ -334,7 +334,7 @@ pub(super) fn signal_value(
         return None;
     }
     let dimension = runmat_types::physical::DynamicDimension::quantity_type(kind);
-    if (value.value_type).is_quantity((dimension).into()) {
+    if (value.value_type).is_quantity(dimension) {
         if let Some(value) = scalar(value) {
             return Some(SignalValue::Scalar(value));
         }
@@ -375,7 +375,7 @@ pub(super) fn signal_value(
     }
     let mut result = [0.0; 3];
     for (index, value) in values.iter().enumerate() {
-        if !(value.value_type).is_quantity((dimension).into()) {
+        if !(value.value_type).is_quantity(dimension) {
             invalid_signal_value(declaration, value, diagnostics);
             return None;
         }

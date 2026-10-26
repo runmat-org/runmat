@@ -167,6 +167,17 @@ fn validate_options(value: Option<&ValueFact>, diagnostics: &mut Vec<InferenceDi
         let Some(option) = OdeOptionField::from_public_name(name) else {
             continue;
         };
+        if matches!(
+            field.kind,
+            ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            })
+        ) && field.shape.element_count() == Some(0)
+            && matches!(field.storage, StorageFact::Dense | StorageFact::Unknown)
+        {
+            continue;
+        }
         let valid = if option.is_floating_control() {
             matches!(
                 field.kind,
@@ -175,7 +186,10 @@ fn validate_options(value: Option<&ValueFact>, diagnostics: &mut Vec<InferenceDi
                     ..
                 }) | ValueKindFact::Unknown
             ) && field.is_scalar()
-                && matches!(field.storage, StorageFact::Scalar | StorageFact::Unknown)
+                && matches!(
+                    field.storage,
+                    StorageFact::Scalar | StorageFact::Dense | StorageFact::Unknown
+                )
         } else {
             matches!(
                 field.kind,

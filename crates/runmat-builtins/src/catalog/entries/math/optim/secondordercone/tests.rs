@@ -43,6 +43,17 @@ fn cone_descriptor_normalizes_double_fields_and_checks_dimensions() {
         fields.fields["A"].numeric().unwrap().class,
         NumericClass::Double
     );
+    request.arguments[0].storage = StorageFact::Sparse;
+    let sparse = inference::infer(&request, &SECONDORDERCONE_CATALOG_ENTRY);
+    assert!(sparse.diagnostics.is_empty());
+    let ValueKindFact::Struct(fields) = &sparse.outputs[0].kind else {
+        panic!("descriptor")
+    };
+    assert_eq!(fields.fields["A"].storage, StorageFact::Sparse);
+    assert_eq!(
+        fields.fields["A"].numeric().unwrap().class,
+        NumericClass::Double
+    );
     request.arguments[2].shape = ShapeFact::from(vec![Some(2), Some(1)]);
     assert!(!inference::infer(&request, &SECONDORDERCONE_CATALOG_ENTRY)
         .diagnostics

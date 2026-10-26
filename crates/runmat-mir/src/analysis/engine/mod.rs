@@ -1,8 +1,12 @@
+mod call_context;
 mod call_graph;
 mod flow;
 mod interprocedural;
+#[cfg(test)]
+mod numerical_suspension_tests;
 mod state;
 
+pub use call_context::{diagnose_call_contexts, CallContextDiagnostics};
 pub(crate) use call_graph::lexical_reference_graph;
 pub(crate) use state::FlowState;
 
@@ -14,6 +18,49 @@ use super::{
     AnalysisDependency, AnalysisStore, ClassAnalysis, ClassPropertyAnalysis, FunctionAnalysis,
     FunctionConvergence,
 };
+
+fn certify_numerical_suspension(
+    store: &mut AnalysisStore,
+    evidence: &std::collections::BTreeMap<
+        runmat_types::FunctionId,
+        flow::NumericalSuspensionEvidence,
+    >,
+) {
+    use std::collections::BTreeSet;
+    let mut certified = BTreeSet::new();
+    loop {
+        let mut changed = false;
+        for function in &store.functions {
+            let Some(CallableIdentity::BoundFunction(local)) = function.callable.identity.as_ref()
+            else {
+                continue;
+            };
+            let Some(proof) = evidence.get(local) else {
+                continue;
+            };
+            if proof.local
+                && proof.callees.is_subset(&certified)
+                && function.convergence == FunctionConvergence::Exact
+                && function.capabilities.0.is_empty()
+                && function.effects.0.iter().all(|effect| {
+                    matches!(
+                        effect,
+                        runmat_types::EffectKind::MayThrow | runmat_types::EffectKind::MaySuspend
+                    )
+                })
+            {
+                changed |= certified.insert(*local);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for function in &mut store.functions {
+        function.cooperative_suspension = matches!(function.callable.identity,
+            Some(CallableIdentity::BoundFunction(local)) if certified.contains(&local));
+    }
+}
 
 pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     let mut store = AnalysisStore {
@@ -30,6 +77,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.functions.clear();
     store.classes.clear();
     let mut liveness_by_function = std::collections::BTreeMap::new();
+    let mut numerical_suspension = std::collections::BTreeMap::new();
 
     for (function, body) in &assembly.bodies {
         let source = assembly
@@ -57,7 +105,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             continue;
         };
         let program_function = ProgramFunctionId(function_ordinal);
-        let flow = flow::analyze_body(
+        let flow = flow::analyze_body_with_suspension(
             body,
             program_function,
             program.parameters.get(function).map_or(&[], Vec::as_slice),
@@ -134,8 +182,14 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
                 None => diagnostic,
             });
         }
+        numerical_suspension.insert(*function, flow.numerical_suspension);
         store.functions.push(FunctionAnalysis {
             function: program_function,
+            captures: capture_contract(
+                assembly,
+                *function,
+                program.captures.get(function).map_or(&[], Vec::as_slice),
+            ),
             callable: CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
                 capabilities: operation_capabilities.clone(),
@@ -154,6 +208,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             },
             outputs: summary.outputs.clone(),
             effects: operation_effects,
+            cooperative_suspension: false,
             capabilities: operation_capabilities,
             convergence,
         });
@@ -167,6 +222,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         .fusion_stage_contracts
         .sort_by_key(|contract| contract.point);
     store.functions.sort_by_key(|function| function.function);
+    certify_numerical_suspension(&mut store, &numerical_suspension);
     store.classes = assembly
         .classes
         .iter()
@@ -218,6 +274,54 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.parallel = parallel;
     store.diagnostics.extend(diagnostics);
     store
+}
+
+fn capture_contract(
+    assembly: &MirAssembly,
+    function: runmat_types::FunctionId,
+    values: &[ValueFact],
+) -> Vec<super::FunctionCaptureAnalysis> {
+    use super::{FunctionCaptureAnalysis, FunctionCaptureSource};
+    if values.is_empty() {
+        return Vec::new();
+    }
+    // Ordinary scalar leaves pay no extra lexical traversal. Capturing bodies
+    // use the same projection that supplies both VM and Native execution.
+    let metadata = assembly.functions.get(&function);
+    let projection = assembly.lexical_environment_projection(function).ok();
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let source = match (
+                metadata.and_then(|metadata| metadata.captures.get(index)),
+                projection.as_ref(),
+            ) {
+                (Some(capture), Some(projection)) => {
+                    if projection
+                        .inherited_storage
+                        .iter()
+                        .any(|entry| entry.binding == capture.binding)
+                    {
+                        FunctionCaptureSource::CanonicalStorage(capture.binding)
+                    } else if projection.inherited.contains(&capture.binding) {
+                        FunctionCaptureSource::Lexical(capture.binding)
+                    } else if projection.transit.contains(&capture.binding) {
+                        // An anonymous snapshot and its descendant's live cell
+                        // are distinct authorities, not one certified value.
+                        FunctionCaptureSource::Unknown
+                    } else {
+                        FunctionCaptureSource::ByValue
+                    }
+                }
+                _ => FunctionCaptureSource::Unknown,
+            };
+            FunctionCaptureAnalysis {
+                source,
+                value: value.clone(),
+            }
+        })
+        .collect()
 }
 
 fn analysis_dependencies(store: &AnalysisStore) -> Vec<AnalysisDependency> {

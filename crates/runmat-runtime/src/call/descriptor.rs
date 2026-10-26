@@ -3,7 +3,7 @@ use crate::call::identity::CallableIdentityOwner;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 use runmat_types::{
-    BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, QualifiedName, SymbolName,
+    CallableFallbackPolicy, CallableIdentity, FunctionId, QualifiedName, SymbolName,
 };
 use runmat_value::{Closure, Value};
 
@@ -35,9 +35,24 @@ impl std::fmt::Display for MissingCallableTarget {
 
 impl std::error::Error for MissingCallableTarget {}
 
+/// Whether an unresolved retained name can be frozen to a builtin target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NameResolutionCompleteness {
+    /// A selected registry can prove that a semantic name is absent.
+    Complete,
+    /// Lookup still belongs to the original invocation's runtime name owner.
+    Deferred,
+}
+
 /// Executor adapter used only to map stable source names to semantic functions.
 pub trait FunctionNameResolver {
     fn resolve_function(&self, name: &str) -> Option<FunctionId>;
+
+    /// Absence is conservative by default. An exact registry adapter may opt
+    /// in only when `None` proves absence from its selected name environment.
+    fn name_resolution_completeness(&self) -> NameResolutionCompleteness {
+        NameResolutionCompleteness::Deferred
+    }
 
     /// Retain the exact selected definition when the resolver owns one.
     /// Numeric identity remains a lookup hint, never retained execution
@@ -246,6 +261,7 @@ impl PartialEq for RetainedCallableValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallableTarget {
+    Scoped(runmat_value::ScopedFunctionHandle),
     Bound(runmat_value::BoundFunctionBinding),
     /// Preserve the traceable closure and its ancestor environment through
     /// queued callback admission; flattened captures alone are insufficient.
@@ -264,9 +280,27 @@ pub enum CallableTarget {
     },
     FevalForward(Value),
     RetainedFevalForward(RetainedCallableValue),
+    /// A selected builtin whose name borrows the original admitted generation.
+    RetainedBuiltin(RetainedCallableValue),
 }
 
 impl CallableTarget {
+    /// Borrow only a builtin identity already selected by the canonical name
+    /// owner. This does not resolve arbitrary text or copy its admitted bytes.
+    pub fn selected_builtin_name(&self) -> Option<&str> {
+        match self {
+            Self::RetainedBuiltin(value) => named_selection::retained_name(value.value()),
+            Self::Resolved {
+                identity,
+                fallback_policy: CallableFallbackPolicy::None,
+            } => match identity.as_identity() {
+                CallableIdentity::Builtin(name) => Some(&name.0),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Expose every value graph retained by a deferred callable target.
     pub(crate) fn visit_retained_values(
         &self,
@@ -277,8 +311,10 @@ impl CallableTarget {
                 visitor(closure.as_value())
             }
             Self::FevalForward(value) => visitor(value),
-            Self::RetainedFevalForward(value) => visitor(value.value()),
-            Self::Bound(_) | Self::Resolved { .. } => Some(()),
+            Self::RetainedFevalForward(value) | Self::RetainedBuiltin(value) => {
+                visitor(value.value())
+            }
+            Self::Scoped(_) | Self::Bound(_) | Self::Resolved { .. } => Some(()),
         }
     }
 }
@@ -325,6 +361,12 @@ impl CallableDescriptor {
         function_resolver: &impl FunctionNameResolver,
     ) -> Result<Self, RuntimeError> {
         let descriptor = match owner.value() {
+            Value::ScopedFunctionHandle(handle) => Self {
+                target: CallableTarget::Scoped(handle.clone()),
+                args: Vec::new(),
+                requested_outputs,
+                metadata: CallableMetadata::feval(None),
+            },
             Value::BoundFunctionHandle(handle) => Self {
                 target: CallableTarget::Bound(runmat_value::BoundFunctionBinding {
                     function: handle.function,
@@ -376,28 +418,39 @@ impl CallableDescriptor {
                     }
                 }
             }
-            Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
-                match function_resolver.resolve_bound_function(name.name()) {
-                    Some(binding) => Self {
-                        target: CallableTarget::Bound(binding),
-                        args: Vec::new(),
-                        requested_outputs,
-                        metadata: CallableMetadata::feval(None),
-                    },
-                    None => Self {
-                        target: match function_resolver.resolve_function(name.name()) {
-                            Some(function) => CallableTarget::Resolved {
-                                identity: CallableIdentity::BoundFunction(function).into(),
-                                fallback_policy: CallableFallbackPolicy::None,
-                            },
-                            None => CallableTarget::RetainedFevalForward(
-                                RetainedCallableValue::from_read_lease(owner),
-                            ),
+            Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::String(_)
+            | Value::StringArray(_) => {
+                let retained = RetainedCallableValue::from_read_lease(owner);
+                let target = match named_selection::retained_name(owner.value()) {
+                    Some(name) => match named_selection::select(name, function_resolver) {
+                        named_selection::Selected::Bound(binding) => CallableTarget::Bound(binding),
+                        named_selection::Selected::Resolved(
+                            named_selection::Resolved::Function(function),
+                        ) => CallableTarget::Resolved {
+                            identity: CallableIdentity::BoundFunction(function).into(),
+                            fallback_policy: CallableFallbackPolicy::None,
                         },
-                        args: Vec::new(),
-                        requested_outputs,
-                        metadata: CallableMetadata::feval(None),
+                        named_selection::Selected::Resolved(named_selection::Resolved::Builtin)
+                            if function_resolver.name_resolution_completeness()
+                                == NameResolutionCompleteness::Complete =>
+                        {
+                            CallableTarget::RetainedBuiltin(retained)
+                        }
+                        named_selection::Selected::Resolved(
+                            named_selection::Resolved::Builtin
+                            | named_selection::Resolved::Qualified
+                            | named_selection::Resolved::Dynamic,
+                        ) => CallableTarget::RetainedFevalForward(retained),
                     },
+                    None => CallableTarget::RetainedFevalForward(retained),
+                };
+                Self {
+                    target,
+                    args: Vec::new(),
+                    requested_outputs,
+                    metadata: CallableMetadata::feval(None),
                 }
             }
             _ => Self {
@@ -545,39 +598,22 @@ impl CallableDescriptor {
         requested_outputs: usize,
         function_resolver: &impl FunctionNameResolver,
     ) -> Self {
-        if let Some(binding) = function_resolver.resolve_bound_function(&name) {
-            return Self::feval_bound(binding, name.into(), args, requested_outputs);
+        match named_selection::select(&name, function_resolver) {
+            named_selection::Selected::Bound(binding) => {
+                Self::feval_bound(binding, name.into(), args, requested_outputs)
+            }
+            named_selection::Selected::Resolved(selected) => {
+                let (identity, fallback_policy) = selected.owned(&name);
+                Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
+            }
         }
-        let (identity, fallback_policy) = Self::resolve_named_target(&name, function_resolver);
-        Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
     }
 
     fn resolve_named_target(
         name: &str,
         function_resolver: &impl FunctionNameResolver,
     ) -> (CallableIdentity, CallableFallbackPolicy) {
-        if let Some(function) = function_resolver.resolve_function(name) {
-            return (
-                CallableIdentity::BoundFunction(function),
-                CallableFallbackPolicy::None,
-            );
-        }
-        if runmat_builtins::builtin_name_is_known(name) {
-            return (
-                CallableIdentity::Builtin(BuiltinId(name.to_string())),
-                CallableFallbackPolicy::None,
-            );
-        }
-        if Self::is_well_formed_qualified_name(name) {
-            return (
-                Self::qualified_identity_from_name(name),
-                CallableFallbackPolicy::ExternalBoundary,
-            );
-        }
-        (
-            CallableIdentity::DynamicName(SymbolName(name.to_string())),
-            CallableFallbackPolicy::RuntimeNameResolution,
-        )
+        named_selection::resolve(name, function_resolver).owned(name)
     }
 
     fn feval_forward(func_value: Value, args: Vec<Value>, requested_outputs: usize) -> Self {
@@ -678,6 +714,12 @@ impl CallableDescriptor {
                 }
                 Self::feval_forward(Value::StringArray(sa), args, requested_outputs)
             }
+            Value::ScopedFunctionHandle(handle) => Self {
+                target: CallableTarget::Scoped(handle),
+                args,
+                requested_outputs,
+                metadata: CallableMetadata::feval(None),
+            },
             Value::Closure(closure) => {
                 Self::from_closure(closure, args, requested_outputs, function_resolver)
             }
@@ -881,6 +923,7 @@ mod resolved_execution;
 
 #[path = "descriptor/repeatable.rs"]
 mod repeatable;
+mod named_selection;
 pub use repeatable::RepeatableCallable;
 
 /// Execute an exact selected method binding with a new callee's supplied

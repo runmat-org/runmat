@@ -68,13 +68,6 @@ enum SimulationErrorKind {
 
 enum SimulationError {
     Domain(SimulationErrorKind, String),
-    Model(Box<RuntimeError>),
-}
-
-impl From<RuntimeError> for SimulationError {
-    fn from(error: RuntimeError) -> Self {
-        Self::Model(Box::new(error))
-    }
 }
 
 type SimulationResult<T> = Result<T, SimulationError>;
@@ -86,7 +79,6 @@ fn simulation_error(kind: SimulationErrorKind, detail: impl ToString) -> Simulat
 impl SimulationError {
     fn into_runtime(self, caller: StepSimulationCaller) -> RuntimeError {
         match self {
-            Self::Model(error) => *error,
             Self::Domain(kind, detail) => {
                 let descriptor = caller.descriptor(kind);
                 let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
@@ -118,22 +110,21 @@ pub(crate) fn simulate(
     caller: StepSimulationCaller,
 ) -> BuiltinResult<StepResponse> {
     model.ensure_zero_delays(caller.name())?;
-    let result = (|| {
-        if model.sample_time() < 0.0 {
-            return Err(simulation_error(
-                SimulationErrorKind::InvalidModel,
-                "step response requires a known nonnegative sample time",
-            ));
-        }
-        if model.numerator.len().saturating_sub(1) > model.denominator.len().saturating_sub(1) {
-            return Err(simulation_error(
-                SimulationErrorKind::UnsupportedModel,
-                "improper transfer functions are not supported yet",
-            ));
-        }
-        solver::evaluate_step(model, time, caller)
-    })();
-    result.map_err(|error| error.into_runtime(caller))
+    if model.sample_time() < 0.0 {
+        return Err(simulation_error(
+            SimulationErrorKind::InvalidModel,
+            "step response requires a known nonnegative sample time",
+        )
+        .into_runtime(caller));
+    }
+    if model.numerator.len().saturating_sub(1) > model.denominator.len().saturating_sub(1) {
+        return Err(simulation_error(
+            SimulationErrorKind::UnsupportedModel,
+            "improper transfer functions are not supported yet",
+        )
+        .into_runtime(caller));
+    }
+    solver::evaluate_step(model, time, caller)
 }
 
 pub(crate) fn preflight_host_time(

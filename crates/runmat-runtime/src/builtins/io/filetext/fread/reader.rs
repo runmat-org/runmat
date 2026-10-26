@@ -18,13 +18,6 @@ pub(super) enum ReadFailure {
         source: std::io::Error,
     },
     Semantic(String),
-    Execution(Box<RuntimeError>),
-}
-
-impl From<RuntimeError> for ReadFailure {
-    fn from(error: RuntimeError) -> Self {
-        Self::Execution(Box::new(error))
-    }
 }
 
 impl From<String> for ReadFailure {
@@ -38,7 +31,6 @@ impl std::fmt::Display for ReadFailure {
         match self {
             Self::Io { operation, source } => write!(f, "fread: {operation} ({source})"),
             Self::Semantic(message) => f.write_str(message),
-            Self::Execution(error) => std::fmt::Display::fmt(error, f),
         }
     }
 }
@@ -48,8 +40,21 @@ impl std::error::Error for ReadFailure {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Semantic(_) => None,
-            Self::Execution(error) => Some(error.as_ref()),
         }
+    }
+}
+
+impl From<ReadFailure> for RuntimeError {
+    fn from(error: ReadFailure) -> Self {
+        let detail = error.to_string();
+        let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
+        let mut builder = build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(error);
+        if let Some(identifier) = FREAD_ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
     }
 }
 
@@ -62,7 +67,7 @@ pub(super) async fn read_from_handle(
     cooperation: &mut super::super::cooperation::FileCooperation,
     runtime: Option<&crate::context::RuntimeContext>,
     projection: Projection<'_>,
-) -> Result<(FreadEval, bool), ReadFailure> {
+) -> BuiltinResult<(FreadEval, bool)> {
     let endianness = machine.to_endianness();
     if matches!(precision.input, InputSource::EncodedCharacter) {
         return read_encoded_source(
@@ -117,7 +122,7 @@ pub(super) async fn read_numeric_values<R: Read + Seek>(
     skip: usize,
     endianness: Endianness,
     cooperation: &mut super::super::cooperation::FileCooperation,
-) -> Result<(NumericStorage, usize, bool), ReadFailure> {
+) -> BuiltinResult<(NumericStorage, usize, bool)> {
     if let Some(0) = limit {
         return Ok((
             NumericStorage::zeros(NumericDType::from(input.numeric_class()), 0),
@@ -149,14 +154,16 @@ pub(super) async fn read_numeric_values<R: Read + Seek>(
                     return Err(ReadFailure::Io {
                         operation: "failed to read from file",
                         source,
-                    })
+                    }
+                    .into())
                 }
             }
         }
         if remaining > 0 {
             break;
         }
-        let value = decode_numeric_scalar(&buffer, input, endianness)?;
+        let value =
+            decode_numeric_scalar(&buffer, input, endianness).map_err(ReadFailure::Semantic)?;
         values.push(value);
         count += 1;
         let applied_skip = skip > 0 && count.is_multiple_of(repeat);
@@ -170,8 +177,7 @@ pub(super) async fn read_numeric_values<R: Read + Seek>(
         }
         cooperation
             .completed(element_size.saturating_add(if applied_skip { skip } else { 0 }))
-            .await
-            .map_err(ReadFailure::from)?;
+            .await?;
     }
     Ok((
         numeric_storage_from_scalars(input, values, cooperation).await?,

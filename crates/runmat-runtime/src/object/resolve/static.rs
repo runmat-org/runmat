@@ -1,9 +1,9 @@
 use super::*;
 
-pub fn load_static_member(
+pub(super) fn load_static_member_with_caller(
     cls: &ClassIdentity,
     field: &str,
-    caller_function_name: Option<&str>,
+    caller_function_name: MemberCaller<'_>,
 ) -> Result<Value, RuntimeError> {
     if let Some((p, owner)) =
         crate::class_registry::lookup_property(cls, &runmat_types::MemberName::from(field))
@@ -56,12 +56,7 @@ pub fn load_static_member(
             },
         )))
     } else if crate::class_registry::class_has_enumeration_member(cls, field) {
-        let mut value = runmat_value::UnboundedObjectBuilder::new(cls.clone());
-        value.insert(
-            "__enum_member__".to_string(),
-            Value::string(field.to_string()),
-        );
-        Ok(Value::Object(value.finish()))
+        Ok(enumeration_value_unbounded(cls, field))
     } else {
         let qualified = external_qualified_display_name(cls.display_name(), field);
         if let Some(builtin) = crate::dispatcher::observed_dispatch_builtin_name(&qualified) {
@@ -79,4 +74,53 @@ pub fn load_static_member(
             Err(format!("Unknown property '{}' on class {}", field, cls).into())
         }
     }
+}
+
+const ENUMERATION_MEMBER_PROPERTY: &str = "__enum_member__";
+fn enumeration_value_unbounded(class: &ClassIdentity, member: &str) -> Value {
+    let mut value = runmat_value::UnboundedObjectBuilder::new(class.clone());
+    value.insert(
+        ENUMERATION_MEMBER_PROPERTY.to_owned(),
+        Value::string(member.to_owned()),
+    );
+    Value::Object(value.finish())
+}
+/// Decode the same carrier written by canonical static-member construction.
+/// Consumers retain responsibility for their typed class/member contract.
+pub(crate) fn enumeration_member_name(object: &runmat_value::ObjectInstance) -> Option<&str> {
+    match object.property(ENUMERATION_MEMBER_PROPERTY) {
+        Some(Value::String(name)) => Some(name.as_str()),
+        _ => None,
+    }
+}
+/// Publish a registered member through the canonical original object allocator.
+pub(crate) fn enumeration_value_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    class: &ClassIdentity,
+    member: &str,
+) -> crate::BuiltinResult<RootedValue> {
+    crate::context::with_original_scope(runtime, || {
+        if !crate::class_registry::class_has_enumeration_member(class, member) {
+            return Err(
+                crate::build_runtime_error("unregistered enumeration member")
+                    .with_identifier("RunMat:EnumerationMember")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build(),
+            );
+        }
+        let value = Value::String(crate::call::argument_text::copy_str(member, runtime)?);
+        crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            class.display_name(),
+            [(ENUMERATION_MEMBER_PROPERTY, &value)].into_iter(),
+        )
+    })
+}
+
+pub fn load_static_member(
+    class: &ClassIdentity,
+    field: &str,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    load_static_member_with_caller(class, field, MemberCaller::named(caller_function_name))
 }

@@ -90,6 +90,17 @@ struct PendingCompilation {
     receiver: Receiver<Result<super::compile::BackgroundCompiledGenericUnit, String>>,
 }
 
+pub(crate) struct ScheduledInvocation {
+    pub(crate) published: Option<PublishedEntry>,
+    pub(crate) ready_at_start: EntryPublications,
+}
+
+struct PreparedInvocation {
+    dependency_keys: BTreeSet<DependencyKey>,
+    current: runmat_jit::invalidation::DependencySnapshot,
+    key: EntryKey,
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct CompilationKey {
     entry: EntryKey,
@@ -276,7 +287,14 @@ impl GenericNativeCache {
         preferred_function: Option<&str>,
         invocation_profile: Option<&RepresentationProfile>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
-        self.resolve_or_schedule_with_evidence(unit, preferred_function, invocation_profile, None)
+        self.resolve_or_schedule_with_evidence(
+            unit,
+            preferred_function,
+            invocation_profile,
+            None,
+            false,
+        )
+        .map(|scheduled| scheduled.published)
     }
 
     pub(crate) fn resolve_or_schedule_with_placement(
@@ -284,12 +302,14 @@ impl GenericNativeCache {
         invocation: super::placement::ReadyInvocation<'_>,
         profile: Option<&RepresentationProfile>,
         runtime: &runmat_runtime::context::RuntimeContext,
-    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        capture_ready: bool,
+    ) -> Result<ScheduledInvocation, runmat_runtime::RuntimeError> {
         self.resolve_or_schedule_with_evidence(
             invocation.unit,
             invocation.preferred_function,
             profile,
             Some((runtime, invocation)),
+            capture_ready,
         )
     }
 
@@ -302,10 +322,53 @@ impl GenericNativeCache {
             &runmat_runtime::context::RuntimeContext,
             super::placement::ReadyInvocation<'_>,
         )>,
-    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        capture_ready: bool,
+    ) -> Result<ScheduledInvocation, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
         let key = entry_key(unit, preferred_function)?;
+        // The mandatory preparation above owns the one canonical fingerprint.
+        // Fresh equivalent units have no cached digest before this point. Take
+        // the bounded ready snapshot now, before publishing completed work or
+        // compiling any product for this invocation.
+        let ready_at_start = if capture_ready {
+            self.ready_publications(unit, preferred_function, invocation_profile)?
+        } else {
+            EntryPublications::default()
+        };
+        let published = self.resolve_prepared_invocation(
+            unit,
+            preferred_function,
+            invocation_profile,
+            placement,
+            PreparedInvocation {
+                dependency_keys,
+                current,
+                key,
+            },
+        )?;
+        Ok(ScheduledInvocation {
+            published,
+            ready_at_start,
+        })
+    }
+
+    fn resolve_prepared_invocation(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        invocation_profile: Option<&RepresentationProfile>,
+        placement: Option<(
+            &runmat_runtime::context::RuntimeContext,
+            super::placement::ReadyInvocation<'_>,
+        )>,
+        prepared: PreparedInvocation,
+    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        let PreparedInvocation {
+            dependency_keys,
+            current,
+            key,
+        } = prepared;
         self.publish_completed(&current)?;
         let site = tier_site(unit, preferred_function)?;
         let availability = self

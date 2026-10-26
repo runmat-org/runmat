@@ -265,6 +265,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
+      - name: Set macOS deployment baseline before native builds and cache restore
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          printf '%s\n' 'MACOSX_DEPLOYMENT_TARGET=11.0' 'CMAKE_OSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
+
       - name: Install macOS native dependencies
         if: runner.os == 'macOS'
         run: bash scripts/ci-install-macos-cross-dependencies.sh "${{ matrix.platform.target }}"
@@ -277,6 +283,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          # The prefix is also part of restore keys: never reuse pre-policy
+          # Darwin C/CMake objects whose build scripts do not track this env.
+          prefix-key: ${{ runner.os == 'macOS' && 'v1-rust-macos-min11-cmake11' || 'v0-rust' }}
+          env-vars: MACOSX_DEPLOYMENT_TARGET CMAKE_OSX_DEPLOYMENT_TARGET
           cache-workspace-crates: true
 
       - name: Restore Windows native dependency cache
@@ -546,6 +556,13 @@ jobs:
           set -euxo pipefail
           while IFS= read -r toml; do
             d="${toml%/*}"
+            if [ "$d" = "crates/runmat-clarabel" ]; then
+              # This vendored dependency retains its upstream Apache license,
+              # not the RunMat workspace license copied into ordinary crates.
+              grep -Eq '^license[[:space:]]*=[[:space:]]*"Apache-2.0"' "$toml"
+              cmp "$d/LICENSE.md" crates/runmat-runtime/licenses/CLARABEL-LICENSE.txt
+              continue
+            fi
             if [ -f LICENSE ] || [ -f LICENSE.md ]; then
               cp -f LICENSE* "$d/" || true
               if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
@@ -573,6 +590,12 @@ jobs:
           cmp openapi/runmat-public.yaml crates/runmat-server-client/openapi/runmat-public.yaml
           cargo package -p runmat-server-client --allow-dirty --list | tee /tmp/runmat-server-client-package.txt
           grep -Fx 'openapi/runmat-public.yaml' /tmp/runmat-server-client-package.txt
+          cargo package -p runmat-clarabel --allow-dirty --list | tee /tmp/runmat-clarabel-package.txt
+          grep -Fx 'LICENSE.md' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM.md' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM-Cargo.toml' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM-vcs-info.json' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'src/solver/core/solver.rs' /tmp/runmat-clarabel-package.txt
 
       - name: Publish crates with cargo-workspaces
         shell: bash

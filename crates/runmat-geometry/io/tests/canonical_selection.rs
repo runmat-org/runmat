@@ -44,8 +44,10 @@ fn full_and_progressive_cad_preview_publish_exact_occurrence_ids() {
         geometry_id: "part".into(),
         parameters: Vec::new(),
         cad_parameters: Vec::new(),
-        source: runmat_geometry_core::GeometryDefinitionSource::Imported(
-            runmat_geometry_core::ImportedGeometryDefinition {preview_extent_m: None, 
+        source: runmat_geometry_core::GeometryDefinitionSource::Imported(Box::new(
+            runmat_geometry_core::ImportedGeometryDefinition {
+                preview_extent_m: None,
+                named_selections: None,
                 logical_path: "assembly.step".into(),
                 format: runmat_geometry_core::GeometrySourceFormat::Step,
                 authored_units: None,
@@ -60,7 +62,7 @@ fn full_and_progressive_cad_preview_publish_exact_occurrence_ids() {
                 exchange: None,
                 shared_interfaces: false,
             },
-        ),
+        )),
         regions: full
             .asset
             .regions

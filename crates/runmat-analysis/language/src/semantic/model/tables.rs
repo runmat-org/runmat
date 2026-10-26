@@ -8,7 +8,7 @@ use crate::{
     LogicalSourcePath, PhysicalDimension,
 };
 use runmat_analysis_core::AcousticImpedanceLaw;
-use runmat_parser::fea::{FeaDeclarationKind, FeaModuleItem};
+use runmat_fea_syntax::{FeaDeclarationKind, FeaModuleItem};
 use std::collections::BTreeMap;
 
 pub(in crate::semantic) type ImpedanceTables =

@@ -99,6 +99,7 @@ pub(super) fn admit_options(headers: Vec<OptionHeader>) -> BuiltinResult<Vec<Adm
                         | Value::ExternalFunctionHandle(_)
                         | Value::MethodFunctionHandle(_)
                         | Value::BoundFunctionHandle(_)
+                        | Value::ScopedFunctionHandle(_)
                 ) {
                     return Err(invalid(
                         "tsne: custom distance function handles are not supported yet",

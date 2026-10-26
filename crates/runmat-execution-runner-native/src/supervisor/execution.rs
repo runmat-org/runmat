@@ -70,12 +70,12 @@ impl LocalSupervisor {
         record: &mut LocalJobRecord,
     ) -> NativeExecutionResult<()> {
         let submission = store
-            .program_submission(record.handle.id)?
+            .retained_submission(record.handle.id)?
             .ok_or_else(|| invalid("program reconciliation lacks its original request"))?;
         let mut scheduler = self.scheduler.lock().await;
         // Admission interrupted before durable publication can be completed from
         // the frozen caller submission. Existing admitted tasks are never reminted.
-        let mut actions = scheduler.admit(record.handle.id, &submission.task)?;
+        let mut actions = scheduler.admit(record.handle.id, submission.task())?;
         let history = scheduler
             .history(record.handle.id)?
             .ok_or_else(|| invalid("durable program lacks original scheduler history"))?;
@@ -181,7 +181,7 @@ impl LocalSupervisor {
         attachment: &mut JobAttachment,
     ) -> NativeExecutionResult<()> {
         if store
-            .program_submission(attachment.record.handle.id)?
+            .retained_submission(attachment.record.handle.id)?
             .is_none()
         {
             return Ok(());
@@ -291,9 +291,20 @@ impl LocalSupervisor {
                     store.require_program_assignment(id, &request)?;
                     // The original fenced cancellation reaches the provider's normal
                     // process-control seam. Escalation remains a shared Driver decision.
+                    let cause = scheduler
+                        .driver
+                        .task_record(request.task_id)?
+                        .cancellation
+                        .ok_or_else(|| {
+                            invalid("scheduler stop has no original cancellation cause")
+                        })?
+                        .cause;
                     atomic_json(
                         &super::program_store::cancel_path(&store.job_dir(id), request.id),
-                        &request,
+                        &crate::process_provider::cancellation::CancellationCommand {
+                            request,
+                            cause,
+                        },
                     )?;
                     // Both escalation and cancellation reach the original provider,
                     // which owns its live ChildProcess and observes termination.

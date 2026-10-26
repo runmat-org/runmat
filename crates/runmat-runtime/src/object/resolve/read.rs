@@ -1,4 +1,8 @@
 use super::*;
+#[path = "read/entry.rs"]
+mod entry;
+pub(crate) use entry::read_member_sequence_text_with_optional_access;
+pub use entry::*;
 
 pub async fn load_member(
     base: Value,
@@ -21,12 +25,12 @@ pub async fn load_member_with_context(
         .try_into_single()
 }
 
-pub async fn read_member_sequence_with_context(
+async fn read_member_sequence_with_caller(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
     field: String,
     allow_init: bool,
-    caller_function_name: Option<&str>,
+    caller_function_name: MemberCaller<'_>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let roots = member_read_roots(context, &base)?;
     let field = crate::call::argument_text::adopt_string(field, context)?;
@@ -43,12 +47,12 @@ pub async fn read_member_sequence_with_context(
     .await
 }
 
-pub async fn read_member_sequence_text_with_context(
+pub(super) async fn read_member_sequence_text_with_caller(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
     field: runmat_value::Utf8Text,
     allow_init: bool,
-    caller_function_name: Option<&str>,
+    caller_function_name: MemberCaller<'_>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let roots = member_read_roots(context, &base)?;
     read_member_sequence_scoped(
@@ -81,7 +85,7 @@ fn member_read_roots(
 fn read_member_sequence_scoped<'a>(
     context: Option<&'a crate::context::RuntimeContext>,
     request: MemberRead,
-    caller_function_name: Option<&'a str>,
+    caller_function_name: MemberCaller<'a>,
 ) -> impl std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a {
     // The callers already defer and retain roots before reaching this scope
     // boundary. Return the same scoped child, without a forwarding poll frame.
@@ -95,7 +99,7 @@ fn read_member_sequence_scoped<'a>(
 async fn read_member_sequence_in_scope(
     context: Option<&crate::context::RuntimeContext>,
     request: MemberRead,
-    caller_function_name: Option<&str>,
+    caller_function_name: MemberCaller<'_>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let MemberRead {
         base,
@@ -130,7 +134,7 @@ async fn load_scalar_member_with_context(
     base: Value,
     field: runmat_value::Utf8Text,
     allow_init: bool,
-    caller_function_name: Option<&str>,
+    caller_function_name: MemberCaller<'_>,
 ) -> Result<RootedValue, RuntimeError> {
     if let Some(result) = context
         .and_then(|context| crate::parallel::introspection::load_member(context, &base, &field))
@@ -155,14 +159,12 @@ async fn load_scalar_member_with_context(
                 Some(projection) => projection.receiver_member_accessible(
                     owner,
                     access,
-                    caller_class_for_function(caller_function_name).as_ref(),
+                    caller_function_name.class().as_ref(),
                 ),
                 None => access_permitted(owner, &access, caller_function_name),
             };
             let base = Value::Object(obj.clone());
-            let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
-                caller_function_name,
-            );
+            let access = caller_function_name.protocol_access();
             if let Some(method) = crate::object::protocol::resolve_object_protocol(
                 &base,
                 crate::object::protocol::ObjectProtocol::Subsref,
@@ -299,9 +301,7 @@ async fn load_scalar_member_with_context(
             if super::graphics::is_graphics_receiver_handle(&handle) {
                 return super::graphics::load_graphics_member(context, base, &field).await;
             }
-            let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
-                caller_function_name,
-            );
+            let access = caller_function_name.protocol_access();
             if let Some(method) = crate::object::protocol::resolve_object_protocol(
                 &base,
                 crate::object::protocol::ObjectProtocol::Subsref,
@@ -353,7 +353,11 @@ async fn load_scalar_member_with_context(
             crate::foreign::load_foreign_member_text(reference, field).await
         }
         Value::ClassRef(cls) => RootedValue::in_optional_context(
-            load_static_member(&cls, &field, caller_function_name)?,
+            super::static_member::load_static_member_with_caller(
+                &cls,
+                &field,
+                caller_function_name,
+            )?,
             context,
         ),
         base @ (Value::Num(_) | Value::Int(_)) => {

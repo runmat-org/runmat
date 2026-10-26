@@ -34,6 +34,12 @@ impl<'a> Encoder<'a> {
             self.pending_bound_targets.push((index, origin));
             return Ok(());
         }
+        if matches!(input.value(), Value::ScopedFunctionHandle(_)) {
+            return Err(ValueCodecError::unsupported(
+                "$",
+                "invocation-scoped callable is not portable",
+            ));
+        }
         if let Value::HandleObject(handle) = input.value() {
             if !handle.valid {
                 return Err(invalid("selected object handle is invalid"));
@@ -254,15 +260,14 @@ impl<'a> Encoder<'a> {
                 });
                 return Ok(());
             }
-            if !crate::parallel::codistributor::is_supported_class(object.class_name()) {
-                return Err(ValueCodecError::unsupported(
-                    "$",
-                    "value has no portable graph codec",
-                ));
-            }
-            crate::parallel::codistributor::validate_definition(object)
-                .map_err(|error| invalid(error.to_string()))?;
-            let type_identity = object.class_name().to_string();
+            let codec = super::super::super::immutable_class::GraphValueClass::for_class(
+                object.class_name(),
+            )?
+            .ok_or_else(|| {
+                ValueCodecError::unsupported("$", "value has no portable graph codec")
+            })?;
+            codec.validate(object, self.workspace.as_ref())?;
+            let type_identity = codec.type_identity().to_owned();
             let fields = input.named_children();
             let names = fields
                 .iter()
@@ -273,7 +278,7 @@ impl<'a> Encoder<'a> {
             GraphNode::Registered(GraphRegistered {
                 kind: GraphRegisteredKind::ImmutableValueClass,
                 type_identity,
-                schema_version: 1,
+                schema_version: codec.schema_version(),
                 fields: names
                     .into_iter()
                     .zip(values)
@@ -344,6 +349,12 @@ impl<'a> Encoder<'a> {
             })
         } else {
             match input.value() {
+                Value::ScopedFunctionHandle(_) => {
+                    return Err(ValueCodecError::unsupported(
+                        "$",
+                        "invocation-scoped callables cannot leave their original execution lane",
+                    ));
+                }
                 Value::FunctionHandle(name) => self.handle(
                     GraphCallableOwner::Workspace,
                     name,

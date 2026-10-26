@@ -106,13 +106,14 @@ RunMat's active GPU backend is WGPU. On native platforms, WGPU can route through
 
 WASM GPU support depends on browser WebGPU availability. The WASM runtime initializes the WGPU provider asynchronously; synchronous WGPU provider registration is not available on `wasm32`.
 
-Precision support depends on the active provider. Providers advertise supported precision, and RunMat guards kernels accordingly:
+Floating-point precision depends on the active provider. Precision admission does not establish support for every operation:
 
 | Precision | Behavior |
 | --- | --- |
 | `F32` | Accepted on all GPU providers. |
 | `F64` | Requires provider support for double precision. |
-| `U8`, `U16` | Rejected by the current precision guard for GPU kernels. |
+
+Fixed-width integer transfers and operations use separate typed provider paths. Supported WGPU kernels retain all eight integer classes; 64-bit integer storage uses paired 32-bit words. Integer support is operation-specific, not inferred from the provider's floating-point precision. Consult the builtin's GPU contract for supported resident operations and host boundaries.
 
 `RUNMAT_ALLOW_PRECISION_DOWNCAST=1` permits implicit downcast from double precision to provider-native precision and emits a warning.
 

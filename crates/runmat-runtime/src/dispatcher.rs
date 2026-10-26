@@ -455,7 +455,9 @@ struct ResolvedBuiltinName<'a> {
     canonical: &'a str,
 }
 
+mod instance_execution;
 mod preparation;
+mod retained_execution;
 mod selected_execution;
 mod selection;
 mod sequence_api;
@@ -520,13 +522,15 @@ enum RetainedDispatchPolicy {
     RegisteredOnly,
 }
 
-async fn try_call_retained_builtin_sequence_async(
-    name: &str,
+fn try_call_retained_builtin_sequence_async<'a>(
+    name: &'a str,
     args: crate::call::BuiltinArguments,
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
     observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
-) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
+) -> impl std::future::Future<
+    Output = Result<Option<crate::execution::RootedValueSequence>, RuntimeError>,
+> + 'a {
     try_call_retained_builtin_sequence_with_policy(
         name,
         args,
@@ -535,90 +539,25 @@ async fn try_call_retained_builtin_sequence_async(
         observation,
         RetainedDispatchPolicy::Normal,
     )
-    .await
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn try_call_retained_builtin_sequence_with_policy(
-    name: &str,
+fn try_call_retained_builtin_sequence_with_policy<'a>(
+    name: &'a str,
     args: crate::call::BuiltinArguments,
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
     observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
     policy: RetainedDispatchPolicy,
-) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
-    ensure_wasm_builtins_registered();
-
-    let resolved_name = ResolvedBuiltinName::resolve(name);
-    let name = resolved_name.canonical;
-
-    let _output_guard = crate::output_count::push_output_count(output_count)?;
-    let distributed = if policy == RetainedDispatchPolicy::Normal {
-        try_distributed_builtin(name, &args, output_count, context.as_ref()).await?
-    } else {
-        None
-    };
-    if let Some(result) = distributed {
-        return Ok(Some(result));
-    }
-    let registered = selection::select_registered_builtin(name, context.as_ref())?;
-    if registered.is_none() {
-        if policy == RetainedDispatchPolicy::RegisteredOnly {
-            return Ok(None);
-        }
-        if let Some(result) =
-            try_call_retained_instance_method_sequence(name, &args, output_count, context.as_ref())
-                .await?
-        {
-            return compatibility_checked_builtin_sequence(name, args.view(), result).map(Some);
-        }
-        if let Some(result) =
-            try_call_registered_static_method(name, &args, output_count, context.as_ref()).await?
-        {
-            return Ok(Some(result));
-        }
-        // Fallback: treat as class constructor if class is registered.
-        if crate::class_registry::registered_constructor_identity(name).is_some() {
-            let result =
-                call_retained_class_constructor(name, args.fork(), output_count, context.as_ref())
-                    .await?;
-            let sequence = result.try_map_owned(
-                crate::call::arguments::adapt_legacy_builtin_result,
-                |error| error.into_runtime_error(),
-            )?;
-            return compatibility_checked_builtin_sequence(name, args.view(), sequence).map(Some);
-        }
-        return Ok(None);
-    }
-
-    let instance = if policy == RetainedDispatchPolicy::Normal {
-        try_call_retained_instance_method_sequence(name, &args, output_count, context.as_ref())
-            .await?
-    } else {
-        None
-    };
-    if let Some(result) = instance {
-        return compatibility_checked_builtin_sequence(name, args.view(), result).map(Some);
-    }
-
-    let selection::SelectedRegisteredBuiltin {
-        origin,
-        implementation,
-        authority,
-    } = registered.expect("nonempty builtin authority has a selected implementation");
-    let prepared =
-        preparation::prepare_retained_selected(origin, name, args.fork(), context.as_ref()).await?;
-    // Explicit Requested gather adaptation stays within this one implementation.
-    let result = selected_execution::execute_retained(
-        implementation,
-        prepared,
-        context,
-        output_count,
-        observation.as_deref(),
-        authority,
-    )
-    .await?;
-    compatibility_checked_builtin_sequence(name, args.view(), result).map(Some)
+) -> impl std::future::Future<
+    Output = Result<Option<crate::execution::RootedValueSequence>, RuntimeError>,
+> + 'a {
+    use futures::TryFutureExt;
+    // Selection stays on first poll. Its data-only frame returns before the
+    // selected route is polled, using the existing single dispatch allocation.
+    futures::future::lazy(move |_| {
+        retained_execution::select(name, args, output_count, context, observation, policy)
+    })
+    .try_flatten()
 }
 
 pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
@@ -1090,80 +1029,11 @@ async fn try_call_retained_instance_method_sequence(
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
-    let Some(selected) = selection::select_instance_method(method_name, args.view())? else {
+    let Some(execution) = instance_execution::select(method_name, args, output_count, context)?
+    else {
         return Ok(None);
     };
-    let receiver = args.first().expect("instance method has a receiver");
-    for route in selected.routes {
-        match route {
-            selection::InstanceMethodRoute::Bound(binding) => {
-                let requested = output_count.unwrap_or(1);
-                let invoked = match context {
-                    Some(runtime) => {
-                        crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
-                            runtime, binding, args.fork().into_supplied_function_arguments(context)?, requested, None,
-                        )
-                        .await
-                    }
-                    None => {
-                        crate::user_functions::try_call_rooted_bound_function(binding, args.fork().into_supplied_function_arguments(context)?, requested)
-                            .await
-                    }
-                };
-                let result = invoked.ok_or_else(|| {
-                    crate::runtime_error::semantic_error(
-                        "UnavailableBoundFunction",
-                        "registered instance method has no bound executor",
-                    )
-                })?;
-                return finalize_instance_method_result(
-                    context,
-                    &selected.method,
-                    receiver,
-                    result,
-                )
-                .map(Some);
-            }
-            selection::InstanceMethodRoute::SemanticName(name) => {
-                if let std::ops::ControlFlow::Break(result) =
-                    crate::user_functions::try_call_rooted_semantic_name_in_context(
-                        context,
-                        &name,
-                        args.fork().into_supplied_function_arguments(context)?,
-                        output_count.unwrap_or(1),
-                    )
-                    .await
-                {
-                    return finalize_instance_method_result(
-                        context,
-                        &selected.method,
-                        receiver,
-                        result,
-                    )
-                    .map(Some);
-                }
-            }
-            selection::InstanceMethodRoute::BuiltinName(name) => {
-                let result = try_call_retained_builtin_sequence_async(
-                    &name,
-                    args.fork(),
-                    output_count,
-                    context.cloned(),
-                    None,
-                )
-                .await
-                .and_then(|result| result.ok_or_else(|| undefined_builtin_error(&name)));
-                return finalize_instance_method_result(
-                    context,
-                    &selected.method,
-                    receiver,
-                    result,
-                )
-                .map(Some);
-            }
-        }
-    }
-    Ok(None)
+    execution.await
 }
 
 fn finalize_instance_method_result(
@@ -2029,10 +1899,13 @@ mod tests {
         );
     }
 
-    struct EmptyBuiltinService;
+    struct EmptyBuiltinService {
+        lookups: std::rc::Rc<std::cell::Cell<usize>>,
+    }
 
     impl crate::context::RuntimeBuiltinService for EmptyBuiltinService {
         fn bindings_by_name(&self, _name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
+            self.lookups.set(self.lookups.get() + 1);
             Vec::new()
         }
     }
@@ -2049,19 +1922,37 @@ mod tests {
 
     #[test]
     fn scoped_builtin_authority_does_not_fall_back_to_global_discovery() {
-        let ports = crate::context::RuntimeServicePorts::default()
-            .with_builtin(std::rc::Rc::new(EmptyBuiltinService));
+        let lookups = std::rc::Rc::new(std::cell::Cell::new(0));
+        let ports = crate::context::RuntimeServicePorts::default().with_builtin(std::rc::Rc::new(
+            EmptyBuiltinService {
+                lookups: std::rc::Rc::clone(&lookups),
+            },
+        ));
         let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
             crate::execution::RuntimeExecutionService::new(),
         ))
         .with_service_ports(ports);
         let _scope = runtime.enter();
+        let initial_output = crate::output_count::current_output_scope();
+        let unpolled = super::try_call_retained_builtin_sequence_with_policy(
+            "full",
+            crate::call::BuiltinArguments::from_borrowed(&[], Some(&runtime)).unwrap(),
+            Some(2),
+            Some(runtime.clone()),
+            None,
+            super::RetainedDispatchPolicy::RegisteredOnly,
+        );
+        assert_eq!(lookups.get(), 0);
+        drop(unpolled);
+        assert_eq!(lookups.get(), 0);
+        assert_eq!(crate::output_count::current_output_scope(), initial_output);
         let error = block_on(super::call_builtin_async_in_context(
             &runtime,
             "full",
             &[Value::Num(7.0)],
         ))
         .expect_err("exact registry miss");
+        assert!(lookups.get() > 0);
         assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
         // The embedding entrypoint deliberately has no session authority.
         assert_eq!(

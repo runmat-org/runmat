@@ -28,20 +28,26 @@ pub(crate) fn hamming_coefficient(idx: usize, effective_len: usize) -> f64 {
 /// A borrowed coefficient program with the same checked allocation and
 /// bounded work accounting as public window construction, without a tensor
 /// allocation or class conversion at the caller.
+macro_rules! window_try {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(error) => return Ok(Err(error)),
+        }
+    };
+}
+
 pub(crate) async fn symmetric_window_values(
     len: usize,
     coeff: impl Fn(usize, usize) -> f64,
     cooperation: &mut SignalCooperation,
-) -> Result<Vec<f64>, WindowArgError> {
-    cooperation
-        .completed(0)
-        .await
-        .map_err(WindowArgError::from)?;
+) -> crate::BuiltinResult<Result<Vec<f64>, WindowArgError>> {
+    cooperation.completed(0).await?;
     if len == 0 {
-        return Err(WindowArgError::InvalidLength);
+        return Ok(Err(WindowArgError::InvalidLength));
     }
     if len == 1 {
-        return Ok(vec![1.0]);
+        return Ok(Ok(vec![1.0]));
     }
     populate(len, len, &coeff, std::convert::identity, cooperation).await
 }
@@ -66,36 +72,35 @@ pub(crate) async fn window_tensor(
     options: WindowOptions,
     coeff: impl Fn(usize, usize) -> f64,
     cooperation: &mut SignalCooperation,
-) -> Result<Value, WindowArgError> {
-    cooperation
-        .completed(0)
-        .await
-        .map_err(WindowArgError::from)?;
+) -> crate::BuiltinResult<Result<Value, WindowArgError>> {
+    cooperation.completed(0).await?;
     let len = options.len;
     if len == 0 {
         let storage = match options.output_type {
             WindowOutputType::Double => NumericStorage::F64(Vec::new()),
             WindowOutputType::Single => NumericStorage::F32(Vec::new()),
         };
-        return Tensor::from_numeric_storage(storage, vec![0, 1])
+        return Ok(Tensor::from_numeric_storage(storage, vec![0, 1])
             .map(Value::Tensor)
-            .map_err(|e| WindowArgError::TensorBuild(e.to_string()));
+            .map_err(|e| WindowArgError::TensorBuild(e.to_string())));
     }
     if len == 1 {
         let storage = match options.output_type {
             WindowOutputType::Double => NumericStorage::F64(vec![1.0]),
             WindowOutputType::Single => NumericStorage::F32(vec![1.0]),
         };
-        return Tensor::from_numeric_storage(storage, vec![1, 1])
+        return Ok(Tensor::from_numeric_storage(storage, vec![1, 1])
             .map(Value::Tensor)
-            .map_err(|e| WindowArgError::TensorBuild(e.to_string()));
+            .map_err(|e| WindowArgError::TensorBuild(e.to_string())));
     }
     let effective_len = match options.sampling {
         WindowSampling::Symmetric => len,
-        WindowSampling::Periodic => len.checked_add(1).ok_or(WindowArgError::InvalidLength)?,
+        WindowSampling::Periodic => {
+            window_try!(len.checked_add(1).ok_or(WindowArgError::InvalidLength))
+        }
     };
     let storage = match options.output_type {
-        WindowOutputType::Double => NumericStorage::F64(
+        WindowOutputType::Double => NumericStorage::F64(window_try!(
             populate(
                 len,
                 effective_len,
@@ -103,9 +108,9 @@ pub(crate) async fn window_tensor(
                 std::convert::identity,
                 cooperation,
             )
-            .await?,
-        ),
-        WindowOutputType::Single => NumericStorage::F32(
+            .await?
+        )),
+        WindowOutputType::Single => NumericStorage::F32(window_try!(
             populate(
                 len,
                 effective_len,
@@ -113,12 +118,12 @@ pub(crate) async fn window_tensor(
                 |value| value as f32,
                 cooperation,
             )
-            .await?,
-        ),
+            .await?
+        )),
     };
-    Tensor::from_numeric_storage(storage, vec![len, 1])
+    Ok(Tensor::from_numeric_storage(storage, vec![len, 1])
         .map(Value::Tensor)
-        .map_err(|e| WindowArgError::TensorBuild(e.to_string()))
+        .map_err(|e| WindowArgError::TensorBuild(e.to_string())))
 }
 
 async fn populate<T>(
@@ -127,21 +132,19 @@ async fn populate<T>(
     coeff: &impl Fn(usize, usize) -> f64,
     cast: impl Fn(f64) -> T,
     cooperation: &mut SignalCooperation,
-) -> Result<Vec<T>, WindowArgError> {
+) -> crate::BuiltinResult<Result<Vec<T>, WindowArgError>> {
     let mut data = Vec::new();
-    data.try_reserve_exact(len)
-        .map_err(WindowArgError::Allocation)?;
+    window_try!(data
+        .try_reserve_exact(len)
+        .map_err(WindowArgError::Allocation));
     for start in (0..len).step_by(COEFFICIENT_CHUNK) {
         let end = start.saturating_add(COEFFICIENT_CHUNK).min(len);
         for idx in start..end {
             data.push(cast(coeff(idx, effective_len)));
         }
-        cooperation
-            .completed((end - start) as u64)
-            .await
-            .map_err(WindowArgError::from)?;
+        cooperation.completed((end - start) as u64).await?;
     }
-    Ok(data)
+    Ok(Ok(data))
 }
 
 #[cfg(test)]

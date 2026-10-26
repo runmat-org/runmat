@@ -651,4 +651,83 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
             LANGUAGE_REALIZATION_SCOPE,
         ),
     ],
+    witnesses: &[
+        Witness {
+            id: "FEA-WITNESS-LANGUAGE-PARSE",
+            locator: WitnessLocator::CargoTest {
+                package: "runmat-fea-syntax",
+                target: CargoTarget::Library,
+                name: "tests::parses_representative_language_surface",
+                source: "crates/runmat-fea-syntax/src/tests.rs"
+            },
+            claims: &[
+                CoverageClaim {
+                    obligation: "grammar_and_recovery",
+                    envelopes: LANGUAGE_SOURCE_SCOPE,
+                    boundary: concat!(
+"Representative declarations, spans and imports only; no complete grammar or ",
+"semantics proof.",
+)
+                }
+            ]
+        },
+        Witness {
+            id: "FEA-WITNESS-LANGUAGE-FORMAT",
+            locator: WitnessLocator::CargoTest {
+                package: "runmat-fea-syntax",
+                target: CargoTarget::Library,
+                name: "tests::formatter_is_canonical_and_idempotent",
+                source: "crates/runmat-fea-syntax/src/tests.rs"
+            },
+            claims: &[
+                CoverageClaim {
+                    obligation: "grammar_and_recovery",
+                    envelopes: LANGUAGE_SOURCE_SCOPE,
+                    boundary: concat!(
+"One formatter fixture and second formatting equality; no complete recovery ",
+"or adversarial grammar credit.",
+)
+                }
+            ]
+        },
+        Witness {
+            id: "FEA-WITNESS-LANGUAGE-PROGRAM",
+            locator: WitnessLocator::CargoTest {
+                package: "runmat-analysis-language",
+                target: CargoTarget::Integration(
+                    "programs"
+                ),
+                name: "compiler_checks_inputs_defaults_locals_and_outputs_as_one_program",
+                source: "crates/runmat-analysis/language/tests/programs.rs"
+            },
+            claims: &[
+                CoverageClaim {
+                    obligation: "typed_expressions",
+                    envelopes: LANGUAGE_SOURCE_SCOPE,
+                    boundary: concat!(
+"Constructed geometry source with local/default quantity typing and one ",
+"node-displacement output; source checking only.",
+)
+                }
+            ]
+        },
+        Witness {
+            id: "FEA-WITNESS-LANGUAGE-TYPE-REJECT",
+            locator: WitnessLocator::CargoTest {
+                package: "runmat-analysis-language",
+                target: CargoTarget::Integration(
+                    "programs"
+                ),
+                name: "compiler_rejects_wrong_input_defaults_and_duplicate_outputs",
+                source: "crates/runmat-analysis/language/tests/programs.rs"
+            },
+            claims: &[
+                CoverageClaim {
+                    obligation: "typed_expressions",
+                    envelopes: LANGUAGE_SOURCE_SCOPE,
+                    boundary: "Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts."
+                }
+            ]
+        },
+    ],
 };

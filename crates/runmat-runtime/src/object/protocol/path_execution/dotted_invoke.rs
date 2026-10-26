@@ -9,11 +9,11 @@ use crate::object::indexing::{
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
-pub(super) fn try_execute<'a>(
+pub(super) fn try_execute<'a, A: std::borrow::Borrow<super::super::ObjectAccessContext> + 'a>(
     runtime: Option<&'a crate::context::RuntimeContext>,
     base: Value,
     steps: &'a mut ExactArrayIntoIter<ObjectSubscript>,
-    request: &'a SubscriptReadRequest,
+    request: &'a SubscriptReadRequest<A>,
     caller_function_name: Option<&'a str>,
 ) -> impl std::future::Future<Output = Result<Option<RootedValueSequence>, RuntimeError>> + 'a {
     // A miss only observes the borrowed selectors: do not allocate a dotted
@@ -63,7 +63,7 @@ pub(super) fn try_execute<'a>(
                 crate::object::protocol::resolve_declared_object_method(
                     &base,
                     &runmat_types::MethodName::from(member.as_str()),
-                    &request.access,
+                    request.access(),
                 )? {
                 let arguments: crate::call::BuiltinArguments =
                     call_arguments(runtime, components)?.into();
@@ -110,12 +110,13 @@ pub(super) fn try_execute<'a>(
                 .await?
             } else {
                 let member_sequence =
-                    crate::object::resolve::read_member_sequence_text_with_context(
+                    crate::object::resolve::read_member_sequence_text_with_optional_access(
                         runtime,
                         base,
                         member,
                         false,
                         caller_function_name,
+                        Some(request.access()),
                     )
                     .await?;
                 let member_value = resolve_single(member_sequence)?;
@@ -137,6 +138,7 @@ pub(super) fn try_execute<'a>(
                         member_value.value().clone(),
                         &step,
                         caller_function_name,
+                        Some(request.access()),
                     )
                     .await?
                     .try_into_sequence()?
@@ -169,10 +171,12 @@ fn call_arguments(
     runtime: Option<&crate::context::RuntimeContext>,
     components: ExactArrayStorage<ObjectIndexComponent>,
 ) -> Result<crate::execution::RootedValues, RuntimeError> {
-    if components
-        .iter()
-        .any(|component| matches!(component, ObjectIndexComponent::Colon))
-    {
+    if components.iter().any(|component| {
+        matches!(
+            component,
+            ObjectIndexComponent::Colon | ObjectIndexComponent::End
+        )
+    }) {
         return Err(semantic_error(
             "InvalidDottedInvokeArgument",
             "colon is not a standalone dotted-invocation argument",

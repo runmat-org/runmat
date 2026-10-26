@@ -19,7 +19,8 @@ pub fn prepare_batch_driver() -> NativeExecutionResult<BatchDriverInvocation> {
         })?;
     let invocation = load_driver_invocation(&job_directory)?;
     let attempt_id = match &invocation {
-        BatchDriverInvocation::Program { attempt, .. } => Some(attempt.request.id),
+        BatchDriverInvocation::Program { attempt, .. }
+        | BatchDriverInvocation::GraphTask { attempt, .. } => Some(attempt.request.id),
         BatchDriverInvocation::Script { .. } | BatchDriverInvocation::Graph { .. } => None,
     };
     write_driver_marker(&job_directory, std::process::id(), attempt_id)?;
@@ -80,6 +81,108 @@ pub async fn execute_graph_batch(
     let mut request = submission.request;
     request.job_id = Some(job_id);
     crate::worker::execute(crate::protocol::WorkerRequest::Graph(request)).await
+}
+
+/// A retained Graph grant uses the ordinary durable assignment/report lifecycle
+/// and the local staged Graph process-tree owner, not the direct-root provider.
+pub async fn execute_and_complete_graph_batch(
+    attempt: DurableProgramAttempt,
+    submission: GraphBatchSubmission,
+    lease: super::DurableAttemptLease,
+) -> NativeExecutionResult<ProgramBatchExecution> {
+    use crate::process_provider::ProcessControl;
+    use std::sync::atomic::Ordering;
+    lease.validate(&attempt.job_directory, &attempt.request)?;
+    submission.validate()?;
+    attempt
+        .config
+        .validate()
+        .map_err(NativeExecutionError::Configuration)?;
+    let original = submission.task.as_ref().ok_or_else(|| {
+        NativeExecutionError::Protocol("retained Graph driver lacks its original task".into())
+    })?;
+    if attempt.schema_version != 1 || attempt.request.task != original.request {
+        return Err(NativeExecutionError::Protocol(
+            "durable Graph provider differs from original assigned invocation".into(),
+        ));
+    }
+    let artifacts =
+        crate::local_store::ArtifactStore::new(attempt.config.store_root.join("artifacts"))?;
+    let objects = crate::FilesystemObjectStore::open(
+        attempt.config.store_root.join("objects"),
+        attempt.config.max_object_bytes,
+    )
+    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let provider = crate::process_provider::NativeProcessProvider {
+        config: &attempt.config,
+        artifacts: &artifacts,
+        objects: &objects,
+    };
+    let control = super::control::DurableControl::for_attempt(&attempt, &lease)?;
+    let cancellation =
+        super::program_store::cancel_path(&attempt.job_directory, attempt.request.id);
+    let execution = crate::driver::process::graph::execute_attempt(
+        &provider,
+        &attempt.request,
+        original,
+        submission.request,
+        &control,
+    );
+    tokio::pin!(execution);
+    let observed = tokio::select! {
+        observed = &mut execution => observed,
+        result = super::control::watch(&cancellation, &attempt.request) => {
+            control.stop(result);
+            execution.await
+        },
+    };
+    let response = match &observed.result {
+        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph, .. }) => {
+            WorkerResponse::GraphSuccess {
+                graph: graph.clone(),
+            }
+        }
+        Ok(_) => WorkerResponse::Failure {
+            message: "Graph provider returned a non-Graph result".into(),
+        },
+        Err(error) => WorkerResponse::Failure {
+            message: error.to_string(),
+        },
+    };
+    let verified_cancel = control.cancellation().load(Ordering::Acquire)
+        && control.cancellation_reason().is_some()
+        && control.failure().is_none()
+        && !matches!(
+            &observed.result,
+            Err(crate::driver::TransferFailure::RetirementUnverified(_))
+        );
+    let (_, report) = observed.into_backend_report(&attempt.request, verified_cancel);
+    let response = match &report.report {
+        runmat_execution_runner::AttemptReport::Succeeded { .. } => response,
+        runmat_execution_runner::AttemptReport::RuntimeFailed { failure } => {
+            WorkerResponse::RuntimeFailure {
+                failure: failure.clone(),
+            }
+        }
+        runmat_execution_runner::AttemptReport::Failed { message, .. }
+        | runmat_execution_runner::AttemptReport::Lost { message }
+        | runmat_execution_runner::AttemptReport::RetirementUnverified { message } => {
+            WorkerResponse::Failure {
+                message: message.clone(),
+            }
+        }
+        _ => WorkerResponse::Failure {
+            message: "durable Graph execution was cancelled".into(),
+        },
+    };
+    let completed = ProgramBatchExecution {
+        response,
+        report,
+        latest_progress: control.latest_progress(),
+    };
+    super::program_store::write_program_completion(&attempt.job_directory, completed.clone())?;
+    drop(lease);
+    Ok(completed)
 }
 
 pub async fn execute_and_complete_program_batch(

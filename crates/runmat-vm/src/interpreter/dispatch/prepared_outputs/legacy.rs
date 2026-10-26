@@ -1,7 +1,7 @@
 use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::object::indexing::ObjectIndexComponent;
 use runmat_runtime::sequence::{
-    AssignmentStepSpec, PreparedSequenceDestination, SequenceEndpointSpec,
+    AssignmentStepSpec, SequenceDestinationBuilder, SequenceEndpointSpec,
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -14,6 +14,9 @@ pub(super) async fn dispatch(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     state: &mut SequenceState,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    bytecode: &crate::bytecode::Bytecode,
+    caller: Option<&str>,
 ) -> Result<bool, RuntimeError> {
     use crate::bytecode::Instr;
     let (root_slot, steps, endpoint) = match instruction {
@@ -70,7 +73,18 @@ pub(super) async fn dispatch(
     // boundary. `prepare_owned` consumes this same required snapshot, so this
     // does not add a second Value clone.
     let root = root(vars, root_slot)?.clone();
-    let endpoint = PreparedSequenceDestination::prepare_owned(root, steps, endpoint).await?;
+    let builder = SequenceDestinationBuilder::from_owned_in_context(runtime, root)?;
+    let mut builder = if bytecode.active_class_method_owner.is_some() {
+        builder.with_method_frame_factory_in_context(runtime, || {
+            super::super::object::frame_access(bytecode, runtime)
+        })?
+    } else {
+        builder
+    };
+    for step in steps {
+        builder.push_step_in_context(runtime, step, caller).await?;
+    }
+    let endpoint = builder.finish_in_context(runtime, endpoint).await?;
     state.push_output_target(PreparedOutputTarget::Sequence {
         root_slot,
         endpoint,

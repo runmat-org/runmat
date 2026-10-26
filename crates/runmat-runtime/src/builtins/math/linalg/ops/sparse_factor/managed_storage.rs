@@ -31,9 +31,17 @@ pub(super) enum Fence<'a> {
 }
 impl Fence<'_> {
     pub(super) fn checkpoint(&self, runtime: &RuntimeContext) -> Result<(), HostAllocationError> {
+        self.checkpoint_optional(Some(runtime))
+    }
+    pub(super) fn checkpoint_optional(
+        &self,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<(), HostAllocationError> {
         match self {
-            Self::Managed(receipt) => receipt.checkpoint(runtime),
-            Self::Unbounded => match HostAllocationReceipt::policy(Some(runtime))? {
+            Self::Managed(receipt) => {
+                receipt.checkpoint(runtime.ok_or(HostAllocationError::StaleAuthority)?)
+            }
+            Self::Unbounded => match HostAllocationReceipt::policy(runtime)? {
                 HostAllocationPolicy::Unbounded => Ok(()),
                 HostAllocationPolicy::Managed => Err(HostAllocationError::StaleAuthority),
             },
@@ -42,9 +50,9 @@ impl Fence<'_> {
 }
 
 pub(super) struct Work<'a> {
-    pub(super) runtime: &'a RuntimeContext,
+    pub(super) runtime: Option<&'a RuntimeContext>,
     pub(super) fence: Fence<'a>,
-    pub(super) cooperation: CpuCooperationBudget,
+    pub(super) cooperation: Option<CpuCooperationBudget>,
     pending: u64,
     quantum: u64,
     remaining: u64,
@@ -52,6 +60,39 @@ pub(super) struct Work<'a> {
     pub(super) total: u64,
 }
 impl<'a> Work<'a> {
+    /// Explicitly absent context has no issuer/port to invent. It is only an
+    /// unbounded synchronous sparse numerical authority; Some preserves the
+    /// original policy, token, cooperation budget and managed receipts.
+    pub(super) fn for_optional_policy(
+        runtime: Option<&'a RuntimeContext>,
+        fence: Option<&'a HostAllocationReceipt>,
+    ) -> Result<Self, SparseWorkError> {
+        if let Some(runtime) = runtime {
+            return Self::for_policy(runtime, fence);
+        }
+        let fence = fence.map_or(Fence::Unbounded, Fence::Managed);
+        fence.checkpoint_optional(None)?;
+        Ok(Self {
+            runtime: None,
+            fence,
+            cooperation: None,
+            pending: 0,
+            quantum: 256,
+            remaining: 256,
+            #[cfg(test)]
+            total: 0,
+        })
+    }
+    pub(super) fn required_runtime(&self) -> Result<&'a RuntimeContext, HostAllocationError> {
+        self.runtime.ok_or(HostAllocationError::StaleAuthority)
+    }
+    pub(super) fn required_budget(
+        &mut self,
+    ) -> Result<&mut CpuCooperationBudget, HostAllocationError> {
+        self.cooperation
+            .as_mut()
+            .ok_or(HostAllocationError::StaleAuthority)
+    }
     #[cfg(test)]
     pub(super) fn new(runtime: &'a RuntimeContext, fence: &'a HostAllocationReceipt) -> Self {
         Self::with_fence(runtime, Fence::Managed(fence))
@@ -70,9 +111,9 @@ impl<'a> Work<'a> {
             CpuCooperationPolicy::WorkQuantum(quantum) => quantum.get(),
         };
         Self {
-            runtime,
+            runtime: Some(runtime),
             fence,
-            cooperation: runtime.cpu_cooperation(),
+            cooperation: Some(runtime.cpu_cooperation()),
             pending: 0,
             quantum,
             remaining: quantum,
@@ -102,14 +143,16 @@ impl<'a> Work<'a> {
         Ok(())
     }
     pub(super) async fn flush(&mut self) -> Result<(), SparseWorkError> {
-        self.fence.checkpoint(self.runtime)?;
-        self.cooperation.checkpoint(self.pending).await?;
+        self.fence.checkpoint_optional(self.runtime)?;
+        if let Some(cooperation) = self.cooperation.as_mut() {
+            cooperation.checkpoint(self.pending).await?;
+        }
         self.remaining -= self.pending;
         if self.remaining == 0 {
             self.remaining = self.quantum;
         }
         self.pending = 0;
-        self.fence.checkpoint(self.runtime)?;
+        self.fence.checkpoint_optional(self.runtime)?;
         Ok(())
     }
     #[cfg(test)]
@@ -120,7 +163,7 @@ impl<'a> Work<'a> {
         quantum: std::num::NonZeroU64,
     ) -> Self {
         let mut result = Self::new(runtime, fence);
-        result.cooperation = budget;
+        result.cooperation = Some(budget);
         result.quantum = quantum.get();
         result.remaining = quantum.get();
         result

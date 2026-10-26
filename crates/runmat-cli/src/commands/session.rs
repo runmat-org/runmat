@@ -4,6 +4,8 @@ use runmat_core::RunMatSession;
 use runmat_runtime::context::RuntimeGraphicsCallbackQueue;
 use std::future::Future;
 
+pub(crate) mod future;
+
 use crate::diagnostics::{parser_compat, resolved_error_namespace};
 use crate::telemetry::{sink as runtime_sink, telemetry_client_id};
 

@@ -18,6 +18,9 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test(async)]
 async fn public_workspace_clear_and_reset_keep_the_browser_session_usable() {
+    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
     let runtime = crate::init_runmat(JsValue::NULL)
         .await
         .expect("initialize browser runtime");
@@ -60,6 +63,9 @@ async fn public_workspace_clear_and_reset_keep_the_browser_session_usable() {
 }
 
 async fn cancel_during_public_execution(name: &str, text: &str, result_name: &str) {
+    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
     let runtime = Rc::new(
         crate::init_runmat(JsValue::NULL)
             .await

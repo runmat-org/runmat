@@ -9,7 +9,7 @@ pub(super) fn expected_sites(
     function: ProgramFunctionId,
     body: &runmat_mir::MirBody,
 ) -> NativeCodegenResult<Vec<NativeMirSite>> {
-    runmat_mir::analysis::operation_sites(function, body).ok_or_else(|| {
+    runmat_mir::operation_sites(function, body).ok_or_else(|| {
         NativeCodegenError::new(
             "native.lowering.site_inventory",
             "canonical MIR site identity exceeds the Native IR schema or is duplicated",

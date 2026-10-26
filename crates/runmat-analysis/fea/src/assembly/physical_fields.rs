@@ -241,7 +241,7 @@ impl StructuralPhysicalOperator<'_> {
                             .map_err(|_| StructuralPhysicalFieldError::CoordinateRoleMismatch)?,
                     )
             };
-            energy = energy + work * 0.5;
+            energy += work * 0.5;
         }
         if !energy.canonical_value().is_finite() {
             return Err(StructuralPhysicalFieldError::InvalidComponent);

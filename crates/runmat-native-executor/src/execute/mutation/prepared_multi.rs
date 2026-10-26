@@ -146,10 +146,10 @@ impl PreparedMultiAssignment {
             .map(|values| {
                 values
                     .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect()
+                    .map(|value| state.arena.insert(value, Some(&state.runtime)))
+                    .collect::<NativeExecutorResult<_>>()
             })
-            .collect();
+            .collect::<NativeExecutorResult<_>>()?;
         Ok(self)
     }
 
@@ -219,7 +219,9 @@ impl PreparedMultiAssignment {
                     let (local, reference) = match &*place {
                         // A plain output initializes its local; unlike a
                         // nested mutation, it has no previous receiver to read.
-                        MirPlace::Local(local) => (*local, state.arena.insert(rhs)),
+                        MirPlace::Local(local) => {
+                            (*local, state.arena.insert(rhs, Some(&state.runtime))?)
+                        }
                         _ => {
                             let local = target::root_local(place)?;
                             let creation = place.assignment_creation_policy(false);
@@ -232,7 +234,7 @@ impl PreparedMultiAssignment {
                             let (local, updated) = continuation::assign_to_root(
                                 state, place, root, rhs, false, creation,
                             )?;
-                            (local, state.arena.insert(updated))
+                            (local, state.arena.insert(updated, Some(&state.runtime))?)
                         }
                     };
                     self.roots.insert(local, reference);
@@ -268,7 +270,8 @@ impl PreparedMultiAssignment {
                         current,
                         values,
                     )?;
-                    self.roots.insert(*root, state.arena.insert(updated));
+                    self.roots
+                        .insert(*root, state.arena.insert(updated, Some(&state.runtime))?);
                 }
             }
             self.next_target = index + 1;

@@ -37,6 +37,14 @@ fn options_count_fact_retains_native_class_but_unknown_solver_stays_partial() {
         NumericClass::UInt64
     );
     assert_eq!(fields.fields["MaxIter"].storage, StorageFact::Scalar);
+    assert!(fields.fields.contains_key("OptimalityTolerance"));
+    assert!(fields.fields.contains_key("FunctionTolerance"));
+    assert!(!fields.fields.contains_key("TolFun"));
+    assert_eq!(
+        fields.fields["MaxFunEvals"].shape,
+        ShapeFact::Unknown,
+        "the effective algorithm can select a dimension-dependent default marker"
+    );
     let known = request.clone();
     request.literals.literal_args[1] = LiteralValue::Unknown;
     let result = inference::infer(&request, &OPTIMOPTIONS_CATALOG_ENTRY);

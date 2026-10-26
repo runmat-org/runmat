@@ -194,7 +194,82 @@ const LINPROG_INPUTS_BOUNDS: [BuiltinParamDescriptor; 7] = [
     },
 ];
 
-const LINPROG_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
+const LINPROG_INPUTS_OPTIONS: [BuiltinParamDescriptor; 8] = [
+    BuiltinParamDescriptor {
+        name: "f",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Linear objective vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Inequality constraint matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Inequality constraint right-hand side.",
+    },
+    BuiltinParamDescriptor {
+        name: "Aeq",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Equality constraint matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "beq",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Equality constraint right-hand side.",
+    },
+    BuiltinParamDescriptor {
+        name: "lb",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Lower bounds.",
+    },
+    BuiltinParamDescriptor {
+        name: "ub",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Upper bounds.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description:
+            "Consumed MaxIterations/MaxIter and Display controls for the current host algorithm.",
+    },
+];
+
+const LINPROG_OUTPUT_WITH_LAMBDA: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor { name: "x", ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required, default: None,
+        description: "Verified optimum or feasible stopped incumbent; empty if unavailable." },
+    BuiltinParamDescriptor { name: "fval", ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required, default: None, description: "Objective at returned x, or empty." },
+    BuiltinParamDescriptor { name: "exitflag", ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required, default: None, description: "Solver status code." },
+    BuiltinParamDescriptor { name: "output", ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required, default: None, description: "Original-model residuals and termination metadata." },
+    BuiltinParamDescriptor { name: "lambda", ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required, default: None,
+        description: "Verified optimal multipliers in original inequality, equality, lower-bound and upper-bound order; empty fields otherwise." },
+];
+
+const LINPROG_SIGNATURES: [BuiltinSignatureDescriptor; 20] = [
     BuiltinSignatureDescriptor {
         label: "x = linprog(f, A, b)",
         inputs: &LINPROG_INPUTS_CORE,
@@ -254,6 +329,46 @@ const LINPROG_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
         label: "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq, lb, ub)",
         inputs: &LINPROG_INPUTS_BOUNDS,
         outputs: &LINPROG_OUTPUT_ALL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = linprog(f, A, b, Aeq, beq, lb, ub, options)",
+        inputs: &LINPROG_INPUTS_OPTIONS,
+        outputs: &LINPROG_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval] = linprog(f, A, b, Aeq, beq, lb, ub, options)",
+        inputs: &LINPROG_INPUTS_OPTIONS,
+        outputs: &LINPROG_OUTPUT_X_FVAL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub, options)",
+        inputs: &LINPROG_INPUTS_OPTIONS,
+        outputs: &LINPROG_OUTPUT_X_FVAL_EXITFLAG,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq, lb, ub, options)",
+        inputs: &LINPROG_INPUTS_OPTIONS,
+        outputs: &LINPROG_OUTPUT_ALL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output, lambda] = linprog(f, A, b)",
+        inputs: &LINPROG_INPUTS_CORE,
+        outputs: &LINPROG_OUTPUT_WITH_LAMBDA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output, lambda] = linprog(f, A, b, Aeq, beq)",
+        inputs: &LINPROG_INPUTS_EQ,
+        outputs: &LINPROG_OUTPUT_WITH_LAMBDA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output, lambda] = linprog(f, A, b, Aeq, beq, lb, ub)",
+        inputs: &LINPROG_INPUTS_BOUNDS,
+        outputs: &LINPROG_OUTPUT_WITH_LAMBDA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output, lambda] = linprog(f, A, b, Aeq, beq, lb, ub, options)",
+        inputs: &LINPROG_INPUTS_OPTIONS,
+        outputs: &LINPROG_OUTPUT_WITH_LAMBDA,
     },
 ];
 

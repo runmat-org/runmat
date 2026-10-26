@@ -9,7 +9,14 @@ mod durable_aggregate;
 mod exception;
 mod graph;
 mod identity;
+mod limits;
 mod origins;
+mod selected_code;
+mod selected_json;
+pub use selected_code::PortableSelectedCode;
+pub use selected_json::{
+    SelectedGraphJsonCursor, SelectedGraphJsonError, SelectedGraphJsonProgress,
+};
 mod storage;
 mod validation;
 pub use exception::{DetachedDiagnosticFrame, ExceptionCallFrame, ExceptionFrameSource};
@@ -23,6 +30,7 @@ pub use graph::{
     PayloadGraph, GRAPH_MAX_SELECTED_UNITS, GRAPH_REQUEST_SCHEMA_V10, GRAPH_REQUEST_SCHEMA_V11,
     GRAPH_REQUEST_SCHEMA_V12,
 };
+pub use limits::ValueLimitBudget;
 pub use validation::{ValuePayloadValidationCursor, ValueValidationProgress};
 #[cfg(test)]
 mod callable_tests;

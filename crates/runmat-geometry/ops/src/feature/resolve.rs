@@ -37,7 +37,7 @@ impl ResolvedGeometryParameters {
                     value: self.quantity(value)?,
                 })
             }
-            GeometryAuthoringValue::Vector(values) => GeometryAuthoringValue::Vector([
+            GeometryAuthoringValue::Vector(values) => GeometryAuthoringValue::Vector(Box::new([
                 GeometryScalarExpression::Canonical {
                     value: self.quantity(&values[0])?,
                 },
@@ -47,7 +47,7 @@ impl ResolvedGeometryParameters {
                 GeometryScalarExpression::Canonical {
                     value: self.quantity(&values[2])?,
                 },
-            ]),
+            ])),
             GeometryAuthoringValue::Matrix(values) => GeometryAuthoringValue::Matrix(
                 values
                     .iter()
@@ -69,7 +69,7 @@ impl ResolvedGeometryParameters {
                         })?,
                     })
                 } else if matches!(bound, GeometryAuthoringValue::Vector(_)) {
-                    GeometryAuthoringValue::Vector([
+                    GeometryAuthoringValue::Vector(Box::new([
                         GeometryScalarExpression::Canonical {
                             value: self.quantity(
                                 &GeometryScalarExpression::ParameterComponent {
@@ -94,7 +94,7 @@ impl ResolvedGeometryParameters {
                                 },
                             )?,
                         },
-                    ])
+                    ]))
                 } else {
                     self.resolve_value(bound)?
                 }
@@ -266,7 +266,7 @@ pub fn resolve_geometry_parameters(
                     GeometryParameterType::QuantityVector3(d) => d,
                     _ => PhysicalDimension::DIMENSIONLESS.into(),
                 };
-                for value in components {
+                for value in components.iter() {
                     resolved.expected(value, descriptor)?;
                 }
             }

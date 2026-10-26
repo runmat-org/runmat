@@ -505,6 +505,8 @@ impl IsolatedNativeFfiClient {
         value: crate::call::RootedArgumentValue,
         callbacks: &mut BTreeMap<u64, crate::call::RetainedCallableTarget>,
     ) -> Result<NativeWireValue, NativeWireError> {
+        crate::foreign::reject_scoped_callback(value.value())
+            .map_err(|error| wire_error("RunMat:NativeFFI:ValueEncode", error.to_string()))?;
         if super::super::is_callable(value.value()) {
             let id = self.next_callback_id;
             self.next_callback_id = self.next_callback_id.checked_add(1).ok_or_else(|| {

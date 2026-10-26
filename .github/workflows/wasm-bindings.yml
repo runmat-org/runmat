@@ -8,6 +8,7 @@ on:
       - "bindings/ts/**"
       - "crates/runmat-wasm/**"
       - "crates/runmat-runtime/**"
+      - "crates/runmat-clarabel/**"
       - "crates/runmat-geometry/**"
       - "crates/runmat-lsp/**"
       - "scripts/regenerate-wasm-registry.sh"

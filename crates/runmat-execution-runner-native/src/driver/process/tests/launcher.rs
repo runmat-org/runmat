@@ -27,10 +27,17 @@ async fn run_process(
     let meters = TransportMeters::default();
     let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
     let mut console = None;
-    super::super::run_process(
-        driver,
+    let owner = super::super::owned::ProcessOwner {
+        config: &driver.config,
+        artifacts: &driver.artifacts,
+        objects: &driver.objects,
+        graph_quarantine: &driver.graph_quarantine,
+    };
+    let control = super::super::owned::LocalControl { driver, completion };
+    super::super::owned::run_process(
+        &owner,
         request,
-        completion,
+        &control,
         &meters,
         &mut termination,
         &mut console,

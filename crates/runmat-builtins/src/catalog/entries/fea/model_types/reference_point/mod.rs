@@ -3,10 +3,7 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod from_coordinates;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

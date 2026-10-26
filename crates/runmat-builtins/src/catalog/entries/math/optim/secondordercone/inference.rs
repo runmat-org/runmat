@@ -13,7 +13,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             matrix_shape
                 .map(ShapeFact::from)
                 .unwrap_or(ShapeFact::Unknown),
-            StorageFact::Dense,
+            match request.arguments.first().map(|value| value.storage) {
+                Some(StorageFact::Sparse) => StorageFact::Sparse,
+                None | Some(StorageFact::Unknown) => StorageFact::Unknown,
+                _ => StorageFact::Dense,
+            },
         ),
     );
     for (name, index) in [("b", 1), ("d", 2)] {
@@ -60,7 +64,7 @@ fn inspect_inputs(
     facts::numeric(
         request,
         0,
-        facts::OptimNumericInput::NonemptyMatrix,
+        facts::OptimNumericInput::NonemptySparseMatrix,
         diagnostics,
     );
     for index in [1, 2] {

@@ -1270,6 +1270,25 @@ fn ordinary_numeric_call_shares_one_ledger_and_transfers_retained_output() {
     drop(tensor);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    // Character conversion retains exactly the same final double owner.
+    let chars = runmat_value::CharArray::from_code_units(
+        [65, 233, 0xD800, 4]
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .to_vec(),
+        2,
+        2,
+    )
+    .unwrap();
+    let converted =
+        crate::builtins::common::tensor::character_numeric::to_double(Some(&runtime), &chars)
+            .unwrap();
+    assert_eq!(converted.shape(), [2, 2]);
+    assert_eq!(converted.materialize_f64(), vec![65., 55296., 233., 4.]);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, output);
+    drop(converted);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 }
 
 #[test]
@@ -1520,11 +1539,33 @@ fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_clai
     assert!(HostAllocationReceipt::admit(None, plan).unwrap().is_none());
     assert!(HostAllocationPlan::new(u64::MAX, 1).is_err());
 
+    // Actual sparse product ingress must use the explicit original policy even
+    // when there is no ambient owner or a foreign unbounded owner is installed.
+    let sparse = Value::SparseTensor(
+        runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![2., 3.]).unwrap(),
+    );
+    let dense = Value::Tensor(runmat_value::Tensor::new(vec![1., 2., 3., 4.], vec![2, 2]).unwrap());
+    let product = |original: &RuntimeContext| {
+        futures::executor::block_on(
+            crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes::mtimes_eval_in_context(
+                original, &sparse, &dense,
+            ),
+        )
+    };
+    assert!(crate::context::legacy::active().is_none());
     let small_ledger = ManagedHostEffectLedger::new_with_epoch(31, 3);
     let small_runtime = runtime(
         RuntimeServicePorts::default()
             .with_parallel(Rc::new(ManagedParallel(small_ledger.clone()))),
     );
+    for foreign in [false, true] {
+        let _ambient = foreign.then(|| unbounded.enter());
+        let error = product(&small_runtime).expect_err("explicit finite sparse owner");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:InsufficientResourceEvidence")
+        );
+    }
     assert!(matches!(
         HostAllocationReceipt::admit(Some(&small_runtime), plan),
         Err(HostAllocationError::Resource(_))
@@ -1564,6 +1605,20 @@ fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_clai
     ));
     drop(receipt);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    for foreign in [false, true] {
+        let _ambient = foreign.then(|| unbounded.enter());
+        let error = product(&runtime).expect_err("explicit cancelled sparse owner");
+        assert!(matches!(
+            error
+                .source
+                .as_deref()
+                .and_then(|cause| cause.downcast_ref::<crate::RuntimeError>())
+                .and_then(|cause| cause.source.as_deref())
+                .and_then(|cause| cause.downcast_ref::<crate::execution::ExecutionServiceError>()),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ));
+    }
 
     let fresh = runtime.with_cancellation_token(CancellationSource::new().token());
     let receipt = HostAllocationReceipt::admit(Some(&fresh), plan)
@@ -1623,6 +1678,24 @@ fn destination_end_rejects_rotated_owner_before_preparing_receiver() {
     }
     block_on(builder.prepare_current_receiver_for_end_in_context(&context, None))
         .expect("original owner remains usable after the temporary scope");
+    // Ordinary destinations retain finite metadata support, but capturing
+    // presently unquoted method-frame backing must refuse before its factory.
+    let called = std::cell::Cell::new(false);
+    let frame_builder = SequenceDestinationBuilder::new_in_context(&context, &Value::Num(3.0))
+        .expect("ordinary finite builder");
+    let error = frame_builder
+        .with_method_frame_factory_in_context(&context, || {
+            called.set(true);
+            Ok(crate::object::protocol::ObjectAccessContext::default())
+        })
+        .expect_err("method-frame backing needs a complete quote");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(!called.get());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, before);
     context.invalidate_host_effect_session_authority();
     block_on(builder.prepare_current_receiver_for_end_in_context(&context, None))
         .expect_err("session invalidation revokes the original builder");

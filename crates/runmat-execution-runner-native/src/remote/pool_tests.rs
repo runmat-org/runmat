@@ -457,6 +457,112 @@ impl RemoteWorkerChannel for FakeWorker {
 }
 
 #[tokio::test]
+async fn direct_admission_pairs_the_original_task_assignment_and_host_policy() {
+    use super::direct_admission::{validate, Admission};
+    let (mut program, artifact_id, _) = executable_bundle().await;
+    let scope_id = ExecutionScopeId::derive(&[b"remote-submit-rollback-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-submit-rollback-pool"]);
+    let task_id = TaskId::derive(&[b"remote-submit-rollback-task"]);
+    let mut task = submission(scope_id, pool_id, task_id, artifact_id).request;
+    task.callable = Callable::for_program("remote-test", &program.callable);
+    task.host = program
+        .artifact
+        .execution_host_requirement(&program.recipe, task.host.permitted_trust_tiers.clone())
+        .unwrap();
+    let pool_accepts = |program: &ProgramExecutionRequest, task: &TaskRequest| {
+        validate(
+            program,
+            Admission::Pool {
+                task,
+                scope_id,
+                pool_id,
+            },
+        )
+    };
+    assert!(pool_accepts(&program, &task).is_ok());
+    let worker = WorkerSpec {
+        id: WorkerId::derive(&[b"quic-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+        host: host_inventory(),
+    };
+    let mut scheduling = runmat_execution_runner::AttemptRequest {
+        id: runmat_execution::identity::AttemptId::derive(&[b"quic-attempt"]),
+        task_id,
+        scope_id,
+        worker_id: worker.id,
+        ordinal: 1,
+        driver_fence: 9,
+        resource_assignment: Default::default(),
+        task,
+    };
+    let worker_accepts = |program: &ProgramExecutionRequest,
+                          scheduling: &runmat_execution_runner::AttemptRequest,
+                          worker: &WorkerSpec| {
+        validate(program, Admission::Worker { scheduling, worker })
+    };
+    assert!(worker_accepts(&program, &scheduling, &worker).is_err());
+    program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+        scope_id,
+        pool_id,
+        task_id,
+        attempt_id: scheduling.id,
+        worker_id: worker.id,
+        backend: runmat_execution::PoolBackend::Remote,
+        resources: scheduling.resource_assignment.clone(),
+    });
+    program.job_id = Some(runmat_execution::JobId::derive(&[b"quic-task"]));
+    assert!(worker_accepts(&program, &scheduling, &worker).is_ok());
+    assert!(pool_accepts(&program, &scheduling.task).is_err());
+    let mut foreign = program.clone();
+    foreign.assignment.as_mut().unwrap().scope_id = ExecutionScopeId::derive(&[b"quic-scope"]);
+    assert!(worker_accepts(&foreign, &scheduling, &worker).is_err());
+    let mut foreign_worker = worker.clone();
+    foreign_worker.pool_id = PoolId::derive(&[b"quic-pool"]);
+    assert!(worker_accepts(&program, &scheduling, &foreign_worker).is_err());
+    foreign_worker = worker.clone();
+    foreign_worker.host.trust_tier = runmat_execution::security::ExecutionTrustTier::HostedOrdinary;
+    assert!(worker_accepts(&program, &scheduling, &foreign_worker).is_err());
+    // Display/owner labels are not a second execution identity.
+    scheduling.task.callable.owner_identity = "remote-parfor".into();
+    assert!(worker_accepts(&program, &scheduling, &worker).is_ok());
+    scheduling.task.invocation_context = ProgramInvocationContext::ParallelTask {
+        task: runmat_execution::ParallelTaskContext {
+            region: runmat_types::ParallelRegionId(runmat_types::RegionId {
+                function: program.callable.semantic_function().unwrap(),
+                ordinal: 0,
+            }),
+            chunk: ParallelChunk {
+                ordinal: 0,
+                start: 0,
+                len: 1,
+            },
+            randomness: ParallelRandomnessContext::Inherit,
+        },
+    };
+    assert!(worker_accepts(&program, &scheduling, &worker).is_err());
+
+    // A recipe grant is checked at both boundaries, not inferred from a host
+    // capability or from an otherwise self-consistent portable artifact.
+    let (program, artifact_id, _) = program::build(
+        "function y = answer(); y = 42; end",
+        Vec::new(),
+        vec![accelerator_request()],
+    )
+    .await;
+    let mut task = submission(scope_id, pool_id, task_id, artifact_id).request;
+    task.callable = Callable::for_program("remote-test", &program.callable);
+    task.host = program
+        .artifact
+        .execution_host_requirement(&program.recipe, task.host.permitted_trust_tiers.clone())
+        .unwrap();
+    task.resources.accelerators = program.recipe.accelerators.clone();
+    assert!(pool_accepts(&program, &task).is_ok());
+    task.resources.accelerators.clear();
+    assert!(pool_accepts(&program, &task).is_err());
+}
+
+#[tokio::test]
 async fn rejected_submission_does_not_poison_remote_task_registries() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-submit-rollback-scope"]);
     let pool_id = PoolId::derive(&[b"remote-submit-rollback-pool"]);
@@ -1836,6 +1942,15 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
             deadline_unix_millis: None,
         },
     };
+    program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+        scope_id,
+        pool_id,
+        task_id,
+        attempt_id: scheduling.id,
+        worker_id: worker.id,
+        backend: runmat_execution::PoolBackend::Remote,
+        resources: scheduling.resource_assignment.clone(),
+    });
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([5; 32]).unwrap();
     let server = run_remote_worker_quic(RemoteWorkerQuicRequest {

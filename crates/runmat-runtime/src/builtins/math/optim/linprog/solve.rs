@@ -1,111 +1,129 @@
-//! Numerical ordering is unchanged; invocation budgets own cooperative turns.
-use super::combinations::Combinations;
+//! One vetted sparse numerical substrate; status is checked against original rows.
 use super::*;
-use crate::builtins::math::optim::common::ScalarCooperation;
+use clarabel::solver::{DefaultInfo, DefaultSettingsBuilder, DefaultSolver, SolverStatus};
+use model::{ConicModel, LinearProgram, LinprogOutcome};
+
+struct Progress<'a> {
+    cooperation: &'a mut ScalarCooperation,
+    controls: &'a mut options::Controls,
+    previous: u32,
+    work: u64,
+}
+
+pub(super) async fn run(
+    model: &ConicModel,
+    feasibility: bool,
+    cooperation: &mut ScalarCooperation,
+    controls: &mut options::Controls,
+) -> BuiltinResult<DefaultSolver<f64>> {
+    cooperation.completed(0).await?;
+    let settings = DefaultSettingsBuilder::default()
+        .verbose(false)
+        .direct_solve_method("qdldl".into())
+        .max_iter(controls.backend_limit()?)
+        .tol_gap_abs(1e-10)
+        .tol_gap_rel(1e-10)
+        .tol_feas(1e-10)
+        .tol_infeas_abs(1e-10)
+        .tol_infeas_rel(1e-10)
+        .build()
+        .map_err(|source| {
+            build_runtime_error("linprog: invalid backend settings")
+                .with_builtin(NAME)
+                .with_source(source)
+                .build()
+        })?;
+    let cones = model.cones();
+    let original = crate::builtins::math::optim::common::conic::Model {
+        p: None,
+        a: &model.a,
+        b: &model.b,
+        f: &model.f,
+        cones: &cones,
+        identity: runmat_builtins::LINPROG_CATALOG_ENTRY.identity,
+        objective_scale: model.objective_scale,
+    };
+    let mut progress = Progress {
+        cooperation,
+        controls,
+        previous: 0,
+        work: model.work_units().max(1),
+    };
+    crate::builtins::math::optim::common::conic::backend::run(
+        &original,
+        feasibility,
+        settings,
+        &mut progress,
+        async |progress: &mut Progress<'_>, info: &DefaultInfo<f64>| {
+            progress.cooperation.completed(0).await?;
+            progress.controls.record_iteration(
+                &mut progress.previous,
+                info.iterations,
+                progress.cooperation.runtime(),
+            )?;
+            progress.cooperation.completed(progress.work).await
+        },
+    )
+    .await
+}
 
 pub(super) async fn solve_linprog(
-    problem: &LinearProgram,
+    problem: LinearProgram,
     cooperation: &mut ScalarCooperation,
+    controls: &mut options::Controls,
+    products: super::compiled::Products,
 ) -> BuiltinResult<LinprogOutcome> {
-    cooperation.completed(0).await?;
-    // nalgebra SVD remains an atomic numerical primitive, not hard-preemptible work.
-    let face = equality_face(problem, problem.f.len());
-    cooperation.completed(1).await?;
-    let Some(face) = face else {
-        return Ok(LinprogOutcome::infeasible("No feasible point found."));
-    };
-    let reduced = reduce_to_equality_face(problem, &face);
-    cooperation.completed(1).await?;
-    let k = reduced.f.len();
-    let mut candidates = Vec::new();
-    let mut combinations = 0usize;
-    for active_count in 0..=reduced.a_ineq.len().min(k) {
-        let mut traversal = Combinations::new(reduced.a_ineq.len(), active_count);
-        while let Some(active) = traversal.next() {
-            cooperation.completed(0).await?;
-            let mut rows = reduced.a_eq.clone();
-            let mut rhs = reduced.b_eq.clone();
-            for &index in active {
-                rows.push(reduced.a_ineq[index].clone());
-                rhs.push(reduced.b_ineq[index]);
-            }
-            let y = pseudo_solve(&rows, &rhs, k);
-            cooperation.completed(1).await?;
-            if let Some(y) = y {
-                combinations = combinations.checked_add(1).ok_or_else(|| {
-                    linprog_error_with_detail(
-                        &LINPROG_ERROR_INVALID_INPUT,
-                        "candidate count exceeds platform limits",
-                    )
-                })?;
-                if is_feasible(&reduced, &y) {
-                    candidates.push(y);
-                }
-            }
-        }
-    }
-    let feasible_fallback = if candidates.is_empty() {
-        let y0 = vec![0.0; k];
-        is_feasible(&reduced, &y0).then_some(y0)
-    } else {
-        None
-    };
-    if candidates.is_empty() && feasible_fallback.is_none() {
-        return Ok(LinprogOutcome::infeasible("No feasible point found."));
-    }
-    if has_unbounded_descent_direction(&reduced, cooperation).await? {
-        return Ok(LinprogOutcome::unbounded(combinations));
-    }
-    if let Some(y) = feasible_fallback {
-        candidates.push(y);
-    }
-    let mut best_y = candidates[0].clone();
-    let mut best_fval = dot(&reduced.f, &best_y);
-    for candidate in candidates.into_iter().skip(1) {
-        cooperation.completed(1).await?;
-        let fval = dot(&reduced.f, &candidate);
-        if fval < best_fval - TOL {
-            best_y = candidate;
-            best_fval = fval;
-        }
-    }
-    let best = lift_from_equality_face(&face, &best_y);
-    let best_fval = dot(&problem.f, &best);
-    let constrviolation = constraint_violation(problem, &best);
-    cooperation.completed(1).await?;
-    Ok(LinprogOutcome {
-        x: Some(best),
-        fval: Some(best_fval),
-        exitflag: 1,
-        iterations: combinations,
-        constrviolation,
-        message: "Optimal solution found.".to_string(),
+    let mut validation = super::compiled::SuppliedRows;
+    let execution = solve_validated(problem, cooperation, controls, products, &mut validation)?;
+    execution.await
+}
+mod validated;
+
+// One exact-layout continuation for a complete numerical invocation. Caller
+// wrappers retain only this owner, not another inlined copy of its large future.
+// The original model, controls, validation and CPU budget move/borrow unchanged.
+pub(super) fn solve_validated<'a, V: super::compiled::Validation + 'a>(
+    problem: LinearProgram,
+    cooperation: &'a mut ScalarCooperation,
+    controls: &'a mut options::Controls,
+    products: super::compiled::Products,
+    validation: &'a mut V,
+) -> BuiltinResult<crate::execution::RuntimeContinuationFuture<'a, LinprogOutcome>> {
+    let runtime = cooperation.runtime().cloned();
+    crate::execution::admit_borrowed_operation_with_contextual_error(runtime.as_ref(), move || {
+        validated::solve(problem, cooperation, controls, products, validation)
     })
 }
 
-async fn has_unbounded_descent_direction(
-    problem: &LinearProgram,
+async fn incumbent<V: super::compiled::Validation>(
+    model: &ConicModel,
+    x: Vec<f64>,
+    flag: i32,
+    iterations: usize,
+    message: &str,
     cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<bool> {
-    let n = problem.f.len();
-    for active_count in 0..=problem.a_ineq.len().min(n.saturating_sub(1)) {
-        let mut traversal = Combinations::new(problem.a_ineq.len(), active_count);
-        while let Some(active) = traversal.next() {
-            cooperation.completed(0).await?;
-            let mut rows = problem.a_eq.clone();
-            for &index in active {
-                rows.push(problem.a_ineq[index].clone());
-            }
-            let directions = candidate_nullspace_descent_directions(&rows, &problem.f, n);
-            cooperation.completed(1).await?;
-            for direction in directions {
-                cooperation.completed(1).await?;
-                if is_recession_direction(problem, &direction) && dot(&problem.f, &direction) < -TOL
-                {
-                    return Ok(true);
-                }
-            }
+    validation: &mut V,
+) -> BuiltinResult<LinprogOutcome> {
+    let mut outcome = LinprogOutcome::failure(flag, iterations, message);
+    if let Some(point) = certificates::primal(model, &x, cooperation)
+        .await?
+        .filter(|point| point.normalized <= TOL)
+    {
+        if !validation.incumbent(&x, cooperation).await? {
+            outcome
+                .message
+                .push_str(" No feasible incumbent was verified against the original model domain.");
+            return Ok(outcome);
         }
+        outcome.x = Some(x);
+        outcome.fval = Some(point.objective);
+        outcome.constrviolation = point.violation;
+        outcome.primalfeasibility = point.normalized;
+        outcome.message.push_str(" Returned x is a verified feasible incumbent; no optimality or multiplier claim is made.");
+    } else {
+        outcome
+            .message
+            .push_str(" No verified feasible incumbent is available.");
     }
-    Ok(false)
+    Ok(outcome)
 }

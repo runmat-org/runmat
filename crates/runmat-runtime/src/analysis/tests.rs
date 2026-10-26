@@ -1,3 +1,4 @@
+use runmat_types::physical::Quantity;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{
@@ -59,9 +60,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind,
-    Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
-    TessellationProfile,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
 };
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
@@ -261,20 +261,20 @@ pub(super) fn sample_model() -> AnalysisModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
             provenance: runmat_analysis_core::MaterialProvenance::Authored,
-            mass_density_kg_per_m3: Some(runmat_types::physical::Quantity::new(7850.0)),
+            mass_density_kg_per_m3: Some(Quantity::new(7850.0)),
             elasticity: Some(MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
-                    youngs_modulus_pa: runmat_types::physical::Quantity::new(200e9),
-                    poisson_ratio: runmat_types::physical::Quantity::new(0.3),
+                    youngs_modulus_pa: Quantity::new(200e9),
+                    poisson_ratio: Quantity::new(0.3),
                 },
             )),
             damping: None,
             thermal: Some(MaterialThermalModel {
-                reference_temperature_k: runmat_types::physical::Quantity::new(293.15),
-                modulus_temp_coeff_per_k: runmat_types::physical::Quantity::new(-2.5e-4),
-                conductivity_w_per_mk: runmat_types::physical::Quantity::new(45.0),
-                specific_heat_j_per_kgk: runmat_types::physical::Quantity::new(500.0),
-                expansion_coefficient_per_k: runmat_types::physical::Quantity::new(1.2e-5),
+                reference_temperature_k: Quantity::new(293.15),
+                modulus_temp_coeff_per_k: Quantity::new(-2.5e-4),
+                conductivity_w_per_mk: Quantity::new(45.0),
+                specific_heat_j_per_kgk: Quantity::new(500.0),
+                expansion_coefficient_per_k: Quantity::new(1.2e-5),
             }),
             acoustic: None,
             electrical: None,
@@ -290,12 +290,12 @@ pub(super) fn sample_model() -> AnalysisModel {
             nodes: vec![
                 StructuralNode {
                     node_id: 1,
-                    coordinates_m: runmat_types::physical::Quantity::new([0.0, 0.0, 0.0]),
+                    coordinates_m: Quantity::new([0.0, 0.0, 0.0]),
                     solid_attachment: None,
                 },
                 StructuralNode {
                     node_id: 2,
-                    coordinates_m: runmat_types::physical::Quantity::new([1.0, 0.0, 0.0]),
+                    coordinates_m: Quantity::new([1.0, 0.0, 0.0]),
                     solid_attachment: None,
                 },
             ],
@@ -310,13 +310,13 @@ pub(super) fn sample_model() -> AnalysisModel {
             }],
             beam_sections: vec![BeamSectionModel {
                 section_id: "rect".to_string(),
-                area_m2: runmat_types::physical::Quantity::new(2.0e-4),
-                iy_m4: runmat_types::physical::Quantity::new(1.6e-9),
-                iz_m4: runmat_types::physical::Quantity::new(6.4e-9),
-                torsion_j_m4: runmat_types::physical::Quantity::new(2.4e-9),
-                outer_fiber_y_m: runmat_types::physical::Quantity::new(0.01),
-                outer_fiber_z_m: runmat_types::physical::Quantity::new(0.005),
-                torsion_outer_radius_m: runmat_types::physical::Quantity::new(0.011_180_339_887_498_949),
+                area_m2: Quantity::new(2.0e-4),
+                iy_m4: Quantity::new(1.6e-9),
+                iz_m4: Quantity::new(6.4e-9),
+                torsion_j_m4: Quantity::new(2.4e-9),
+                outer_fiber_y_m: Quantity::new(0.01),
+                outer_fiber_z_m: Quantity::new(0.005),
+                torsion_outer_radius_m: Quantity::new(0.011_180_339_887_498_949),
             }],
             shell_sections: Vec::new(),
         }),
@@ -383,7 +383,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3: (Some(1150.0)).map(runmat_types::physical::MassDensity::new),
+        mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(1150.0)),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
                 youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(3.2e9),
@@ -5400,7 +5400,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3: (Some(1800.0)).map(runmat_types::physical::MassDensity::new),
+        mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(1800.0)),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
                 youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(5.0e9),

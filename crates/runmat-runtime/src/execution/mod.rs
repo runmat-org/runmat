@@ -1,5 +1,8 @@
 mod blocking_cpu;
+mod callback_batch;
 mod capture;
+pub use callback_batch::SelectedWorkerCallable;
+pub(crate) use callback_batch::{CallbackBatch, CallbackParallelMode};
 mod completion;
 mod cooperation;
 mod errors;
@@ -7,10 +10,13 @@ mod future_handle;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native_task;
 mod owned_builtin;
+mod phases;
+pub use phases::after_result;
 mod program_capture;
 mod retained_value;
 pub(crate) mod rooted_continuation;
 mod running_future;
+pub(crate) mod scoped_callable;
 pub use future_handle::{FutureCompletionRef, FutureExecutionHandle, FutureExecutionIdentity};
 pub(crate) mod object;
 pub(crate) mod object_array;
@@ -41,7 +47,7 @@ pub use completion::{
     RootedResult, RootedValue, RootedValueLease, RootedValueSequence, RootedValues,
     RootedValuesBuilder, RootedValuesIntoIter,
 };
-pub use cooperation::{CpuCooperationBudget, CpuCooperationPolicy};
+pub use cooperation::{CpuCooperationBudget, CpuCooperationPolicy, OwnedCpuPayload};
 pub use errors::{
     decode_runtime_failure, decode_runtime_failure_with_source_issuer_in_context,
     encode_runtime_failure, encode_runtime_failure_in_context,
@@ -61,11 +67,13 @@ pub use rooted_continuation::{
     admit_optional_hostcall_with, admit_optional_rooted_result_with, admit_rooted_result_with,
     admit_stack_mutation, RuntimeContinuationFuture,
 };
+// Numerical phases borrow their domain's original roots and mutable owners.
+pub(crate) use rooted_continuation::admit_optional_hostcall_with_contextual_error as admit_borrowed_operation_with_contextual_error;
 pub use running_future::RunningFutureLease;
 pub use services::{
-    AwaitAction, DeferredCall, DeferredGraphCapture, DeferredGraphProgram, DeferredGraphSnapshot,
-    DeferredInvocation, DeferredProgram, DurableJobOptions, GraphResultReceipt,
-    RuntimeExecutionService, RuntimeExecutionServices, SpmdExecutionMode, SpmdGangCall,
-    SpmdRankResult,
+    AdmittedCallableReentry, AwaitAction, DeferredCall, DeferredGraphCapture, DeferredGraphProgram,
+    DeferredGraphSnapshot, DeferredInvocation, DeferredProgram, DeferredSelectedCodeCapture,
+    DurableJobOptions, GraphResultReceipt, RestoredCallableGraph, RuntimeExecutionService,
+    RuntimeExecutionServices, SpmdExecutionMode, SpmdGangCall, SpmdRankResult, TaskRetention,
 };
 pub use storable::validate_storable_value;

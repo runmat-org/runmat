@@ -1,6 +1,83 @@
 use super::*;
 
 impl HostState {
+    /// Reclaim obsolete physical generations, never logical SSA definitions.
+    /// Call only between settled native sites, with no arena Value borrow live.
+    pub(in crate::execute) fn retire_obsolete_generations(
+        &mut self,
+        call: &mut runmat_runtime::native::NativeCall,
+    ) -> NativeExecutorResult<()> {
+        if !self.arena.has_retirement_debt() {
+            return Ok(());
+        }
+        // Use the original allocation policy, not a guessed next-operation
+        // quote or ledger-pressure fraction. Finite mode pays a full census
+        // after any insertion or final-pin release so obsolete residents cannot
+        // consume the next operation's headroom. Current SSA/pins can still exhaust it.
+        // A policy error grants nothing and is left to its original operation
+        // owner; this maintenance check must not newly deny a pure operation.
+        let managed = matches!(
+            runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(Some(
+                &self.runtime
+            )),
+            Ok(runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed)
+        );
+        if !managed && !self.arena.retirement_due() {
+            return Ok(());
+        }
+        if call.frame.is_null() {
+            return Err(NativeExecutorError::Host("native call has no frame".into()));
+        }
+        // Reuse the canonical typed-owner root census, without mirroring SSA
+        // tokens into another variable-width root buffer. Refresh may relocate
+        // that buffer, so republish its borrowed ABI view before proceeding.
+        let roots = self.refresh_roots()?;
+        // SAFETY: the checked frame is borrowed from ActiveInvocation for the
+        // complete synchronous machine entry.
+        unsafe { (*call.frame).roots = roots };
+        self.arena.begin_retirement();
+        for root in self.roots.iter() {
+            self.arena.mark_resident(root.value)?;
+        }
+        // Frame materialization and evaluated operands may still require an
+        // old local generation. NativeFrameState is not a last-use analysis.
+        for reference in self.values.values() {
+            self.arena.mark_resident(*reference)?;
+        }
+        // ActiveInvocation owns initialized argument/result windows throughout
+        // each machine entry. Generated code retains no additional opaque
+        // Value tokens outside those windows and HostState's typed owners.
+        if call.argument_count != 0 {
+            if call.arguments.is_null() {
+                return Err(NativeExecutorError::Host(
+                    "native arguments are missing".into(),
+                ));
+            }
+            // SAFETY: ActiveInvocation::enter_once publishes its initialized
+            // argument_refs vector and its exact length for this entry.
+            for reference in
+                unsafe { std::slice::from_raw_parts(call.arguments, call.argument_count) }
+            {
+                self.arena.mark_resident(*reference)?;
+            }
+        }
+        if call.result_capacity != 0 {
+            if call.results.is_null() {
+                return Err(NativeExecutorError::Host(
+                    "native results are missing".into(),
+                ));
+            }
+            // SAFETY: ActiveInvocation allocates results as vec![NULL; count],
+            // clears it before entry, and publishes that vector's exact length.
+            for reference in
+                unsafe { std::slice::from_raw_parts(call.results, call.result_capacity) }
+            {
+                self.arena.mark_resident(*reference)?;
+            }
+        }
+        self.arena.finish_retirement()
+    }
+
     /// A catch edge abandons the throwing native site, including every
     /// partially prepared mutation. None of these cursors may be replayed at
     /// the handler's next site, even when that site has the same MIR shape.
@@ -35,138 +112,152 @@ impl HostState {
         reference_error.map_or(finished, Err)
     }
 
-    pub fn refresh_roots(&mut self) -> NativeRootSet {
-        self.roots.truncate(self.locals.len());
-        for (root, value) in self.roots.iter_mut().zip(&self.locals) {
-            root.value = *value;
+    pub fn refresh_roots(&mut self) -> NativeExecutorResult<NativeRootSet> {
+        // Count the actual live owner projection, not an arena highwater or a
+        // copied workspace. No root token escapes this borrowed census.
+        let mut count = 0usize;
+        self.visit_roots(|_| count += 1);
+        u32::try_from(count)
+            .map_err(|_| NativeExecutorError::Host("native root cardinality overflow".into()))?;
+        self.roots.reserve(&self.runtime, count)?;
+        // Keep the original buffer and claim together while borrowing the
+        // typed owners. Capacity is admitted before any existing ABI view can
+        // be displaced; filling is allocation-free and cannot fail.
+        let mut roots = std::mem::take(&mut self.roots);
+        roots.values.clear();
+        self.visit_roots(|root| roots.values.push(root));
+        self.roots = roots;
+        Ok(NativeRootSet {
+            roots: self.roots.as_ptr(),
+            count: self.roots.len(),
+        })
+    }
+
+    fn visit_roots(&self, mut visit: impl FnMut(NativeRoot)) {
+        for (slot, value) in self.locals.iter().enumerate() {
+            visit(NativeRoot {
+                value: *value,
+                kind: NativeRootKind::LOCAL,
+                slot: slot as u32,
+            });
         }
+        let mut next_slot = self.locals.len();
         if let Some(value) = self.last_expression {
-            let slot = u32::try_from(self.roots.len())
-                .expect("native root cardinality is bounded by admitted frame state");
-            self.roots.push(NativeRoot {
+            let slot = next_slot as u32;
+            visit(NativeRoot {
                 value,
                 kind: NativeRootKind::TEMPORARY,
                 slot,
             });
+            next_slot += 1;
         }
         if let Some(sequence) = &self.sequence_assignment_register {
             for (slot, value) in sequence.root_references() {
-                self.roots.push(NativeRoot {
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
         if let Some(sequence) = &self.pending_sequence_rvalue {
-            let values = sequence.root_references().collect::<Vec<_>>();
-            for value in values {
-                let slot = u32::try_from(self.roots.len()).expect(
-                    "prepared sequence root cardinality is bounded by native value admission",
-                );
-                self.roots.push(NativeRoot {
+            for value in sequence.root_references() {
+                let slot = next_slot as u32;
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
         if let Some(sequence) = &self.pending_sequence_assign {
-            let values = sequence.root_references().collect::<Vec<_>>();
-            for value in values {
-                let slot = u32::try_from(self.roots.len()).expect(
-                    "pending sequence root cardinality is bounded by native value admission",
-                );
-                self.roots.push(NativeRoot {
+            for value in sequence.root_references() {
+                let slot = next_slot as u32;
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
         if let Some(assignment) = &self.prepared_multi_assignment {
             for (slot, value) in assignment.root_references() {
-                self.roots.push(NativeRoot {
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
         if let Some(preparation) = &self.pending_multi_preparation {
             for value in preparation.root_references() {
-                let slot = u32::try_from(self.roots.len())
-                    .expect("pending multi-target preparation root cardinality is bounded by native value admission");
-                self.roots.push(NativeRoot {
+                let slot = next_slot as u32;
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
         if let Some(assignment) = &self.pending_assign {
-            let values = assignment.root_references().collect::<Vec<_>>();
-            for value in values {
-                let slot = u32::try_from(self.roots.len()).expect(
-                    "pending assignment root cardinality is bounded by native value admission",
-                );
-                self.roots.push(NativeRoot {
+            for value in assignment.root_references() {
+                let slot = next_slot as u32;
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
         if let Some(preparation) = &self.pending_place_prepare {
-            let values = preparation.root_references().collect::<Vec<_>>();
-            for value in values {
-                let slot = u32::try_from(self.roots.len())
-                    .expect("pending place preparation root cardinality is bounded by native value admission");
-                self.roots.push(NativeRoot {
+            for value in preparation.root_references() {
+                let slot = next_slot as u32;
+                visit(NativeRoot {
                     value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
         }
-        let contextual_roots = self.expression_region_roots().collect::<Vec<_>>();
-        for value in contextual_roots {
-            let slot = u32::try_from(self.roots.len())
-                .expect("contextual region root cardinality is bounded by native value admission");
-            self.roots.push(NativeRoot {
+        for value in self.expression_region_roots() {
+            let slot = next_slot as u32;
+            visit(NativeRoot {
                 value,
                 kind: NativeRootKind::TEMPORARY,
                 slot,
             });
+            next_slot += 1;
         }
         // Borrow only the completed owner so the canonical root buffer can
         // be updated without copying the numeric continuation's inline slots.
         for value in
             super::super::call_suspension::completed_roots_from(self.completed_call.as_ref())
         {
-            let slot = u32::try_from(self.roots.len())
-                .expect("completed call root cardinality is bounded by native value admission");
-            self.roots.push(NativeRoot {
+            let slot = next_slot as u32;
+            visit(NativeRoot {
                 value,
                 kind: NativeRootKind::TEMPORARY,
                 slot,
             });
+            next_slot += 1;
         }
         if let Some(pending) = &self.pending_call {
             for value in &pending.retained_roots {
-                let slot = u32::try_from(self.roots.len())
-                    .expect("pending native call root cardinality is bounded by operation arity");
-                self.roots.push(NativeRoot {
+                let slot = next_slot as u32;
+                visit(NativeRoot {
                     value: *value,
                     kind: NativeRootKind::TEMPORARY,
                     slot,
                 });
+                next_slot += 1;
             }
-        }
-        // Captures own canonical Runtime roots: no variable-width arena mirror.
-        NativeRootSet {
-            roots: self.roots.as_ptr(),
-            count: self.roots.len(),
         }
     }
 

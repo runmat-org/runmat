@@ -1,12 +1,3 @@
-mod diagnostic;
-mod lexer;
-mod token;
-mod trivia;
+//! Public FEA lexical entrypoint, backed by the canonical FEA syntax owner.
 
-pub use diagnostic::*;
-pub use lexer::*;
-pub use token::*;
-pub use trivia::*;
-
-#[cfg(test)]
-mod tests;
+pub use runmat_fea_syntax::lexical::*;

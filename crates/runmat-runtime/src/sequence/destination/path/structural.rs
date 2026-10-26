@@ -4,7 +4,7 @@ use runmat_value::Value;
 use super::{AssignmentStepSpec, PreparedAssignmentStep, ReceiverCreationOrigin};
 use crate::indexing::plan::IndexPlan;
 use crate::object::dispatch::{
-    invoke_resolved_object_index_path_method, resolve_object_index_protocol,
+    invoke_resolved_object_index_path_method, resolve_object_index_protocol_with_access,
 };
 use crate::object::indexing::{
     ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
@@ -112,6 +112,7 @@ pub(super) async fn read_step(
     base: Value,
     step: &PreparedAssignmentStep,
     caller: Option<&str>,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
 ) -> Result<RootedValue, RuntimeError> {
     let owner = crate::indexing::plan::admission::Owner::new(context)?;
     let result = match step {
@@ -134,24 +135,26 @@ pub(super) async fn read_step(
             if missing {
                 super::assignment_container_in_context(context, *intent)
             } else {
-                crate::object::resolve::read_member_sequence_text_with_context(
+                crate::object::resolve::read_member_sequence_text_with_optional_access(
                     context,
                     base,
                     member.clone(),
                     true,
                     caller,
+                    access,
                 )
                 .await?
                 .try_into_single()
             }
         }
         PreparedAssignmentStep::Member(member) => {
-            crate::object::resolve::read_member_sequence_text_with_context(
+            crate::object::resolve::read_member_sequence_text_with_optional_access(
                 context,
                 base,
                 member.clone(),
                 false,
                 caller,
+                access,
             )
             .await?
             .try_into_single()
@@ -159,7 +162,7 @@ pub(super) async fn read_step(
         PreparedAssignmentStep::Parentheses {
             plan,
             selector_values,
-        } => read_parentheses(context, base, plan, selector_values).await,
+        } => read_parentheses(context, base, plan, selector_values, access).await,
         PreparedAssignmentStep::InitializingParentheses { plan, .. } => {
             crate::aggregate::structure::operations::project_initializing_in_context(
                 context, &base, plan,
@@ -195,8 +198,12 @@ pub(super) async fn read_step(
                             components: indices.clone(),
                         }),
                     )?;
-                    let resolution =
-                        resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+                    let resolution = resolve_object_index_protocol_with_access(
+                        &base,
+                        ObjectIndexOp::Subsref,
+                        None,
+                        access,
+                    )?;
                     let values = match context {
                         Some(runtime) => crate::object::dispatch::invoke_resolved_object_index_path_method_in_context(runtime, &resolution, base, path, 1).await?,
                         None => invoke_resolved_object_index_path_method(&resolution, base, path, 1).await?,
@@ -227,17 +234,19 @@ pub(super) async fn write_step(
     step: PreparedAssignmentStep,
     rhs: Value,
     caller: Option<&str>,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
 ) -> Result<RootedValue, RuntimeError> {
     let owner = crate::indexing::plan::admission::Owner::new(context)?;
     let result = match step {
         PreparedAssignmentStep::Member(member)
         | PreparedAssignmentStep::InitializingMember { member, .. } => {
-            crate::object::resolve::store_member_text_with_context(
+            crate::object::resolve::store_member_text_with_optional_access(
                 context,
                 base,
                 member,
                 rhs,
                 caller,
+                access,
                 runmat_gc::gc_record_write,
             )
             .await
@@ -245,7 +254,7 @@ pub(super) async fn write_step(
         PreparedAssignmentStep::Parentheses {
             plan,
             selector_values,
-        } => write_parentheses(context, base, &plan, selector_values, rhs).await,
+        } => write_parentheses(context, base, &plan, selector_values, rhs, access).await,
         PreparedAssignmentStep::InitializingParentheses { plan, .. } => {
             crate::aggregate::structure::operations::assign_initializing_in_context(
                 context, &base, &rhs, &plan,
@@ -268,11 +277,12 @@ pub(super) async fn write_step(
             .and_then(|value| RootedValue::in_optional_context(value, context))
         }
         PreparedAssignmentStep::Braces(indices) => {
-            crate::sequence::destination::endpoint::assign_cell_contents_with_context(
+            crate::sequence::destination::endpoint::assign_cell_contents_with_access(
                 context,
                 base,
                 indices,
                 crate::sequence::single_value_sequence(rhs)?,
+                access,
             )
             .await
         }
@@ -289,8 +299,10 @@ async fn read_parentheses(
     selector_values: &runmat_value::ExactArrayStorage<
         crate::object::indexing::ObjectIndexComponent,
     >,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
 ) -> Result<RootedValue, RuntimeError> {
-    let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+    let resolution =
+        resolve_object_index_protocol_with_access(&base, ObjectIndexOp::Subsref, None, access)?;
     if resolution.is_some() {
         let path = ObjectSubscriptPath::single_in_context(
             context,
@@ -323,8 +335,10 @@ async fn write_parentheses(
     plan: &IndexPlan,
     selector_values: runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>,
     rhs: Value,
+    access: Option<&crate::object::protocol::ObjectAccessContext>,
 ) -> Result<RootedValue, RuntimeError> {
-    let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
+    let resolution =
+        resolve_object_index_protocol_with_access(&base, ObjectIndexOp::Subsasgn, None, access)?;
     if let Some(method) = resolution {
         let path = ObjectSubscriptPath::single_in_context(
             context,

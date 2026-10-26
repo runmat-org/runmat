@@ -5,6 +5,7 @@ mod checkpoint;
 mod collective;
 mod config;
 mod crypto;
+mod direct_admission;
 mod driver;
 pub(crate) mod exact_meshing;
 pub(crate) mod exact_structural_study;
@@ -48,7 +49,9 @@ pub use channel::{
 };
 pub use driver::run_remote_driver_from_env;
 pub use gang::{RemoteSpmdGangCompletion, RemoteSpmdGangProgram};
-pub use pool::{RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority};
+pub use pool::{
+    RemoteGraphTransfer, RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority,
+};
 pub use pool_progress::RemoteTaskCompletion;
 pub use quic_channel::{QuicRemoteWorkerChannel, RemoteWorkerChannelConfig};
 pub use relay_channel::RelayRemoteWorkerChannel;

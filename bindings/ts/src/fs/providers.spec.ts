@@ -50,7 +50,19 @@ describe("in-memory filesystem provider", () => {
 
     provider.removeFile("/tmp/file.txt");
     provider.removeDir?.("/tmp");
-    expect(() => provider.metadata("/tmp/file.txt")).toThrow();
+    for (const operation of [
+      () => provider.metadata("/tmp/file.txt"),
+      () => provider.readFile("/tmp/file.txt"),
+      () => provider.readDir("/tmp"),
+      () => provider.removeFile("/tmp/file.txt"),
+      () => provider.rename?.("/tmp/file.txt", "/replaced"),
+      () => provider.setReadonly?.("/tmp/file.txt", true)
+    ]) {
+      expect(operation).toThrowError(expect.objectContaining({ name: "NotFoundError", status: 404 }));
+    }
+    // Existing directories are not missing files; do not turn a type mismatch
+    // into a source-probe miss at the JS/WASM boundary.
+    expect(() => provider.readFile("/")).toThrow("not a file");
   });
 
   it("seeds nested initial files without changing ordinary write parent checks", () => {

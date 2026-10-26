@@ -1,5 +1,5 @@
-mod coverage;
 pub(crate) mod callback;
+mod coverage;
 mod dependencies;
 mod import;
 mod interop;
@@ -30,6 +30,7 @@ pub(crate) use source::CapturedPrimarySource;
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
 pub(crate) use unit::ExecutableUnitDraft;
+pub(crate) use unit::RuntimeConstructorAdmissions;
 pub use unit::{
     reachability_requires_python, ExecutableFunctionInterface, ExecutableFunctionParameter,
     ExecutableUnit,

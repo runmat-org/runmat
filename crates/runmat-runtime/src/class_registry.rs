@@ -19,12 +19,12 @@ use runmat_types::{
 };
 use runmat_value::Value;
 
-mod retained;
-mod registration;
-mod revision;
-mod selected;
 mod event_data;
 mod object_literal;
+mod registration;
+mod retained;
+mod revision;
+mod selected;
 pub use object_literal::construct_class_literal_in_context;
 pub mod declaration;
 pub use event_data::{
@@ -127,6 +127,26 @@ impl ClassRegistration {
 
     fn get(&self) -> bool {
         with_state(|state| state.registrations.contains(&self.class_name))
+    }
+
+    /// Read fence for an already installed canonical builtin registration.
+    /// This issues no class or callable authority and allocates no identity.
+    pub(crate) fn current_builtin_revision_in_context(
+        &self,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Option<u64> {
+        let name = self.class_name.display_name();
+        if runtime
+            .selected_class_projection()
+            .is_some_and(|selected| selected.classes.contains_key(name))
+        {
+            return None;
+        }
+        let state = runtime.state().classes.borrow();
+        if !state.registrations.contains(&self.class_name) || !state.classes.contains_key(name) {
+            return None;
+        }
+        state.builtin_issuances.get(name).copied()
     }
 
     pub fn ensure(&self, register: impl FnOnce()) {

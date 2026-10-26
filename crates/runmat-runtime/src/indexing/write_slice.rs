@@ -83,6 +83,7 @@ pub(in crate::indexing) mod sparse;
 pub use dense_assignment::{
     assign_complex_with_plan_host_in_context, assign_tensor_with_plan_host_in_context,
 };
+pub(crate) use rhs_shape::AssignmentRhsLayout;
 use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
 
 /// Validated borrowed native complex interpretation; no payload/stride mirror.

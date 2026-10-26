@@ -148,7 +148,10 @@ fn validate_callable(
     label: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
-    if !facts.effects.is_deterministic_value_function() {
+    if !facts.effects.0.iter().all(|effect| {
+        effect.is_side_effect_free()
+            || (*effect == runmat_types::EffectKind::MaySuspend && facts.cooperative_suspension)
+    }) {
         error(
             declaration,
             declaration.span,

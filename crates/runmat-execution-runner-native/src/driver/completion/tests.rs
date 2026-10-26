@@ -108,7 +108,22 @@ fn assigned() -> (Driver, AttemptRequest) {
 
 #[test]
 fn completion_publishes_result_and_history_once() {
-    let completion = TaskCompletion::new();
+    use std::future::Future;
+    use std::task::{Context, Poll};
+    struct Wake(std::sync::atomic::AtomicUsize);
+    impl futures::task::ArcWake for Wake {
+        fn wake_by_ref(this: &Arc<Self>) {
+            this.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let completion = Arc::new(TaskCompletion::new());
+    let wake = Arc::new(Wake(std::sync::atomic::AtomicUsize::new(0)));
+    let waker = futures::task::waker(wake.clone());
+    let mut waiting = Box::pin(completion.clone().wait_terminal());
+    assert!(waiting
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
     assert!(completion.try_value().is_none());
     assert!(completion.try_attempt_history().is_none());
     completion.complete(
@@ -130,6 +145,15 @@ fn completion_publishes_result_and_history_once() {
         Some(Err(TransferFailure::Execution("original".into())))
     );
     assert_eq!(completion.try_attempt_history(), Some(Vec::new()));
+    assert!(
+        wake.0.load(Ordering::SeqCst) > 0,
+        "terminal publication must wake, not require a polling timer"
+    );
+    assert!(matches!(
+        waiting.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Ready(())
+    ));
+    futures::executor::block_on(completion.clone().wait_terminal());
 }
 
 #[test]

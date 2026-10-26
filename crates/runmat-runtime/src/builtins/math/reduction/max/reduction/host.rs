@@ -154,7 +154,8 @@ pub(in crate::builtins::math::reduction::max) fn materialize_for_max(
         | Value::Struct(_)
         | Value::StructArray(_)
         | Value::Listener(_) => Err(max_invalid_input(format!("{name}: unsupported input type"))),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

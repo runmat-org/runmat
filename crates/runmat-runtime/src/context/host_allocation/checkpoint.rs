@@ -73,6 +73,21 @@ impl HostAllocationWorkerCheckpoint {
 }
 
 impl HostAllocationCheckpoint {
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        self.context.same_owner(&other.context)
+            && self.owner.ledger.same_owner(&other.owner.ledger)
+            && self.owner.epoch == other.owner.epoch
+            && self.owner.generation == other.owner.generation
+            && Arc::ptr_eq(&self.owner.generation_owner, &other.owner.generation_owner)
+            && self
+                .owner
+                .cancellation
+                .same_generation(&other.owner.cancellation)
+    }
+
+    pub(crate) fn check_original(&self) -> Result<(), HostAllocationError> {
+        self.check_captured()
+    }
     pub(crate) fn check(&self, runtime: &RuntimeContext) -> Result<(), HostAllocationError> {
         self.owner.check()?;
         if !self.context.matches_runtime(runtime)

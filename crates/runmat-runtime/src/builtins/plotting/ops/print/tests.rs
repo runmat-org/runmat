@@ -151,7 +151,20 @@ fn captured_scene_renders_after_ambient_figure_is_cleared() {
     ]))
     .expect("plot");
     let selected = current_figure_handle();
-    let scene = clone_figure(selected).expect("captured plotted scene");
+    let mut scene = clone_figure(selected).expect("captured plotted scene");
+    // Explicit export must retain hidden figures and all subplot content,
+    // independently of automatic presentation eligibility or ambient state.
+    scene.set_name("hidden subplot export");
+    scene.set_visible(false);
+    scene.set_subplot_grid(1, 2);
+    scene.add_bar_chart_on_axes(
+        runmat_plot::plots::BarChart::new(vec!["first".into(), "second".into()], vec![3.0, 1.0])
+            .expect("bar data"),
+        1,
+    );
+    assert_eq!(scene.len(), 2);
+    assert_eq!(scene.axes_grid(), (1, 2));
+    assert!(!scene.visible);
     clear_figure(None).expect("clear ambient figure");
     let bytes = block_on(render_png(scene, 800, 600)).expect("captured scene export");
     assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));

@@ -244,7 +244,8 @@ fn ensure_on_cleanup_class_registered() {
 
 fn canonicalize_cleanup_callback(callback: Value) -> BuiltinResult<Value> {
     match callback {
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

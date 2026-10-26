@@ -8,7 +8,7 @@ use runmat_analysis_core::{
     AuthoredParameterizedSignal, CoordinateFrame, ExcitationCaseActivation, ExcitationDistribution,
     ExcitationKinematics, PhysicalSignal, ProjectionRequirement, SignalId,
 };
-use runmat_parser::fea::FeaModelDefinitionKind;
+use runmat_fea_syntax::FeaModelDefinitionKind;
 use std::collections::BTreeSet;
 
 pub(super) struct LoweredExcitations {

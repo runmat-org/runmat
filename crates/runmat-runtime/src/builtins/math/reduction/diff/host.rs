@@ -119,20 +119,14 @@ where
             .map_err(|e| diff_internal_error(format!("diff: {e}")));
     }
     output_shape[dim_index] = len_dim - 1;
-    let stride_before = product(&shape[..dim_index]);
-    let stride_after = product(&shape[dim_index + 1..]);
-    let output_len = stride_before * (len_dim - 1) * stride_after;
+    let plan = DifferenceGeometry::new(&shape, 1, Some(dim))?;
+    let output_len = product(&output_shape);
     let mut out = Vec::with_capacity(output_len);
-
-    for after in 0..stride_after {
-        let after_base = after * stride_before * len_dim;
-        for k in 0..(len_dim - 1) {
-            for before in 0..stride_before {
-                let idx0 = before + after_base + k * stride_before;
-                let idx1 = idx0 + stride_before;
-                out.push(convert(data[idx1]) - convert(data[idx0]));
-            }
-        }
+    for row in 0..output_len {
+        let (idx0, idx1) = plan
+            .pair(0, row)
+            .ok_or_else(|| diff_internal_error("difference stage index overflow"))?;
+        out.push(convert(data[idx1]) - convert(data[idx0]));
     }
 
     Tensor::from_numeric_storage(wrap(out), output_shape)

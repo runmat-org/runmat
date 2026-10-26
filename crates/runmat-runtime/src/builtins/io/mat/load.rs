@@ -381,6 +381,7 @@ pub(crate) use reader::{
 mod decoder;
 #[cfg(test)]
 use decoder::mat_array_to_value;
+pub(in crate::builtins::io::mat) use decoder::read_mat_arrays_cooperative;
 #[cfg(test)]
 use decoder::read_mat_reader;
 
