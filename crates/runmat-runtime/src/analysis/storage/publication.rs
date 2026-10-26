@@ -426,6 +426,40 @@ impl AnalysisPublicationBuilder {
             .persist_acoustic_frequency(step, catalog, roots, source)
             .map_err(Into::into)
     }
+    /// Reads staged chunks where staging wrote them: records, tiles and histories stay resident
+    /// in the staging store, while field payloads stream to the spill area. Every reader of a
+    /// staged record goes through here.
+    pub(in crate::analysis::storage) fn read_staged_chunks<R>(
+        &self,
+        read: impl FnOnce(&mut dyn FnMut(Digest) -> Result<Option<Vec<u8>>, String>) -> Result<R, String>,
+    ) -> Result<R, String> {
+        let chunks = self
+            .store
+            .chunks
+            .read()
+            .map_err(|_| "publication chunks poisoned")?;
+        let spilled = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
+        read(&mut |digest| match chunks.get(&digest) {
+            Some(bytes) => Ok(Some(bytes.to_vec())),
+            None => spilled.read(&digest),
+        })
+    }
+    /// The staged standard run `run_id`, materialized with its field values.
+    pub(in crate::analysis::storage) fn load_staged_run(
+        &self,
+        run_id: &str,
+    ) -> Result<AnalysisRunResult, String> {
+        let runs = self
+            .store
+            .runs
+            .read()
+            .map_err(|_| "publication staging store poisoned")?;
+        let Some(PersistedAnalysisArtifact::Standard(persisted)) = runs.get(run_id) else {
+            return Err("staged standard run is absent".into());
+        };
+        validate_persisted_run(persisted, run_id)?;
+        self.read_staged_chunks(|read| materialize_run(persisted, read))
+    }
     pub fn stage_thermal_observations(
         &self,
         run_id: &str,
@@ -466,7 +500,10 @@ impl AnalysisPublicationBuilder {
                         message: "staging byte overflow".into(),
                     })
             })?;
-        let attachment = self.store.prepare_observations(run_id, completed, source)?;
+        let run = self.load_staged_run(run_id)?;
+        let attachment = self
+            .store
+            .prepare_observations(run_id, &run, completed, source)?;
         phase.with_transport(self, bytes, || {
             self.store
                 .install_observations(run_id, attachment, source)
@@ -688,3 +725,24 @@ pub(in crate::analysis::storage) mod reclamation;
 
 mod outcome;
 pub use outcome::AnalysisPublicationError;
+
+/// Stages `run` in a fresh publication and reads it back through the staged-record reader,
+/// returning the readback and how many chunks staging streamed to the spill area.
+#[cfg(test)]
+pub(in crate::analysis) fn stage_and_read_back_for_tests(
+    run: &AnalysisRunResult,
+) -> Result<(AnalysisRunResult, usize), String> {
+    let builder = AnalysisPublicationBuilder::new(
+        Digest::sha256(b"staged-run-readback"),
+        512 * 1024 * 1024,
+    )
+    .map_err(|error| error.to_string())?;
+    builder.stage_run(run).map_err(|error| error.to_string())?;
+    let spilled = builder
+        .spill
+        .lock()
+        .map_err(|_| "publication spill lock poisoned")?
+        .digests()
+        .count();
+    Ok((builder.load_staged_run(&run.run_id)?, spilled))
+}

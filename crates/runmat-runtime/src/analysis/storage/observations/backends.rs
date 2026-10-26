@@ -34,13 +34,17 @@ impl InMemoryAnalysisArtifactStore {
         completed: &ThermalStudyCompletion,
         source: &ThermalStudyObjectSource,
     ) -> Result<(), String> {
-        let attachment = self.prepare_observations(run_id, completed, source)?;
+        let run = self.load_run(run_id)?.ok_or("observation run is absent")?;
+        let attachment = self.prepare_observations(run_id, &run, completed, source)?;
         self.install_observations(run_id, attachment, source)
     }
 
+    /// Binds observations to `materialized`, the run `run_id` read back with its field values
+    /// from wherever its writer put the chunks (this store, or a publication's spill area).
     pub(in crate::analysis::storage) fn prepare_observations(
         &self,
         run_id: &str,
+        materialized: &AnalysisRunResult,
         completed: &ThermalStudyCompletion,
         source: &ThermalStudyObjectSource,
     ) -> Result<ObservationAttachment, String> {
@@ -53,11 +57,7 @@ impl InMemoryAnalysisArtifactStore {
             source,
             self.observation_run_digest(run_id)?,
         )?;
-        binding::validate_run(
-            &self.load_run(run_id)?.ok_or("observation run is absent")?,
-            completed,
-            source,
-        )?;
+        binding::validate_run(materialized, completed, source)?;
         Ok(attachment)
     }
 
