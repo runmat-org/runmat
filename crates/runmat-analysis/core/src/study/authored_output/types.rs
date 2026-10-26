@@ -5,7 +5,6 @@ use crate::{
     ObservationQuantity, ObservationValueShape, PartialAccessPolicy, Position, RetentionPolicy,
     SamplingPolicy, SeriesWeighting, SignalPrecision,
 };
-use runmat_types::PhysicalDimension;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -191,7 +190,7 @@ pub enum AuthoredOutputType {
 #[serde(rename_all = "snake_case")]
 pub enum AuthoredOutputValue {
     Physical(ObservationQuantity),
-    Derived(PhysicalDimension),
+    Derived(runmat_types::physical::DynamicDimension),
     Dimensionless,
 }
 

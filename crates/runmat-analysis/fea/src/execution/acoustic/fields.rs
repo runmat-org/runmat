@@ -33,7 +33,7 @@ impl AcousticHarmonicSolverResult {
             RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
         };
         let request = self.native_field_request_from_result()?;
-        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().hertz);
+        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().canonical_value());
         let definitions = [
             native_acoustic_field_definition("acoustic.pressure", &request.plan.requirements[0])?,
             native_acoustic_field_definition(
@@ -127,7 +127,7 @@ impl AcousticHarmonicSolverResult {
                 "acoustic field request differs from its exact producer, result, topology or plan",
             ));
         }
-        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().hertz);
+        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().canonical_value());
         let fields = vec![
             native_field(
                 "acoustic.pressure",

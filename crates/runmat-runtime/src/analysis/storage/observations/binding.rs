@@ -28,7 +28,8 @@ pub(super) fn validate_run(
     if run.run.identity != manifest.run.identity
         || thermal.time_points_s != manifest.time_points_s
         || thermal.residual_norms != manifest.residual_norms
-        || thermal.reference_temperature_k != manifest.reference_temperature_k
+        || thermal.reference_temperature_k.canonical_value()
+            != manifest.reference_temperature_k.canonical_value()
         || thermal.initial_state != manifest.initial_state
     {
         return Err("persisted thermal run differs from observation source".into());

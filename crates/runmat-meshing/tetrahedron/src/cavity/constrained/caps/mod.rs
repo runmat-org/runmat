@@ -40,7 +40,7 @@ pub(super) fn best_local_cap_for_face(
                 node_coordinates[&face[0]],
                 node_coordinates[&face[1]],
                 node_coordinates[&face[2]],
-                apex.coordinates_m,
+                apex.coordinates_m.canonical_value(),
             ];
             if point_in_closed_triangle_surface(
                 tetrahedron_centroid(tetrahedron_points),
@@ -56,7 +56,7 @@ pub(super) fn best_local_cap_for_face(
                 options,
             )
             .ok()?;
-            Some((apex.coordinates_m, tetrahedron))
+            Some((apex.coordinates_m.canonical_value(), tetrahedron))
         })
         .max_by(|left, right| {
             left.1
@@ -85,7 +85,7 @@ pub(super) fn best_shared_patch_cap_for_faces(
         candidate_points.extend(
             local_cap_apex_candidates(*face, surface_point, cavity_centroid, node_coordinates)
                 .into_iter()
-                .map(|candidate| candidate.coordinates_m),
+                .map(|candidate| candidate.coordinates_m.canonical_value()),
         );
     }
     if let Some(surface_point) = centroid_of_node_set(&patch_node_ids, node_coordinates) {

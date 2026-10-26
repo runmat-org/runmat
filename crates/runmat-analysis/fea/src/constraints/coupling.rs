@@ -43,7 +43,7 @@ pub(super) fn compile_reference_coupling(
         mesh.topology
             .nodes
             .iter()
-            .map(|n| (n.stable_identity, n.coordinates_m)),
+            .map(|n| (n.stable_identity, n.coordinates_m.canonical_value())),
         mesh.topology.nodes.len(),
     )?;
     let weights = weights::target_weights(mesh, target, &coordinates, constraint_id)?;
@@ -82,7 +82,12 @@ pub(super) fn compile_reference_coupling_for_nodes(
             ))
         })?;
         radii.push(
-            weight.weight * magnitude(subtract(position, reference_point.position.meters)).powi(2),
+            weight.weight
+                * magnitude(subtract(
+                    position,
+                    reference_point.position.canonical_value(),
+                ))
+                .powi(2),
         );
     }
     let characteristic_length_meters = radii.into_iter().sum::<f64>().sqrt();

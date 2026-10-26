@@ -18,7 +18,7 @@ fn charged(charge: f64, gauge: f64) -> ElectricalStaticWorkload {
 
 #[test]
 fn charged_results_receipts_and_retained_native_fields_have_cold_source_bound_closure() {
-    let epsilon = 4.0 * VACUUM_PERMITTIVITY_F_PER_M;
+    let epsilon = 4.0 * VACUUM_PERMITTIVITY_F_PER_M.canonical_value();
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = mesh(order, 2);
         for sign in [-1.0, 0.0, 1.0] {
@@ -43,7 +43,8 @@ fn charged_results_receipts_and_retained_native_fields_have_cold_source_bound_cl
             .unwrap();
             receipt.validate_against(&input, &cold, &mesh).unwrap();
             assert!(
-                (receipt.receipt().net_outward_flux - sign * 2.0 * epsilon).abs() < epsilon * 1e-9
+                (receipt.receipt().net_outward_flux.canonical_value() - sign * 2.0 * epsilon).abs()
+                    < epsilon * 1e-9
             );
             let request = cold.native_field_request(&input, &mesh).unwrap();
             let fields = cold.recover_native_fields(&input, &mesh, &request).unwrap();
@@ -64,7 +65,7 @@ fn charged_results_receipts_and_retained_native_fields_have_cold_source_bound_cl
 
 #[test]
 fn charged_cold_import_rejects_source_work_charge_and_gauge_increment_substitution() {
-    let input = charged(8.0 * VACUUM_PERMITTIVITY_F_PER_M, 0.0);
+    let input = charged(8.0 * VACUUM_PERMITTIVITY_F_PER_M.canonical_value(), 0.0);
     let mesh = mesh(ElementOrder::Tet10, 1);
     let result = input.execute(&mesh).unwrap();
     let baseline = serde_json::to_value(&result).unwrap();

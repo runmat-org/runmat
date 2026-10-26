@@ -7,6 +7,8 @@ mod compatibility;
 mod matrix;
 mod nullspace;
 mod operator;
+mod physical_operator;
+pub(crate) use physical_operator::PhysicalScalarSystem;
 mod pattern;
 mod reference;
 mod right_inverse;

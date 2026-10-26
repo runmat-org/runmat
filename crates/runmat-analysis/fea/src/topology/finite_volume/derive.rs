@@ -197,7 +197,7 @@ pub(super) fn derive(
                         corner_identities: key,
                         centroid_m: face_centroid,
                         owner_area_vector_m2: area,
-                        area_m2: magnitude,
+                        area_m2: runmat_types::physical::Area::new(magnitude),
                         owner: cell_index,
                         neighbor: None,
                         boundary_source: None,
@@ -239,9 +239,13 @@ pub(super) fn derive(
             return Err(Error::Invalid("boundary original adjacency mismatch"));
         }
         if boundary.centroid_m.iter().any(|v| !v.is_finite())
-            || !geometry::close_scalar(boundary.area_m2, face.area_m2, face.area_m2)
+            || !geometry::close_scalar(
+                boundary.area_m2.canonical_value(),
+                face.area_m2.canonical_value(),
+                face.area_m2.canonical_value(),
+            )
             || geometry::length(subtract(boundary.centroid_m, face.centroid_m))
-                > RELATIVE_TOLERANCE * face.area_m2.sqrt()
+                > RELATIVE_TOLERANCE * face.area_m2.canonical_value().sqrt()
         {
             return Err(Error::Invalid("boundary geometry mismatch"));
         }
@@ -260,7 +264,8 @@ pub(super) fn derive(
             )
         };
         if normal_difference.iter().any(|v| !v.is_finite())
-            || geometry::length(normal_difference) > RELATIVE_TOLERANCE * face.area_m2
+            || geometry::length(normal_difference)
+                > RELATIVE_TOLERANCE * face.area_m2.canonical_value()
         {
             return Err(Error::Invalid("boundary area-vector mismatch"));
         }
@@ -303,7 +308,7 @@ pub(super) fn derive(
             for (sum, value) in area_sums[cell].iter_mut().zip(area) {
                 *sum += value;
             }
-            area_scales[cell] += face.area_m2;
+            area_scales[cell] += face.area_m2.canonical_value();
             // Translation invariant divergence theorem relative to this cell centroid.
             volumes[cell] += dot(subtract(face.centroid_m, cells[cell].centroid_m), area) / 3.0;
         }
@@ -366,7 +371,7 @@ fn identity(
             .centroid_m
             .into_iter()
             .chain(face.owner_area_vector_m2)
-            .chain([face.area_m2])
+            .chain([face.area_m2.canonical_value()])
         {
             hash.update(value.to_bits().to_le_bytes());
         }

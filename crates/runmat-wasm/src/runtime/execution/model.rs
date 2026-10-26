@@ -17,6 +17,8 @@ pub(crate) struct BrowserExecutionCapabilities {
     /// cancel returns a Promise resolving after physical termination.
     #[serde(default)]
     pub(crate) owned_builtin_work: bool,
+    #[serde(default)]
+    pub(crate) selected_program_work: bool,
 }
 
 impl Default for BrowserExecutionCapabilities {
@@ -25,6 +27,7 @@ impl Default for BrowserExecutionCapabilities {
             topology: BrowserWorkerTopology::Serial,
             max_workers: 1,
             owned_builtin_work: false,
+            selected_program_work: false,
         }
     }
 }
@@ -37,7 +40,7 @@ impl BrowserExecutionCapabilities {
         if self.topology == BrowserWorkerTopology::Serial && self.max_workers != 1 {
             return Err("the serial browser execution topology requires maxWorkers = 1".into());
         }
-        if self.owned_builtin_work && !self.has_worker_isolation() {
+        if (self.owned_builtin_work || self.selected_program_work) && !self.has_worker_isolation() {
             return Err("ownedBuiltinWork requires isolated browser workers".into());
         }
         Ok(self)

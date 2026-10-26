@@ -17,7 +17,9 @@ pub struct StructuralModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuralNode {
     pub node_id: u32,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub solid_attachment: Option<ConformalSolidAttachment>,
 }
 
@@ -65,23 +67,31 @@ pub struct ShellElementModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BeamSectionModel {
     pub section_id: String,
-    pub area_m2: f64,
-    pub iy_m4: f64,
-    pub iz_m4: f64,
-    pub torsion_j_m4: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub area_m2: runmat_types::physical::Area,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iy_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iz_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub torsion_j_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub outer_fiber_y_m: f64,
+    pub outer_fiber_y_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub outer_fiber_z_m: f64,
+    pub outer_fiber_z_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub torsion_outer_radius_m: f64,
+    pub torsion_outer_radius_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HomogeneousShellSectionModel {
     pub section_id: String,
-    pub thickness_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thickness_m: runmat_types::physical::Length,
     pub reference_surface: HomogeneousShellReferenceSurface,
     #[serde(default = "default_shell_shear_correction")]
     pub shear_correction: f64,
@@ -144,8 +154,10 @@ impl ShellSectionModel {
 pub struct LaminatePlyModel {
     pub ply_id: String,
     pub material_id: String,
-    pub thickness_m: f64,
-    pub angle_rad: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thickness_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub angle_rad: runmat_types::physical::Quantity<runmat_types::physical::kind::Angle, f64>,
 }
 
 fn default_beam_reference_axis() -> [f64; 3] {

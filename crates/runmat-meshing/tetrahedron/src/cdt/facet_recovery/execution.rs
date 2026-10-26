@@ -294,8 +294,11 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         },
                     );
                     let coordinates = triangle.node_identities.map(|identity| {
-                        node_index(&working.topology, identity)
-                            .map(|index| working.topology.nodes()[index].coordinates_m)
+                        node_index(&working.topology, identity).map(|index| {
+                            working.topology.nodes()[index]
+                                .coordinates_m
+                                .canonical_value()
+                        })
                     });
                     return Err(error(
                         DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,

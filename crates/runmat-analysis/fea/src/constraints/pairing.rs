@@ -39,7 +39,7 @@ pub(crate) fn pair_targets(
         mesh.topology
             .nodes
             .iter()
-            .map(|node| (node.stable_identity, node.coordinates_m)),
+            .map(|node| (node.stable_identity, node.coordinates_m.canonical_value())),
         profile.coordinate_index_slots,
     )?;
     pair_targets_with_nodes(
@@ -70,7 +70,7 @@ pub(super) fn pair_mixed_targets(
         topology
             .nodes
             .iter()
-            .map(|node| (node.identity, node.coordinates_m)),
+            .map(|node| (node.identity, node.coordinates_m.canonical_value())),
         profile.coordinate_index_slots,
     )?;
     pair_targets_with_nodes(
@@ -104,7 +104,7 @@ fn pair_targets_with_nodes(
             primary,
             secondary,
             transform,
-            tolerance.meters,
+            tolerance.canonical_value(),
             constraint_id,
         )?,
     };
@@ -136,7 +136,7 @@ fn validate_inputs(
     let valid_policy = match policy {
         PairingPolicy::Matching => true,
         PairingPolicy::GeometricTolerance(tolerance) => {
-            tolerance.meters.is_finite() && tolerance.meters >= 0.0
+            tolerance.canonical_value().is_finite() && tolerance.canonical_value() >= 0.0
         }
     };
     let valid_transform = match transform {
@@ -165,7 +165,9 @@ fn validate_inputs(
 pub(super) fn displacement_transform(transform: &PeriodicTransform) -> [[f64; 3]; 3] {
     match transform {
         PeriodicTransform::Identity | PeriodicTransform::Translation(_) => identity(),
-        PeriodicTransform::Rotation { axis, angle, .. } => rotation_matrix(*axis, angle.radians),
+        PeriodicTransform::Rotation { axis, angle, .. } => {
+            rotation_matrix(*axis, angle.canonical_value())
+        }
     }
 }
 
@@ -248,16 +250,20 @@ fn matching_tolerance(mesh: &SolverMeshArtifact) -> f64 {
     let mut coordinate_scale = 1.0_f64;
     for node in &mesh.topology.nodes {
         for component in 0..3 {
-            minimum[component] = minimum[component].min(node.coordinates_m[component]);
-            maximum[component] = maximum[component].max(node.coordinates_m[component]);
-            coordinate_scale = coordinate_scale.max(node.coordinates_m[component].abs());
+            minimum[component] =
+                minimum[component].min(node.coordinates_m.canonical_value()[component]);
+            maximum[component] =
+                maximum[component].max(node.coordinates_m.canonical_value()[component]);
+            coordinate_scale =
+                coordinate_scale.max(node.coordinates_m.canonical_value()[component].abs());
         }
     }
     let model_scale = magnitude(subtract(maximum, minimum));
     let tolerance = mesh.resolved_request.tolerance;
     tolerance
         .source_tolerance_m
-        .max(tolerance.absolute_floor_m)
+        .canonical_value()
+        .max(tolerance.absolute_floor_m.canonical_value())
         .max(tolerance.model_relative_term * model_scale)
         .max(64.0 * f64::EPSILON * coordinate_scale)
 }

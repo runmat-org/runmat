@@ -22,9 +22,9 @@ fn exact_primitives_use_the_canonical_import_path() {
         &provider,
         "stock",
         ResolvedGeometryFeatureOperation::Box {
-            width_m: 2.0,
-            depth_m: 3.0,
-            height_m: 4.0,
+            width_m: runmat_types::physical::Length::new(2.0),
+            depth_m: runmat_types::physical::Length::new(3.0),
+            height_m: runmat_types::physical::Length::new(4.0),
         },
         &[],
     );
@@ -35,10 +35,10 @@ fn exact_primitives_use_the_canonical_import_path() {
         &provider,
         "cylinder",
         ResolvedGeometryFeatureOperation::Cylinder {
-            radius_m: 0.25,
-            height_m: 6.0,
+            radius_m: runmat_types::physical::Length::new(0.25),
+            height_m: runmat_types::physical::Length::new(6.0),
             axis: [0.0, 0.0, 1.0],
-            origin_m: [1.0, 1.5, -1.0],
+            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 1.5, -1.0]),
         },
         &[],
     );
@@ -51,8 +51,8 @@ fn exact_primitives_use_the_canonical_import_path() {
         &provider,
         "sphere",
         ResolvedGeometryFeatureOperation::Sphere {
-            radius_m: 0.5,
-            center_m: [2.0, -1.0, 0.25],
+            radius_m: runmat_types::physical::Length::new(0.5),
+            center_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([2.0, -1.0, 0.25]),
         },
         &[],
     );
@@ -328,9 +328,9 @@ fn unit_box(provider: &OcctExactFeatureProvider, id: &str) -> ImportedExactCad {
         provider,
         id,
         ResolvedGeometryFeatureOperation::Box {
-            width_m: 1.0,
-            depth_m: 1.0,
-            height_m: 1.0,
+            width_m: runmat_types::physical::Length::new(1.0),
+            depth_m: runmat_types::physical::Length::new(1.0),
+            height_m: runmat_types::physical::Length::new(1.0),
         },
         &[],
     )
@@ -367,7 +367,7 @@ fn volume(geometry: &ImportedExactCad) -> f64 {
         .iter()
         .map(|record| match &record.implementation {
             ExactMassPropertiesImplementation::KernelValidated { properties, .. } => {
-                properties.volume_m3
+                properties.volume_m3.canonical_value()
             }
             ExactMassPropertiesImplementation::Kernel { .. } => 0.0,
         })
@@ -546,14 +546,6 @@ impl GeometryRegionEvidence for NoRegionEvidence {
         &self,
         _role: GeometryRegionRole,
         _tag: &str,
-    ) -> Result<Vec<PersistentEntityId>, Self::Error> {
-        Ok(Vec::new())
-    }
-
-    fn by_alias(
-        &self,
-        _role: GeometryRegionRole,
-        _alias: &str,
     ) -> Result<Vec<PersistentEntityId>, Self::Error> {
         Ok(Vec::new())
     }

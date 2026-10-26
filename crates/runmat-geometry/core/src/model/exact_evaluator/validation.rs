@@ -277,7 +277,7 @@ fn validate_topology_claims(
         if let ExactMassPropertiesImplementation::KernelValidated { properties, .. } =
             implementation
         {
-            if body.is_sheet_body != (properties.volume_m3 == 0.0) {
+            if body.is_sheet_body != (properties.volume_m3.canonical_value() == 0.0) {
                 return Err(invalid(
                     "body mass properties",
                     "sheet bodies require zero volume and solid bodies require positive volume",

@@ -214,7 +214,8 @@ fn sample(
             if depth < options.minimum_subdivision_depth
                 || (depth < options.maximum_subdivision_depth
                     && (cell_chordal
-                        > quality.maximum_chordal_deviation_m * options.refinement_margin_ratio
+                        > quality.maximum_chordal_deviation_m.canonical_value()
+                            * options.refinement_margin_ratio
                         || cell_normal
                             > quality.maximum_normal_deviation_degrees.to_radians()
                                 * options.refinement_margin_ratio))
@@ -227,7 +228,9 @@ fn sample(
         triangle_reports.push(ExactFaceTriangleAcceptance {
             triangle: evidence.triangle,
             sample_count: budget.consumed - before,
-            maximum_chordal_deviation_m: triangle_chordal.value,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                triangle_chordal.value,
+            ),
             maximum_chordal_deviation_uv: triangle_chordal.uv,
             maximum_normal_deviation_rad: triangle_normal.value,
             maximum_normal_deviation_uv: triangle_normal.uv,
@@ -237,7 +240,7 @@ fn sample(
         source_face_id: mesh.geometry.source_face_id.clone(),
         triangles: triangle_reports,
         sample_count: budget.consumed,
-        maximum_chordal_deviation_m: face_chordal.value,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(face_chordal.value),
         maximum_chordal_deviation_uv: face_chordal.uv,
         maximum_normal_deviation_rad: face_normal.value,
         maximum_normal_deviation_uv: face_normal.uv,
@@ -254,7 +257,7 @@ fn enforce_report(
             mesh,
             triangle.triangle,
             SampleMaximum {
-                value: triangle.maximum_chordal_deviation_m,
+                value: triangle.maximum_chordal_deviation_m.canonical_value(),
                 uv: triangle.maximum_chordal_deviation_uv,
             },
             SampleMaximum {
@@ -301,7 +304,7 @@ fn enforce_quality(
     normal: SampleMaximum,
     quality: SurfaceQualityTargets,
 ) -> Result<(), ExactFaceAcceptanceError> {
-    if chordal.value > quality.maximum_chordal_deviation_m {
+    if chordal.value > quality.maximum_chordal_deviation_m.canonical_value() {
         return Err(error(
             mesh,
             ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,

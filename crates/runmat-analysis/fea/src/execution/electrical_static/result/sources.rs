@@ -44,6 +44,7 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
     }
     let volume_work = r.charge_sources.as_ref().map_or(0.0, |source| {
         r.potential_increment_v
+            .canonical_values()
             .iter()
             .zip(&source.nodal_charge_c)
             .map(|(potential, charge)| potential * charge)
@@ -53,13 +54,13 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
         .ordered_node_ids
         .iter()
         .copied()
-        .zip(r.potential_increment_v.iter().copied())
+        .zip(r.potential_increment_v.canonical_values().iter().copied())
         .collect::<std::collections::BTreeMap<_, _>>();
     let outward = r
         .ordered_node_ids
         .iter()
         .copied()
-        .zip(r.nodal_outward_flux.iter().copied())
+        .zip(r.nodal_outward_flux.canonical_values().iter().copied())
         .collect::<std::collections::BTreeMap<_, _>>();
     let terminal_work = r
         .terminals
@@ -70,16 +71,16 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
     let work_scale = volume_work
         .abs()
         .max(terminal_work.abs())
-        .max(r.volume_source_work.abs())
-        .max(r.terminal_work.abs())
+        .max(r.volume_source_work.canonical_value().abs())
+        .max(r.terminal_work.canonical_value().abs())
         .max(f64::MIN_POSITIVE);
     let bound = 128.0 * f64::EPSILON * r.ordered_node_ids.len() as f64 * work_scale;
     if !volume_work.is_finite()
         || !terminal_work.is_finite()
-        || !r.volume_source_work.is_finite()
-        || !r.terminal_work.is_finite()
-        || (volume_work - r.volume_source_work).abs() > bound
-        || (terminal_work - r.terminal_work).abs() > bound
+        || !r.volume_source_work.canonical_value().is_finite()
+        || !r.terminal_work.canonical_value().is_finite()
+        || (volume_work - r.volume_source_work.canonical_value()).abs() > bound
+        || (terminal_work - r.terminal_work.canonical_value()).abs() > bound
     {
         return Err(invalid(
             "retained source/terminal work disagrees with gauge-departure arrays",
@@ -87,14 +88,14 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
     }
     let energy = match r.constitutive {
         ElectricalConstitutiveResponse::Electrostatics { total_energy_j, .. } => {
-            2.0 * total_energy_j
+            2.0 * total_energy_j.canonical_value()
         }
         ElectricalConstitutiveResponse::SteadyConduction {
             total_joule_power_w,
             ..
-        } => total_joule_power_w,
+        } => total_joule_power_w.canonical_value(),
     };
-    let work = r.volume_source_work + r.terminal_work;
+    let work = r.volume_source_work.canonical_value() + r.terminal_work.canonical_value();
     let error = (energy - work).abs() / energy.abs().max(work.abs()).max(f64::MIN_POSITIVE);
     if error != r.relative_energy_identity_error {
         return Err(invalid(

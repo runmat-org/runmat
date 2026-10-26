@@ -10,7 +10,7 @@ use super::{
     MeshingResourceBudget, MeshingStageKind, PersistentEntityId, StableDigest,
 };
 
-pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 3;
+pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 4;
 const MAX_STAGE_COUNTERS: usize = 256;
 const MAX_STAGE_INVARIANTS: usize = 256;
 const MAX_STAGE_EVIDENCE: usize = 65_536;

@@ -21,7 +21,7 @@ use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
     elements::{
         beam::{BeamSection, BEAM_ELEMENT_DOF_COUNT},
-        shell::{ShellMassMoments, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT},
+        shell::{ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT},
     },
     BeamRecoveryElementSummary, ShellRecoveryElementSummary, StructuralAssemblyError,
 };
@@ -280,26 +280,34 @@ fn structural_node_index(
 
 fn section_from_model(section: &BeamSectionModel) -> BeamSection {
     BeamSection {
-        area_m2: section.area_m2,
-        iy_m4: section.iy_m4,
-        iz_m4: section.iz_m4,
-        torsion_j_m4: section.torsion_j_m4,
-        outer_fiber_y_m: section.outer_fiber_y_m,
-        outer_fiber_z_m: section.outer_fiber_z_m,
-        torsion_outer_radius_m: section.torsion_outer_radius_m,
+        area_m2: runmat_types::physical::Area::new(section.area_m2.canonical_value()),
+        iy_m4: runmat_types::physical::SecondMomentOfArea::new(section.iy_m4.canonical_value()),
+        iz_m4: runmat_types::physical::SecondMomentOfArea::new(section.iz_m4.canonical_value()),
+        torsion_j_m4: runmat_types::physical::SecondMomentOfArea::new(
+            section.torsion_j_m4.canonical_value(),
+        ),
+        outer_fiber_y_m: runmat_types::physical::Length::new(
+            section.outer_fiber_y_m.canonical_value(),
+        ),
+        outer_fiber_z_m: runmat_types::physical::Length::new(
+            section.outer_fiber_z_m.canonical_value(),
+        ),
+        torsion_outer_radius_m: runmat_types::physical::Length::new(
+            section.torsion_outer_radius_m.canonical_value(),
+        ),
     }
 }
 
 fn shell_section_from_model(section: &HomogeneousShellSectionModel) -> ShellSection {
-    let half_thickness = 0.5 * section.thickness_m;
+    let half_thickness = 0.5 * section.thickness_m.canonical_value();
     ShellSection {
-        thickness_m: section.thickness_m,
-        reference_offset_m: match section.reference_surface {
+        thickness_m: runmat_types::physical::Length::new(section.thickness_m.canonical_value()),
+        reference_offset_m: runmat_types::physical::Length::new(match section.reference_surface {
             HomogeneousShellReferenceSurface::MidSurface => 0.0,
             HomogeneousShellReferenceSurface::NegativeNormalSurface => -half_thickness,
             HomogeneousShellReferenceSurface::PositiveNormalSurface => half_thickness,
             HomogeneousShellReferenceSurface::OffsetFromMidSurface(offset) => offset,
-        },
+        }),
         shear_correction: section.shear_correction,
     }
 }
@@ -350,14 +358,6 @@ fn scatter_diagonal<const D: usize>(
 ) {
     for (local, global_dof) in element_dofs.iter().copied().enumerate() {
         global.add(global_dof, global_dof, element[local]);
-    }
-}
-
-fn scale_mass_moments(moments: ShellMassMoments, scale: f64) -> ShellMassMoments {
-    ShellMassMoments {
-        zeroth_kg_per_m2: scale * moments.zeroth_kg_per_m2,
-        first_kg_per_m: scale * moments.first_kg_per_m,
-        second_kg: scale * moments.second_kg,
     }
 }
 

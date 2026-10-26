@@ -44,33 +44,29 @@ impl Ap242EngineeringProperty {
         }
         self.value.validate()?;
         let expected = match self.kind {
-            Ap242EngineeringPropertyKind::MassDensity => super::Ap242PhysicalDimension::MassDensity,
-            Ap242EngineeringPropertyKind::YoungsModulus => super::Ap242PhysicalDimension::Pressure,
+            Ap242EngineeringPropertyKind::MassDensity => super::QuantityKind::MassDensity,
+            Ap242EngineeringPropertyKind::YoungsModulus => super::QuantityKind::Pressure,
             Ap242EngineeringPropertyKind::PoissonRatio
             | Ap242EngineeringPropertyKind::RelativePermittivity
             | Ap242EngineeringPropertyKind::RelativePermeability => {
-                super::Ap242PhysicalDimension::Dimensionless
+                super::QuantityKind::Dimensionless
             }
             Ap242EngineeringPropertyKind::ThermalConductivity => {
-                super::Ap242PhysicalDimension::ThermalConductivity
+                super::QuantityKind::ThermalConductivity
             }
-            Ap242EngineeringPropertyKind::SpecificHeat => {
-                super::Ap242PhysicalDimension::SpecificHeat
-            }
+            Ap242EngineeringPropertyKind::SpecificHeat => super::QuantityKind::SpecificHeat,
             Ap242EngineeringPropertyKind::ThermalExpansionCoefficient => {
-                super::Ap242PhysicalDimension::InverseTemperature
+                super::QuantityKind::InverseTemperature
             }
             Ap242EngineeringPropertyKind::ElectricalConductivity => {
-                super::Ap242PhysicalDimension::ElectricalConductivity
+                super::QuantityKind::ElectricalConductivity
             }
             Ap242EngineeringPropertyKind::AcousticImpedance => {
-                super::Ap242PhysicalDimension::AcousticImpedance
+                super::QuantityKind::SpecificAcousticImpedance
             }
-            Ap242EngineeringPropertyKind::DynamicViscosity => {
-                super::Ap242PhysicalDimension::DynamicViscosity
-            }
+            Ap242EngineeringPropertyKind::DynamicViscosity => super::QuantityKind::DynamicViscosity,
         };
-        if self.value.dimension != expected {
+        if self.value.kind() != expected {
             return Err(invalid(
                 "AP242 property dimension",
                 "measure dimension is incompatible with the engineering-property kind",
@@ -96,7 +92,7 @@ pub struct Ap242EnvironmentCondition {
 impl Ap242EnvironmentCondition {
     fn validate(&self) -> Result<(), GeometryContractError> {
         token("AP242 environment condition", &self.name)?;
-        self.value.validate()
+        self.value.validate().map_err(Into::into)
     }
 }
 

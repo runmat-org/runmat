@@ -249,7 +249,7 @@ fn initial_input_does_not_silently_select_a_history_sample_or_invalid_temperatur
         .admit(&temperature(&input), Digest::sha256("topology"), 4)
         .is_err());
     for value in [f64::NAN, f64::INFINITY] {
-        let field = RecoveredField::new(
+        assert!(RecoveredField::new(
             original.fields()[0].definition().clone(),
             RecoveredFieldSample::Final,
             AnalysisField {
@@ -257,15 +257,6 @@ fn initial_input_does_not_silently_select_a_history_sample_or_invalid_temperatur
                 shape: vec![4],
                 values: AnalysisFieldValues::HostF64(vec![value; 4]),
             },
-        )
-        .unwrap();
-        assert!(RecoveredFieldArtifact::new(
-            original.recovery_request,
-            original.source,
-            original.topology_digest,
-            original.entity_counts,
-            vec![field]
-        )
-        .is_err());
+        ).is_err());
     }
 }

@@ -100,6 +100,7 @@ fn validate_original_values(
     let velocity = values(0)?;
     let count = original
         .velocity_m_per_s
+        .canonical_values()
         .len()
         .checked_mul(3)
         .ok_or("fluid publication velocity count overflow")?;
@@ -113,10 +114,10 @@ fn validate_original_values(
     if velocity.len() != count
         || !velocity
             .iter()
-            .zip(original.velocity_m_per_s.iter().flatten())
+            .zip(original.velocity_m_per_s.canonical_values().iter().flatten())
             .all(|(a, b)| a.to_bits() == b.to_bits())
-        || !exact(values(1)?, &original.pressure_pa)
-        || !exact(values(2)?, &original.face_volume_flux_m3_per_s)
+        || !exact(values(1)?, original.pressure_pa.canonical_values())
+        || !exact(values(2)?, original.face_volume_flux_m3_per_s.canonical_values())
     {
         return Err("fluid recovered artifact substituted original signed U/p/q values".into());
     }

@@ -329,7 +329,17 @@ mod tests {
             SolverFieldTransferError::InvalidFieldShape
         );
         let mut tampered = quadratic;
-        tampered.topology.nodes[0].coordinates_m[0] = 0.25;
+        {
+            let quantity_change = 0.25;
+            let quantity_index = 0;
+            let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert!(matches!(
             transfer_solver_field(
                 &linear,

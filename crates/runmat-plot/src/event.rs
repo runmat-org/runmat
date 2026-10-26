@@ -1,5 +1,4 @@
 mod geometry_lines;
-pub use geometry_lines::GeometryLines;
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
@@ -9,6 +8,7 @@ use crate::plots::{
     PlotElement, PlotType, QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot,
     ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
+pub use geometry_lines::GeometryLines;
 use glam::{Vec3, Vec4};
 use runmat_value::NumericStorage;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,8 @@ pub struct FigureSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FigureScene {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry_physical_context: Option<crate::geometry_scene::GeometryPhysicalContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry_overlay: Option<crate::geometry_scene::GeometrySceneOverlay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -726,7 +728,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 6;
+    pub const SCHEMA_VERSION: u32 = 7;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -739,6 +741,7 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
@@ -774,6 +777,7 @@ impl FigureScene {
         Ok(Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
@@ -801,7 +805,12 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: scene.overlay.clone(),
-            geometry_lines: scene.chunks.iter().filter_map(GeometryLines::capture).collect(),
+            geometry_physical_context: scene.physical_context.clone(),
+            geometry_lines: scene
+                .chunks
+                .iter()
+                .filter_map(GeometryLines::capture)
+                .collect(),
             layout: FigureLayout {
                 axes_rows: 1,
                 axes_cols: 1,
@@ -896,6 +905,7 @@ impl FigureScene {
         let mut scene = crate::GeometryScene::new(scene_id, revision, chunks);
         scene.title = self.metadata.title;
         scene.overlay = self.geometry_overlay;
+        scene.physical_context = self.geometry_physical_context;
         scene.show_grid = self.metadata.grid_enabled;
         scene.axis_equal = self.metadata.axis_equal;
         Ok(scene)
@@ -4429,6 +4439,7 @@ mod tests {
         let scene = FigureScene {
             schema_version: FigureScene::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
@@ -4789,8 +4800,14 @@ mod tests {
     #[test]
     fn hidden_lines_stay_out_of_the_legend_after_scene_roundtrip() {
         let mut figure = Figure::new();
-        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap().with_label("shown"));
-        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![1.0, 0.0]).unwrap().with_label("[1 0]");
+        figure.add_line_plot(
+            LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0])
+                .unwrap()
+                .with_label("shown"),
+        );
+        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![1.0, 0.0])
+            .unwrap()
+            .with_label("[1 0]");
         hidden.handle_visibility = "off".to_string();
         figure.add_line_plot(hidden);
 
@@ -5526,6 +5543,7 @@ mod tests {
         let scene = FigureScene {
             schema_version: FigureScene::SCHEMA_VERSION,
             geometry_overlay: None,
+            geometry_physical_context: None,
             geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,

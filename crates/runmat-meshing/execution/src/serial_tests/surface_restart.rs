@@ -165,7 +165,12 @@ fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
         runmat_meshing_core::MeshingChunkMediaType::SurfaceMesh
     );
     let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
-        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+        coordinate_tolerance_m: runmat_types::physical::Length::new(
+            host.resolved_request
+                .tolerance
+                .absolute_floor_m
+                .canonical_value(),
+        ),
         maximum_nodes: host.resolved_request.resources.maximum_nodes,
         maximum_triangles: host.resolved_request.resources.maximum_elements,
         maximum_boundary_segments: host.resolved_request.resources.maximum_elements,

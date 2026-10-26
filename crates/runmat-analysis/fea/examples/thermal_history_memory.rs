@@ -70,12 +70,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         reference_temperature: Temperature::new(293.15),
     });
     let material = model.materials.first().ok_or("missing fixture material")?;
-    let volumetric_capacity = material.mass_density_kg_per_m3.ok_or("missing density")?
+    let volumetric_capacity = material
+        .mass_density_kg_per_m3
+        .map(|quantity| quantity.canonical_value())
+        .ok_or("missing density")?
         * material
             .thermal
             .as_ref()
             .ok_or("missing thermal material")?
-            .specific_heat_j_per_kgk;
+            .specific_heat_j_per_kgk
+            .canonical_value();
     // Keep the total heating fixed at 1 K/s, split equally among genuine typed sources.
     // The zero-source case remains the original constant-temperature reference.
     let total_heat_generation = if source_count == 0 {

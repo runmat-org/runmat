@@ -90,7 +90,17 @@ fn attachments_fail_closed_on_missing_ambiguous_and_displaced_vertices() {
         .provenance
         .retain(|entity| entity.kind != PersistentEntityKind::Vertex);
     reseal(&mut mesh);
-    structural.nodes[0].coordinates_m[0] += 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut structural.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         CanonicalStructuralNodeSpace::derive(&mesh, &structural),
         Err(StructuralNodeSpaceError::AttachmentCoordinateMismatch { .. })
@@ -134,7 +144,10 @@ fn construction_inventory_bounds_original_mixed_identity_and_preserves_authored_
         )
         .structural
         .unwrap();
-        structural.nodes[0].coordinates_m = mesh.topology.nodes[0].coordinates_m;
+        structural.nodes[0].coordinates_m =
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                mesh.topology.nodes[0].coordinates_m.canonical_value(),
+            );
         structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment::SolverNode {
             stable_identity: mesh.topology.nodes[0].stable_identity.0,
         });
@@ -152,7 +165,10 @@ fn construction_inventory_bounds_original_mixed_identity_and_preserves_authored_
             .enumerate()
             .map(|(i, n)| CanonicalStructuralNode {
                 identity: n.stable_identity,
-                coordinates_m: n.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(n.coordinates_m.canonical_value()),
                 owns_solid_translation: true,
                 owns_explicit_rotation: i == 0,
             })
@@ -162,10 +178,13 @@ fn construction_inventory_bounds_original_mixed_identity_and_preserves_authored_
             identity: explicit_node_identity(
                 digest,
                 structural.nodes[1].node_id,
-                structural.nodes[1].coordinates_m,
+                structural.nodes[1].coordinates_m.canonical_value(),
             )
             .unwrap(),
-            coordinates_m: structural.nodes[1].coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(structural.nodes[1].coordinates_m.canonical_value()),
             owns_solid_translation: false,
             owns_explicit_rotation: true,
         });

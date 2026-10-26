@@ -50,23 +50,27 @@ pub(super) fn lower(
     let period = assignment(statements, "periods");
     let (abscissa, default_interpolation) = match (frequency, period) {
         (Some(value), None) => (
-            SpectrumAbscissa::FrequencyHertz(quantity_vector(
-                declaration,
-                value,
-                "frequencies",
-                PhysicalDimension::FREQUENCY,
-                diagnostics,
-            )?),
+            SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::new(
+                quantity_vector(
+                    declaration,
+                    value,
+                    "frequencies",
+                    PhysicalDimension::FREQUENCY,
+                    diagnostics,
+                )?,
+            )),
             SpectrumInterpolation::LinearFrequency,
         ),
         (None, Some(value)) => (
-            SpectrumAbscissa::PeriodSeconds(quantity_vector(
-                declaration,
-                value,
-                "periods",
-                PhysicalDimension::TIME,
-                diagnostics,
-            )?),
+            SpectrumAbscissa::PeriodSeconds(runmat_types::physical::Quantity::new(
+                quantity_vector(
+                    declaration,
+                    value,
+                    "periods",
+                    PhysicalDimension::TIME,
+                    diagnostics,
+                )?,
+            )),
             SpectrumInterpolation::LinearPeriod,
         ),
         _ => {

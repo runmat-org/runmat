@@ -33,11 +33,11 @@ fn workload() -> MaxwellHarmonicWorkload {
     model.sequence = AnalysisSequence::from_steps("maxwell", vec![step]);
     model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 3.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
-        resistive_heating_coefficient: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
         conductivity_frequency_response: Vec::new(),
     });
     for face in 0..4 {
@@ -150,7 +150,15 @@ fn exact_authored_preparation_and_owned_phases_both_orders() {
             .electrical
             .as_mut()
             .unwrap()
-            .relative_permittivity *= 2.0;
+            .relative_permittivity = runmat_types::physical::Quantity::new(
+            changed.product.compiled.model.materials[0]
+                .electrical
+                .as_mut()
+                .unwrap()
+                .relative_permittivity
+                .canonical_value()
+                * (2.0),
+        );
         assert!(MaxwellStudyCoordinator::new(changed).is_err());
     }
 }

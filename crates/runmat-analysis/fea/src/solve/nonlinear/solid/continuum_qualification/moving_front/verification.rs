@@ -81,7 +81,7 @@ fn measure(
         .nodes
         .iter()
         .enumerate()
-        .filter(|(_, node)| node.coordinates_m[0] == 0.0)
+        .filter(|(_, node)| node.coordinates_m.canonical_value()[0] == 0.0)
         .map(|(i, _)| {
             let row = summary
                 .structural_dof_layout
@@ -111,12 +111,12 @@ fn measure(
         evaluation
             .element_evidence
             .iter()
-            .map(|e| e.elastic_energy_j)
+            .map(|e| e.elastic_energy_j.canonical_value())
             .sum::<f64>(),
         evaluation
             .element_evidence
             .iter()
-            .map(|e| e.hardening_energy_j)
+            .map(|e| e.hardening_energy_j.canonical_value())
             .sum::<f64>(),
         accumulated_dissipation,
     ];
@@ -137,7 +137,7 @@ fn measure(
                         .structural_dof_layout
                         .index(node_index, kind)
                         .unwrap();
-                    node.coordinates_m[axis + 1]
+                    node.coordinates_m.canonical_value()[axis + 1]
                         * (evaluation.internal_force[row] - factor * summary.physical_load[row])
                 })
                 .sum::<f64>()

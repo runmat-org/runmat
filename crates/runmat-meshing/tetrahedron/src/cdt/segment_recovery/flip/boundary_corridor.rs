@@ -61,15 +61,25 @@ pub(super) fn recover(
                 continue;
             }
             let axes = match projection(
-                [a.coordinates_m, b.coordinates_m, c.coordinates_m],
+                [
+                    a.coordinates_m.canonical_value(),
+                    b.coordinates_m.canonical_value(),
+                    c.coordinates_m.canonical_value(),
+                ],
                 constraint_index,
             )? {
                 Some(axes) => axes,
                 None => continue,
             };
             if !crosses(
-                [a.coordinates_m, b.coordinates_m],
-                [c.coordinates_m, d.coordinates_m],
+                [
+                    a.coordinates_m.canonical_value(),
+                    b.coordinates_m.canonical_value(),
+                ],
+                [
+                    c.coordinates_m.canonical_value(),
+                    d.coordinates_m.canonical_value(),
+                ],
                 axes,
                 constraint_index,
             )? {
@@ -117,10 +127,13 @@ pub(super) fn recover(
             // Both diagonals must meet strictly: this is a convex quadrilateral,
             // not a boundary change across a concavity or an overlapping patch.
             if !crosses(
-                [c.coordinates_m, d.coordinates_m],
                 [
-                    current.nodes()[x as usize].coordinates_m,
-                    current.nodes()[y as usize].coordinates_m,
+                    c.coordinates_m.canonical_value(),
+                    d.coordinates_m.canonical_value(),
+                ],
+                [
+                    current.nodes()[x as usize].coordinates_m.canonical_value(),
+                    current.nodes()[y as usize].coordinates_m.canonical_value(),
                 ],
                 axes,
                 constraint_index,

@@ -19,7 +19,7 @@ fn fixed_star_probes_reuse_the_original_local_metric_inventory() {
             .unwrap()
         });
     assert_eq!(calls.get(), star.len());
-    let point = topology.nodes[index].coordinates_m;
+    let point = topology.nodes[index].coordinates_m.canonical_value();
     let before = prepared.score(point);
     for _ in 0..128 {
         assert!(prepared.score(point) == before);

@@ -127,7 +127,7 @@ pub fn consistent_mass_matrix(
     geometry: Tetrahedron4ElementGeometry,
 ) -> Result<Tetrahedron4Matrix12, Tetrahedron4ElementError> {
     material.validate()?;
-    let scalar = material.density_kg_per_m3 * geometry.volume_m3()? / 20.0;
+    let scalar = material.density_kg_per_m3.canonical_value() * geometry.volume_m3()? / 20.0;
     Ok(std::array::from_fn(|row| {
         std::array::from_fn(|column| {
             if row % TETRAHEDRON4_NODE_DOF_COUNT != column % TETRAHEDRON4_NODE_DOF_COUNT {
@@ -219,9 +219,9 @@ mod tests {
 
     fn steel() -> SolidMaterial {
         SolidMaterial {
-            youngs_modulus_pa: 200.0e9,
-            poisson_ratio: 0.3,
-            density_kg_per_m3: 7_850.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(7_850.0),
         }
     }
 

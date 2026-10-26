@@ -7,14 +7,12 @@ pub struct ResolvedCadParameterValue {
     pub parameter_id: String,
     pub source_entity_id: u64,
     pub persistent_id: Option<String>,
-    pub value_si_bits: u64,
-    pub source_value_bits: u64,
-    pub source_unit: String,
+    pub measure: runmat_types::physical::SourceQuantity,
 }
 
 impl ResolvedCadParameterValue {
     pub fn value_si(&self) -> f64 {
-        f64::from_bits(self.value_si_bits)
+        self.measure.canonical_value()
     }
 }
 

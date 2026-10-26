@@ -29,7 +29,9 @@ struct TopologyContract<'a> {
 #[derive(Serialize)]
 struct NodeContract<'a> {
     node_id: u32,
-    coordinates_m: [u64; 3],
+    // Canonical identity encoding of checked physical positions, not a numeric quantity.
+    #[serde(rename = "coordinates_m")]
+    coordinate_bits: [u64; 3],
     solid_attachment: Option<&'a ConformalSolidAttachment>,
 }
 #[derive(Serialize)]
@@ -44,7 +46,7 @@ fn serialize_nodes<S: Serializer>(
 ) -> Result<S::Ok, S::Error> {
     serializer.collect_seq(nodes.iter().map(|node| NodeContract {
         node_id: node.node_id,
-        coordinates_m: node.coordinates_m.map(f64::to_bits),
+        coordinate_bits: node.coordinates_m.canonical_value().map(f64::to_bits),
         solid_attachment: node.solid_attachment.as_ref(),
     }))
 }
@@ -99,7 +101,12 @@ fn validate(structural: &StructuralModel) -> Result<(), ExplicitStructuralTopolo
                 node_id: node.node_id,
             });
         }
-        if node.coordinates_m.iter().any(|value| !value.is_finite()) {
+        if node
+            .coordinates_m
+            .canonical_value()
+            .iter()
+            .any(|value| !value.is_finite())
+        {
             return Err(ExplicitStructuralTopologyError::NonFiniteNode {
                 node_id: node.node_id,
             });

@@ -100,12 +100,14 @@ impl BrowserExecutionService {
     pub(super) fn retain_launched_owned_requests(&self, state: &mut State) {
         // Ordinary future cancellation may discard a request, but not an
         // owned numerical claim while a launched worker may still be live.
-        let launched_owned = self
+        let mut launched_owned = self
             .owned
             .borrow()
             .iter()
             .filter_map(|(id, task)| task.launched.then_some(*id))
             .collect::<std::collections::HashSet<_>>();
+        // The same request table also owns live selected program invocations.
+        launched_owned.extend(self.selected.borrow().keys().copied());
         state.requests.retain(|id, _| launched_owned.contains(id));
         self.owned.borrow_mut().retain(|id, task| {
             if !task.launched {

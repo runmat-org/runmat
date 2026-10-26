@@ -1,5 +1,6 @@
 use super::super::{
-    GeometryEvaluationControl, GeometryEvaluationError, NurbsSurface3, SurfaceDerivatives,
+    GeometryEvaluationControl, GeometryEvaluationError, NurbsSurface3,
+    SurfaceDerivativeCoefficients,
 };
 use super::invalid_result;
 use super::spline::{charge_spline_allocation, homogeneous_derivatives, HomogeneousDerivatives};
@@ -8,7 +9,7 @@ pub(super) fn rational_surface_derivatives(
     definition: &NurbsSurface3,
     uv: [f64; 2],
     control: &dyn GeometryEvaluationControl,
-) -> Result<SurfaceDerivatives, GeometryEvaluationError> {
+) -> Result<SurfaceDerivativeCoefficients, GeometryEvaluationError> {
     control.checkpoint()?;
     let u_degree = usize::from(definition.u_degree);
     let v_degree = usize::from(definition.v_degree);
@@ -16,7 +17,12 @@ pub(super) fn rational_surface_derivatives(
         .map_err(|_| invalid_result("surface u control count does not fit this platform"))?;
     let v_count = usize::try_from(definition.v_control_count)
         .map_err(|_| invalid_result("surface v control count does not fit this platform"))?;
-    charge_spline_allocation(definition.control_points_m.len(), 4, 16, control)?;
+    charge_spline_allocation(
+        definition.control_points_m.canonical_values().len(),
+        4,
+        16,
+        control,
+    )?;
     let work = (u_degree + 1)
         .saturating_mul(u_degree + 1)
         .saturating_mul(v_count)
@@ -32,6 +38,7 @@ pub(super) fn rational_surface_derivatives(
 
     let homogeneous = definition
         .control_points_m
+        .canonical_values()
         .iter()
         .zip(&definition.weights)
         .map(|(point, weight)| {
@@ -76,7 +83,7 @@ fn rationalize_surface(
     along_v: &HomogeneousDerivatives,
     u_first_along_v: &HomogeneousDerivatives,
     u_second_along_v: &HomogeneousDerivatives,
-) -> Result<SurfaceDerivatives, GeometryEvaluationError> {
+) -> Result<SurfaceDerivativeCoefficients, GeometryEvaluationError> {
     let h = &along_v.value;
     let hu = &u_first_along_v.value;
     let hv = &along_v.first;
@@ -101,7 +108,7 @@ fn rationalize_surface(
     let dvv_m = std::array::from_fn(|index| {
         (hvv[index] - 2.0 * dv_m[index] * hv[3] - point_m[index] * hvv[3]) / weight
     });
-    let result = SurfaceDerivatives {
+    let result = SurfaceDerivativeCoefficients {
         point_m,
         du_m,
         dv_m,

@@ -1,5 +1,4 @@
 use runmat_analysis_core::{validate_model_against_geometry, CoordinateFrame};
-use runmat_geometry_core::UnitSystem;
 
 use super::{contracts, AnalysisSolverOptions, AnalysisStudySpec, ANALYSIS_VALIDATE_OP_VERSION};
 
@@ -28,9 +27,6 @@ pub(super) fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String
     if spec.geometry.meshes.is_empty() {
         issue_codes.push("RM.FEA.STUDY.GEOMETRY_MESHES_EMPTY".to_string());
     }
-    if spec.geometry.units == UnitSystem::Unspecified {
-        issue_codes.push("RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED".to_string());
-    }
     if spec.execution.steps.is_empty() {
         issue_codes.push("RM.FEA.STUDY.EXECUTION_EMPTY".to_string());
     }
@@ -43,9 +39,7 @@ pub(super) fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String
     {
         issue_codes.push("RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH".to_string());
     }
-    if validate_model_against_geometry(model, spec.geometry.units, &CoordinateFrame::Global)
-        .is_err()
-    {
+    if validate_model_against_geometry(model, &CoordinateFrame::Global).is_err() {
         issue_codes.push("RM.FEA.STUDY.MODEL_INVALID".to_string());
     }
     if spec.execution.validate_against(&model.sequence).is_err() {

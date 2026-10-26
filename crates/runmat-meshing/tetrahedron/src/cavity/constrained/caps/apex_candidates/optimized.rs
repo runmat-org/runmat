@@ -32,11 +32,12 @@ pub(super) fn optimized_normal_cap_apex_candidate(
     let scale = (low + high) * 0.5;
     let distance = max_edge_length * scale;
     LocalCapApexCandidate {
-        coordinates_m: [
-            surface_point[0] + direction[0] * distance,
-            surface_point[1] + direction[1] * distance,
-            surface_point[2] + direction[2] * distance,
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                surface_point[0] + direction[0] * distance,
+                surface_point[1] + direction[1] * distance,
+                surface_point[2] + direction[2] * distance,
+            ]),
         source,
     }
 }
@@ -73,17 +74,18 @@ pub(super) fn optimized_inplane_inward_cap_apex_candidate(
     }
     let (inward_scale, lateral_scale, _) = best;
     LocalCapApexCandidate {
-        coordinates_m: [
-            surface_point[0]
-                + inward_direction[0] * max_edge_length * inward_scale
-                + in_plane_direction[0] * max_edge_length * lateral_scale,
-            surface_point[1]
-                + inward_direction[1] * max_edge_length * inward_scale
-                + in_plane_direction[1] * max_edge_length * lateral_scale,
-            surface_point[2]
-                + inward_direction[2] * max_edge_length * inward_scale
-                + in_plane_direction[2] * max_edge_length * lateral_scale,
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                surface_point[0]
+                    + inward_direction[0] * max_edge_length * inward_scale
+                    + in_plane_direction[0] * max_edge_length * lateral_scale,
+                surface_point[1]
+                    + inward_direction[1] * max_edge_length * inward_scale
+                    + in_plane_direction[1] * max_edge_length * lateral_scale,
+                surface_point[2]
+                    + inward_direction[2] * max_edge_length * inward_scale
+                    + in_plane_direction[2] * max_edge_length * lateral_scale,
+            ]),
         source: "inplane_inward_optimized",
     }
 }

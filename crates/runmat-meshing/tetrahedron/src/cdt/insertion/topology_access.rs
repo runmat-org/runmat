@@ -24,7 +24,7 @@ pub(in crate::cdt) trait TetrahedralTopology {
         runmat_meshing_core::quality::predicate::constructed_point_bounds(
             runmat_meshing_core::quality::predicate::SpatialPredicatePoint {
                 identity: node.identity,
-                coordinates: node.coordinates_m,
+                coordinates: node.coordinates_m.canonical_value(),
                 construction: node.construction,
             },
         )
@@ -119,7 +119,7 @@ pub(in crate::cdt) trait TetrahedralTopology {
     fn coordinate_scale_m(&self) -> f64 {
         self.nodes()
             .iter()
-            .flat_map(|node| node.coordinates_m)
+            .flat_map(|node| node.coordinates_m.canonical_value())
             .map(f64::abs)
             .fold(1.0, f64::max)
     }
@@ -139,10 +139,11 @@ pub(in crate::cdt) trait TetrahedralTopology {
         let mut candidates = Vec::new();
         for (index, node) in self.nodes().iter().enumerate() {
             checkpoint()?;
-            if bounds.is_none_or(|bounds| bounds.contains_point(node.coordinates_m))
+            if bounds
+                .is_none_or(|bounds| bounds.contains_point(node.coordinates_m.canonical_value()))
                 && intersects(runmat_meshing_core::Aabb3 {
-                    min_m: node.coordinates_m,
-                    max_m: node.coordinates_m,
+                    min_m: node.coordinates_m.canonical_value(),
+                    max_m: node.coordinates_m.canonical_value(),
                 })
             {
                 candidates.push(index as u32);
@@ -153,7 +154,7 @@ pub(in crate::cdt) trait TetrahedralTopology {
     fn contains_position(&self, coordinates: [f64; 3]) -> bool {
         self.nodes()
             .iter()
-            .any(|node| node.coordinates_m == coordinates)
+            .any(|node| node.coordinates_m.canonical_value() == coordinates)
     }
     fn orient_nodes(
         &self,

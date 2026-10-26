@@ -52,7 +52,11 @@ fn cavity_ties_match_the_independent_lifted_oracle_and_legalization_policy() {
         };
         let vertices = topology.tetrahedra[0].vertex_indices;
         let mut rows = vertices
-            .map(|index| topology.nodes[index as usize].coordinates_m)
+            .map(|index| {
+                topology.nodes[index as usize]
+                    .coordinates_m
+                    .canonical_value()
+            })
             .to_vec();
         rows.push(points[query]);
         let lifted = |perturbed: bool| {

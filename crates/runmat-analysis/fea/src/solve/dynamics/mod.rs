@@ -18,7 +18,7 @@ pub use harmonic_balance::{
 pub use modal_harmonic::{
     solve_modal_harmonic, ModalHarmonicError, ModalHarmonicLoad, ModalHarmonicResponse,
 };
-pub use modal_projection::{ModalProjectionError, ModalReducedSystem};
+pub use modal_projection::{ModalCoordinateQuantity, ModalProjectionError, ModalReducedSystem};
 pub use modal_transient::{
     advance_modal_transient_state, continue_modal_transient, initialize_modal_transient_state,
     refresh_modal_transient_state, solve_modal_transient, ModalTransientError,

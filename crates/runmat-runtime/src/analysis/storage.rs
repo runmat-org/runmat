@@ -686,14 +686,13 @@ pub fn next_run_id() -> String {
 }
 
 pub fn persist_run_result(run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.persist_run(run)
 }
 
 pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisArtifactStore>, String>
 {
+    if let Some(store) = async_access::scoped_store() { return Ok(store); }
     global_store()
         .read()
         .map(|store| Arc::clone(&store))
@@ -701,15 +700,16 @@ pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisAr
 }
 
 mod source_access;
+mod async_access;
+pub use async_access::with_artifact_access;
+pub(in crate::analysis) use async_access::scoped_artifact_provider;
 pub use source_access::{
     load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
     load_structural_frequency_result,
 };
 
 pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned")?;
+    let guard = capture_artifact_store()?;
     guard.load_render_tile_index(run_id)
 }
 
@@ -717,9 +717,7 @@ pub fn plan_render_view(
     run_id: &str,
     view: Option<RenderViewRequest>,
 ) -> Result<Option<RenderViewSelection>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned")?;
+    let guard = capture_artifact_store()?;
     guard.plan_render_view(run_id, view)
 }
 
@@ -728,9 +726,7 @@ pub fn load_render_tile(
     mesh_index: usize,
     tile_index: usize,
 ) -> Result<Option<RenderTile>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned")?;
+    let guard = capture_artifact_store()?;
     guard.load_render_tile(run_id, mesh_index, tile_index)
 }
 
@@ -739,23 +735,17 @@ pub fn load_render_lod_node(
     mesh_index: usize,
     node_index: usize,
 ) -> Result<Option<RenderTile>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned")?;
+    let guard = capture_artifact_store()?;
     guard.load_render_lod_node(run_id, mesh_index, node_index)
 }
 
 pub fn load_render_topology(run_id: &str) -> Result<Option<super::AnalysisRenderTopology>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned")?;
+    let guard = capture_artifact_store()?;
     guard.load_render_topology(run_id)
 }
 
 pub fn load_field_inventory(run_id: &str) -> Result<Option<Vec<AnalysisField>>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.load_field_inventory(run_id)
 }
 
@@ -764,23 +754,17 @@ pub fn load_field_page(
     selection: &AnalysisFieldSelection,
     options: AnalysisFieldRequestOptions,
 ) -> Result<AnalysisFieldPageLookup, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.load_field_page(run_id, selection, options)
 }
 
 pub fn list_run_results() -> Result<Vec<AnalysisRunResult>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.list_runs()
 }
 
 pub fn list_run_metadata() -> Result<Vec<AnalysisRunResult>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.list_run_metadata()
 }
 

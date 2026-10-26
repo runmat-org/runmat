@@ -34,6 +34,8 @@ use super::resources::{
 use super::state::{FutureState, State, TaskRecord};
 
 mod owned_builtin;
+mod selected_program;
+use selected_program::SelectedTask;
 use owned_builtin::OwnedTask;
 
 pub(crate) struct BrowserExecutionService {
@@ -43,6 +45,7 @@ pub(crate) struct BrowserExecutionService {
     capabilities: BrowserExecutionCapabilities,
     state: RefCell<State>,
     owned: RefCell<HashMap<TaskId, OwnedTask>>,
+    selected: RefCell<HashMap<TaskId, SelectedTask>>,
     self_weak: RefCell<Weak<Self>>,
 }
 
@@ -125,9 +128,16 @@ impl BrowserExecutionService {
         let session_nonce = uuid::Uuid::new_v4();
         let scope_id = ExecutionScopeId::derive(&[b"browser-session", session_nonce.as_bytes()]);
         let pool_id = PoolId::derive(&[scope_id.bytes(), b"browser"]);
-        let accelerators = browser_accelerators()?;
+        let selected_inventory = host.as_ref().and_then(BrowserExecutionHost::worker_inventory);
+        let accelerators = match selected_inventory {
+            Some(inventory) => inventory.accelerators.clone(),
+            None => browser_accelerators()?,
+        };
         let resources = browser_inventory(capabilities, accelerators.clone());
-        let execution_host = browser_execution_host_inventory(&accelerators)?;
+        let execution_host = match selected_inventory {
+            Some(inventory) => inventory.host.clone(),
+            None => browser_execution_host_inventory(&accelerators)?,
+        };
         let mut driver = Driver::new(DriverConfig::default(), 1)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         driver
@@ -188,6 +198,7 @@ impl BrowserExecutionService {
                 pool_open: false,
             }),
             owned: RefCell::new(HashMap::new()),
+            selected: RefCell::new(HashMap::new()),
             self_weak: RefCell::new(Weak::new()),
         });
         service.self_weak.replace(Rc::downgrade(&service));
@@ -315,6 +326,10 @@ impl BrowserExecutionService {
         }
         if matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_)) {
             self.mark_owned_launched(&attempt, selected_assignment);
+        }
+        if self.capabilities.selected_program_work && !matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_)) {
+            self.launch_selected_program(attempt, program);
+            return;
         }
         let weak = self.self_weak.borrow().clone();
         let retained_service = matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_))
@@ -552,6 +567,9 @@ impl BrowserExecutionService {
         if self.owned.borrow().contains_key(&attempt.task_id) {
             return self.cancel_owned_attempt(attempt);
         }
+        if self.selected.borrow().contains_key(&attempt.task_id) {
+            return self.cancel_selected_program(attempt);
+        }
         if let Some(host) = &self.host {
             host.cancel(&attempt.task_id.to_string())
                 .map_err(ExecutionServiceError::Failed)?;
@@ -736,14 +754,27 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         };
         // This can traverse managed values and call source/GC observers. It
         // must never run under the service's RefCell mutable borrow.
-        let (callable, invocation_context, recipe, artifact, arguments) =
-            runmat_vm::materialize_deferred_call(
-                &call,
-                future.outputs.clone(),
-                runmat_execution_artifact::ProgramTarget::portable(
-                    "wasm32-browser-interpreter-bytecode-v2",
-                ),
+        let target = runmat_execution_artifact::ProgramTarget::portable("wasm32-browser-interpreter-bytecode-v2");
+        let (callable, request, receipt) = if matches!(&call.program, runmat_runtime::execution::DeferredProgram::SelectedGraph(_)) {
+            let (callable, request, receipt) = runmat_vm::materialize_deferred_graph_call(
+                &call, future.outputs.clone(), target, runmat_execution::value::ValueLimits::default(),
             )?;
+            (callable, BrowserWorkerRequest::Graph(request), Some(receipt))
+        } else {
+            let (callable, context, recipe, artifact, arguments) = runmat_vm::materialize_deferred_call(&call, future.outputs.clone(), target)?;
+            let request = ProgramExecutionRequest {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                recipe, artifact, callable: callable.clone(), context, assignment: None, job_id: None,
+                arguments, requested_outputs: future.outputs.requested_outputs,
+                environment: call.environment.clone(), console: call.console,
+            };
+            (callable, BrowserWorkerRequest::Direct(request), None)
+        };
+        let (recipe, artifact, invocation_context, arguments) = match &request {
+            BrowserWorkerRequest::Direct(r) => (&r.recipe, &r.artifact, r.context.clone(), r.arguments.clone()),
+            BrowserWorkerRequest::Graph(r) => (&r.recipe, &r.artifact, r.context.clone(), Vec::new()),
+            BrowserWorkerRequest::OwnedBuiltin(_) => unreachable!(),
+        };
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         let mut resources = browser_request(self.capabilities, recipe.accelerators.clone());
         let context_bytes =
@@ -755,6 +786,11 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .ok_or_else(|| {
                 ExecutionServiceError::Failed("invocation memory reservation overflow".into())
             })?;
+        if let BrowserWorkerRequest::Graph(graph) = &request {
+            let wire_bytes = serde_json::to_vec(graph).map_err(|e| ExecutionServiceError::Failed(e.to_string()))?;
+            resources.memory_bytes = resources.memory_bytes.max(graph.input_allocation_floor_bytes(wire_bytes.len()).map_err(|e| ExecutionServiceError::Failed(e.to_string()))?);
+            resources.scratch_bytes = resources.scratch_bytes.max(u64::try_from(wire_bytes.len()).map_err(|_| ExecutionServiceError::Failed("graph wire size exceeds u64".into()))?);
+        }
         recipe
             .validate_resource_request(&resources)
             .map_err(|error| {
@@ -762,12 +798,11 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     "browser scheduler resources do not satisfy the program: {error}"
                 ))
             })?;
-        let host = artifact
-            .execution_host_requirement(
-                &recipe,
-                BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
-            )
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        let trust = BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]);
+        let host = match &request {
+            BrowserWorkerRequest::Graph(graph) => graph.execution_host_requirement(trust),
+            _ => artifact.execution_host_requirement(recipe, trust),
+        }.map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         let mut state = self.state.borrow_mut();
         match state.futures.get(&future.id) {
             Some(FutureState::Materializing {
@@ -794,19 +829,6 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 parent: Some(self.scope_id),
             })
             .map_err(driver_error)?;
-        let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-            recipe: recipe.clone(),
-            artifact: artifact.clone(),
-            callable: callable.clone(),
-            context: invocation_context.clone(),
-            assignment: None,
-            job_id: None,
-            arguments: arguments.clone(),
-            requested_outputs: future.outputs.requested_outputs,
-            environment: call.environment.clone(),
-            console: call.console,
-        };
         let generation = 1;
         let actions = match state
             .driver
@@ -845,7 +867,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         };
         state
             .requests
-            .insert(task_id, BrowserWorkerRequest::Direct(request));
+            .insert(task_id, request);
         state.tasks.insert(
             task_id,
             TaskRecord {
@@ -861,7 +883,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             future.id,
             FutureState::Scheduled {
                 task_id,
-                receipt: None,
+                receipt,
             },
         );
         drop(state);
@@ -1223,7 +1245,9 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             Vec::new()
         };
         if let Some(task_id) = task_id {
-            self.state.borrow_mut().requests.remove(&task_id);
+            if !self.selected.borrow().contains_key(&task_id) {
+                self.state.borrow_mut().requests.remove(&task_id);
+            }
         }
         self.dispatch(actions);
         Ok(())

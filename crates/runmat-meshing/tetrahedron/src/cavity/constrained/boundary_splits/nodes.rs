@@ -104,11 +104,12 @@ pub(crate) fn boundary_edge_split_node(
     let points = edge.map(|node_id| boundary_nodes[&node_id]);
     ConstrainedCavityNode {
         node_id: next_available_node_id(boundary_nodes),
-        coordinates_m: [
-            points[0][0] * (1.0 - fraction) + points[1][0] * fraction,
-            points[0][1] * (1.0 - fraction) + points[1][1] * fraction,
-            points[0][2] * (1.0 - fraction) + points[1][2] * fraction,
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                points[0][0] * (1.0 - fraction) + points[1][0] * fraction,
+                points[0][1] * (1.0 - fraction) + points[1][1] * fraction,
+                points[0][2] * (1.0 - fraction) + points[1][2] * fraction,
+            ]),
     }
 }
 
@@ -126,20 +127,21 @@ pub(crate) fn boundary_edge_patch_split_node(
     ];
     ConstrainedCavityNode {
         node_id: next_available_node_id(boundary_nodes),
-        coordinates_m: [
-            weights[0] * points[0][0]
-                + weights[1] * points[1][0]
-                + weights[2] * points[2][0]
-                + weights[3] * points[3][0],
-            weights[0] * points[0][1]
-                + weights[1] * points[1][1]
-                + weights[2] * points[2][1]
-                + weights[3] * points[3][1],
-            weights[0] * points[0][2]
-                + weights[1] * points[1][2]
-                + weights[2] * points[2][2]
-                + weights[3] * points[3][2],
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                weights[0] * points[0][0]
+                    + weights[1] * points[1][0]
+                    + weights[2] * points[2][0]
+                    + weights[3] * points[3][0],
+                weights[0] * points[0][1]
+                    + weights[1] * points[1][1]
+                    + weights[2] * points[2][1]
+                    + weights[3] * points[3][1],
+                weights[0] * points[0][2]
+                    + weights[1] * points[1][2]
+                    + weights[2] * points[2][2]
+                    + weights[3] * points[3][2],
+            ]),
     }
 }
 
@@ -151,17 +153,18 @@ pub(crate) fn boundary_face_split_node(
     let points = face.map(|node_id| boundary_nodes[&node_id]);
     ConstrainedCavityNode {
         node_id: next_available_node_id(boundary_nodes),
-        coordinates_m: [
-            points[0][0] * barycentric[0]
-                + points[1][0] * barycentric[1]
-                + points[2][0] * barycentric[2],
-            points[0][1] * barycentric[0]
-                + points[1][1] * barycentric[1]
-                + points[2][1] * barycentric[2],
-            points[0][2] * barycentric[0]
-                + points[1][2] * barycentric[1]
-                + points[2][2] * barycentric[2],
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                points[0][0] * barycentric[0]
+                    + points[1][0] * barycentric[1]
+                    + points[2][0] * barycentric[2],
+                points[0][1] * barycentric[0]
+                    + points[1][1] * barycentric[1]
+                    + points[2][1] * barycentric[2],
+                points[0][2] * barycentric[0]
+                    + points[1][2] * barycentric[1]
+                    + points[2][2] * barycentric[2],
+            ]),
     }
 }
 

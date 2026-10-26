@@ -26,13 +26,13 @@ pub(super) fn tetrahedralize_points(
     }];
 
     for point_index in 0..input_points.len() {
-        let point = points[point_index].coordinates_m;
+        let point = points[point_index].coordinates_m.canonical_value();
         let mut bad_indices = Vec::<usize>::new();
         for (tetrahedron_index, tetrahedron) in tetrahedra.iter().enumerate() {
             if tetrahedron_circumsphere_contains_point(
                 tetrahedron
                     .vertices
-                    .map(|index| points[index].coordinates_m),
+                    .map(|index| points[index].coordinates_m.canonical_value()),
                 point,
                 MeshingTolerance::default(),
             ) {
@@ -66,7 +66,8 @@ pub(super) fn tetrahedralize_points(
             .collect();
         for face in cavity_faces {
             let vertices = [face[0], face[1], face[2], point_index];
-            let points_for_tetrahedron = vertices.map(|index| points[index].coordinates_m);
+            let points_for_tetrahedron =
+                vertices.map(|index| points[index].coordinates_m.canonical_value());
             if tetrahedron_signed_volume(points_for_tetrahedron).abs()
                 > MeshingTolerance::default().volume_epsilon(1.0)
             {
@@ -87,12 +88,12 @@ pub(super) fn tetrahedralize_points(
 }
 
 fn super_tetrahedron_points(points: &[ConnectivityPoint]) -> [ConnectivityPoint; 4] {
-    let mut min = points[0].coordinates_m;
-    let mut max = points[0].coordinates_m;
+    let mut min = points[0].coordinates_m.canonical_value();
+    let mut max = points[0].coordinates_m.canonical_value();
     for point in points {
         for axis in 0..3 {
-            min[axis] = min[axis].min(point.coordinates_m[axis]);
-            max[axis] = max[axis].max(point.coordinates_m[axis]);
+            min[axis] = min[axis].min(point.coordinates_m.canonical_value()[axis]);
+            max[axis] = max[axis].max(point.coordinates_m.canonical_value()[axis]);
         }
     }
     let center = [
@@ -108,22 +109,42 @@ fn super_tetrahedron_points(points: &[ConnectivityPoint]) -> [ConnectivityPoint;
     [
         ConnectivityPoint {
             node_id: u32::MAX - 3,
-            coordinates_m: [center[0] + radius, center[1], center[2] - radius],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([center[0] + radius, center[1], center[2] - radius]),
             is_super: true,
         },
         ConnectivityPoint {
             node_id: u32::MAX - 2,
-            coordinates_m: [center[0] - radius, center[1] + radius, center[2] - radius],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                center[0] - radius,
+                center[1] + radius,
+                center[2] - radius,
+            ]),
             is_super: true,
         },
         ConnectivityPoint {
             node_id: u32::MAX - 1,
-            coordinates_m: [center[0] - radius, center[1] - radius, center[2] - radius],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                center[0] - radius,
+                center[1] - radius,
+                center[2] - radius,
+            ]),
             is_super: true,
         },
         ConnectivityPoint {
             node_id: u32::MAX,
-            coordinates_m: [center[0], center[1], center[2] + radius],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([center[0], center[1], center[2] + radius]),
             is_super: true,
         },
     ]

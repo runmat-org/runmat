@@ -101,17 +101,19 @@ fn bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end() {
     assert_eq!(
         declaration.outputs["tip_history"],
         FeaType::History(FeaHistoryType {
-            sample: Box::new(FeaType::Quantity(PhysicalDimension::LENGTH)),
+            sample: Box::new(FeaType::Quantity((PhysicalDimension::LENGTH).into())),
             domain: Some(FeaSeriesDomain::Time),
         })
     );
     assert_eq!(
         declaration.outputs["variance_value"],
-        FeaType::Quantity(PhysicalDimension::LENGTH.power(2).unwrap())
+        FeaType::Quantity((PhysicalDimension::LENGTH.power(2).unwrap()).into())
     );
     assert_eq!(
         declaration.outputs["range"],
-        FeaType::Envelope(Box::new(FeaType::Quantity(PhysicalDimension::LENGTH)))
+        FeaType::Envelope(Box::new(FeaType::Quantity(
+            (PhysicalDimension::LENGTH).into()
+        )))
     );
 
     let study = program.studies.values().next().unwrap();
@@ -145,7 +147,7 @@ fn bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end() {
     assert_eq!(
         variance.result_quantity(),
         runmat_analysis_core::ObservationResultQuantity::Derived(
-            PhysicalDimension::LENGTH.power(2).unwrap()
+            PhysicalDimension::LENGTH.power(2).unwrap().into()
         )
     );
     assert!(matches!(

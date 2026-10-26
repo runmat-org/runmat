@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use runmat_geometry_core::{PersistentEntityId, UnitSystem};
+use runmat_geometry_core::{LengthUnit, PersistentEntityId};
 use runmat_meshing_core::{MeshingEvidence, MeshingRequestSettings, SolverMeshArtifact};
 
 pub use persistence::write_canonical_artifact_pair;
@@ -25,7 +25,7 @@ pub struct MeshingContactDefinition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshingExecutionRequest {
     pub source_path: PathBuf,
-    pub source_units: UnitSystem,
+    pub source_units: Option<LengthUnit>,
     pub expected_source_sha256: [u8; 32],
     pub settings: MeshingRequestSettings,
     pub contact_definitions: Vec<MeshingContactDefinition>,

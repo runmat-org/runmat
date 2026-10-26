@@ -29,7 +29,7 @@ pub struct NormalContactContribution {
     pub signed_gap_m: f64,
     /// Nominal traction per reference area, not spatial pressure per deformed area.
     pub nominal_pressure_pa: f64,
-    pub elastic_energy_j: f64,
+    pub elastic_energy_j: runmat_types::physical::Energy,
     pub query_internal_force_n: [f64; 3],
     primary_internal_force_n: [[f64; 3]; 6],
     count: usize,
@@ -84,7 +84,9 @@ impl NormalContactPoint {
         let response = NormalContactContribution {
             signed_gap_m: gap,
             nominal_pressure_pa: local.normal_pressure_pa,
-            elastic_energy_j: reference_area_m2 * local.normal_elastic_energy_j_per_m2,
+            elastic_energy_j: runmat_types::physical::Energy::new(
+                reference_area_m2 * local.normal_elastic_energy_j_per_m2,
+            ),
             query_internal_force_n: geometry
                 .gap_gradient_query
                 .map(|n| reference_area_m2 * traction * n),
@@ -97,7 +99,7 @@ impl NormalContactPoint {
             }),
             count,
         };
-        if !response.elastic_energy_j.is_finite()
+        if !response.elastic_energy_j.canonical_value().is_finite()
             || response
                 .query_internal_force_n
                 .iter()

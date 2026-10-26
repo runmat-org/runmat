@@ -46,7 +46,17 @@ fn changed(count: usize) -> TopologyMutation {
             let mut identity = [1; 32];
             identity[..8].copy_from_slice(&((nodes.len() + 1) as u64).to_be_bytes());
             node.identity = StableDigest::from_bytes(identity);
-            node.coordinates_m[0] += cluster as f64 * 8.0;
+            {
+                let quantity_change = cluster as f64 * 8.0;
+                let quantity_index = 0;
+                let quantity_slot = &mut node.coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
             if let runmat_meshing_core::quality::predicate::Point3Construction::Segment {
                 ref mut endpoints,
                 ..

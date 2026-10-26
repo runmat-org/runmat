@@ -44,7 +44,7 @@ pub(super) async fn run() {
                 .unwrap();
             let outward = density * speed * if id == "mass-inlet" { -1.0 } else { 1.0 };
             assert!((balance.mass_flow_rate_kg_per_s - outward).abs() < 1e-14);
-            assert!((balance.area_m2 - 1.0).abs() < 1e-14);
+            assert!((balance.area_m2.canonical_value() - 1.0).abs() < 1e-14);
         }
         eprintln!("scheduled signed mass flow speed={speed}, density={density}, rotated={rotated}: original fields, full state, receipts and cold publication preserved");
     }

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn write_canonical_artifact_pair(
@@ -95,7 +96,12 @@ impl StagedArtifact {
                 ));
             }
         }
-        let temporary = sibling_work_path(path, "tmp");
+        let temporary = sibling_work_path(path, "tmp")?;
+        let backup = if exists {
+            Some(sibling_work_path(path, "backup")?)
+        } else {
+            None
+        };
         runmat_filesystem::write(&temporary, bytes).map_err(|error| {
             format!(
                 "failed to write temporary artifact {}: {error}",
@@ -105,7 +111,7 @@ impl StagedArtifact {
         Ok(Self {
             target: path.to_path_buf(),
             temporary,
-            backup: exists.then(|| sibling_work_path(path, "backup")),
+            backup,
             published: false,
         })
     }
@@ -169,14 +175,22 @@ impl StagedArtifact {
     }
 }
 
-fn sibling_work_path(path: &Path, kind: &str) -> PathBuf {
-    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(1);
-    let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+fn sibling_work_path(path: &Path, kind: &str) -> Result<PathBuf, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let identity = {
+        static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(1);
+        let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+        format!("{}-{sequence}", std::process::id())
+    };
+    #[cfg(target_arch = "wasm32")]
+    let identity = {
+        let mut nonce = [0_u8; 16];
+        getrandom::getrandom(&mut nonce)
+            .map_err(|error| format!("failed to name temporary mesh artifact: {error}"))?;
+        format!("{:032x}", u128::from_le_bytes(nonce))
+    };
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    parent.join(format!(
-        ".runmat-meshing-{}-{sequence}.{kind}",
-        std::process::id(),
-    ))
+    Ok(parent.join(format!(".runmat-meshing-{identity}.{kind}")))
 }
 
 fn target_exists(path: &Path) -> Result<bool, String> {

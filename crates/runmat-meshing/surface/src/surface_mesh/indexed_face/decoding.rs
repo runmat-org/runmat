@@ -22,7 +22,8 @@ pub(super) struct DecodedFace {
     quality: QualityDecoded,
     boundary_segments: ExactVec<BoundaryRow>,
     joined_chart_cuts: ExactVec<ExactFaceMeshJoinedCut>,
-    maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    maximum_chordal_deviation_m: runmat_types::physical::Length,
     maximum_normal_deviation_rad: f64,
 }
 impl DecodedFace {
@@ -240,7 +241,9 @@ impl DecodedFace {
             triangles,
             boundary_segments,
             joined_chart_cuts: self.joined_chart_cuts.into_vec(),
-            maximum_chordal_deviation_m: self.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                self.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_normal_deviation_rad: self.maximum_normal_deviation_rad,
         })
     }

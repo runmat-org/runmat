@@ -54,10 +54,22 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
         .map(|face| dot(start, face.owner_area_vector_m2))
         .collect::<Vec<_>>();
     let previous = CanonicalFluidFields {
-        velocity_m_per_s: &u,
-        pressure_reference_pa: &zero,
-        pressure_fluctuation_pa: &zero,
-        face_volume_flux_m3_per_s: &q,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(&u),
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&zero),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&zero),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(&q),
     };
     let full =
         FluidTransientBlock::prepare(&model, &step.step_id, f.input(), previous, 0..3).unwrap();
@@ -69,7 +81,7 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
     for (index, r) in result.original_results().iter().enumerate() {
         let t = full.schedule().points_s()[index + 1];
         let expected: [f64; 3] = std::array::from_fn(|k| start[k] + t * acceleration[k]);
-        for v in &r.velocity_m_per_s {
+        for v in r.velocity_m_per_s.canonical_values() {
             assert!(norm(sub(*v, expected)) < 1e-8);
         }
         let p = CanonicalFluidProblem::prepare_at(
@@ -80,8 +92,11 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
             },
         )
         .unwrap();
-        let gradients =
-            super::super::pressure_gradient::evaluate(&p, &r.pressure_fluctuation_pa).unwrap();
+        let gradients = super::super::pressure_gradient::evaluate(
+            &p,
+            r.pressure_fluctuation_pa.canonical_values(),
+        )
+        .unwrap();
         for g in gradients {
             assert!(norm(add(g, acceleration)) < 2e-7);
         }
@@ -117,7 +132,10 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
     let mut wrong = u.clone();
     wrong[0][0] += 0.1;
     let wrong = CanonicalFluidFields {
-        velocity_m_per_s: &wrong,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(&wrong),
         ..previous
     };
     assert!(
@@ -247,10 +265,22 @@ fn gauge_jump_arrival_and_requested_time_survive_original_field_blocks() {
         .map(|face| dot(velocity, face.owner_area_vector_m2))
         .collect::<Vec<_>>();
     let initial = CanonicalFluidFields {
-        velocity_m_per_s: &u,
-        pressure_reference_pa: &zero,
-        pressure_fluctuation_pa: &zero,
-        face_volume_flux_m3_per_s: &q,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(&u),
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&zero),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(&zero),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(&q),
     };
     let block = FluidTransientBlock::prepare(&model, &step_id, f.input(), initial, 0..5).unwrap();
     assert_eq!(
@@ -274,12 +304,20 @@ fn gauge_jump_arrival_and_requested_time_survive_original_field_blocks() {
     );
     let result = block.execute().unwrap();
     for (i, r) in result.original_results().iter().enumerate() {
-        for v in &r.velocity_m_per_s {
+        for v in r.velocity_m_per_s.canonical_values() {
             assert!(norm(sub(*v, velocity)) < 1e-8);
         }
         let expected = if i < 2 { 0. } else { 1e16 };
-        assert!(r.pressure_reference_pa.iter().all(|v| *v == expected));
-        assert!(r.pressure_fluctuation_pa.iter().all(|v| v.abs() < 1e-7));
+        assert!(r
+            .pressure_reference_pa
+            .canonical_values()
+            .iter()
+            .all(|v| *v == expected));
+        assert!(r
+            .pressure_fluctuation_pa
+            .canonical_values()
+            .iter()
+            .all(|v| v.abs() < 1e-7));
     }
     let cold = FluidTransientBlockResult::from_canonical_bytes(&result.canonical_bytes().unwrap())
         .unwrap();

@@ -124,8 +124,10 @@ fn configure_thermo_mechanical_excitation(
             .thermal
             .as_mut()
             .expect("thermo-mechanical fixture declares thermal capability");
-        thermal.reference_temperature_k = reference_temperature_k;
-        thermal.expansion_coefficient_per_k = expansion_coefficient_per_k;
+        thermal.reference_temperature_k =
+            runmat_types::physical::Temperature::new(reference_temperature_k);
+        thermal.expansion_coefficient_per_k =
+            runmat_types::physical::ThermalExpansion::new(expansion_coefficient_per_k);
     }
     append_fixture_temperature_field(
         model,
@@ -142,11 +144,13 @@ fn configure_electro_thermal_excitation(model: &mut runmat_analysis_core::Analys
     });
     for material in &mut model.materials {
         material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-            reference_temperature_k,
-            conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            relative_permittivity: 1.0,
-            relative_permeability: 1.0,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                reference_temperature_k,
+            ),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.5e7),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(4.0e-4),
+            relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+            relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
             conductivity_frequency_response: Vec::new(),
         });
     }
@@ -874,7 +878,7 @@ fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
 #[test]
 fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
     let mut mesh = single_tetrahedron_solver_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0].provenance.push(PersistentEntityId {
         kind: PersistentEntityKind::Vertex,
         source_topology_id: "beam_root".into(),
@@ -919,7 +923,7 @@ fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
 #[test]
 fn conformal_solid_beam_shell_pipeline_recovers_every_formulation() {
     let mut mesh = single_tetrahedron_solver_mesh();
-    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m.canonical_value();
     mesh.topology.nodes[0].provenance.push(PersistentEntityId {
         kind: PersistentEntityKind::Vertex,
         source_topology_id: "beam_root".into(),
@@ -985,12 +989,12 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         nodes: vec![
             runmat_analysis_core::StructuralNode {
                 node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             runmat_analysis_core::StructuralNode {
                 node_id: 2,
-                coordinates_m: [length_m, 0.0, 0.0],
+                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([length_m, 0.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -1007,13 +1011,13 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         }],
         beam_sections: vec![runmat_analysis_core::BeamSectionModel {
             section_id: "rect".to_string(),
-            area_m2: 2.0e-4,
-            iy_m4: 1.6e-9,
-            iz_m4,
-            torsion_j_m4: 2.4e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.005,
-            torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(2.0e-4),
+            iy_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(1.6e-9),
+            iz_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(iz_m4),
+            torsion_j_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.011_180_339_887_498_949),
         }],
         shell_sections: Vec::new(),
     });
@@ -2648,8 +2652,10 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         .position(|node| node.node_id == 4)
         .unwrap();
     let delta = std::array::from_fn::<_, 3, _>(|component| {
-        mesh.topology.nodes[secondary].coordinates_m[component]
-            - mesh.topology.nodes[primary].coordinates_m[component]
+        mesh.topology.nodes[secondary]
+            .coordinates_m
+            .canonical_value()[component]
+            - mesh.topology.nodes[primary].coordinates_m.canonical_value()[component]
     });
     let length = delta.iter().map(|value| value * value).sum::<f64>().sqrt();
     let axis = delta.map(|value| value / length);
@@ -4223,8 +4229,8 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
     assert_eq!(result.energy_balances.len(), 2);
     for balance in &result.energy_balances {
         balance.validate().unwrap();
-        assert!(balance.applied_power_w > 0.0);
-        assert!(balance.prescribed_boundary_power_w.abs() > 0.0);
+        assert!(balance.applied_power_w.canonical_value() > 0.0);
+        assert!(balance.prescribed_boundary_power_w.canonical_value().abs() > 0.0);
         assert!(balance.relative_residual <= result.residual_target);
     }
     assert!(result

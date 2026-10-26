@@ -118,7 +118,8 @@ impl AnalysisProjection {
                 .ok_or(AnalysisProjectionError::InvalidElementGeometry {
                     element_id: element.element_id,
                 })?
-                .coordinates_m;
+                .coordinates_m
+                .canonical_value();
         }
         super::quadrature::visit_volume_quadrature(
             element.order,
@@ -189,7 +190,8 @@ impl AnalysisProjection {
                 .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
                     face_id: face.face_id,
                 })?
-                .coordinates_m;
+                .coordinates_m
+                .canonical_value();
         }
         let raw_normal = super::element::cross(
             super::element::subtract(coordinates[1], coordinates[0]),
@@ -208,7 +210,8 @@ impl AnalysisProjection {
 pub struct ProjectedNode {
     pub node_id: u64,
     pub stable_identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,7 +272,7 @@ pub struct ProjectedBoundaryFace {
     pub centroid_m: [f64; 3],
     pub oriented_area_vector_m2: [f64; 3],
     pub normal_orientation: BoundaryNormalOrientation,
-    pub area_m2: f64,
+    pub area_m2: runmat_types::physical::Area,
 }
 
 #[derive(Debug, Clone, Copy)]

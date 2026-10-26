@@ -8,16 +8,22 @@ pub(super) fn element(order: ElementOrder) -> (SolidRecoveryElementSummary, Vec<
         .topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect();
     let geometry = match order {
         ElementOrder::Tet4 => SolidRecoveryGeometry::Tetrahedron4 {
             node_indices: std::array::from_fn(|i| i),
-            coordinates_m: coordinates.clone().try_into().unwrap(),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates.clone().try_into().unwrap()),
         },
         ElementOrder::Tet10 => SolidRecoveryGeometry::Tetrahedron10 {
             node_indices: std::array::from_fn(|i| i),
-            coordinates_m: coordinates.clone().try_into().unwrap(),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates.clone().try_into().unwrap()),
         },
     };
     (
@@ -25,9 +31,9 @@ pub(super) fn element(order: ElementOrder) -> (SolidRecoveryElementSummary, Vec<
             element_id: "patch".into(),
             region_id: "solid".into(),
             material: SolidMaterial {
-                youngs_modulus_pa: 100.0,
-                poisson_ratio: 0.25,
-                density_kg_per_m3: 1.0,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+                density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
             },
             thermal_eigenstrain: None,
             prescribed_temperature_k: None,
@@ -40,14 +46,19 @@ pub(super) fn element(order: ElementOrder) -> (SolidRecoveryElementSummary, Vec<
 
 fn thermal(element: &mut SolidRecoveryElementSummary, coordinates: &[[f64; 3]], gradient: f64) {
     element.solved_thermal_quadrature = Some(SolvedThermalRecoveryQuadrature {
-        nodal_temperature_k: coordinates
-            .iter()
-            .map(|x| 300.0 + 10.0 + gradient * x[0])
-            .collect(),
-        expansion_coefficient_per_k: 0.001,
-        reference_temperature_k: 300.0,
+        nodal_temperature_k: runmat_types::physical::Quantity::new(
+            coordinates
+                .iter()
+                .map(|x| 300.0 + 10.0 + gradient * x[0])
+                .collect::<Vec<_>>(),
+        ),
+        expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(0.001),
+        reference_temperature_k: runmat_types::physical::Temperature::new(300.0),
         // These legacy recovery samples must not drive integration at different points.
-        temperature_k: [999.0; 4],
+        temperature_k: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Temperature,
+            _,
+        >::new([999.0; 4]),
         eigenstrain: [123.0; 4],
     });
 }
@@ -106,7 +117,12 @@ fn quadratic_temperature_geometric_moment_requires_higher_than_four_point_rule()
         .solved_thermal_quadrature
         .as_mut()
         .unwrap()
-        .nodal_temperature_k = coordinates.iter().map(|x| 300.0 + x[0] * x[0]).collect();
+        .nodal_temperature_k = runmat_types::physical::Quantity::new(
+        coordinates
+            .iter()
+            .map(|x| 300.0 + x[0] * x[0])
+            .collect::<Vec<_>>(),
+    );
     let result = integrate::<30>(
         &element,
         &[[0.0; 3]; 10],
@@ -208,12 +224,17 @@ fn genuinely_curved_free_expansion_converges_at_physical_roundoff_scale() {
         coordinates[4][0] += 0.02;
         element.geometry = SolidRecoveryGeometry::Tetrahedron10 {
             node_indices: std::array::from_fn(|i| i),
-            coordinates_m: coordinates.clone().try_into().unwrap(),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates.clone().try_into().unwrap()),
         };
         assert!(!tetrahedron10_is_affine(Tetrahedron10ElementGeometry {
             nodes_m: coordinates.clone().try_into().unwrap(),
         }));
-        element.material.youngs_modulus_pa *= modulus_factor;
+        element.material.youngs_modulus_pa = runmat_types::physical::Quantity::new(
+            element.material.youngs_modulus_pa.canonical_value() * (modulus_factor),
+        );
         thermal(&mut element, &coordinates, 0.0);
         // Isoparametric partition of unity reproduces u=alpha*deltaT*x exactly,
         // including on genuinely curved geometry. The exact physical stress is zero.
@@ -239,6 +260,7 @@ fn genuinely_curved_free_expansion_converges_at_physical_roundoff_scale() {
             .iter()
             .flatten()
             .flatten()
-            .all(|value| value.abs() <= 256.0 * f64::EPSILON * element.material.youngs_modulus_pa));
+            .all(|value| value.abs()
+                <= 256.0 * f64::EPSILON * element.material.youngs_modulus_pa.canonical_value()));
     }
 }

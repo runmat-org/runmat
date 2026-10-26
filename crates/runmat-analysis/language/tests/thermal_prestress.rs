@@ -76,7 +76,7 @@ fn explicit_domains_and_named_thermal_state_survive_checked_realization() {
             .as_ref()
             .unwrap()
             .reference_temperature
-            .kelvin,
+            .canonical_value(),
         293.15
     );
     assert_eq!(
@@ -86,7 +86,7 @@ fn explicit_domains_and_named_thermal_state_survive_checked_realization() {
             .as_ref()
             .unwrap()
             .reference_temperature
-            .kelvin,
+            .canonical_value(),
         300.0
     );
     let preload = &realized.sequence.steps[1];

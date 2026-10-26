@@ -9,7 +9,8 @@
       "files": [
         "cantilever-static.fea",
         "cantilever-load.svg",
-        "geometry/cantilever.step"
+        "geometry/cantilever.step",
+        "geometry/.runmat/geometry/cantilever.step.json"
       ],
       "expected_outputs": [
         "Node displacement, in metres",
@@ -61,7 +62,8 @@
       "entry": "structural-static-experimental.fea",
       "files": [
         "structural-static-experimental.fea",
-        "geometry/two-box-assembly.step"
+        "geometry/two-box-assembly.step",
+        "geometry/.runmat/geometry/two-box-assembly.step.json"
       ],
       "expected_outputs": [
         "Node displacement, in metres",
@@ -87,7 +89,8 @@
         "heatsink-setup.svg",
         "geometry/electronics-heatsink.step",
         "geometry/KICAD-LICENSE.md",
-        "geometry/electronics-heatsink-provenance.md"
+        "geometry/electronics-heatsink-provenance.md",
+        "geometry/.runmat/geometry/electronics-heatsink.step.json"
       ],
       "expected_outputs": [
         "Node temperature, in kelvin",
@@ -141,7 +144,8 @@
         "tuning-fork-modal.fea",
         "tuning-fork-setup.svg",
         "geometry/tuning-fork.step",
-        "geometry/generate-tuning-fork.cc"
+        "geometry/generate-tuning-fork.cc",
+        "geometry/.runmat/geometry/tuning-fork.step.json"
       ],
       "expected_outputs": [
         "Natural frequencies, in hertz",
@@ -193,7 +197,8 @@
       "entry": "cantilever-coarse.fea",
       "files": [
         "cantilever-coarse.fea",
-        "geometry/cantilever.step"
+        "geometry/cantilever.step",
+        "geometry/.runmat/geometry/cantilever.step.json"
       ],
       "expected_outputs": [
         "Node displacement, in metres",
@@ -238,7 +243,8 @@
       "entry": "cantilever-medium.fea",
       "files": [
         "cantilever-medium.fea",
-        "geometry/cantilever.step"
+        "geometry/cantilever.step",
+        "geometry/.runmat/geometry/cantilever.step.json"
       ],
       "expected_outputs": [
         "Node displacement, in metres",

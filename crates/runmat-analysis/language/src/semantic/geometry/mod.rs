@@ -13,12 +13,12 @@ use crate::{
     FeaSymbolKind, FeaSymbolOrigin, GeometryInspectionCapability, LogicalSourcePath,
 };
 use runmat_geometry_core::{
-    Ap242ParameterAccess, Ap242PhysicalDimension, CadParameterAccess, CadParameterDefinition,
-    CadParameterPhysicalType, CadParameterSelector, DerivedGeometryDefinition,
-    GeometryAuthoringCapabilities, GeometryDefinition, GeometryDefinitionRef,
-    GeometryDefinitionSource, GeometryDigest, GeometryRegionCardinality, GeometryRegionDefinition,
-    GeometryRegionRole, GeometryRegionSelector, GeometrySourceFormat, ImportedGeometryDefinition,
-    UnitSystem,
+    Ap242ParameterAccess, CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType,
+    CadParameterSelector, DerivedGeometryDefinition, GeometryAuthoringCapabilities,
+    GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
+    GeometryRegionCardinality, GeometryRegionDefinition, GeometryRegionRole,
+    GeometryRegionSelector, GeometrySourceFormat, ImportedGeometryDefinition, LengthUnit,
+    QuantityKind,
 };
 use std::collections::BTreeMap;
 
@@ -101,8 +101,8 @@ fn definition(
         let Some(inspection) = inspection else {
             // The inspection diagnostic (missing file, undeclared length unit,
             // import failure) states the cause at the same declaration.
-            let file_span = imported_file(&declaration.statements)
-                .map_or(declaration.span, |file| file.span);
+            let file_span =
+                imported_file(&declaration.statements).map_or(declaration.span, |file| file.span);
             let message = format!(
                 "imported geometry `{}` could not be inspected; see the inspection diagnostic for its file",
                 declaration.key.name
@@ -110,7 +110,7 @@ fn definition(
             error(declaration, file_span, message, diagnostics);
             return None;
         };
-        imported_source(declaration, inspection, diagnostics)
+        imported_source(declaration, inspection, diagnostics)?
     } else if let Some(statements) = construct {
         if declaration.source.is_some() {
             error(
@@ -148,6 +148,16 @@ fn definition(
             diagnostics,
         )?
     };
+    if let GeometryDefinitionSource::Imported(imported) = &source {
+        for region in &regions {
+            if let GeometryRegionSelector::Name(name) = &region.selector {
+                match &imported.named_selections {
+                    Some(metadata) => if let Err(reason) = metadata.selection(name, region.role) { error(declaration, declaration.span, reason.to_string(), diagnostics); },
+                    None => error(declaration, declaration.span, format!("Named selection `{name}` is not saved for this CAD asset. Select its geometry and save the selection before continuing."), diagnostics),
+                }
+            }
+        }
+    }
     Some(GeometryDefinition {
         module_path: declaration.module.as_str().to_string(),
         geometry_id: declaration.key.name.clone(),
@@ -168,9 +178,8 @@ fn imported_source(
     declaration: &CheckedFeaDeclaration,
     inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> GeometryDefinitionSource {
-    let units =
-        imported_units(declaration, inspection, diagnostics).unwrap_or(UnitSystem::Unspecified);
+) -> Option<GeometryDefinitionSource> {
+    let units = imported_units(declaration, inspection, diagnostics);
     let format = source_format(inspection.source_path.as_str()).unwrap_or_else(|| {
         error(
             declaration,
@@ -180,15 +189,23 @@ fn imported_source(
         );
         GeometrySourceFormat::Step
     });
-    GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
-        logical_path: inspection.source_path.as_str().to_string(),
-        format,
-        units,
-        content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
-        topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
-        capabilities: capabilities(inspection),
-        exchange: inspection.facts.exchange.clone(),
-    })
+    Some(GeometryDefinitionSource::Imported(
+        ImportedGeometryDefinition {preview_extent_m: inspection.facts.preview_extent_m, 
+            named_selections: inspection.facts.named_selections.clone(),
+            unit_evidence: inspection
+                .facts
+                .unit_evidence
+                .clone()
+                .resolve_fallback(units, "authored geometry units"),
+            logical_path: inspection.source_path.as_str().to_string(),
+            format,
+            unit_fallback: units,
+            content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
+            topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
+            capabilities: capabilities(inspection),
+            exchange: inspection.facts.exchange.clone(),
+        },
+    ))
 }
 
 fn named_block<'a>(
@@ -274,15 +291,12 @@ fn imported_units(
     declaration: &CheckedFeaDeclaration,
     inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<UnitSystem> {
+) -> Option<LengthUnit> {
     let Some(value) = assignment(&declaration.statements, "units") else {
-        // Omitted units use the single length unit the file declares.
-        if let Some(units) = inspection
-            .facts
-            .resolved_units
-            .filter(|units| *units != UnitSystem::Unspecified)
-        {
-            return Some(units);
+        // File declarations (including mixed contexts) establish scale. The
+        // optional authored unit is only a fallback for genuinely unitless input.
+        if inspection.facts.unit_evidence.physical_scale_resolved() {
+            return None;
         }
         error(
             declaration,
@@ -305,9 +319,9 @@ fn imported_units(
         return None;
     };
     match unit.as_str() {
-        "m" | "meter" | "meters" => Some(UnitSystem::Meter),
-        "mm" | "millimeter" | "millimeters" => Some(UnitSystem::Millimeter),
-        "in" | "inch" | "inches" => Some(UnitSystem::Inch),
+        "m" | "meter" | "meters" => Some(LengthUnit::Meter),
+        "mm" | "millimeter" | "millimeters" => Some(LengthUnit::Millimeter),
+        "in" | "inch" | "inches" => Some(LengthUnit::Inch),
         _ => {
             error(
                 declaration,
@@ -442,7 +456,7 @@ fn lower_cad_parameter(
         );
         return None;
     };
-    if source.value.dimension != physical_dimension(physical_type) {
+    if source.value.kind() != physical_dimension(physical_type) {
         error(
             declaration,
             *header_span,
@@ -450,7 +464,7 @@ fn lower_cad_parameter(
                 "CAD parameter `{}` is declared as `{}` but the source has dimension `{:?}`",
                 name.trim(),
                 physical_type_name(physical_type),
-                source.value.dimension
+                source.value.kind()
             ),
             diagnostics,
         );
@@ -478,15 +492,15 @@ fn lower_cad_parameter(
     })
 }
 
-fn physical_dimension(value: CadParameterPhysicalType) -> Ap242PhysicalDimension {
+fn physical_dimension(value: CadParameterPhysicalType) -> QuantityKind {
     match value {
-        CadParameterPhysicalType::Dimensionless => Ap242PhysicalDimension::Dimensionless,
-        CadParameterPhysicalType::Length => Ap242PhysicalDimension::Length,
-        CadParameterPhysicalType::Angle => Ap242PhysicalDimension::PlaneAngle,
-        CadParameterPhysicalType::Area => Ap242PhysicalDimension::Area,
-        CadParameterPhysicalType::Volume => Ap242PhysicalDimension::Volume,
-        CadParameterPhysicalType::Mass => Ap242PhysicalDimension::Mass,
-        CadParameterPhysicalType::Temperature => Ap242PhysicalDimension::Temperature,
+        CadParameterPhysicalType::Dimensionless => QuantityKind::Dimensionless,
+        CadParameterPhysicalType::Length => QuantityKind::Length,
+        CadParameterPhysicalType::Angle => QuantityKind::Angle,
+        CadParameterPhysicalType::Area => QuantityKind::Area,
+        CadParameterPhysicalType::Volume => QuantityKind::Volume,
+        CadParameterPhysicalType::Mass => QuantityKind::Mass,
+        CadParameterPhysicalType::Temperature => QuantityKind::Temperature,
     }
 }
 

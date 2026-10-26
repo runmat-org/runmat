@@ -19,7 +19,7 @@ pub(in crate::cdt::facet_recovery) fn star_refill(
             topology
                 .nodes
                 .get(node as usize)
-                .map(|node| node.coordinates_m)
+                .map(|node| node.coordinates_m.canonical_value())
         }) else {
             continue;
         };

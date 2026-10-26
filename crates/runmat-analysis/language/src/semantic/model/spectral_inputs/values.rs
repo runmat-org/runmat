@@ -159,7 +159,7 @@ pub(super) fn quantity_vector(
     dimension: PhysicalDimension,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Vec<f64>> {
-    if leaf_type(&expression.value_type) != Some(FeaType::Quantity(dimension)) {
+    if leaf_type(&expression.value_type) != Some(FeaType::Quantity((dimension).into())) {
         invalid(
             declaration,
             expression,
@@ -206,7 +206,7 @@ pub(super) fn quantity_tensor3(
     dimension: PhysicalDimension,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Vec<Vec<Vec<f64>>>> {
-    if leaf_type(&expression.value_type) != Some(FeaType::Quantity(dimension)) {
+    if leaf_type(&expression.value_type) != Some(FeaType::Quantity((dimension).into())) {
         invalid(
             declaration,
             expression,
@@ -341,15 +341,9 @@ enum NumericalTree {
 
 fn numerical_tree(expression: &CheckedExpression) -> Option<NumericalTree> {
     match &expression.kind {
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-        } => scale_tree(
-            numerical_tree(value)?,
-            f64::from_bits(*scale_bits),
-            f64::from_bits(*offset_bits),
-        ),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            scale_tree(numerical_tree(value)?, unit.scale(), unit.offset())
+        }
         CheckedExpressionKind::List(values) => Some(NumericalTree::List(
             values.iter().map(numerical_tree).collect::<Option<_>>()?,
         )),

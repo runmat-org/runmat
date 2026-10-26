@@ -251,6 +251,7 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
     let parameter_model = tabulated_force_model(
         runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
             parameter_id: "load_scale".into(),
+            quantity: Some(runmat_types::PhysicalDimension::DIMENSIONLESS.into()),
         },
         vec![0.0, 1.0],
     );
@@ -277,6 +278,7 @@ fn static_excitation_accepts_only_coordinate_independent_tables() {
         runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
         runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
             parameter_id: "load_scale".into(),
+            quantity: Some(runmat_types::PhysicalDimension::DIMENSIONLESS.into()),
         },
     ] {
         let mut model = tabulated_force_model(domain, vec![0.0, 1.0]);
@@ -559,6 +561,7 @@ fn rejects_nonfinite_and_mismatched_parameter_samples() {
     let parameter_model = tabulated_force_model(
         runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
             parameter_id: "load_scale".into(),
+            quantity: Some(runmat_types::PhysicalDimension::DIMENSIONLESS.into()),
         },
         vec![0.0, 1.0],
     );

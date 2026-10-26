@@ -219,7 +219,63 @@ pub async fn study_parameter_domain(parameter_id: String) -> BuiltinResult<Value
     }
     domain_object(
         "fea.SignalDomain.studyParameter",
-        GeneratorDomain::StudyParameter { parameter_id },
+        GeneratorDomain::StudyParameter {
+            parameter_id,
+            quantity: None,
+        },
+    )
+}
+
+const STUDY_PARAMETER_UNIT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    required("parameterId", BuiltinParamType::StringScalar, "Stable study-parameter identifier."),
+    required("canonicalUnits", BuiltinParamType::StringScalar,
+        "Canonical coordinate units (m, N, rad, 1, etc.); sampling policy numbers are already canonical."),
+];
+const STUDY_PARAMETER_UNIT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "domain = fea.SignalDomain.studyParameterWithUnits(parameterId, canonicalUnits)",
+        inputs: &STUDY_PARAMETER_UNIT_INPUTS,
+        outputs: &OUT_POLICY,
+    }];
+const STUDY_PARAMETER_UNIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STUDY_PARAMETER_UNIT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+#[runtime_builtin(
+    name = "fea.SignalDomain.studyParameterWithUnits",
+    category = "fea",
+    summary = "Declare a named signal axis with explicit canonical coordinate units.",
+    keywords = "fea,signal,generator,domain,parameter,units",
+    descriptor(STUDY_PARAMETER_UNIT_DESCRIPTOR),
+    integer_audit(NO_NUMERIC_AUDIT),
+    builtin_path = "crate::builtins::fea::generator_policies"
+)]
+pub async fn study_parameter_domain_with_units(
+    parameter_id: String,
+    canonical_units: String,
+) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.SignalDomain.studyParameterWithUnits";
+    if parameter_id.trim().is_empty() {
+        return Err(builtin_error(
+            NAME,
+            &ERROR_INPUT,
+            "study parameter id must not be empty",
+        ));
+    }
+    let unit = runmat_types::physical::parse_unit_expression(&canonical_units)
+        .map_err(|e| builtin_error(NAME, &ERROR_INPUT, e.to_string()))?;
+    if unit.scale() != 1.0 || unit.offset() != 0.0 {
+        return Err(builtin_error(NAME, &ERROR_INPUT,
+            "sampling numbers are canonical; specify canonical units such as m, rad or K and convert the source values first"));
+    }
+    domain_object(
+        NAME,
+        GeneratorDomain::StudyParameter {
+            parameter_id,
+            quantity: Some(runmat_types::physical::DynamicDimension::from_unit(unit)),
+        },
     )
 }
 
@@ -442,6 +498,10 @@ pub(super) fn ensure_generator_policy_classes_registered() {
                 ("time", "fea.SignalDomain.time"),
                 ("frequency", "fea.SignalDomain.frequency"),
                 ("studyParameter", "fea.SignalDomain.studyParameter"),
+                (
+                    "studyParameterWithUnits",
+                    "fea.SignalDomain.studyParameterWithUnits",
+                ),
             ]),
         );
         register_value_class(
@@ -474,7 +534,8 @@ mod tests {
         assert_eq!(
             domain_from_value("test", &domain).unwrap(),
             GeneratorDomain::StudyParameter {
-                parameter_id: "load_scale".into()
+                parameter_id: "load_scale".into(),
+                quantity: None,
             }
         );
         let sampling = block_on(uniform_sampling(

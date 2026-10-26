@@ -161,6 +161,7 @@ fn topology_edges_do_not_bypass_exact_polygon_orientation() {
                     let [a, b, c] = triangle.node_identities.map(|identity| {
                         recovery.topology.nodes[node_index(&recovery.topology, identity).unwrap()]
                             .coordinates_m
+                            .canonical_value()
                     });
                     ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) * 0.5
                 })

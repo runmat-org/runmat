@@ -100,19 +100,27 @@ pub(crate) fn response_at_volume_point(
     ];
     let eigenstrain = if let Some(thermal) = &element.solved_thermal_quadrature {
         if element.thermal_eigenstrain.is_some()
-            || thermal.nodal_temperature_k.len() != count
+            || thermal.nodal_temperature_k.canonical_values().len() != count
             || thermal
                 .nodal_temperature_k
+                .canonical_values()
                 .iter()
                 .any(|value| !value.is_finite() || *value <= 0.0)
-            || !thermal.reference_temperature_k.is_finite()
-            || thermal.reference_temperature_k <= 0.0
-            || !thermal.expansion_coefficient_per_k.is_finite()
+            || !thermal
+                .reference_temperature_k
+                .canonical_value()
+                .is_finite()
+            || thermal.reference_temperature_k.canonical_value() <= 0.0
+            || !thermal
+                .expansion_coefficient_per_k
+                .canonical_value()
+                .is_finite()
         {
             return Err(SolidResponseError::InvalidInput);
         }
         let temperature = thermal
             .nodal_temperature_k
+            .canonical_values()
             .iter()
             .zip(shapes)
             .map(|(value, shape)| value * shape)
@@ -120,7 +128,8 @@ pub(crate) fn response_at_volume_point(
         if !temperature.is_finite() || temperature <= 0.0 {
             return Err(SolidResponseError::InvalidInput);
         }
-        thermal.expansion_coefficient_per_k * (temperature - thermal.reference_temperature_k)
+        thermal.expansion_coefficient_per_k.canonical_value()
+            * (temperature - thermal.reference_temperature_k.canonical_value())
     } else {
         element.thermal_eigenstrain.unwrap_or(0.0)
     };
@@ -134,9 +143,9 @@ mod tests {
     #[test]
     fn physical_response_subtracts_only_isotropic_normal_eigenstrain() {
         let material = SolidMaterial {
-            youngs_modulus_pa: 100.0,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
         let free = response_from_strain(material, [0.01, 0.01, 0.01, 0.0, 0.0, 0.0], 0.01).unwrap();
         assert_eq!(free.stress, [0.0; 6]);
@@ -165,22 +174,33 @@ mod tests {
             .topology
             .nodes
             .iter()
-            .map(|node| thermal.reference_temperature_k + 100.0 * node.coordinates_m[0].powi(2))
+            .map(|node| {
+                thermal.reference_temperature_k.canonical_value()
+                    + 100.0 * node.coordinates_m.canonical_value()[0].powi(2)
+            })
             .collect::<Vec<_>>();
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-        let mut elements =
-            solid_recovery::build(&mesh, &properties, None, Some(&temperature)).unwrap();
+        let mut elements = solid_recovery::build(
+            &mesh,
+            &properties,
+            None,
+            Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Temperature,
+                _,
+            >::new(temperature.as_slice())),
+        )
+        .unwrap();
         let element = &mut elements[0];
         // Deliberately poison the four visualization/recovery samples: arbitrary-point
         // integration must use the complete nodal polynomial, not fit these samples.
         let cached = element.solved_thermal_quadrature.as_mut().unwrap();
-        cached.temperature_k = [1.0; 4];
+        cached.temperature_k = runmat_types::physical::Quantity::new([1.0; 4]);
         cached.eigenstrain = [123.0; 4];
         let coordinates = mesh
             .topology
             .nodes
             .iter()
-            .map(|node| node.coordinates_m)
+            .map(|node| node.coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         let mut visited = 0;
         visit_volume_rule(
@@ -190,11 +210,11 @@ mod tests {
             |point| {
                 visited += 1;
                 let response = response_at_volume_point(element, &[[0.0; 3]; 10], &point).unwrap();
-                let expected = -mechanical.youngs_modulus_pa
-                    * thermal.expansion_coefficient_per_k
+                let expected = -mechanical.youngs_modulus_pa.canonical_value()
+                    * thermal.expansion_coefficient_per_k.canonical_value()
                     * 100.0
                     * point.position_m[0].powi(2)
-                    / (1.0 - 2.0 * mechanical.poisson_ratio);
+                    / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
                 for actual in &response.stress[..3] {
                     assert!((actual - expected).abs() < 1.0e-6 + expected.abs() * 1.0e-10);
                 }
@@ -204,12 +224,18 @@ mod tests {
                     Err(SolidResponseError::InvalidInput)
                 );
                 let mut invalid = element.clone();
-                invalid
+                let nodal = &mut invalid
                     .solved_thermal_quadrature
                     .as_mut()
                     .unwrap()
-                    .nodal_temperature_k
-                    .pop();
+                    .nodal_temperature_k;
+                *nodal = nodal
+                    .clone()
+                    .try_map_canonical_storage(|mut values| {
+                        values.pop();
+                        values
+                    })
+                    .unwrap();
                 assert_eq!(
                     response_at_volume_point(&invalid, &[[0.0; 3]; 10], &point),
                     Err(SolidResponseError::InvalidInput)

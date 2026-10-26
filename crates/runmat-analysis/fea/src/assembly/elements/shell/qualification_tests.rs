@@ -129,7 +129,8 @@ fn assemble_triangle(
     let area = geometry
         .local_frame()
         .expect("valid triangle frame")
-        .area_m2;
+        .area_m2
+        .canonical_value();
     let centroid = [
         geometry.nodes_m.iter().map(|node| node[0]).sum::<f64>() / 3.0,
         geometry.nodes_m.iter().map(|node| node[1]).sum::<f64>() / 3.0,
@@ -155,23 +156,24 @@ fn assemble_triangle(
 }
 
 fn navier_center_deflection() -> f64 {
-    let bending_rigidity = material().youngs_modulus_pa * section().thickness_m.powi(3)
-        / (12.0 * (1.0 - material().poisson_ratio.powi(2)));
+    let bending_rigidity = material().youngs_modulus_pa.canonical_value()
+        * section().thickness_m.canonical_value().powi(3)
+        / (12.0 * (1.0 - material().poisson_ratio.canonical_value().powi(2)));
     1.0 / (4.0 * std::f64::consts::PI.powi(4) * bending_rigidity)
 }
 
 fn section() -> ShellSection {
     ShellSection {
-        thickness_m: 0.01,
-        reference_offset_m: 0.0,
+        thickness_m: runmat_types::physical::Length::new(0.01),
+        reference_offset_m: runmat_types::physical::Length::new(0.0),
         shear_correction: 5.0 / 6.0,
     }
 }
 
 fn material() -> ShellMaterial {
     ShellMaterial {
-        youngs_modulus_pa: 200.0e9,
-        poisson_ratio: 0.3,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
         shear_modulus_pa: 200.0e9 / (2.0 * 1.3),
     }
 }

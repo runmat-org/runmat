@@ -66,11 +66,14 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
         };
         registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
             definition: ExactSurfaceDefinition::Cylinder {
-                origin_m: [0.; 3],
+                origin_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.; 3]),
                 x_axis: [1., 0., 0.],
                 y_axis: [0., 1., 0.],
                 axis_m_per_v: [0., 0., 1.],
-                radius_m: 1.,
+                radius_m: runmat_types::physical::Length::new(1.),
                 domains: [
                     ParameterRange {
                         start: 0.,
@@ -94,7 +97,7 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
             contributions: vec![],
         };
         let curve_quality = CurveQualityTargets {
-            maximum_chordal_deviation_m: 0.001,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.001),
             maximum_tangent_change_degrees: 5.,
             minimum_metric_edge_length: 0.01,
             maximum_metric_edge_length: 1.5,
@@ -103,7 +106,7 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
             minimum_metric_edge_length: 0.1,
             minimum_metric_angle_degrees: 20.,
             maximum_physical_aspect_ratio: 10.,
-            maximum_chordal_deviation_m: 0.001,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.001),
             maximum_normal_deviation_degrees: 5.,
         };
         let derived = derive_curve_geometry_metric(

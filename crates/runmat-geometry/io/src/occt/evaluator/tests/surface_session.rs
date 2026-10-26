@@ -46,7 +46,7 @@ fn session_surface_inventory_is_admitted_before_native_reconstruction() {
         let control = AllocationLimit(AtomicU64::new(ceiling));
         let error = OcctExactEvaluator::from_closure_controlled(
             &imported.representation,
-            imported.meters_per_source_unit,
+            imported.kernel_units.meters_per_unit(),
             &imported.topology,
             &imported.evaluators,
             &control,
@@ -61,7 +61,7 @@ fn session_surface_inventory_is_admitted_before_native_reconstruction() {
     let control = AllocationLimit(AtomicU64::new(representation_bytes + 48 * face_count));
     let evaluator = OcctExactEvaluator::from_closure_controlled(
         &imported.representation,
-        imported.meters_per_source_unit,
+        imported.kernel_units.meters_per_unit(),
         &imported.topology,
         &imported.evaluators,
         &control,
@@ -97,7 +97,7 @@ fn session_surface_bounds_preserve_trim_admission_and_original_geometry() {
         let direct = OcctExactEvaluator::new(&imported).unwrap();
         let cold = OcctExactEvaluator::from_closure(
             &imported.representation,
-            imported.meters_per_source_unit,
+            imported.kernel_units.meters_per_unit(),
             &imported.topology,
             &imported.evaluators,
         )

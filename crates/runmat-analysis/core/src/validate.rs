@@ -1,4 +1,3 @@
-use runmat_geometry_core::UnitSystem;
 use thiserror::Error;
 
 use crate::{
@@ -117,13 +116,6 @@ pub enum AnalysisValidationError {
     #[error("ANALYSIS_DEPENDENCY_GRAPH_RESOURCE_OVERFLOW: dependency index inventory overflows")]
     DependencyGraphResourceOverflow,
     #[error(
-        "ANALYSIS_VALIDATION_UNIT_MISMATCH: model units {model:?} do not match geometry units {geometry:?}"
-    )]
-    UnitMismatch {
-        model: UnitSystem,
-        geometry: UnitSystem,
-    },
-    #[error(
         "ANALYSIS_VALIDATION_FRAME_MISMATCH: model frame {model:?} does not match geometry frame {geometry:?}"
     )]
     FrameMismatch {
@@ -192,17 +184,10 @@ fn validated_model_graph(
 
 pub fn validate_model_against_geometry(
     model: &AnalysisModel,
-    geometry_units: UnitSystem,
     geometry_frame: &CoordinateFrame,
 ) -> Result<(), AnalysisValidationError> {
     validate_model(model)?;
 
-    if model.units != geometry_units {
-        return Err(AnalysisValidationError::UnitMismatch {
-            model: model.units,
-            geometry: geometry_units,
-        });
-    }
     if &model.frame != geometry_frame {
         return Err(AnalysisValidationError::FrameMismatch {
             model: Box::new(model.frame.clone()),

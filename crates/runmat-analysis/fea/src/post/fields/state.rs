@@ -146,14 +146,6 @@ pub(super) fn structural_displacement_node_count(
     }
 }
 
-pub(super) fn recover_total_strain_energy(displacement: &[f64], internal_force: &[f64]) -> f64 {
-    0.5 * displacement
-        .iter()
-        .zip(internal_force.iter())
-        .map(|(u, force)| u * force)
-        .sum::<f64>()
-}
-
 pub(super) struct StructuralResidualMetrics {
     pub(super) normalized_residual_norm: f64,
     pub(super) equation_scale: f64,

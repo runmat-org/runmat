@@ -51,7 +51,8 @@ pub(super) fn validate_temperature_regions(
                 target.region_id.clone(),
             ));
         }
-        let temperature = context.reference_temperature_k + target.temperature_delta_k;
+        let temperature =
+            context.reference_temperature_k.canonical_value() + target.temperature_delta_k;
         if !temperature.is_finite() || temperature <= 0.0 {
             return Err(ThermoelasticLoadError::InvalidTemperature(
                 target.region_id.clone(),
@@ -69,10 +70,11 @@ pub(super) fn element_temperature_k(
         .region_temperature_deltas
         .iter()
         .find(|target| target.region_id == region_id)
-        .map_or(context.applied_temperature_delta_k, |target| {
-            target.temperature_delta_k
-        });
-    let temperature = context.reference_temperature_k + delta;
+        .map_or(
+            context.applied_temperature_delta_k.canonical_value(),
+            |target| target.temperature_delta_k,
+        );
+    let temperature = context.reference_temperature_k.canonical_value() + delta;
     if temperature.is_finite() && temperature > 0.0 {
         Ok(temperature)
     } else {
@@ -90,8 +92,8 @@ pub(super) fn element_thermal_eigenstrain(
         .require_thermal()
         .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(owner.element_id))?;
     let temperature_k = element_temperature_k(region_id, context)?;
-    let strain =
-        thermal.expansion_coefficient_per_k * (temperature_k - thermal.reference_temperature_k);
+    let strain = thermal.expansion_coefficient_per_k.canonical_value()
+        * (temperature_k - thermal.reference_temperature_k.canonical_value());
     if strain.is_finite() {
         Ok(strain)
     } else {
@@ -122,9 +124,9 @@ pub(super) fn assemble_prescribed_temperature_load(
             .material
             .require_mechanical()
             .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
-        let hydrostatic_stress_pa = mechanical.youngs_modulus_pa
+        let hydrostatic_stress_pa = mechanical.youngs_modulus_pa.canonical_value()
             * element_thermal_eigenstrain(owner, &element.region_id.source_topology_id, context)?
-            / (1.0 - 2.0 * mechanical.poisson_ratio);
+            / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         if !hydrostatic_stress_pa.is_finite() {
             return Err(ThermoelasticLoadError::InvalidConstitutive(
                 element.element_id,
@@ -183,8 +185,9 @@ pub(crate) fn assemble_solved_temperature_load(
             .material
             .require_thermal()
             .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
-        let coefficient = mechanical.youngs_modulus_pa * thermal.expansion_coefficient_per_k
-            / (1.0 - 2.0 * mechanical.poisson_ratio);
+        let coefficient = mechanical.youngs_modulus_pa.canonical_value()
+            * thermal.expansion_coefficient_per_k.canonical_value()
+            / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         if !coefficient.is_finite() {
             return Err(ThermoelasticLoadError::InvalidConstitutive(
                 element.element_id,
@@ -198,7 +201,8 @@ pub(crate) fn assemble_solved_temperature_load(
                     .zip(point.shape_values())
                     .map(|(&node_index, &shape)| shape * nodal_temperature_k[node_index])
                     .sum::<f64>();
-                let stress_pa = coefficient * (temperature_k - thermal.reference_temperature_k);
+                let stress_pa = coefficient
+                    * (temperature_k - thermal.reference_temperature_k.canonical_value());
                 for (&node_index, gradient) in element
                     .node_indices
                     .iter()
@@ -237,9 +241,9 @@ mod tests {
 
     fn context() -> FeaThermoMechanicalContext {
         FeaThermoMechanicalContext {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 10.0,
-            thermal_expansion_coefficient: 0.0,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(10.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(0.0),
             region_temperature_deltas: Vec::new(),
         }
     }
@@ -252,11 +256,12 @@ mod tests {
             .thermal
             .as_mut()
             .unwrap()
-            .expansion_coefficient_per_k = 1.0e-5;
+            .expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(1.0e-5);
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
         let load = assemble_prescribed_temperature_load(&mesh, &properties, &context()).unwrap();
         let mechanical = model.materials[0].require_mechanical().unwrap();
-        let stress = mechanical.youngs_modulus_pa * 1.0e-4 / (1.0 - 2.0 * mechanical.poisson_ratio);
+        let stress = mechanical.youngs_modulus_pa.canonical_value() * 1.0e-4
+            / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         let expected = [
             -stress / 6.0,
             -stress / 6.0,
@@ -288,22 +293,25 @@ mod tests {
             .thermal
             .as_mut()
             .unwrap()
-            .expansion_coefficient_per_k = 1.0e-5;
+            .expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(1.0e-5);
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
         let temperature = mesh
             .topology
             .nodes
             .iter()
             .map(|node| {
-                293.15 + 10.0 * node.coordinates_m[0] + 20.0 * node.coordinates_m[1]
-                    - 5.0 * node.coordinates_m[2]
+                293.15
+                    + 10.0 * node.coordinates_m.canonical_value()[0]
+                    + 20.0 * node.coordinates_m.canonical_value()[1]
+                    - 5.0 * node.coordinates_m.canonical_value()[2]
             })
             .collect::<Vec<_>>();
         let force = assemble_solved_temperature_load(&mesh, &properties, &temperature).unwrap();
         let mechanical = model.materials[0].require_mechanical().unwrap();
         let average_delta = 0.25 * (10.0 + 20.0 - 5.0);
-        let hydrostatic_stress = mechanical.youngs_modulus_pa * 1.0e-5 * average_delta
-            / (1.0 - 2.0 * mechanical.poisson_ratio);
+        let hydrostatic_stress =
+            mechanical.youngs_modulus_pa.canonical_value() * 1.0e-5 * average_delta
+                / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         let expected = [
             -hydrostatic_stress / 6.0,
             -hydrostatic_stress / 6.0,
@@ -366,19 +374,22 @@ mod tests {
                 .thermal
                 .as_mut()
                 .unwrap()
-                .expansion_coefficient_per_k = 1.0e-5;
+                .expansion_coefficient_per_k =
+                runmat_types::physical::ThermalExpansion::new(1.0e-5);
             let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
             let projected = AnalysisProjection::derive(&mesh).unwrap();
             let coefficient = model.materials[0]
                 .require_thermal()
                 .unwrap()
                 .expansion_coefficient_per_k
-                * context().applied_temperature_delta_k;
+                .canonical_value()
+                * context().applied_temperature_delta_k.canonical_value();
             let displacement = projected
                 .nodes
                 .iter()
                 .flat_map(|node| {
                     node.coordinates_m
+                        .canonical_value()
                         .map(|coordinate| coefficient * coordinate)
                 })
                 .collect::<Vec<_>>();
@@ -425,7 +436,8 @@ mod tests {
                 .thermal
                 .as_mut()
                 .unwrap()
-                .expansion_coefficient_per_k = coefficient;
+                .expansion_coefficient_per_k =
+                runmat_types::physical::ThermalExpansion::new(coefficient);
         }
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
         let mut prescribed = context();
@@ -443,7 +455,12 @@ mod tests {
             &mesh,
             &properties,
             Some(&prescribed),
-            Some(&vec![300.0; mesh.topology.nodes.len()]),
+            Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Temperature,
+                _,
+            >::new(
+                vec![300.0; mesh.topology.nodes.len()].as_slice()
+            )),
         )
         .is_err());
         for element in &recovery {
@@ -452,7 +469,12 @@ mod tests {
             } else {
                 303.15
             };
-            assert_eq!(element.prescribed_temperature_k, Some(expected));
+            assert_eq!(
+                element
+                    .prescribed_temperature_k
+                    .map(|value| value.canonical_value()),
+                Some(expected)
+            );
         }
         let projected = AnalysisProjection::derive(&mesh).unwrap();
         for element in &projected.elements {

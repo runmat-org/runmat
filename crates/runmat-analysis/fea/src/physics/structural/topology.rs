@@ -84,14 +84,26 @@ mod tests {
         );
 
         let mut changed = structural.clone();
-        changed.nodes[1].coordinates_m[0] += 0.25;
+        {
+            let quantity_change = 0.25;
+            let quantity_index = 0;
+            let quantity_slot = &mut changed.nodes[1].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert_ne!(
             first,
             explicit_topology_digest(&changed).expect("changed identity")
         );
 
         let mut section_only = structural.clone();
-        section_only.beam_sections[0].area_m2 *= 2.0;
+        section_only.beam_sections[0].area_m2 = runmat_types::physical::Quantity::new(
+            section_only.beam_sections[0].area_m2.canonical_value() * (2.0),
+        );
         assert_eq!(
             first,
             explicit_topology_digest(&section_only).expect("section-independent identity")

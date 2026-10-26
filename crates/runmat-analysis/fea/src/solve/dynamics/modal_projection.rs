@@ -30,11 +30,12 @@ pub enum ModalProjectionError {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModalReducedSystem {
     evidence: ModalProjectionEvidence,
+    coordinates: std::sync::Arc<crate::pipeline::modal_basis::ModalBasisCoordinates>,
     mode_shapes: Vec<Vec<f64>>,
     mass_applied_mode_shapes: Vec<Vec<f64>>,
-    stiffness: Vec<f64>,
-    mass: Vec<f64>,
-    damping: Vec<f64>,
+    stiffness: runmat_types::physical::Quantity<runmat_types::physical::kind::Stiffness, Vec<f64>>,
+    mass: runmat_types::physical::Quantity<runmat_types::physical::kind::Mass, Vec<f64>>,
+    damping: runmat_types::physical::Quantity<runmat_types::physical::kind::Damping, Vec<f64>>,
 }
 
 impl ModalReducedSystem {
@@ -82,16 +83,23 @@ impl ModalReducedSystem {
         };
         let reduced = Self {
             evidence,
+            coordinates: basis.shared_coordinates(),
             mode_shapes,
             mass_applied_mode_shapes,
-            stiffness,
-            mass,
-            damping,
+            stiffness: runmat_types::physical::Quantity::try_new(stiffness)
+                .map_err(|_| ModalProjectionError::NonFinite)?,
+            mass: runmat_types::physical::Quantity::try_new(mass)
+                .map_err(|_| ModalProjectionError::NonFinite)?,
+            damping: runmat_types::physical::Quantity::try_new(damping)
+                .map_err(|_| ModalProjectionError::NonFinite)?,
         };
         reduced.validate()?;
         Ok(reduced)
     }
 
+    pub fn coordinates(&self) -> &crate::pipeline::modal_basis::ModalBasisCoordinates {
+        &self.coordinates
+    }
     pub fn evidence(&self) -> &ModalProjectionEvidence {
         &self.evidence
     }
@@ -104,66 +112,162 @@ impl ModalReducedSystem {
         self.evidence.full_dof_count
     }
 
-    pub fn stiffness(&self) -> &[f64] {
-        &self.stiffness
+    pub fn stiffness(
+        &self,
+    ) -> runmat_types::physical::Quantity<runmat_types::physical::kind::Stiffness, &[f64]> {
+        runmat_types::physical::Quantity::new(self.stiffness.canonical_values().as_slice())
     }
 
-    pub fn mass(&self) -> &[f64] {
-        &self.mass
+    pub fn mass(
+        &self,
+    ) -> runmat_types::physical::Quantity<runmat_types::physical::kind::Mass, &[f64]> {
+        runmat_types::physical::Quantity::new(self.mass.canonical_values().as_slice())
     }
 
-    pub fn damping(&self) -> &[f64] {
-        &self.damping
+    pub fn damping(
+        &self,
+    ) -> runmat_types::physical::Quantity<runmat_types::physical::kind::Damping, &[f64]> {
+        runmat_types::physical::Quantity::new(self.damping.canonical_values().as_slice())
     }
 
-    pub fn project_vector(&self, full: &[f64]) -> Result<Vec<f64>, ModalProjectionError> {
-        if full.len() != self.full_dof_count() || full.iter().any(|value| !value.is_finite()) {
-            return Err(if full.len() == self.full_dof_count() {
-                ModalProjectionError::NonFinite
-            } else {
-                ModalProjectionError::DimensionMismatch
-            });
+    pub fn load_field<'a>(
+        &'a self,
+        values: &'a [f64],
+    ) -> Result<
+        runmat_types::physical::QuantityField<
+            crate::assembly::dofs::StructuralQuantityLayout<'a>,
+            &'a [f64],
+        >,
+        ModalProjectionError,
+    > {
+        self.coordinates
+            .full_dof_layout()
+            .physical_field(crate::assembly::dofs::StructuralQuantityLane::Load, values)
+            .map_err(|_| ModalProjectionError::DimensionMismatch)
+    }
+
+    pub fn project_load<S: AsRef<[f64]>>(
+        &self,
+        full: &runmat_types::physical::QuantityField<
+            crate::assembly::dofs::StructuralQuantityLayout<'_>,
+            S,
+        >,
+    ) -> Result<
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Force, Vec<f64>>,
+        ModalProjectionError,
+    > {
+        if full.layout().dofs != self.coordinates.full_dof_layout()
+            || full.layout().lane != crate::assembly::dofs::StructuralQuantityLane::Load
+        {
+            return Err(ModalProjectionError::DimensionMismatch);
         }
-        Ok(self
-            .mode_shapes
-            .iter()
-            .map(|shape| dot(shape, full))
-            .collect())
+        // Phi is the retained work-conjugate transformation: full forces and
+        // moments project to force conjugate to the declared modal length.
+        let values = full.with_canonical_storage(|values| {
+            self.mode_shapes
+                .iter()
+                .map(|shape| dot(shape, values))
+                .collect::<Vec<_>>()
+        });
+        runmat_types::physical::Quantity::try_new(values)
+            .map_err(|_| ModalProjectionError::NonFinite)
     }
 
-    /// Project a physical displacement or velocity using the modal mass inner product.
-    ///
-    /// The generalized coordinates solve `M_r q = Phi' M x`; using `Phi' x` is only valid for
-    /// an identity physical mass matrix and would give incorrect initial conditions in general.
-    pub fn project_physical_state(&self, full: &[f64]) -> Result<Vec<f64>, ModalProjectionError> {
-        if full.len() != self.full_dof_count() || full.iter().any(|value| !value.is_finite()) {
-            return Err(if full.len() == self.full_dof_count() {
-                ModalProjectionError::NonFinite
-            } else {
-                ModalProjectionError::DimensionMismatch
-            });
+    /// Project a physical state through its retained mass metric. A raw array
+    /// cannot choose translation/rotation or derivative roles by its shape.
+    pub fn project_state<K: ModalCoordinateQuantity, S: AsRef<[f64]>>(
+        &self,
+        full: &runmat_types::physical::QuantityField<
+            crate::assembly::dofs::StructuralQuantityLayout<'_>,
+            S,
+        >,
+    ) -> Result<runmat_types::physical::Quantity<K, Vec<f64>>, ModalProjectionError> {
+        if full.layout().dofs != self.coordinates.full_dof_layout()
+            || full.layout().lane
+                != (crate::assembly::dofs::StructuralQuantityLane::State {
+                    derivative_order: K::DERIVATIVE_ORDER,
+                })
+        {
+            return Err(ModalProjectionError::DimensionMismatch);
         }
-        let right_hand_side = self
-            .mass_applied_mode_shapes
-            .iter()
-            .map(|mass_applied_shape| dot(mass_applied_shape, full))
-            .collect::<Vec<_>>();
-        super::dense::solve_square(self.mass(), &right_hand_side, self.mode_count()).map_err(
-            |error| match error {
-                super::dense::DenseSolveError::DimensionMismatch => {
-                    ModalProjectionError::DimensionMismatch
-                }
-                super::dense::DenseSolveError::NonFinite => ModalProjectionError::NonFinite,
-                super::dense::DenseSolveError::Singular => ModalProjectionError::NonPositiveMass,
-            },
+        let right_hand_side = full.with_canonical_storage(|values| {
+            self.mass_applied_mode_shapes
+                .iter()
+                .map(|shape| dot(shape, values))
+                .collect::<Vec<_>>()
+        });
+        let values = super::dense::solve_square(
+            self.mass().canonical_value(),
+            &right_hand_side,
+            self.mode_count(),
         )
+        .map_err(|error| match error {
+            super::dense::DenseSolveError::DimensionMismatch => {
+                ModalProjectionError::DimensionMismatch
+            }
+            super::dense::DenseSolveError::NonFinite => ModalProjectionError::NonFinite,
+            super::dense::DenseSolveError::Singular => ModalProjectionError::NonPositiveMass,
+        })?;
+        runmat_types::physical::Quantity::try_new(values)
+            .map_err(|_| ModalProjectionError::NonFinite)
     }
 
-    pub fn expand_vector(&self, reduced: &[f64]) -> Result<Vec<f64>, ModalProjectionError> {
-        expand_vector(&self.mode_shapes, self.full_dof_count(), reduced)
+    pub fn state_field<'a, K: ModalCoordinateQuantity>(
+        &'a self,
+        values: &'a [f64],
+    ) -> Result<
+        runmat_types::physical::QuantityField<
+            crate::assembly::dofs::StructuralQuantityLayout<'a>,
+            &'a [f64],
+        >,
+        ModalProjectionError,
+    > {
+        self.coordinates
+            .full_dof_layout()
+            .physical_field(
+                crate::assembly::dofs::StructuralQuantityLane::State {
+                    derivative_order: K::DERIVATIVE_ORDER,
+                },
+                values,
+            )
+            .map_err(|_| ModalProjectionError::DimensionMismatch)
+    }
+
+    pub fn expand_state<K: ModalCoordinateQuantity, S: AsRef<[f64]>>(
+        &self,
+        reduced: &runmat_types::physical::Quantity<K, S>,
+    ) -> Result<
+        runmat_types::physical::QuantityField<
+            crate::assembly::dofs::StructuralQuantityLayout<'_>,
+            Vec<f64>,
+        >,
+        ModalProjectionError,
+    > {
+        let values = expand_vector(
+            &self.mode_shapes,
+            self.full_dof_count(),
+            reduced.canonical_values().as_ref(),
+        )?;
+        runmat_types::physical::QuantityField::try_new(
+            crate::assembly::dofs::StructuralQuantityLayout {
+                dofs: self.coordinates.full_dof_layout(),
+                lane: crate::assembly::dofs::StructuralQuantityLane::State {
+                    derivative_order: K::DERIVATIVE_ORDER,
+                },
+            },
+            values,
+        )
+        .map_err(|_| ModalProjectionError::NonFinite)
     }
 
     fn validate(&self) -> Result<(), ModalProjectionError> {
+        self.coordinates
+            .validate()
+            .map_err(|error| ModalProjectionError::IncompatibleBasis(error.into()))?;
+        if self.coordinates.full_dof_layout().total_dof_count() != self.full_dof_count() {
+            return Err(ModalProjectionError::DimensionMismatch);
+        }
+
         self.evidence
             .validate_for(self.evidence.operator_digest, self.evidence.full_dof_count)
             .map_err(|error| ModalProjectionError::IncompatibleBasis(error.to_string()))?;
@@ -183,9 +287,9 @@ impl ModalReducedSystem {
                 .mass_applied_mode_shapes
                 .iter()
                 .any(|shape| shape.len() != self.full_dof_count())
-            || self.stiffness.len() != matrix_size
-            || self.mass.len() != matrix_size
-            || self.damping.len() != matrix_size
+            || self.stiffness.canonical_values().len() != matrix_size
+            || self.mass.canonical_values().len() != matrix_size
+            || self.damping.canonical_values().len() != matrix_size
         {
             return Err(ModalProjectionError::DimensionMismatch);
         }
@@ -194,9 +298,9 @@ impl ModalReducedSystem {
             .iter()
             .flatten()
             .chain(self.mass_applied_mode_shapes.iter().flatten())
-            .chain(&self.stiffness)
-            .chain(&self.mass)
-            .chain(&self.damping)
+            .chain(self.stiffness.canonical_values())
+            .chain(self.mass.canonical_values())
+            .chain(self.damping.canonical_values())
             .any(|value| !value.is_finite())
         {
             return Err(ModalProjectionError::NonFinite);
@@ -366,16 +470,54 @@ mod tests {
         let reduced = ModalReducedSystem::project(&summary, &modal.basis).unwrap();
 
         assert_eq!(reduced.mode_count(), modal.basis.modes().len());
-        assert_eq!(reduced.mass(), modal.basis.mass_orthogonality());
+        assert_eq!(
+            reduced.mass().canonical_value(),
+            modal.basis.mass_orthogonality()
+        );
         for (mode_index, mode) in modal.basis.modes().iter().enumerate() {
             let mut coordinate = vec![0.0; reduced.mode_count()];
             coordinate[mode_index] = 1.0;
+            // Source millimeters are converted once, before entering a generalized
+            // length coordinate; reconstruction does not silently reinterpret them.
+            let millimeters = runmat_types::physical::Unit::<
+                runmat_types::physical::kind::Displacement,
+            >::try_from_definition(
+                runmat_types::physical::LengthUnit::Millimeter
+                    .definition()
+                    .clone(),
+            )
+            .unwrap();
+            let source_amplitude = millimeters.quantity(2.5).unwrap();
+            let mut source_coordinate = vec![0.0; reduced.mode_count()];
+            source_coordinate[mode_index] = source_amplitude.canonical_value();
+            let source_state = reduced
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Displacement,
+                    _,
+                >::new(source_coordinate))
+                .unwrap();
+            let roundtrip = reduced
+                .project_state::<runmat_types::physical::kind::Displacement, _>(&source_state)
+                .unwrap();
+            assert!((roundtrip.canonical_values()[mode_index] - 0.0025).abs() <= 1.0e-12);
+            source_state.with_canonical_storage(|values| {
+                for (actual, shape) in values.iter().zip(mode.dof_shape()) {
+                    assert!((actual - shape * 0.0025).abs() <= 1.0e-12);
+                }
+            });
             assert_eq!(
-                reduced.expand_vector(&coordinate).unwrap(),
+                reduced
+                    .expand_state(&runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Displacement,
+                        _,
+                    >::new(&coordinate))
+                    .unwrap()
+                    .into_canonical_storage(),
                 mode.dof_shape()
             );
             assert!(
-                (reduced.stiffness()[mode_index * reduced.mode_count() + mode_index]
+                (reduced.stiffness().canonical_value()
+                    [mode_index * reduced.mode_count() + mode_index]
                     - mode.modal_stiffness())
                 .abs()
                     <= 1.0e-10 * mode.modal_stiffness().abs().max(1.0)
@@ -387,11 +529,30 @@ mod tests {
             modal.basis.operator_digest()
         );
         for (mode_index, mode) in modal.basis.modes().iter().enumerate() {
-            let projected = reduced.project_physical_state(mode.dof_shape()).unwrap();
-            for (coordinate_index, coordinate) in projected.iter().enumerate() {
+            let state = reduced
+                .state_field::<runmat_types::physical::kind::Displacement>(mode.dof_shape())
+                .unwrap();
+            let projected = reduced
+                .project_state::<runmat_types::physical::kind::Displacement, _>(&state)
+                .unwrap();
+            for (coordinate_index, coordinate) in projected.canonical_values().iter().enumerate() {
                 let expected = usize::from(mode_index == coordinate_index) as f64;
                 assert!((coordinate - expected).abs() <= 1.0e-10);
             }
         }
     }
+}
+
+/// Closed semantic roles admitted by modal state projection/reconstruction.
+pub trait ModalCoordinateQuantity: runmat_types::physical::QuantityMarker {
+    const DERIVATIVE_ORDER: u8;
+}
+impl ModalCoordinateQuantity for runmat_types::physical::kind::Displacement {
+    const DERIVATIVE_ORDER: u8 = 0;
+}
+impl ModalCoordinateQuantity for runmat_types::physical::kind::Velocity {
+    const DERIVATIVE_ORDER: u8 = 1;
+}
+impl ModalCoordinateQuantity for runmat_types::physical::kind::Acceleration {
+    const DERIVATIVE_ORDER: u8 = 2;
 }

@@ -11,13 +11,17 @@ fn independent_bodies_use_exact_yield_hardening_and_elasticity_owners_both_order
         for (i, material) in model.materials.iter_mut().enumerate() {
             material.elasticity = Some(MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
-                    youngs_modulus_pa: [1200.0, 2400.0, 4800.0][i],
-                    poisson_ratio: 0.0,
+                    youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                        [1200.0, 2400.0, 4800.0][i],
+                    ),
+                    poisson_ratio: runmat_types::physical::PoissonRatio::new(0.0),
                 },
             ));
             material.plastic = Some(MaterialPlasticModel::J2IsotropicLinearHardening {
-                yield_stress_pa: [5.0, 9.0, 15.0][i],
-                isotropic_hardening_modulus_pa: [30.0, 60.0, 90.0][i],
+                yield_stress_pa: runmat_types::physical::YieldStress::new([5.0, 9.0, 15.0][i]),
+                isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(
+                    [30.0, 60.0, 90.0][i],
+                ),
             });
         }
         for assignment in &mut model.material_assignments {
@@ -79,7 +83,7 @@ fn independent_bodies_use_exact_yield_hardening_and_elasticity_owners_both_order
                 assert!((history.equivalent_plastic_strain - delta_alpha).abs() < 1e-12);
             }
             assert!(
-                (evidence.hardening_energy_j
+                (evidence.hardening_energy_j.canonical_value()
                     - 0.5 * hardening * delta_alpha.powi(2) * evidence.volume_m3)
                     .abs()
                     < 1e-12

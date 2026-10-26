@@ -21,10 +21,29 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
-        linear::solve_operator_system,
         preconditioner::SpdPreconditionerKind,
     },
 };
+
+// Numerical precision fixtures retain their physical equation owner around the
+// same kernel used by production; the returned scalars are local test oracles.
+pub(super) fn solve_operator_system<K: runmat_types::physical::QuantityMarker>(
+    operator: &crate::algebra::PhysicalScalarSystem<K>,
+    preconditioner: crate::solve::preconditioner::SpdPreconditionerKind,
+    backend: crate::solve::backend::kind::LinearAlgebraBackendKind,
+    algebra: &dyn crate::solve::backend::linear_algebra::LinearAlgebraBackend,
+    initial: Option<&[f64]>,
+) -> crate::solve::linear::LinearSolveResult {
+    operator.with_canonical_system(|numerical| {
+        crate::solve::linear::solve_operator_system(
+            numerical,
+            preconditioner,
+            backend,
+            algebra,
+            initial,
+        )
+    })
+}
 
 // Direct assembly fixtures prepare shared ownership just as the production preassembly does.
 pub(super) fn assemble(
@@ -76,9 +95,9 @@ fn thermal_reference_model() -> (
         .thermal
         .as_mut()
         .expect("thermal fixture declares thermal capability");
-    thermal.conductivity_w_per_mk = 1.0;
-    thermal.specific_heat_j_per_kgk = 1.0;
-    material.mass_density_kg_per_m3 = Some(1.0);
+    thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
+    thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(1.0);
+    material.mass_density_kg_per_m3 = (Some(1.0)).map(runmat_types::physical::MassDensity::new);
 
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -86,7 +105,7 @@ fn thermal_reference_model() -> (
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let base_face = mesh
         .topology
@@ -168,10 +187,10 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
     let mut unused = with_unused_material.materials[0].clone();
     unused.material_id = "unused_extreme_material".into();
     unused.name = "Unused extreme material".into();
-    unused.mass_density_kg_per_m3 = Some(9.0e8);
+    unused.mass_density_kg_per_m3 = (Some(9.0e8)).map(runmat_types::physical::MassDensity::new);
     let thermal = unused.thermal.as_mut().unwrap();
-    thermal.conductivity_w_per_mk = 7.0e11;
-    thermal.specific_heat_j_per_kgk = 3.0e10;
+    thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(7.0e11);
+    thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(3.0e10);
     with_unused_material.materials.push(unused);
 
     let baseline = assemble(
@@ -238,8 +257,16 @@ fn prepared_properties_are_reused_across_load_samples_and_reject_topology_substi
     .unwrap();
     assert_eq!(second.conductivity, fresh.conductivity);
     assert_eq!(second.capacity, fresh.capacity);
-    assert_eq!(second.applied_source, fresh.applied_source);
-    for (one, two) in first.applied_source.iter().zip(&second.applied_source) {
+    assert_eq!(
+        second.applied_source.canonical_values(),
+        fresh.applied_source.canonical_values()
+    );
+    for (one, two) in first
+        .applied_source
+        .canonical_values()
+        .iter()
+        .zip(second.applied_source.canonical_values())
+    {
         assert!((two - 2.0 * one).abs() < 1e-14);
     }
     let mut substituted = properties.clone();
@@ -309,7 +336,9 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
             &vec![300.0; mesh.topology.nodes.len()],
         )
         .unwrap();
-    assert!(anchored.nullspace_evidence().is_some());
+    assert!(anchored
+        .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+        .is_some());
 
     let mut disconnected_projection = assembly.projection.clone();
     disconnected_projection
@@ -318,6 +347,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
         .for_each(Vec::clear);
     let constrained = assembly
         .prescribed_temperature_k
+        .canonical_values()
         .iter()
         .map(Option::is_some)
         .collect::<Vec<_>>();
@@ -326,7 +356,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
             &disconnected_projection,
             &assembly.conductivity,
             &constrained,
-            &assembly.positive_robin_weight,
+            assembly.positive_robin_weight.canonical_values(),
         ),
         Err(crate::algebra::NullspaceEvidenceError::NullModeViolation)
     );
@@ -348,7 +378,9 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
         &vec![300.0; mesh.topology.nodes.len()],
     )
     .unwrap();
-    assert!(unanchored.nullspace_evidence().is_none());
+    assert!(unanchored
+        .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+        .is_none());
 }
 
 #[test]
@@ -367,6 +399,7 @@ fn thermal_nullspace_proof_rejects_metadata_only_semidefinite_claims() {
     .unwrap();
     let constrained = assembly
         .prescribed_temperature_k
+        .canonical_values()
         .iter()
         .map(Option::is_some)
         .collect::<Vec<_>>();
@@ -382,7 +415,7 @@ fn thermal_nullspace_proof_rejects_metadata_only_semidefinite_claims() {
             &assembly.projection,
             &false_semidefinite,
             &constrained,
-            &assembly.positive_robin_weight,
+            assembly.positive_robin_weight.canonical_values(),
         ),
         Err(crate::algebra::NullspaceEvidenceError::NullModeViolation),
     );
@@ -450,9 +483,14 @@ fn deserialization_discards_process_local_nullspace_proof() {
     )
     .unwrap();
     let encoded = serde_json::to_value(system).unwrap();
-    assert!(encoded.get("nullspace_evidence").is_none());
-    let decoded = serde_json::from_value::<AssembledRealSystem>(encoded).unwrap();
-    assert!(decoded.nullspace_evidence().is_none());
+    assert!(encoded["numerical"].get("nullspace_evidence").is_none());
+    let decoded = serde_json::from_value::<
+        crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>,
+    >(encoded)
+    .unwrap();
+    assert!(decoded
+        .with_canonical_system(|numerical| numerical.nullspace_evidence().cloned())
+        .is_none());
 }
 
 #[test]
@@ -476,10 +514,13 @@ fn deserialization_rejects_caller_asserted_nullspace_proof() {
     )
     .unwrap();
     let mut encoded = serde_json::to_value(system).unwrap();
-    encoded["nullspace_evidence"] = serde_json::json!({
+    encoded["numerical"]["nullspace_evidence"] = serde_json::json!({
         "proof_identity": Digest::sha256("caller-asserted").to_string()
     });
-    assert!(serde_json::from_value::<AssembledRealSystem>(encoded).is_err());
+    assert!(serde_json::from_value::<
+        crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>,
+    >(encoded)
+    .is_err());
 }
 
 mod energy_recovery;

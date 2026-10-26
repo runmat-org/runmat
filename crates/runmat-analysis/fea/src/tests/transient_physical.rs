@@ -835,13 +835,13 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
                 .unwrap()
         );
         assert_eq!(
-            sample.physical.support_work_j,
+            sample.physical.support_work_j.canonical_value(),
             uninterrupted.support_work_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]
         );
         assert_eq!(
-            sample.physical.energy_balance_residual_j,
+            sample.physical.energy_balance_residual_j.canonical_value(),
             uninterrupted.energy_balance_residual_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]
@@ -970,7 +970,7 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
         .iter()
         .flat_map(|segment| segment.samples())
         .any(|sample| {
-            sample.physical.time_s == 0.5
+            sample.physical.time_s.canonical_value() == 0.5
                 && scope.schedule.points[sample.physical.schedule_ordinal as usize].arrival
                     == crate::execution::StructuralTransientScheduleArrival::LeftLimit
         }));
@@ -1147,7 +1147,7 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
                 .unwrap()
         );
         assert_eq!(
-            sample.physical.support_work_j,
+            sample.physical.support_work_j.canonical_value(),
             result.support_work_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]

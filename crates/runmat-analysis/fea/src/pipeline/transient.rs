@@ -166,7 +166,7 @@ fn assemble_transient_block_basis(
         schedule,
         ..
     } = prepared;
-    let start_time_s = schedule.points[0].time_s;
+    let start_time_s = schedule.points[0].time_s.canonical_value();
     let excitations = realize_step_excitations(
         &active_model,
         &execution_step,
@@ -303,7 +303,7 @@ pub fn run_transient_block(
         &basis.initial_assembly,
         Some(input.solver_mesh),
         &basis.motions,
-        basis.schedule.points[0].time_s,
+        basis.schedule.points[0].time_s.canonical_value(),
         &input.workload.initial_fields,
     )?;
     let initial_conditions =
@@ -432,12 +432,13 @@ pub fn run_transient_with_fields(
         initial_fields,
     )?;
     let execution_step = &execution_step;
-    let start_time_s = schedule.points[0].time_s;
+    let start_time_s = schedule.points[0].time_s.canonical_value();
     let end_time_s = schedule
         .points
         .last()
         .expect("validated transient schedule has a terminal point")
-        .time_s;
+        .time_s
+        .canonical_value();
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::RegionResolution,
@@ -515,8 +516,8 @@ pub fn run_transient_with_fields(
             options.clone(),
             backend,
             TransientTimeDomain {
-                start_time_s,
-                end_time_s,
+                start_time_s: runmat_types::physical::Time::new(start_time_s),
+                end_time_s: runmat_types::physical::Time::new(end_time_s),
                 step_boundaries: &step_boundaries,
             },
             initial_state.displacement,
@@ -531,8 +532,8 @@ pub fn run_transient_with_fields(
                 options: options.clone(),
                 backend,
                 time_domain: TransientTimeDomain {
-                    start_time_s,
-                    end_time_s,
+                    start_time_s: runmat_types::physical::Time::new(start_time_s),
+                    end_time_s: runmat_types::physical::Time::new(end_time_s),
                     step_boundaries: &step_boundaries,
                 },
                 initial_displacement: initial_state.displacement,

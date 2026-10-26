@@ -63,7 +63,7 @@ fn original_axial_constraint_spaces_certify_with_actual_reduced_operator_caps() 
                         let k = global_stiffness_matrix(
                             element.material,
                             Tetrahedron4ElementGeometry {
-                                nodes_m: *coordinates_m,
+                                nodes_m: coordinates_m.canonical_value(),
                             },
                         )
                         .unwrap();
@@ -75,7 +75,7 @@ fn original_axial_constraint_spaces_certify_with_actual_reduced_operator_caps() 
                         let k = tetrahedron10_global_stiffness_matrix(
                             element.material,
                             Tetrahedron10ElementGeometry {
-                                nodes_m: *coordinates_m,
+                                nodes_m: coordinates_m.canonical_value(),
                             },
                         )
                         .unwrap();

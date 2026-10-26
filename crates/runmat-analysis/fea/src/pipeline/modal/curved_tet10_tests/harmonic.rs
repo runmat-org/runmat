@@ -41,7 +41,17 @@ impl SolidCase {
         };
         let mut mesh = canonical_tetrahedron_solver_mesh(order);
         if warp != 0.0 {
-            mesh.topology.nodes[4].coordinates_m[0] += warp;
+            {
+                let quantity_change = warp;
+                let quantity_index = 0;
+                let quantity_slot = &mut mesh.topology.nodes[4].coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
             mesh.canonical_digest = StableDigest::ZERO;
             mesh.seal_canonical_digest().unwrap();
         }
@@ -93,9 +103,10 @@ fn qualify(case: SolidCase, damped: bool) {
     else {
         panic!("expected isotropic linear elasticity");
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     let (alpha, beta) = if damped { (0.8, 0.002) } else { (0.0, 0.0) };
     model.materials[0].damping = damped.then_some(MechanicalDampingModel::Rayleigh {
         mass_coefficient: RayleighMassCoefficient::new(alpha),
@@ -168,14 +179,24 @@ fn qualify(case: SolidCase, damped: bool) {
                 &reduced,
                 omega,
                 &ModalHarmonicLoad {
-                    real: reduced.project_vector(summary.operator.load()).unwrap(),
-                    imaginary: reduced.project_vector(&imaginary_load).unwrap(),
+                    real: (reduced)
+                        .load_field(summary.operator.load())
+                        .and_then(|field| (reduced).project_load(&field))
+                        .unwrap(),
+                    imaginary: (reduced)
+                        .load_field(&imaginary_load)
+                        .and_then(|field| (reduced).project_load(&field))
+                        .unwrap(),
                 },
             )
             .unwrap();
-            let modal_real = reduced.expand_vector(&modal.displacement_real).unwrap();
-            let modal_imaginary = reduced
-                .expand_vector(&modal.displacement_imaginary)
+            let modal_real = (reduced)
+                .expand_state(&modal.displacement_real)
+                .map(|field| field.into_canonical_storage())
+                .unwrap();
+            let modal_imaginary = (reduced)
+                .expand_state(&modal.displacement_imaginary)
+                .map(|field| field.into_canonical_storage())
                 .unwrap();
             for (real, imaginary) in [
                 (&direct.displacement_real, &direct.displacement_imaginary),

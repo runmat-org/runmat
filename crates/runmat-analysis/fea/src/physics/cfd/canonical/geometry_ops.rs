@@ -106,7 +106,7 @@ pub(super) fn face_pressure_offset(
     } else {
         match p.boundaries[i] {
             FaceBoundary::PressureOutlet { pressure, .. } => {
-                pressure - p.pressure_reference_pa[f.owner]
+                pressure - p.pressure_reference_pa.canonical_values()[f.owner]
             }
             _ => {
                 pressure[f.owner]

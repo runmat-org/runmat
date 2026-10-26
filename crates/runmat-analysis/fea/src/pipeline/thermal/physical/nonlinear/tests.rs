@@ -19,7 +19,10 @@ fn assert_acceptance(result: &FeaThermalRunResult, solved: usize) {
         assert!(evidence.backtracking_count <= MAX_CORRECTIONS * MAX_TRIALS);
         assert!(evidence.relative_equilibrium_residual <= TARGET);
         assert!(evidence.relative_increment <= TARGET);
-        assert!(evidence.power_scale_w.is_finite() && evidence.power_scale_w >= 0.0);
+        assert!(
+            evidence.power_scale_w.canonical_value().is_finite()
+                && evidence.power_scale_w.canonical_value() >= 0.0
+        );
     }
     assert!(result
         .residual_norms
@@ -54,18 +57,20 @@ fn fixed_hot_slab_matches_independent_gray_surface_scalar_equilibrium() {
             .iter()
             .zip(result.temperature_snapshots[0].as_host_f64().unwrap())
         {
-            let expected = 400.0 + (surface - 400.0) * node.coordinates_m[0];
+            let expected = 400.0 + (surface - 400.0) * node.coordinates_m.canonical_value()[0];
             assert!(
                 (temperature - expected).abs() / 400.0 < 1.0e-8,
                 "quadratic={quadratic} x={} actual={temperature} expected={expected}",
-                node.coordinates_m[0]
+                node.coordinates_m.canonical_value()[0]
             );
         }
         let balance = result.energy_balances[0];
-        assert!((balance.boundary_loss_w / power - 1.0).abs() < 1.0e-8);
-        assert!((balance.prescribed_boundary_power_w / power + 1.0).abs() < 1.0e-8);
-        assert_eq!(balance.applied_power_w, 0.0);
-        assert_eq!(balance.storage_rate_w, 0.0);
+        assert!((balance.boundary_loss_w.canonical_value() / power - 1.0).abs() < 1.0e-8);
+        assert!(
+            (balance.prescribed_boundary_power_w.canonical_value() / power + 1.0).abs() < 1.0e-8
+        );
+        assert_eq!(balance.applied_power_w.canonical_value(), 0.0);
+        assert_eq!(balance.storage_rate_w.canonical_value(), 0.0);
         for gradient in result.temperature_gradient_snapshots[0]
             .as_host_f64()
             .unwrap()

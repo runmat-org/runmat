@@ -45,7 +45,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::{artifact_object_value_id, ValueRefKind};
     use runmat_execution::Digest;
 
@@ -65,7 +65,7 @@ mod tests {
         let encryption_context = Digest::sha256(b"artifact-source-test-context");
         let authorization_scope = "artifact-source-test".to_string();
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: artifact_object_value_id(logical_digest, encryption_context, &authorization_scope),
             logical_digest,
             encoded_length: bytes.len() as u64,

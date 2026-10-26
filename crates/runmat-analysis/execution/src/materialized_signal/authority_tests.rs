@@ -93,6 +93,7 @@ fn authority_fixture(
         domain: generator.domain.clone(),
         knots: admitted
             .sample_points
+            .canonical_values()
             .iter()
             .map(|point| CanonicalSignalKnot {
                 abscissa: point.to_bits(),

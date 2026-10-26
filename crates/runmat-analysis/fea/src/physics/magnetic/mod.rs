@@ -1,6 +1,7 @@
 //! Physical static vector-potential curl-curl formulation with a discrete weak
 //! Coulomb gauge. No reduced graph, penalty gauge, or fictitious frequency.
 mod assembly;
+mod quantity_layout;
 mod boundary;
 mod input;
 mod plan;
@@ -37,9 +38,9 @@ fn validated_spaces(
 pub use input::{solve_canonical_static, validate_canonical_input};
 pub use response::{MagneticFieldSample, MagnetostaticResponse};
 
-/// CODATA 2022 vacuum permeability, SI H/m (not an exact SI defining constant).
-pub const VACUUM_PERMEABILITY_H_PER_M: f64 = 1.256_637_061_27e-6;
 use runmat_meshing_core::StableDigest;
+/// CODATA 2022 vacuum permeability, SI H/m (not an exact SI defining constant).
+pub use runmat_types::physical::VACUUM_MAGNETIC_PERMEABILITY as VACUUM_PERMEABILITY_H_PER_M;
 use thiserror::Error;
 
 /// Constant isotropic element law and physical volume current in SI units.
@@ -47,8 +48,11 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy)]
 pub struct MagneticVolumeData {
     pub element_identity: StableDigest,
-    pub permeability_h_per_m: f64,
-    pub current_density_a_per_m2: [f64; 3],
+    pub permeability_h_per_m: runmat_types::physical::MagneticPermeability,
+    pub current_density_a_per_m2: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ElectricCurrentDensity,
+        [f64; 3],
+    >,
 }
 
 #[derive(Debug, Error)]

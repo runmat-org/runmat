@@ -1,3 +1,4 @@
+use super::tests::solve_operator_system;
 use crate::topology::test_meshes::{entity, slab_mesh};
 use runmat_analysis_core::{
     AnalysisConstraint, PrescribedValue, PropertyRegionTarget, RegionTarget, Temperature,
@@ -11,7 +12,6 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
-        linear::solve_operator_system,
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -26,10 +26,12 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
     let mut left_elements = Vec::new();
     let mut right_elements = Vec::new();
     for element in &mut mesh.topology.volume_elements {
-        let left = element
-            .node_ids
-            .iter()
-            .all(|node_id| mesh.topology.nodes[*node_id as usize - 1].coordinates_m[0] <= 0.5);
+        let left = element.node_ids.iter().all(|node_id| {
+            mesh.topology.nodes[*node_id as usize - 1]
+                .coordinates_m
+                .canonical_value()[0]
+                <= 0.5
+        });
         if left {
             element.region_id = left_region.clone();
             left_elements.push(element.element_id);
@@ -59,15 +61,16 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
         .thermal
         .as_mut()
         .unwrap()
-        .conductivity_w_per_mk = 1.0;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+        .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     let mut right_material = model.materials[0].clone();
     right_material.material_id = "right_conductor".into();
     right_material
         .thermal
         .as_mut()
         .unwrap()
-        .conductivity_w_per_mk = 4.0;
+        .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(4.0);
     model.materials.push(right_material);
     model.material_assignments[0].target = PropertyRegionTarget::solid("left_material");
     let mut right_assignment = model.material_assignments[0].clone();
@@ -124,7 +127,7 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
     };
     let (assembly, solution) = solve(&model);
     for (node, temperature) in assembly.projection.nodes.iter().zip(&solution) {
-        let x = node.coordinates_m[0];
+        let x = node.coordinates_m.canonical_value()[0];
         let expected = if x <= 0.5 {
             300.0 + 160.0 * x
         } else {
@@ -136,8 +139,14 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
             node.node_id
         );
     }
-    assert!(assembly.element_conductivity_w_per_mk.contains(&1.0));
-    assert!(assembly.element_conductivity_w_per_mk.contains(&4.0));
+    assert!(assembly
+        .element_conductivity_w_per_mk
+        .canonical_values()
+        .contains(&1.0));
+    assert!(assembly
+        .element_conductivity_w_per_mk
+        .canonical_values()
+        .contains(&4.0));
     for flux in assembly
         .recover_element_heat_flux(&solution)
         .expect("recover steady heat flux")
@@ -154,8 +163,8 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
     let (reordered, reordered_solution) = solve(&model);
     assert_eq!(assembly.property_identity, reordered.property_identity);
     assert_eq!(
-        assembly.element_conductivity_w_per_mk,
-        reordered.element_conductivity_w_per_mk
+        assembly.element_conductivity_w_per_mk.canonical_values(),
+        reordered.element_conductivity_w_per_mk.canonical_values()
     );
     for (original, after_reorder) in solution.iter().zip(reordered_solution) {
         assert!((original - after_reorder).abs() < 1.0e-10);
@@ -180,9 +189,10 @@ fn transient_slab_has_second_order_spatial_convergence() {
             .thermal
             .as_mut()
             .expect("thermal fixture declares thermal capability");
-        thermal.conductivity_w_per_mk = 1.0;
-        thermal.specific_heat_j_per_kgk = 1.0;
-        model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+        thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
+        thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(1.0);
+        model.materials[0].mass_density_kg_per_m3 =
+            (Some(1.0)).map(runmat_types::physical::MassDensity::new);
         for (id, region) in [
             ("left_temperature", "slab_left"),
             ("right_temperature", "slab_right"),
@@ -211,7 +221,10 @@ fn transient_slab_has_second_order_spatial_convergence() {
             .projection
             .nodes
             .iter()
-            .map(|node| 300.0 + 20.0 * (std::f64::consts::PI * node.coordinates_m[0]).sin())
+            .map(|node| {
+                300.0
+                    + 20.0 * (std::f64::consts::PI * node.coordinates_m.canonical_value()[0]).sin()
+            })
             .collect::<Vec<_>>();
         for _ in 0..256 {
             let operator = assembly
@@ -240,14 +253,18 @@ fn transient_slab_has_second_order_spatial_convergence() {
             .iter()
             .zip(&temperature)
             .map(|(node, numerical)| {
-                let exact =
-                    300.0 + 20.0 * (std::f64::consts::PI * node.coordinates_m[0]).sin() * decay;
+                let exact = 300.0
+                    + 20.0
+                        * (std::f64::consts::PI * node.coordinates_m.canonical_value()[0]).sin()
+                        * decay;
                 (numerical - exact).powi(2)
             })
             .sum::<f64>();
         errors.push((squared_error / temperature.len() as f64).sqrt());
         midspan_temperatures.push(assembly.projection.nodes.iter().zip(&temperature).find_map(
-            |(node, value)| ((node.coordinates_m[0] - 0.5).abs() <= 1.0e-12).then_some(*value),
+            |(node, value)| {
+                ((node.coordinates_m.canonical_value()[0] - 0.5).abs() <= 1.0e-12).then_some(*value)
+            },
         ));
     }
 

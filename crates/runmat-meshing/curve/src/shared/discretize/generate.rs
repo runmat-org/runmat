@@ -130,7 +130,8 @@ pub(crate) fn discretize_edge_with_parameters(
         ));
     }
 
-    let arc_error = options.arc_length_absolute_error_m / (samples.len() - 1) as f64;
+    let arc_error =
+        options.arc_length_absolute_error_m.canonical_value() / (samples.len() - 1) as f64;
     let mut arc_length_m = 0.0;
     let mut nodes = Vec::with_capacity(samples.len());
     for (index, sample) in samples.iter().enumerate() {
@@ -170,8 +171,11 @@ pub(crate) fn discretize_edge_with_parameters(
             node_id,
             source_vertex_id,
             parameter: sample.parameter,
-            arc_length_m,
-            coordinates_m,
+            arc_length_m: runmat_types::physical::Length::new(arc_length_m),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         });
     }
 
@@ -237,7 +241,11 @@ fn subdivide(
     options: SharedCurveDiscretizationOptions,
 ) -> Result<(), SharedCurveError> {
     let evidence = interval_evidence(cache, left, right)?;
-    let violates = evidence.chordal_deviation_m > options.resolution.maximum_chordal_deviation_m
+    let violates = evidence.chordal_deviation_m
+        > options
+            .resolution
+            .maximum_chordal_deviation_m
+            .canonical_value()
         || evidence.tangent_change_rad > options.resolution.maximum_tangent_change_rad
         || evidence.metric_length > options.resolution.maximum_metric_edge_length;
     if violates {
@@ -283,7 +291,9 @@ fn resolution_evidence(
         maximum_metric_edge_length = maximum_metric_edge_length.max(evidence.metric_length);
     }
     Ok(CurveResolutionEvidence {
-        maximum_chordal_deviation_m,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            maximum_chordal_deviation_m,
+        ),
         maximum_tangent_change_rad,
         minimum_metric_edge_length,
         maximum_metric_edge_length,

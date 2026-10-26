@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "source_digest": [
+    210,
+    170,
+    80,
+    255,
+    12,
+    156,
+    181,
+    130,
+    50,
+    137,
+    5,
+    139,
+    182,
+    110,
+    205,
+    211,
+    188,
+    3,
+    73,
+    172,
+    161,
+    122,
+    93,
+    241,
+    194,
+    231,
+    198,
+    109,
+    41,
+    127,
+    86,
+    196
+  ],
+  "regions": [
+    {
+      "region_id": "body",
+      "role": "solid",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:52c01494e65089ce416a4191d6be81691e7954605e57c2bd1e42face54965e48"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "fixed_end",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:c7919e6de9ff8c318caaf789a460a1a26daa05badfe1a496ae23454c4c0127ca"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "loaded_end",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:5f20e78dae4f217e62923f0f96b56d7db2da48e07443ddf6f877017ffe126865"
+      },
+      "cardinality": "exactly_one"
+    }
+  ]
+}

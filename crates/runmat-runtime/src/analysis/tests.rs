@@ -65,9 +65,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
-    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
-    UnitSystem,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, LengthUnit, MeshDescriptor, MeshKind,
+    Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
+    TessellationProfile,
 };
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
@@ -244,11 +244,11 @@ pub(super) fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 fn test_electrical_material() -> MaterialElectricalModel {
     MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 1.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
         conductivity_frequency_response: Vec::new(),
     }
 }
@@ -258,7 +258,7 @@ pub(super) fn sample_model() -> AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
         geometry_id: "geo:beam".to_string(),
         geometry_revision: 1,
-        units: UnitSystem::Meter,
+        units: runmat_types::physical::CoordinateUnits::canonical(),
         frame: CoordinateFrame::Global,
         materials: vec![MaterialModel {
             fluid: None,
@@ -387,20 +387,20 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3: Some(1150.0),
+        mass_density_kg_per_m3: (Some(1150.0)).map(runmat_types::physical::MassDensity::new),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
-                youngs_modulus_pa: 3.2e9,
-                poisson_ratio: 0.37,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(3.2e9),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.37),
             },
         )),
         damping: None,
         thermal: Some(MaterialThermalModel {
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -7.0e-4,
-            conductivity_w_per_mk: 45.0,
-            specific_heat_j_per_kgk: 500.0,
-            expansion_coefficient_per_k: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(-7.0e-4),
+            conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(45.0),
+            specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(500.0),
+            expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(1.2e-5),
         }),
         acoustic: None,
         electrical: None,
@@ -612,9 +612,9 @@ fn sample_cht_model() -> AnalysisModel {
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 60.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(60.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -629,18 +629,18 @@ struct TestThermoRegionTemperatureDelta {
 
 #[derive(Clone)]
 struct TestThermoMechanicalCoupling {
-    reference_temperature_k: f64,
-    applied_temperature_delta_k: f64,
-    thermal_expansion_coefficient: f64,
+    reference_temperature_k: runmat_types::physical::Temperature,
+    applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
     region_temperature_deltas: Vec<TestThermoRegionTemperatureDelta>,
 }
 
 #[derive(Clone, Copy)]
 struct TestElectroThermalCoupling {
-    reference_temperature_k: f64,
+    reference_temperature_k: runmat_types::physical::Temperature,
     applied_voltage_v: f64,
     base_electrical_conductivity_s_per_m: f64,
-    resistive_heating_coefficient: f64,
+    resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
 }
 
 fn sample_fsi_model() -> AnalysisModel {
@@ -691,7 +691,7 @@ fn test_model_for_geometry(
     model.model_id = AnalysisModelId(spec.model_id);
     model.geometry_id = geometry.geometry_id.clone();
     model.geometry_revision = geometry.revision;
-    model.units = geometry.units;
+    model.units = runmat_types::physical::CoordinateUnits::canonical();
     model.material_assignments = vec![MaterialAssignment {
         target: match spec.kind {
             TestModelKind::AcousticHarmonic | TestModelKind::ElectromagneticHarmonic => {
@@ -722,8 +722,8 @@ fn test_model_for_geometry(
         TestModelKind::AcousticHarmonic => {
             for material in &mut model.materials {
                 material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-                    speed_of_sound_m_per_s: 343.0,
-                    damping_ratio: 0.02,
+                    speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+                    damping_ratio: runmat_types::physical::DampingRatio::new(0.02),
                 });
             }
             model.sequence = AnalysisSequence::from_steps(
@@ -799,13 +799,20 @@ fn test_model_for_geometry(
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMechanicalCoupling) {
     for material in &mut model.materials {
         let thermal = material.thermal.as_mut().expect("thermal fixture material");
-        thermal.reference_temperature_k = coupling.reference_temperature_k;
-        thermal.expansion_coefficient_per_k = coupling.thermal_expansion_coefficient;
+        thermal.reference_temperature_k = runmat_types::physical::Temperature::new(
+            coupling.reference_temperature_k.canonical_value(),
+        );
+        thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(
+            coupling.thermal_expansion_coefficient.canonical_value(),
+        );
     }
     append_scalar_constant_excitation(
         model,
         "thermo_temperature",
-        Temperature::new(coupling.reference_temperature_k + coupling.applied_temperature_delta_k),
+        Temperature::new(
+            coupling.reference_temperature_k.canonical_value()
+                + coupling.applied_temperature_delta_k.canonical_value(),
+        ),
         ExcitationTarget::WholeModel,
         None,
         PhysicalSignal::Temperature,
@@ -815,7 +822,9 @@ fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMech
         append_scalar_constant_excitation(
             model,
             &format!("thermo_region_temperature_{index}"),
-            Temperature::new(coupling.reference_temperature_k + delta.temperature_delta_k),
+            Temperature::new(
+                coupling.reference_temperature_k.canonical_value() + delta.temperature_delta_k,
+            ),
             ExcitationTarget::Region(RegionTarget::volume(&delta.region_id)),
             None,
             PhysicalSignal::Temperature,
@@ -823,18 +832,24 @@ fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMech
         );
     }
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
-        reference_temperature: Temperature::new(coupling.reference_temperature_k),
+        reference_temperature: Temperature::new(coupling.reference_temperature_k.canonical_value()),
     });
 }
 
 fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: TestElectroThermalCoupling) {
     for material in &mut model.materials {
         material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-            reference_temperature_k: coupling.reference_temperature_k,
-            conductivity_s_per_m: coupling.base_electrical_conductivity_s_per_m,
-            resistive_heating_coefficient: coupling.resistive_heating_coefficient,
-            relative_permittivity: 1.0,
-            relative_permeability: 1.0,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                coupling.reference_temperature_k.canonical_value(),
+            ),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                coupling.base_electrical_conductivity_s_per_m,
+            ),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                coupling.resistive_heating_coefficient.canonical_value(),
+            ),
+            relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+            relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
             conductivity_frequency_response: Vec::new(),
         });
     }
@@ -848,7 +863,7 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: TestElectroTh
         ExcitationAction::TerminalVoltage,
     );
     model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
-        reference_temperature: Temperature::new(coupling.reference_temperature_k),
+        reference_temperature: Temperature::new(coupling.reference_temperature_k.canonical_value()),
     });
 }
 
@@ -886,6 +901,7 @@ fn sample_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:beam".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/fixtures/beam.stl".to_string(),
             sha256: "hash-beam".to_string(),
             importer_version: "stl/v1".to_string(),
@@ -898,7 +914,7 @@ fn sample_geometry_asset() -> GeometryAsset {
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 2,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),
@@ -930,6 +946,7 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:closed_cube".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/fixtures/closed_cube.step".to_string(),
             sha256: "hash-closed-cube".to_string(),
             importer_version: "test".to_string(),
@@ -942,7 +959,7 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "cube_surface".to_string(),
@@ -2010,7 +2027,7 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
     let mut model = sample_solid_model();
     model.geometry_id = spec.geometry.geometry_id.clone();
     model.geometry_revision = spec.geometry.revision;
-    model.units = spec.geometry.units;
+    model.units = runmat_types::physical::CoordinateUnits::canonical();
     model.material_assignments = vec![MaterialAssignment {
         target: runmat_analysis_core::PropertyRegionTarget::solid("region"),
         expected_material_id: "mat_steel".to_string(),
@@ -2422,7 +2439,7 @@ fn analysis_validate_returns_typed_envelope() {
     let model = sample_model();
     let context =
         OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
+    let envelope = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect("validation should pass");
 
     assert_eq!(envelope.operation, "fea.validate");
@@ -2437,7 +2454,7 @@ fn analysis_validate_maps_typed_error_code() {
     let mut model = sample_model();
     model.materials.clear();
     let context = OperationContext::new(None, None);
-    let error = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
+    let error = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
     assert_eq!(error.error_code, "RM.FEA.VALIDATE.MISSING_MATERIALS");
@@ -2459,7 +2476,7 @@ fn analysis_validate_maps_invalid_moment_signal_error_code() {
         runmat_analysis_core::Moment::new(1.0),
     ]));
     let context = OperationContext::new(None, None);
-    let error = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
+    let error = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
     assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_SIGNAL");
@@ -2534,9 +2551,9 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -2638,9 +2655,9 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -2718,7 +2735,9 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let cancelled = Arc::new(AtomicBool::new(true));
-    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(cancelled)));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(cancelled),
+    ));
     let model = sample_model();
 
     let err = analysis_run_linear_static_with_options(
@@ -2741,7 +2760,9 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
 fn analysis_run_linear_static_cancellation_after_preparation_stops_assembly() {
     let _guard = analysis_test_guard();
     let cancelled = Arc::new(AtomicBool::new(false));
-    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(Arc::clone(&cancelled))));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(Arc::clone(&cancelled)),
+    ));
     let cancellation_on_assembly = Arc::clone(&cancelled);
     let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
         if event.phase == FeaProgressPhase::ModelAssembly
@@ -3862,9 +3883,9 @@ fn analysis_run_transient_rejects_configured_thermomechanical_step() {
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -3890,10 +3911,10 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     set_model_electro_coupling(
         &mut model,
         TestElectroThermalCoupling {
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(4.0e-4),
         },
     );
 
@@ -3920,10 +3941,10 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
     set_model_electro_coupling(
         &mut model,
         TestElectroThermalCoupling {
-            reference_temperature_k: 293.15,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(4.0e-4),
         },
     );
 
@@ -3985,9 +4006,9 @@ fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupli
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(80.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -4576,9 +4597,9 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     set_model_thermo_coupling(
         &mut thermal_model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 20.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(20.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -5144,7 +5165,7 @@ fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
         .thermal
         .as_mut()
         .expect("thermal fixture material")
-        .conductivity_w_per_mk = 0.0;
+        .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(0.0);
 
     let err = analysis_run_thermal_with_options_op(
         &model,
@@ -5253,9 +5274,9 @@ fn analysis_run_cht_rejects_uncoupled_thermal_step() {
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 50.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(50.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
         },
     );
@@ -5301,8 +5322,7 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
         .cfd
         .as_mut()
         .expect("cht model should include cfd")
-        .dynamic_viscosity
-        .pascal_seconds = 0.0;
+        .dynamic_viscosity = runmat_types::physical::Quantity::new(0.0);
     let err = analysis_run_cht_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -5450,8 +5470,7 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
         .cfd
         .as_mut()
         .expect("fsi model should include cfd")
-        .dynamic_viscosity
-        .pascal_seconds = 0.0;
+        .dynamic_viscosity = runmat_types::physical::Quantity::new(0.0);
     let err = analysis_run_fsi_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -5710,20 +5729,20 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
-        mass_density_kg_per_m3: Some(1800.0),
+        mass_density_kg_per_m3: (Some(1800.0)).map(runmat_types::physical::MassDensity::new),
         elasticity: Some(MaterialElasticityModel::IsotropicLinear(
             MaterialMechanicalModel {
-                youngs_modulus_pa: 5.0e9,
-                poisson_ratio: 0.33,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(5.0e9),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.33),
             },
         )),
         damping: None,
         thermal: Some(MaterialThermalModel {
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -2.5e-4,
-            conductivity_w_per_mk: 1200.0,
-            specific_heat_j_per_kgk: 160.0,
-            expansion_coefficient_per_k: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(-2.5e-4),
+            conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(1200.0),
+            specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(160.0),
+            expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(1.2e-5),
         }),
         acoustic: None,
         electrical: None,
@@ -6237,7 +6256,7 @@ fn analysis_run_cfd_rejects_vector_boundaries_without_fabricated_payload() {
     assert!(matches!(&inlet.kind,
         runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
             value: runmat_analysis_core::PrescribedValue::Constant(velocity), ..
-        } if velocity.map(|component| component.meters_per_second) == [4.25, 0.0, 0.0]
+        } if velocity.map(|component| component.canonical_value()) == [4.25, 0.0, 0.0]
     ));
     let err = analysis_run_cfd_with_options_op(
         &model,
@@ -6803,9 +6822,9 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     set_model_thermo_coupling(
         &mut model,
         TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(80.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: vec![TestThermoRegionTemperatureDelta {
                 region_id: "missing_region".to_string(),
                 temperature_delta_k: 80.0,
@@ -6839,8 +6858,8 @@ fn analysis_run_nonlinear_rejects_invalid_plastic_material() {
     set_model_plasticity(
         &mut model,
         runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: -1.0,
-            isotropic_hardening_modulus_pa: 1e9,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(-1.0),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         },
     );
 
@@ -6901,8 +6920,8 @@ fn nonlinear_plasticity_rejects_noncanonical_synthetic_model() {
     set_model_plasticity(
         &mut model,
         runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening {
-            yield_stress_pa: 250e6,
-            isotropic_hardening_modulus_pa: 1e9,
+            yield_stress_pa: runmat_types::physical::YieldStress::new(250e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         },
     );
 

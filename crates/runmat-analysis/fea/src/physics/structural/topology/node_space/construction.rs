@@ -12,7 +12,10 @@ impl CanonicalStructuralNodeSpace {
                 .iter()
                 .map(|node| CanonicalStructuralNode {
                     identity: node.stable_identity,
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                     owns_solid_translation: true,
                     owns_explicit_rotation: false,
                 }),
@@ -43,10 +46,13 @@ impl CanonicalStructuralNodeSpace {
                 identity: explicit_node_identity(
                     structural_topology_digest,
                     node.node_id,
-                    node.coordinates_m,
+                    node.coordinates_m.canonical_value(),
                 )
                 .map_err(identity_error)?,
-                coordinates_m: node.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(node.coordinates_m.canonical_value()),
                 owns_solid_translation: false,
                 owns_explicit_rotation: true,
             });
@@ -89,7 +95,10 @@ impl CanonicalStructuralNodeSpace {
                 .iter()
                 .map(|node| CanonicalStructuralNode {
                     identity: node.stable_identity,
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                     owns_solid_translation: true,
                     owns_explicit_rotation: false,
                 }),
@@ -135,8 +144,10 @@ impl CanonicalStructuralNodeSpace {
                     });
                 }
                 let distance_m = distance(
-                    node.coordinates_m,
-                    mesh.topology.nodes[canonical_index].coordinates_m,
+                    node.coordinates_m.canonical_value(),
+                    mesh.topology.nodes[canonical_index]
+                        .coordinates_m
+                        .canonical_value(),
                 );
                 if !distance_m.is_finite() || distance_m > tolerance_m {
                     return Err(StructuralNodeSpaceError::AttachmentCoordinateMismatch {
@@ -152,12 +163,15 @@ impl CanonicalStructuralNodeSpace {
                 let identity = explicit_node_identity(
                     structural_topology_digest,
                     node.node_id,
-                    node.coordinates_m,
+                    node.coordinates_m.canonical_value(),
                 )
                 .map_err(identity_error)?;
                 nodes.push(CanonicalStructuralNode {
                     identity,
-                    coordinates_m: node.coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(node.coordinates_m.canonical_value()),
                     owns_solid_translation: false,
                     owns_explicit_rotation: true,
                 });

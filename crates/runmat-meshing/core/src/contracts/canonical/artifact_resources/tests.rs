@@ -61,7 +61,17 @@ fn validation_estimate_counts_nested_metadata_and_checks_overflow() {
         assert!(slots::<StableDigest>(usize::MAX).is_err());
         assert!(volume_edge_occurrences(usize::MAX).is_err());
     }
-    mesh.topology.nodes[0].coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(mesh.validation_resident_bytes_estimate().is_err());
 }
 
@@ -96,7 +106,17 @@ fn owned_encoding_estimate_covers_wire_and_nested_metadata_without_changing_orig
             .assembly_path
             .push("part".repeat(4096));
         assert!(mesh.canonical_encoding_resident_bytes_estimate().unwrap() > estimate);
-        mesh.topology.nodes[0].coordinates_m[0] = f64::NAN;
+        {
+            let quantity_change = f64::NAN;
+            let quantity_index = 0;
+            let quantity_slot = &mut mesh.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert!(mesh.canonical_encoding_resident_bytes_estimate().is_err());
     }
 }

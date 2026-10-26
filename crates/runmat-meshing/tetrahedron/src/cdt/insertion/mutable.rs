@@ -102,7 +102,7 @@ pub(in crate::cdt) fn insert_delaunay_volume_node_into_mutation_with_prepared_ba
         failure.reason = format!(
             "{}; insertion preparation coordinates={:?}, nodes={}, work={:?}",
             failure.reason,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             topology.nodes.len(),
             work.inventory()
         );
@@ -119,7 +119,7 @@ pub(in crate::cdt) fn insert_delaunay_volume_node_into_mutation_with_prepared_ba
         failure.reason = format!(
             "{}; insertion application coordinates={:?}, nodes={}, work={:?}",
             failure.reason,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             topology.nodes.len(),
             work.inventory()
         );
@@ -336,8 +336,11 @@ fn first_illegal_inserted_face(
                 right.vertex_indices,
                 |node| {
                     let node = topology.nodes[node as usize];
-                    DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
-                        .predicate_point()
+                    DelaunayVolumeNode::explicit(
+                        node.identity,
+                        node.coordinates_m.canonical_value(),
+                    )
+                    .predicate_point()
                 },
             )
             .map_err(super::predicate_error)?

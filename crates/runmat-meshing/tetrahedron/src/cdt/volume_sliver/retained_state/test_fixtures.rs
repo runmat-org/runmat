@@ -57,7 +57,9 @@ pub(in crate::cdt::volume_sliver) fn assigned(
         .iter()
         .map(|cell| PersistentEntityId {
             kind: PersistentEntityKind::Region,
-            source_topology_id: if topology.nodes[cell.vertex_indices[0] as usize].coordinates_m[0]
+            source_topology_id: if topology.nodes[cell.vertex_indices[0] as usize]
+                .coordinates_m
+                .canonical_value()[0]
                 >= 20.
             {
                 "unrelated-part"

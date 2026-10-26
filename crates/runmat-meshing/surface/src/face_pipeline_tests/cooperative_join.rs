@@ -144,7 +144,11 @@ pub(super) fn verify(
                 5 => {
                     surface.face_ids.pop();
                 }
-                _ => surface.maximum_chordal_deviation_m += 1e-7,
+                _ => {
+                    surface.maximum_chordal_deviation_m = runmat_types::physical::Quantity::new(
+                        surface.maximum_chordal_deviation_m.canonical_value() + (1e-7),
+                    )
+                }
             }
             let bytes = encode_decided_exact_surface_pass_result(&tampered).unwrap();
             assert!(

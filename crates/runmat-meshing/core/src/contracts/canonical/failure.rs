@@ -106,17 +106,29 @@ pub enum MeshingFailureCategory {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GeometricWitness {
-    Point { coordinates_m: [f64; 3] },
-    Segment { endpoints_m: [[f64; 3]; 2] },
-    Triangle { vertices_m: [[f64; 3]; 3] },
-    CurveParameter { parameter: f64 },
-    SurfaceParameter { uv: [f64; 2] },
+    Point {
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        coordinates_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
+    },
+    Segment {
+        endpoints_m: [[f64; 3]; 2],
+    },
+    Triangle {
+        vertices_m: [[f64; 3]; 3],
+    },
+    CurveParameter {
+        parameter: f64,
+    },
+    SurfaceParameter {
+        uv: [f64; 2],
+    },
 }
 
 impl GeometricWitness {
     fn validate(&self) -> Result<(), MeshingContractError> {
         let values: Vec<f64> = match self {
-            Self::Point { coordinates_m } => coordinates_m.to_vec(),
+            Self::Point { coordinates_m } => coordinates_m.canonical_value().to_vec(),
             Self::Segment { endpoints_m } => endpoints_m.iter().flatten().copied().collect(),
             Self::Triangle { vertices_m } => vertices_m.iter().flatten().copied().collect(),
             Self::CurveParameter { parameter } => vec![*parameter],

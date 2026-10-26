@@ -1,6 +1,5 @@
 use super::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, FeaTopologyRole, FeaType,
-    PhysicalDimension,
 };
 use crate::{
     BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey,
@@ -11,7 +10,6 @@ use runmat_analysis_core::{
 };
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
 use runmat_parser::fea::{FeaBinaryOperator, FeaUnaryOperator};
-use runmat_types::QuantityDimension;
 
 pub(super) fn lower_definitions(
     bound: &BoundFeaProgram,
@@ -75,9 +73,7 @@ pub(super) fn authored_type(value_type: &FeaType) -> Option<AuthoredInputType> {
         FeaType::Real => AuthoredInputType::Real,
         FeaType::Complex => AuthoredInputType::Complex,
         FeaType::String => AuthoredInputType::String,
-        FeaType::Quantity(dimension) => {
-            AuthoredInputType::Quantity(quantity_dimension(*dimension)?)
-        }
+        FeaType::Quantity(dimension) => AuthoredInputType::Quantity((*dimension).into()),
         FeaType::Declaration(FeaSymbolKind::Material) => AuthoredInputType::Material,
         FeaType::Region(role) => AuthoredInputType::Region(geometry_role(*role)),
         _ => return None,
@@ -117,11 +113,24 @@ pub(super) fn lower_value(
             CheckedExpressionKind::String(value) => AuthoredInputValue::String(value.clone()),
             _ => return invalid_value(declaration, expression, expected, diagnostics),
         },
-        AuthoredInputType::Quantity(dimension) => AuthoredInputValue::Quantity {
-            dimension,
-            value_si: scalar(expression)
+        AuthoredInputType::Quantity(dimension) => {
+            let kind = expression
+                .quantity_kind_hint()
+                .ok()
+                .or_else(|| invalid_value(declaration, expression, expected, diagnostics))?;
+            let value = scalar(expression)
+                .or_else(|| invalid_value(declaration, expression, expected, diagnostics))?;
+            AuthoredInputValue::Quantity(
+                runmat_types::physical::DimensionedScalar::try_from_descriptor(
+                    dimension
+                        .with_semantic_kind(kind.or(dimension.kind()))
+                        .ok()?,
+                    value,
+                )
+                .ok()
                 .or_else(|| invalid_value(declaration, expression, expected, diagnostics))?,
-        },
+            )
+        }
         AuthoredInputType::Material => AuthoredInputValue::Material(material_reference(
             bound,
             declaration,
@@ -144,7 +153,7 @@ pub(super) fn lower_value(
 }
 
 fn type_assignable(expected: AuthoredInputType, actual: AuthoredInputType) -> bool {
-    expected == actual
+    expected.accepts_type(actual)
         || matches!(
             (expected, actual),
             (AuthoredInputType::Real, AuthoredInputType::Integer)
@@ -173,11 +182,9 @@ fn scalar(expression: &CheckedExpression) -> Option<f64> {
     match &expression.kind {
         CheckedExpressionKind::Number(value) => value.parse().ok(),
         CheckedExpressionKind::CadParameterValue(value) => Some(value.value_si()),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-        } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            unit.to_canonical(scalar(value)?).ok()
+        }
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = scalar(operand)?;
             Some(match operator {
@@ -321,54 +328,6 @@ fn declaration_reference(
             None
         }
     }
-}
-
-fn quantity_dimension(dimension: PhysicalDimension) -> Option<QuantityDimension> {
-    Some(if dimension == PhysicalDimension::DIMENSIONLESS {
-        QuantityDimension::Dimensionless
-    } else if dimension == PhysicalDimension::LENGTH {
-        QuantityDimension::Length
-    } else if dimension == PhysicalDimension::AREA {
-        QuantityDimension::Area
-    } else if dimension == PhysicalDimension::VOLUME {
-        QuantityDimension::Volume
-    } else if dimension == PhysicalDimension::TIME {
-        QuantityDimension::Time
-    } else if dimension == PhysicalDimension::FREQUENCY {
-        QuantityDimension::Frequency
-    } else if dimension == PhysicalDimension::MASS {
-        QuantityDimension::Mass
-    } else if dimension == PhysicalDimension::DENSITY {
-        QuantityDimension::Density
-    } else if dimension == PhysicalDimension::TEMPERATURE {
-        QuantityDimension::Temperature
-    } else if dimension == PhysicalDimension::VELOCITY {
-        QuantityDimension::Velocity
-    } else if dimension == PhysicalDimension::ACCELERATION {
-        QuantityDimension::Acceleration
-    } else if dimension == PhysicalDimension::FORCE {
-        QuantityDimension::Force
-    } else if dimension == PhysicalDimension::MOMENT {
-        QuantityDimension::Moment
-    } else if dimension == PhysicalDimension::PRESSURE {
-        QuantityDimension::Pressure
-    } else if dimension == PhysicalDimension::ENERGY {
-        QuantityDimension::Energy
-    } else if dimension == PhysicalDimension::POWER {
-        QuantityDimension::Power
-    } else if dimension == PhysicalDimension::HEAT_FLUX {
-        QuantityDimension::HeatFlux
-    } else if dimension == PhysicalDimension::THERMAL_CONDUCTIVITY {
-        QuantityDimension::ThermalConductivity
-    } else if dimension == PhysicalDimension::ELECTRIC_POTENTIAL {
-        QuantityDimension::ElectricPotential
-    } else if dimension == PhysicalDimension::ELECTRIC_CURRENT {
-        QuantityDimension::ElectricCurrent
-    } else if dimension == PhysicalDimension::MAGNETIC_FLUX_DENSITY {
-        QuantityDimension::MagneticFluxDensity
-    } else {
-        return None;
-    })
 }
 
 fn geometry_role(role: FeaTopologyRole) -> GeometryRegionRole {

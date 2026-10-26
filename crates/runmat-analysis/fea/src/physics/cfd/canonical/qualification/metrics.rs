@@ -7,7 +7,12 @@ use super::{fixture, reference};
 pub fn cell_centroid_velocity_error(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
     let mut numerator = 0.0;
     let mut denominator = 0.0;
-    for (c, u) in f.topology.cells.iter().zip(&r.velocity_m_per_s) {
+    for (c, u) in f
+        .topology
+        .cells
+        .iter()
+        .zip(r.velocity_m_per_s.canonical_values())
+    {
         let exact = reference::velocity(f.reference, c.centroid_m, f.rotated);
         numerator += c.volume_m3 * norm(sub(*u, exact)).powi(2);
         denominator += c.volume_m3 * norm(exact).powi(2);
@@ -28,8 +33,13 @@ pub fn wall_shear_error(f: &fixture::Fixture, r: &CanonicalFluidResidual) -> f64
                 .map(|j| (gradient[k][j] + gradient[j][k]) * face.owner_area_vector_m2[j])
                 .sum::<f64>()
         });
-        error += norm(sub(r.face_forces.viscous_traction_n[i], traction)).powi(2) / face.area_m2;
-        exact += norm(traction).powi(2) / face.area_m2;
+        error += norm(sub(
+            r.face_forces.viscous_traction_n.canonical_values()[i],
+            traction,
+        ))
+        .powi(2)
+            / face.area_m2.canonical_value();
+        exact += norm(traction).powi(2) / face.area_m2.canonical_value();
     }
     (error / exact).sqrt()
 }

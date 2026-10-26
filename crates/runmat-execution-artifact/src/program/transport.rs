@@ -48,7 +48,7 @@ impl ProgramExecutionObject {
         let bytes = serde_json::to_vec(&value)
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         let reference = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: access.value_id(logical_digest),
             logical_digest,
             encoded_length: bytes.len() as u64,
@@ -493,7 +493,7 @@ fn collect_references(values: &[ValuePayload]) -> Vec<&ValueRef> {
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::ValueId;
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::InlineValue;
     use runmat_execution::Digest;
 
@@ -503,7 +503,7 @@ mod tests {
     fn result_reference(bytes: &[u8]) -> ValueRef {
         let logical_digest = Digest::sha256(bytes);
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"program-transport-test", logical_digest.bytes()]),
             logical_digest,
             encoded_length: bytes.len() as u64,

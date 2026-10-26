@@ -31,7 +31,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LinearSolveResult {
+pub struct LinearSolveResult<StateStorage = Vec<f64>> {
     pub iterations: u32,
     pub residual_norm: f64,
     /// Relative residual in the actual solved equation space; absent after admission failure.
@@ -42,10 +42,54 @@ pub struct LinearSolveResult {
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
     pub accelerator_evidence: Option<crate::solve::accelerator::AcceleratorSolveEvidence>,
-    pub solution: Vec<f64>,
+    pub solution: StateStorage,
     pub solver_method: SolverMethod,
     pub preconditioner: SolverPreconditioner,
     pub diagnostics: Vec<FeaDiagnostic>,
+}
+
+impl<S> LinearSolveResult<S> {
+    pub fn map_solution<T>(self, map: impl FnOnce(S) -> T) -> LinearSolveResult<T> {
+        self.try_map_solution(|storage| Ok::<_, std::convert::Infallible>(map(storage)))
+            .unwrap_or_else(|never| match never {})
+    }
+    /// Move the solver's numerical state into a checked physical representation
+    /// without duplicating its buffer or its backend/admission evidence.
+    pub fn try_map_solution<T, E>(
+        self,
+        map: impl FnOnce(S) -> Result<T, E>,
+    ) -> Result<LinearSolveResult<T>, E> {
+        let LinearSolveResult {
+            iterations,
+            residual_norm,
+            relative_residual,
+            converged,
+            host_sync_count,
+            solver_backend,
+            device_apply_k_count,
+            device_apply_k_attempt_count,
+            accelerator_evidence,
+            solution,
+            solver_method,
+            preconditioner,
+            diagnostics,
+        } = self;
+        Ok(LinearSolveResult {
+            iterations,
+            residual_norm,
+            relative_residual,
+            converged,
+            host_sync_count,
+            solver_backend,
+            device_apply_k_count,
+            device_apply_k_attempt_count,
+            accelerator_evidence,
+            solution: map(solution)?,
+            solver_method,
+            preconditioner,
+            diagnostics,
+        })
+    }
 }
 
 pub fn solve_linear_system(

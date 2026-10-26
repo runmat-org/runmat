@@ -126,10 +126,11 @@ pub(super) fn create_future(
     );
     let program = if !context.runtime.execution().requires_program_capture() {
         runmat_runtime::execution::DeferredProgram::Local
-    } else if builtin && !graph_required {
-        // A builtin has typed catalog authority but no V3 function body. Keep
-        // its existing direct V2 worker route instead of inventing a graph
-        // callable owner or rejecting previously supported async builtins.
+    } else if builtin && !graph_required && context.graph_program.is_none() {
+        // A legacy embedding without a selected V3 owner can retain the
+        // catalog-only direct route. A selected session uses its graph capture
+        // below, including for builtin roots; its registry is session-owned
+        // and cannot be serialized into a legacy portable function registry.
         let bytes = crate::encode_interpreter_program_v2(function_registry).map_err(|error| {
             crate::interpreter::errors::mex(
                 "ExecutionProgram",
@@ -425,7 +426,7 @@ async fn await_sequence(
             }
             AwaitAction::Completed(sequence) => return Ok(sequence),
             AwaitAction::Pending(pending) => {
-                yield_once().await;
+                yield_execution(context).await?;
                 value = pending;
             }
             AwaitAction::ExecuteFuture { handle, call } => {
@@ -601,7 +602,7 @@ pub(super) async fn fetch_next(
                 {
                     return empty_outputs(requested_outputs);
                 }
-                yield_once().await;
+                yield_execution(context).await?;
             }
         }
     }
@@ -856,6 +857,21 @@ fn empty_outputs(
         }
     };
     runmat_runtime::execution::RootedValueSequence::new(sequence).map_err(execution_error)
+}
+
+/// Browser workers deliver results and cancellation as message tasks. A
+/// self-waking microtask loop can starve those messages indefinitely. Reuse the
+/// execution adapter's real task-turn scheduler when it provides one.
+pub(super) async fn yield_execution(context: &ExecutionContext) -> Result<(), RuntimeError> {
+    match context.runtime.execution().cpu_cooperation_policy() {
+        runmat_runtime::execution::CpuCooperationPolicy::WorkQuantum(_) => {
+            context.runtime.execution().cooperate_cpu().await.map_err(execution_error)
+        }
+        runmat_runtime::execution::CpuCooperationPolicy::NeverYield => {
+            yield_once().await;
+            Ok(())
+        }
+    }
 }
 
 pub(super) async fn yield_once() {

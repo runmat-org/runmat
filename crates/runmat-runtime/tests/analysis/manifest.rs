@@ -1862,7 +1862,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "unit mismatch fixture must fail validation with mismatch code",
             model: || {
                 let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-                model.units = UnitSystem::Inch;
+                model.units = LengthUnit::Inch;
                 model
             },
             expect_validate_error: Some("RM.FEA.VALIDATE.UNIT_MISMATCH"),

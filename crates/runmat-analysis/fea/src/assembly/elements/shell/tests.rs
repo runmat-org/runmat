@@ -2,16 +2,16 @@ use super::*;
 
 fn section() -> ShellSection {
     ShellSection {
-        thickness_m: 0.002,
-        reference_offset_m: 0.0,
+        thickness_m: runmat_types::physical::Length::new(0.002),
+        reference_offset_m: runmat_types::physical::Length::new(0.0),
         shear_correction: 5.0 / 6.0,
     }
 }
 
 fn material() -> ShellMaterial {
     ShellMaterial {
-        youngs_modulus_pa: 200.0e9,
-        poisson_ratio: 0.3,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
         shear_modulus_pa: 76.9e9,
     }
 }
@@ -26,7 +26,7 @@ fn geometry() -> ShellElementGeometry {
 #[test]
 fn shell_local_frame_is_orthonormal() {
     let frame = geometry().local_frame().expect("frame should build");
-    assert_close(frame.area_m2, 0.5, 1.0e-12);
+    assert_close(frame.area_m2.canonical_value(), 0.5, 1.0e-12);
     assert_close(dot(frame.x, frame.y), 0.0, 1.0e-12);
     assert_close(dot(frame.x, frame.z), 0.0, 1.0e-12);
     assert_close(dot(frame.y, frame.z), 0.0, 1.0e-12);
@@ -78,8 +78,9 @@ fn shell_constant_membrane_strain_matches_plane_stress_resultants() {
         displacement[node * SHELL_NODE_DOF_COUNT] = epsilon_x * position[0];
     }
     let result = recover_resultants(section(), material(), geometry, displacement).unwrap();
-    let factor = material().youngs_modulus_pa * section().thickness_m
-        / (1.0 - material().poisson_ratio.powi(2));
+    let factor = material().youngs_modulus_pa.canonical_value()
+        * section().thickness_m.canonical_value()
+        / (1.0 - material().poisson_ratio.canonical_value().powi(2));
     assert_close(
         result.membrane_force_n_per_m[0],
         factor * epsilon_x,
@@ -87,7 +88,7 @@ fn shell_constant_membrane_strain_matches_plane_stress_resultants() {
     );
     assert_close(
         result.membrane_force_n_per_m[1],
-        factor * material().poisson_ratio * epsilon_x,
+        factor * material().poisson_ratio.canonical_value() * epsilon_x,
         1.0e-8 * factor,
     );
     assert_close(result.membrane_force_n_per_m[2], 0.0, 1.0e-8 * factor);
@@ -101,17 +102,18 @@ fn shell_constant_membrane_strain_matches_plane_stress_resultants() {
 #[test]
 fn homogeneous_reference_surface_retains_membrane_bending_coupling() {
     let mut offset_section = section();
-    offset_section.reference_offset_m = 0.5 * offset_section.thickness_m;
+    offset_section.reference_offset_m =
+        runmat_types::physical::Length::new(0.5 * offset_section.thickness_m.canonical_value());
     let constitutive = homogeneous_constitutive(offset_section, material());
     let extensional = constitutive.matrices.extensional[0][0];
     assert_close(
         constitutive.matrices.coupling[0][0],
-        -0.5 * offset_section.thickness_m * extensional,
+        -0.5 * offset_section.thickness_m.canonical_value() * extensional,
         1.0e-12 * extensional,
     );
     assert_close(
         constitutive.matrices.bending[0][0],
-        offset_section.thickness_m.powi(2) * extensional / 3.0,
+        offset_section.thickness_m.canonical_value().powi(2) * extensional / 3.0,
         1.0e-12 * extensional,
     );
 }
@@ -211,7 +213,9 @@ fn shell_resultant_thickness_scaling_separates_membrane_bending_and_shear() {
     let thin = recover_resultants(section(), material(), geometry(), displacement).unwrap();
     let thick = recover_resultants(
         ShellSection {
-            thickness_m: section().thickness_m * 2.0,
+            thickness_m: runmat_types::physical::Length::new(
+                section().thickness_m.canonical_value() * 2.0,
+            ),
             ..section()
         },
         material(),
@@ -258,12 +262,15 @@ fn assumed_shear_field_preserves_pure_bending_in_the_thin_limit() {
     }
     let thin_section = section();
     let thick_section = ShellSection {
-        thickness_m: thin_section.thickness_m * 2.0,
+        thickness_m: runmat_types::physical::Length::new(
+            thin_section.thickness_m.canonical_value() * 2.0,
+        ),
         ..thin_section
     };
     let result = recover_resultants(thin_section, material(), geometry(), displacement).unwrap();
-    let bending_factor = material().youngs_modulus_pa * thin_section.thickness_m.powi(3)
-        / (12.0 * (1.0 - material().poisson_ratio.powi(2)));
+    let bending_factor = material().youngs_modulus_pa.canonical_value()
+        * thin_section.thickness_m.canonical_value().powi(3)
+        / (12.0 * (1.0 - material().poisson_ratio.canonical_value().powi(2)));
     assert_close(
         result.bending_moment_n[0],
         bending_factor * curvature,

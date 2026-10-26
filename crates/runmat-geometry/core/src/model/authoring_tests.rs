@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::authoring::*;
-use super::{GeometryDigest, GeometryScalarExpression, GeometrySourceFormat, UnitSystem};
+use super::{GeometryDigest, GeometryScalarExpression, GeometrySourceFormat, LengthUnit};
 
 #[test]
 fn imported_geometry_requires_exact_identity_and_persistent_topology() {
@@ -9,10 +9,12 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
         module_path: "project/main.fea".into(),
         geometry_id: "bracket".into(),
         parameters: Vec::new(),
-        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+            named_selections: None,
+            unit_evidence: Default::default(),
             logical_path: "geometry/bracket.step".into(),
             format: GeometrySourceFormat::Step,
-            units: UnitSystem::Millimeter,
+            unit_fallback: Some(LengthUnit::Millimeter),
             content_digest: GeometryDigest::from_bytes([1; 32]),
             topology_digest: GeometryDigest::from_bytes([2; 32]),
             capabilities: GeometryAuthoringCapabilities {

@@ -39,7 +39,7 @@ impl ThermalResultMetadata<'_> {
             self.residual_norms,
             self.residual_target,
             self.energy_balances,
-            self.reference_temperature_k,
+            self.reference_temperature_k.canonical_value(),
             self.topology_digest,
             self.producer,
             self.ordered_node_ids,

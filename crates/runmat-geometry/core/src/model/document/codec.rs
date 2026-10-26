@@ -10,12 +10,12 @@ pub fn encode_geometry_document(
     document: &GeometryDocument,
 ) -> Result<Vec<u8>, GeometryContractError> {
     document.validate()?;
-    crate::model::canonical::encode("analysis.geometry.document/v2", document, DOCUMENT_LIMITS)
+    crate::model::canonical::encode("analysis.geometry.document/v3", document, DOCUMENT_LIMITS)
 }
 
 pub fn decode_geometry_document(bytes: &[u8]) -> Result<GeometryDocument, GeometryContractError> {
     let document =
-        crate::model::canonical::decode("analysis.geometry.document/v2", bytes, DOCUMENT_LIMITS)?;
+        crate::model::canonical::decode("analysis.geometry.document/v3", bytes, DOCUMENT_LIMITS)?;
     GeometryDocument::validate(&document)?;
     Ok(document)
 }

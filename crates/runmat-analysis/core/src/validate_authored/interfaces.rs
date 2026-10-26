@@ -27,17 +27,17 @@ pub(super) fn validate_interfaces(
                 AnalysisInterfaceKind::Contact(value) => match value.friction {
                     crate::ContactFriction::Frictionless => true,
                     crate::ContactFriction::Coulomb { coefficient } => {
-                        coefficient.is_finite() && coefficient.ratio > 0.0
+                        coefficient.is_finite() && coefficient.canonical_value() > 0.0
                     }
                 },
                 AnalysisInterfaceKind::FluidStructure(_) => true,
                 AnalysisInterfaceKind::ConjugateHeatTransfer(value) => match value.transfer {
                     crate::ThermalInterfaceTransfer::Perfect => true,
                     crate::ThermalInterfaceTransfer::Conductance(value) => {
-                        value.is_finite() && value.watts_per_square_meter_kelvin > 0.0
+                        value.is_finite() && value.canonical_value() > 0.0
                     }
                     crate::ThermalInterfaceTransfer::Resistance(value) => {
-                        value.is_finite() && value.square_meter_kelvin_per_watt > 0.0
+                        value.is_finite() && value.canonical_value() > 0.0
                     }
                 },
             };

@@ -41,8 +41,12 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
         // A completely unbalanced source cannot become acceptable merely by changing
         // its power scale. Exercise both full-result and persisted-manifest admission.
         for power_w in [1.0e-12, 1.0e-9, 1.0, 1.0e9] {
-            let balance =
-                crate::contracts::ThermalEnergyBalance::from_powers(0.0, 0.0, power_w, 0.0);
+            let balance = crate::contracts::ThermalEnergyBalance::from_powers(
+                runmat_types::physical::Power::new(0.0),
+                runmat_types::physical::Power::new(0.0),
+                runmat_types::physical::Power::new(power_w),
+                runmat_types::physical::Power::new(0.0),
+            );
             balance.validate().unwrap();
             let mut unbalanced = result.clone();
             unbalanced.energy_balances[0] = balance;
@@ -103,7 +107,15 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
             .thermal
             .as_mut()
             .unwrap()
-            .conductivity_w_per_mk *= 2.0;
+            .conductivity_w_per_mk = runmat_types::physical::Quantity::new(
+            other_material.model.materials[0]
+                .thermal
+                .as_mut()
+                .unwrap()
+                .conductivity_w_per_mk
+                .canonical_value()
+                * (2.0),
+        );
         other_material.validate().unwrap();
         assert_eq!(other_material.model.sequence, workload.model.sequence);
         assert_ne!(other_material.identity().unwrap(), result.source_workload);
@@ -147,7 +159,9 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
         malformed.initial_state.procedure_step_id = "other".into();
         assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
         let mut malformed = receipt.clone();
-        malformed.receipt.reference_temperature_k += 1.0;
+        malformed.receipt.reference_temperature_k = runmat_types::physical::Quantity::new(
+            malformed.receipt.reference_temperature_k.canonical_value() + (1.0),
+        );
         assert!(malformed.validate().is_err());
         let mut excessive_energy = receipt.clone();
         excessive_energy.receipt.maximum_relative_energy_residual = workload.residual_target * 2.0;
@@ -216,15 +230,23 @@ fn steady_receipts_bind_one_accepted_sample_and_mandatory_workload_lineage() {
         );
         assert!(result.residual_norms[0] <= workload.residual_target);
         assert_eq!(
-            receipt.receipt().first_sample_time_s,
-            receipt.receipt().terminal_sample_time_s
+            receipt.receipt().first_sample_time_s.canonical_value(),
+            receipt.receipt().terminal_sample_time_s.canonical_value()
         );
         let mut other = workload.clone();
         other.model.materials[0]
             .thermal
             .as_mut()
             .unwrap()
-            .conductivity_w_per_mk *= 2.0;
+            .conductivity_w_per_mk = runmat_types::physical::Quantity::new(
+            other.model.materials[0]
+                .thermal
+                .as_mut()
+                .unwrap()
+                .conductivity_w_per_mk
+                .canonical_value()
+                * (2.0),
+        );
         let mut tampered_manifest = manifest.clone();
         tampered_manifest.source_workload = other.identity().unwrap();
         tampered_manifest.validate().unwrap();
@@ -263,7 +285,15 @@ fn numerical_intent_excludes_placement_and_admission_but_exact_workload_does_not
         .thermal
         .as_mut()
         .unwrap()
-        .conductivity_w_per_mk *= 2.0;
+        .conductivity_w_per_mk = runmat_types::physical::Quantity::new(
+        changed_material.model.materials[0]
+            .thermal
+            .as_mut()
+            .unwrap()
+            .conductivity_w_per_mk
+            .canonical_value()
+            * (2.0),
+    );
     assert_ne!(
         cpu.numerical_intent_identity().unwrap(),
         changed_material.numerical_intent_identity().unwrap()

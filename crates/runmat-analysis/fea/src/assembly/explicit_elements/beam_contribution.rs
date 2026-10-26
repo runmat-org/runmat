@@ -61,8 +61,8 @@ pub(super) fn compute(
         shear_modulus_pa: material.shear_modulus_pa(),
     };
     let geometry = BeamElementGeometry {
-        node_i_m: structural.nodes[explicit_i].coordinates_m,
-        node_j_m: structural.nodes[explicit_j].coordinates_m,
+        node_i_m: structural.nodes[explicit_i].coordinates_m.canonical_value(),
+        node_j_m: structural.nodes[explicit_j].coordinates_m.canonical_value(),
         reference_axis: beam.reference_axis,
     };
     let frame = geometry
@@ -85,8 +85,8 @@ pub(super) fn compute(
     })?;
     let mass = lumped_beam_mass(
         section,
-        material.density_kg_per_m3,
-        frame.length_m,
+        material.density_kg_per_m3.canonical_value(),
+        frame.length_m.canonical_value(),
         &transform_global_to_local,
     );
     Ok(BeamElementContribution {
@@ -99,7 +99,7 @@ pub(super) fn compute(
             region_id: element.region_id.clone(),
             node_i_index: node_i,
             node_j_index: node_j,
-            length_m: frame.length_m,
+            length_m: runmat_types::physical::Length::new(frame.length_m.canonical_value()),
             section,
             material: beam_material,
             transform_global_to_local,

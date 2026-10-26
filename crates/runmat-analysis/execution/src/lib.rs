@@ -642,3 +642,11 @@ pub use nonlinear_field_recovery::{
     require_nonlinear_recovery_decode_budget, NonlinearFieldRecoveryPreparation,
     PreparedNonlinearFieldRecovery,
 };
+
+mod serial_kernel;
+pub use serial_kernel::{SerialStructuralAnalysisKernel,SerialAnalysisHost,execute_serial_structural_sequence,execute_structural_linear_kernel,execute_state_publication_kernel};
+
+/// Source-bound artifact authority shared by checked-source execution hosts.
+pub fn checked_fea_artifact_access(authority:&str)->runmat_execution_artifact::ArtifactAccess {
+    runmat_execution_artifact::ArtifactAccess {authorization_scope:authority.to_owned(),encryption_context:runmat_execution::Digest::sha256([b"runmat-typed-fea-access/v1\0".as_slice(),authority.as_bytes()].concat())}
+}

@@ -10,8 +10,12 @@ fn assembly() -> AcousticAssembly {
     model.material_assignments[0].target =
         runmat_analysis_core::PropertyRegionTarget::solid("slab");
     let properties = compile_solid_property_map(&model, &mesh).unwrap();
-    AcousticAssembly::assemble(AnalysisProjection::derive(&mesh).unwrap(), &properties, 1.0)
-        .unwrap()
+    AcousticAssembly::assemble(
+        AnalysisProjection::derive(&mesh).unwrap(),
+        &properties,
+        runmat_types::physical::AngularFrequency::new(1.0),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -22,8 +26,16 @@ fn incident_plane_rejects_equal_impedance_but_different_material_and_nonparallel
     a.validate_incident_plane(&left).unwrap();
     let owner = left.last().unwrap().adjacent_element_indices[0];
     assert_ne!(owner, left[0].adjacent_element_indices[0]);
-    a.density[owner] *= 2.0;
-    a.compressibility[owner] *= 2.0; // Y unchanged, c halved: genuinely different medium.
+    a.density = runmat_types::physical::Quantity::new({
+        let mut values = a.density.canonical_values().clone();
+        values[owner] *= 2.0;
+        values
+    });
+    a.compressibility = runmat_types::physical::Quantity::new({
+        let mut values = a.compressibility.canonical_values().clone();
+        values[owner] *= 2.0;
+        values
+    }); // Y unchanged, c halved: genuinely different medium.
     assert!(matches!(
         a.validate_incident_plane(&left),
         Err(AcousticHarmonicError::Unsupported(_))

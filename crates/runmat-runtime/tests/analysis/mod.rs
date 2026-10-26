@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
 use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ProcedureStep};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::LengthUnit;
 use runmat_meshing_core::{
     solver_volume_element_identity, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
     MeshNeighbor, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshNode,

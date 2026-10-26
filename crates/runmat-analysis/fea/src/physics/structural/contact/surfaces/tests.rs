@@ -35,7 +35,7 @@ fn canonical_contact_surfaces_bind_original_face_occurrences_and_current_geometr
         let positions: Vec<_> = projection
             .nodes
             .iter()
-            .map(|n| n.coordinates_m.map(|p| p + 2.0))
+            .map(|n| n.coordinates_m.canonical_value().map(|p| p + 2.0))
             .collect();
         let search = plan.primary_search_index(&positions, 1).unwrap();
         let face = &projection.boundary_faces[0];

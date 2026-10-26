@@ -36,10 +36,22 @@ fn fields<'a>(
     q: &'a [f64],
 ) -> CanonicalFluidFields<'a> {
     CanonicalFluidFields {
-        pressure_reference_pa: &problem.pressure_reference_pa,
-        velocity_m_per_s: u,
-        pressure_fluctuation_pa: p,
-        face_volume_flux_m3_per_s: q,
+        pressure_reference_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(problem.pressure_reference_pa.canonical_values()),
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(u),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(p),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(q),
     }
 }
 
@@ -69,12 +81,14 @@ fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
             p.recover(&cold).is_err(),
             "transient result cannot claim steady equations"
         );
-        for velocity in &result.velocity_m_per_s {
+        for velocity in result.velocity_m_per_s.canonical_values() {
             assert!(norm(sub(*velocity, final_velocity)) < 1e-8);
         }
-        for gradient in
-            super::super::geometry_ops::pressure_gradient(&p, &result.pressure_fluctuation_pa)
-                .unwrap()
+        for gradient in super::super::geometry_ops::pressure_gradient(
+            &p,
+            result.pressure_fluctuation_pa.canonical_values(),
+        )
+        .unwrap()
         {
             assert!(
                 norm(sub(gradient, exact_gradient)) < 1e-6,
@@ -94,7 +108,14 @@ fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
             .recover(&cold)
             .is_err());
         let mut changed = cold;
-        changed.velocity_m_per_s[0][0] += 0.01;
+        changed.velocity_m_per_s = changed
+            .velocity_m_per_s
+            .clone()
+            .try_map_canonical_storage(|mut values| {
+                values[0][0] += 0.01;
+                values
+            })
+            .unwrap();
         assert!(step.recover(&changed).is_err());
     }
 }
@@ -129,7 +150,7 @@ fn exponential_translation_pressure_shows_first_order_time_convergence() {
                 for (cell, gradient) in p.topology.cells.iter().zip(
                     super::super::geometry_ops::pressure_gradient(
                         &p,
-                        &result.pressure_fluctuation_pa,
+                        result.pressure_fluctuation_pa.canonical_values(),
                     )
                     .unwrap(),
                 ) {

@@ -131,7 +131,7 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
+use runmat_geometry_core::{EntityKind, GeometryAsset, LengthUnit};
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
 };
@@ -368,8 +368,8 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     );
     for material in &mut model.materials {
         material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-            speed_of_sound_m_per_s: 343.0,
-            damping_ratio: 0.02,
+            speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+            damping_ratio: runmat_types::physical::DampingRatio::new(0.02),
         });
     }
     model.material_assignments = vec![MaterialAssignment {
@@ -486,7 +486,7 @@ fn material_conflict_contract_model() -> AnalysisModel {
     polymer
         .require_mechanical_mut()
         .expect("structural fixture material")
-        .youngs_modulus_pa = 3.0e9;
+        .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(3.0e9);
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
         target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
@@ -586,7 +586,7 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
 fn analysis_validate_contract_is_v1_and_maps_codes() {
     let model = contract_linear_static_model();
     let context = OperationContext::new(Some("trace-contract-2".to_string()), None);
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
+    let envelope = analysis_validate(&model, LengthUnit::Meter, &CoordinateFrame::Global, context)
         .expect("validate should succeed");
     assert_eq!(envelope.operation, "fea.validate");
     assert_eq!(envelope.op_version, "fea.validate/v1");
@@ -595,7 +595,7 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
     invalid.materials.clear();
     let err = analysis_validate(
         &invalid,
-        UnitSystem::Meter,
+        LengthUnit::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(None, None),
     )
@@ -1011,10 +1011,10 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 #[test]
 fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     let mut unit_mismatch = contract_linear_static_model();
-    unit_mismatch.units = UnitSystem::Inch;
+    unit_mismatch.units = LengthUnit::Inch;
     let unit_err = analysis_validate(
         &unit_mismatch,
-        UnitSystem::Meter,
+        LengthUnit::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(Some("trace-contract-2b".to_string()), None),
     )
@@ -1038,7 +1038,7 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     });
     let frame_err = analysis_validate(
         &frame_mismatch,
-        UnitSystem::Meter,
+        LengthUnit::Meter,
         &CoordinateFrame::Global,
         OperationContext::new(Some("trace-contract-2c".to_string()), None),
     )
@@ -2749,7 +2749,9 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
         let _ = host;
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        Err(anyhow::anyhow!("admission probe never allocates device memory"))
+        Err(anyhow::anyhow!(
+            "admission probe never allocates device memory"
+        ))
     }
 
     fn download<'a>(

@@ -1,3 +1,4 @@
+use runmat_types::PhysicalDimension;
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{
@@ -8,9 +9,8 @@ use runmat_analysis_core::{
 };
 use runmat_geometry_core::{
     Ap242AssociationTarget, Ap242EngineeringProperty, Ap242EngineeringPropertyKind,
-    Ap242ExchangeInventory, Ap242MaterialClass, Ap242PhysicalDimension,
+    Ap242ExchangeInventory, Ap242MaterialClass, QuantityKind,
 };
-use runmat_types::PhysicalDimension;
 
 use super::{error, CheckedFeaDeclaration, CheckedGeometryInspection};
 use crate::{
@@ -134,7 +134,7 @@ pub(super) fn lower(
         adopted
             .iter()
             .find(|property| property_kind(property.kind) == kind)
-            .map(|property| property.value.value_si)
+            .map(|property| property.value.canonical_value())
     };
     let elasticity = match (
         value(ImportedCadMaterialPropertyKind::YoungsModulus),
@@ -143,8 +143,10 @@ pub(super) fn lower(
         (Some(youngs_modulus_pa), Some(poisson_ratio)) => Some(
             runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
-                    youngs_modulus_pa,
-                    poisson_ratio,
+                    youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                        youngs_modulus_pa,
+                    ),
+                    poisson_ratio: runmat_types::physical::PoissonRatio::new(poisson_ratio),
                 },
             ),
         ),
@@ -173,7 +175,8 @@ pub(super) fn lower(
             associations: associations(inventory, &candidate.material_id),
             adopted_properties: adopted.iter().map(provenance).collect(),
         }),
-        mass_density_kg_per_m3: value(ImportedCadMaterialPropertyKind::MassDensity),
+        mass_density_kg_per_m3: (value(ImportedCadMaterialPropertyKind::MassDensity))
+            .map(runmat_types::physical::MassDensity::new),
         elasticity,
         damping: None,
         thermal: None,
@@ -309,8 +312,8 @@ fn environment_requirements_hold(
         };
         let matches = properties.iter().all(|property| {
             property.environment.iter().any(|condition| {
-                condition.value.dimension == Ap242PhysicalDimension::Temperature
-                    && (condition.value.value_si - required).abs() <= 1e-9
+                condition.value.kind() == QuantityKind::Temperature
+                    && (condition.value.canonical_value() - required).abs() <= 1e-9
             })
         });
         if !matches {
@@ -401,20 +404,14 @@ fn provenance(property: &Ap242EngineeringProperty) -> ImportedCadMaterialPropert
         source_name: property.name.clone(),
         source_entity_id: property.source_entity_id,
         representation_entity_id: property.representation_entity_id,
-        dimension: dimension(property.value.dimension),
-        value_si: property.value.value_si,
-        source_value: property.value.source_value,
-        source_unit: property.value.source_unit.clone(),
+        value: property.value.clone(),
         specification: property.specification.clone(),
         environment: property
             .environment
             .iter()
             .map(|condition| ImportedCadEnvironmentCondition {
                 name: condition.name.clone(),
-                dimension: dimension(condition.value.dimension),
-                value_si: condition.value.value_si,
-                source_value: condition.value.source_value,
-                source_unit: condition.value.source_unit.clone(),
+                value: condition.value.clone(),
             })
             .collect(),
     }
@@ -450,31 +447,4 @@ fn associations(
             },
         })
         .collect()
-}
-
-fn dimension(value: Ap242PhysicalDimension) -> PhysicalDimension {
-    use Ap242PhysicalDimension as D;
-    match value {
-        D::Dimensionless | D::PlaneAngle => PhysicalDimension::DIMENSIONLESS,
-        D::Length => PhysicalDimension::LENGTH,
-        D::Area => PhysicalDimension::AREA,
-        D::Volume => PhysicalDimension::VOLUME,
-        D::Time => PhysicalDimension::TIME,
-        D::Mass => PhysicalDimension::MASS,
-        D::MassDensity => PhysicalDimension::DENSITY,
-        D::Temperature => PhysicalDimension::TEMPERATURE,
-        D::Pressure => PhysicalDimension::PRESSURE,
-        D::Force => PhysicalDimension::FORCE,
-        D::Energy => PhysicalDimension::ENERGY,
-        D::Power => PhysicalDimension::POWER,
-        D::ThermalConductivity => PhysicalDimension::THERMAL_CONDUCTIVITY,
-        D::SpecificHeat => PhysicalDimension::SPECIFIC_HEAT,
-        D::InverseTemperature => PhysicalDimension::new([0, 0, 0, 0, -1, 0, 0, 0]),
-        D::ElectricalConductivity => PhysicalDimension::ELECTRICAL_CONDUCTIVITY,
-        D::AcousticImpedance => PhysicalDimension::new([-2, 1, -1, 0, 0, 0, 0, 0]),
-        D::DynamicViscosity => PhysicalDimension::new([-1, 1, -1, 0, 0, 0, 0, 0]),
-        D::ElectricPotential => PhysicalDimension::ELECTRIC_POTENTIAL,
-        D::ElectricCurrent => PhysicalDimension::ELECTRIC_CURRENT,
-        D::MagneticFluxDensity => PhysicalDimension::MAGNETIC_FLUX_DENSITY,
-    }
 }

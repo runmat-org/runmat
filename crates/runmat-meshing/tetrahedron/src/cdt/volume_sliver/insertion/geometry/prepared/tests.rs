@@ -25,8 +25,12 @@ fn split_probes_resolve_each_child_scope_once() {
     })
     .unwrap();
     let point = std::array::from_fn(|axis| {
-        (topology.nodes[edge[0] as usize].coordinates_m[axis]
-            + topology.nodes[edge[1] as usize].coordinates_m[axis])
+        (topology.nodes[edge[0] as usize]
+            .coordinates_m
+            .canonical_value()[axis]
+            + topology.nodes[edge[1] as usize]
+                .coordinates_m
+                .canonical_value()[axis])
             * 0.5
     });
     let mut expected = f64::INFINITY;
@@ -42,11 +46,17 @@ fn split_probes_resolve_each_child_scope_once() {
             .vertex_indices
             .into_iter()
             .filter(|vertex| !edge.contains(vertex))
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m)
+            .map(|vertex| {
+                topology.nodes[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            })
             .collect::<Vec<_>>();
         for endpoint in edge {
             let points = [
-                topology.nodes[endpoint as usize].coordinates_m,
+                topology.nodes[endpoint as usize]
+                    .coordinates_m
+                    .canonical_value(),
                 point,
                 opposite[0],
                 opposite[1],

@@ -28,11 +28,11 @@ fn request(order: ElementOrder) -> MeshingRequest {
             validation: "validation/current".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
@@ -42,7 +42,7 @@ fn request(order: ElementOrder) -> MeshingRequest {
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 2.0,
@@ -51,7 +51,7 @@ fn request(order: ElementOrder) -> MeshingRequest {
                 minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -159,7 +159,9 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
         }));
     assert!(result.volume_elements.iter().all(|element| {
         let points = std::array::from_fn(|index| {
-            result.nodes[element.node_ids[index] as usize - 1].coordinates_m
+            result.nodes[element.node_ids[index] as usize - 1]
+                .coordinates_m
+                .canonical_value()
         });
         runmat_meshing_core::quality::predicate::tetrahedron_signed_volume(points) > 0.0
     }));
@@ -170,7 +172,11 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
             .iter()
             .find(|node| !face.node_ids.contains(node))
             .unwrap();
-        let point = |node_id: u64| result.nodes[node_id as usize - 1].coordinates_m;
+        let point = |node_id: u64| {
+            result.nodes[node_id as usize - 1]
+                .coordinates_m
+                .canonical_value()
+        };
         assert_eq!(
             runmat_meshing_core::quality::predicate::orient3d([
                 point(face.node_ids[0]),
@@ -343,11 +349,15 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
             .iter()
             .enumerate()
         {
-            let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
-            let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;
+            let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1]
+                .coordinates_m
+                .canonical_value();
+            let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1]
+                .coordinates_m
+                .canonical_value();
             let midpoint = &topology.nodes[element.node_ids[4 + local_edge] as usize - 1];
             assert_eq!(
-                midpoint.coordinates_m,
+                midpoint.coordinates_m.canonical_value(),
                 [
                     left[0] * 0.5 + right[0] * 0.5,
                     left[1] * 0.5 + right[1] * 0.5,
@@ -427,8 +437,12 @@ fn curved_tet10_nodes_optimize_deterministically() {
         .iter()
         .enumerate()
     {
-        let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
-        let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;
+        let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1]
+            .coordinates_m
+            .canonical_value();
+        let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1]
+            .coordinates_m
+            .canonical_value();
         let node = &topology.nodes[element.node_ids[4 + local_edge] as usize - 1];
         let target: [f64; 3] = std::array::from_fn(|axis| left[axis] * 0.5 + right[axis] * 0.5);
         let edge_length_squared = left
@@ -438,6 +452,7 @@ fn curved_tet10_nodes_optimize_deterministically() {
             .sum::<f64>();
         let optimized_distance_squared = node
             .coordinates_m
+            .canonical_value()
             .into_iter()
             .zip(target)
             .map(|(left, right)| (left - right) * (left - right))

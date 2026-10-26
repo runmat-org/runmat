@@ -232,9 +232,9 @@ fn prepare_remote_root(
             ValuePayload::Object(reference) => {
                 Some((reference.logical_digest, reference.as_ref().clone()))
             }
-            ValuePayload::Inline(_)
-            | ValuePayload::Distributed(_)
-            | ValuePayload::Composite(_) => None,
+            ValuePayload::Inline(_) | ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
+                None
+            }
         })
         .collect::<BTreeMap<_, _>>();
     let objects = prepared

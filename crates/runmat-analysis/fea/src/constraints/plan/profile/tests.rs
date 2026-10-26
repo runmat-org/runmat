@@ -8,7 +8,7 @@ fn finalization_profile_bounds_original_canonical_payload_and_component_rank() {
         let mesh = crate::constraints::compilation_tests::mesh(order);
         for model in [
             fixture_model(FixtureId::CantileverLinearStatic),
-            mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m),
+            mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m.canonical_value()),
         ] {
             let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
             let profile = constraint_plan_finalization_workspace_profile(&plan).unwrap();

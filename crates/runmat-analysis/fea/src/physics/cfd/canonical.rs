@@ -96,19 +96,29 @@ fn deserialize_acceleration<'de, D: serde::Deserializer<'de>>(
 pub struct CanonicalFluidResult {
     pub numerical_input_identity: Digest,
     pub authored_authority_identity: Digest,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Metres per second, in source-bound canonical cell order.
-    pub velocity_m_per_s: Vec<[f64; 3]>,
+    pub velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, Vec<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Original governing pressure relative to the source-bound component outlet or gauge.
     /// This is retained independently of the rounded absolute-pressure projection.
-    pub pressure_fluctuation_pa: Vec<f64>,
+    pub pressure_fluctuation_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Original source-bound pressure coordinate; retained without subtracting
     /// fluctuation from rounded absolute Pa during continuation.
-    pub pressure_reference_pa: Vec<f64>,
+    pub pressure_reference_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Physical pressure in pascals, NOT kinematic pressure.
     /// Exact f64 projection reference + original fluctuation; never restart authority.
-    pub pressure_pa: Vec<f64>,
+    pub pressure_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// Volume flux m^3/s, outward from the canonical face owner.
-    pub face_volume_flux_m3_per_s: Vec<f64>,
+    pub face_volume_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, Vec<f64>>,
     pub outer_iterations: usize,
     pub linear_iterations: u64,
     pub residual: CanonicalFluidResidual,
@@ -160,7 +170,8 @@ pub struct CanonicalFluidProblem<'a> {
     numerical_input_identity: Digest,
     authored_authority_identity: Digest,
     sample: crate::excitation::ProjectionSample,
-    pressure_reference_pa: Vec<f64>,
+    pressure_reference_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
     pressure_reference_plan: pressure_reference::PressureReferencePlan,
     pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
     velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
@@ -293,14 +304,14 @@ impl<'a> CanonicalFluidProblem<'a> {
         topology
             .validate_for(source)
             .map_err(|_| CanonicalFluidError::Invalid("source-bound geometry"))?;
-        let density = material.density.kilograms_per_cubic_meter;
-        let viscosity = material.dynamic_viscosity.pascal_seconds;
+        let density = material.density.canonical_value();
+        let viscosity = material.dynamic_viscosity.canonical_value();
         if !density.is_finite() || density <= 0.0 || !viscosity.is_finite() || viscosity <= 0.0 {
             return Err(CanonicalFluidError::Invalid(
                 "positive finite density and dynamic viscosity required",
             ));
         }
-        if material.turbulence_intensity.ratio != 0.0 {
+        if material.turbulence_intensity.canonical_value() != 0.0 {
             return Err(CanonicalFluidError::Unsupported("turbulence closure"));
         }
         let body_force_n_per_m3 =
@@ -356,7 +367,10 @@ impl<'a> CanonicalFluidProblem<'a> {
             numerical_input_identity,
             authored_authority_identity,
             sample,
-            pressure_reference_pa,
+            pressure_reference_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(pressure_reference_pa),
             pressure_reference_plan,
             pressure_stencils,
             velocity_stencils,

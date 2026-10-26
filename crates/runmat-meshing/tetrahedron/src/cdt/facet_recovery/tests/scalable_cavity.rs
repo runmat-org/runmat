@@ -65,11 +65,11 @@ fn boundary_driven_refill_recovers_large_nonstar_tetrahelix() {
             .tetrahedra
             .iter()
             .map(|tetrahedron| {
-                tetrahedron_volume(
-                    tetrahedron
-                        .vertex_indices
-                        .map(|node| topology.nodes[node as usize].coordinates_m),
-                )
+                tetrahedron_volume(tetrahedron.vertex_indices.map(|node| {
+                    topology.nodes[node as usize]
+                        .coordinates_m
+                        .canonical_value()
+                }))
             })
             .sum(),
     };
@@ -89,7 +89,10 @@ fn boundary_driven_refill_recovers_large_nonstar_tetrahelix() {
         .map(
             |(node_id, node)| crate::cavity::constrained::ConstrainedCavityNode {
                 node_id: node_id as u32,
-                coordinates_m: node.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(node.coordinates_m.canonical_value()),
             },
         )
         .collect::<Vec<_>>();

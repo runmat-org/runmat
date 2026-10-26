@@ -11,9 +11,9 @@ pub struct SharedCurveDiscretizationOptions {
     pub resolution: CurveResolutionPolicy,
     pub maximum_nodes_per_edge: u32,
     pub maximum_subdivision_depth: u16,
-    pub geometry_absolute_error_m: f64,
+    pub geometry_absolute_error_m: runmat_types::physical::Length,
     pub pcurve_absolute_error: f64,
-    pub arc_length_absolute_error_m: f64,
+    pub arc_length_absolute_error_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, Copy)]

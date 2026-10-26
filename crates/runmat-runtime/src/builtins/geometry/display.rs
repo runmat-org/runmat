@@ -5,7 +5,7 @@ use runmat_builtins::{
     BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
     BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::LengthUnit;
 use runmat_geometry_io::GeometryImportOptions;
 
 pub(super) const GEOMETRY_MESH_METHOD_NAME: &str = "__runmat_geometry_mesh";
@@ -167,11 +167,11 @@ pub(super) fn parse_load_options(args: &[Value]) -> BuiltinResult<GeometryImport
             .to_ascii_lowercase()
             .as_str()
         {
-            "m" | "meter" | "meters" | "metre" | "metres" => UnitSystem::Meter,
+            "m" | "meter" | "meters" | "metre" | "metres" => LengthUnit::Meter,
             "mm" | "millimeter" | "millimeters" | "millimetre" | "millimetres" => {
-                UnitSystem::Millimeter
+                LengthUnit::Millimeter
             }
-            "in" | "inch" | "inches" => UnitSystem::Inch,
+            "in" | "inch" | "inches" => LengthUnit::Inch,
             other => {
                 return Err(builtin_error(
                     GEOMETRY_LOAD_NAME,
@@ -180,6 +180,7 @@ pub(super) fn parse_load_options(args: &[Value]) -> BuiltinResult<GeometryImport
                 ))
             }
         };
+        options.source_units = Some(options.units);
     }
     Ok(options)
 }

@@ -51,10 +51,10 @@ struct EquilibriumRefinement<'a> {
     preparation: &'a mut LinearPreparationReuse,
 }
 
-struct NormalizedCorrectionEquation {
-    summary: EffectiveLinearSystem,
+struct NormalizedCorrectionEquation<'a> {
+    summary: EffectiveLinearSystem<'a>,
     solution_scale: f64,
-    expansion: Option<AffineConstraintReduction>,
+    expansion: Option<std::sync::Arc<AffineConstraintReduction>>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -313,11 +313,11 @@ fn normalize_correction_rhs(
     ))
 }
 
-fn normalize_correction_equation(
-    summary: &AssemblySummary,
+fn normalize_correction_equation<'a>(
+    summary: &'a AssemblySummary,
     operator: &RealSparseMatrix,
     right_hand_side: &[f64],
-) -> Result<NormalizedCorrectionEquation, EffectiveDynamicsSolveError> {
+) -> Result<NormalizedCorrectionEquation<'a>, EffectiveDynamicsSolveError> {
     let (homogeneous_matrix, _) = homogeneous_constraints(summary)?;
     let reduction = homogeneous_matrix
         .as_ref()
@@ -335,7 +335,8 @@ fn normalize_correction_equation(
                         summary.operator.constrained_dofs(),
                     )
                 })
-        });
+        })
+        .map(std::sync::Arc::new);
     let mut constrained_rhs = right_hand_side.to_vec();
     for (value, constrained) in constrained_rhs
         .iter_mut()
@@ -368,7 +369,12 @@ fn normalize_correction_equation(
         .map(|value| value / operator_scale / solution_scale)
         .collect::<Vec<_>>();
     let normalized_summary = if let Some(reduction) = reduction.as_ref() {
-        reduced_effective_system(summary, reduction, normalized_operator, normalized_rhs)?
+        reduced_effective_system(
+            summary,
+            std::sync::Arc::clone(reduction),
+            normalized_operator,
+            normalized_rhs,
+        )?
     } else {
         effective_system(summary, normalized_operator, normalized_rhs)?
     };
@@ -449,7 +455,7 @@ fn add_scaled_correction(
 }
 
 fn solve_effective_system(
-    summary: &EffectiveLinearSystem,
+    summary: &EffectiveLinearSystem<'_>,
     backend: LinearAlgebraBackendKind,
     initial_guess: Option<&[f64]>,
     preconditioner: SpdPreconditionerKind,

@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "source_digest": [
+    120,
+    147,
+    15,
+    218,
+    170,
+    203,
+    31,
+    172,
+    122,
+    157,
+    239,
+    194,
+    65,
+    92,
+    220,
+    86,
+    33,
+    71,
+    53,
+    97,
+    148,
+    206,
+    231,
+    245,
+    194,
+    75,
+    213,
+    152,
+    232,
+    95,
+    167,
+    179
+  ],
+  "regions": [
+    {
+      "region_id": "left_body",
+      "role": "solid",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:12e8ce25ac7c65b86bca0267d22d8ad4a9b9d2356a861fe9a029ba603458466a"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "right_body",
+      "role": "solid",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:4fc30e09392811724895ba43ca688c88993eb6d35b79d0bf6b3ecc031238f4a3"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "left_support",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:13dbb9a48060152f6b7ba6d851024195cd39e5ef0372bd989ad439e8462beda1"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "left_load_face",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:b197507e138c77923ebc115b9de88af16e9bc59c4e6cc64e8814af1eb3ab284a"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "right_support",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:fd676241b0d8d11dfbc5f5dfd04a535d49c0700215a9d152fa4ba7f2808ca0f7"
+      },
+      "cardinality": "exactly_one"
+    }
+  ]
+}

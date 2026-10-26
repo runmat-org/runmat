@@ -73,9 +73,17 @@ pub(super) fn project_exact_contracts(
                     vertex.occurrence_index,
                     path,
                 )?,
-                point_m: [vertex.point_x, vertex.point_y, vertex.point_z]
-                    .map(|coordinate| coordinate * meters_per_source_unit),
-                tolerance_m: vertex.tolerance * meters_per_source_unit,
+                point_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(
+                    [vertex.point_x, vertex.point_y, vertex.point_z]
+                        .map(|coordinate| coordinate * meters_per_source_unit),
+                ),
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(vertex.tolerance * meters_per_source_unit),
             })
         })
         .collect::<Result<Vec<_>, GeometryImportError>>()?;
@@ -108,7 +116,10 @@ pub(super) fn project_exact_contracts(
                     edge.occurrence_index,
                     path,
                 )?,
-                tolerance_m: edge.tolerance * meters_per_source_unit,
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(edge.tolerance * meters_per_source_unit),
                 is_closed: edge.closed,
                 is_periodic: edge.periodic,
                 is_degenerate: edge.degenerate,
@@ -514,10 +525,12 @@ pub(super) fn mass_validation_digest(
     let mut hasher = Sha256::new();
     hasher.update(b"runmat.exact-geometry.occt-mass-validation\0");
     hasher.update(representation_digest);
-    for value in std::iter::once(properties.volume_m3)
-        .chain(std::iter::once(properties.surface_area_m2))
-        .chain(properties.centroid_m)
-        .chain(properties.inertia_about_centroid_m5)
+    for value in std::iter::once(properties.volume_m3.canonical_value())
+        .chain(std::iter::once(
+            properties.surface_area_m2.canonical_value(),
+        ))
+        .chain(properties.centroid_m.canonical_value())
+        .chain(properties.inertia_about_centroid_m5.canonical_value())
     {
         hasher.update(value.to_bits().to_be_bytes());
     }

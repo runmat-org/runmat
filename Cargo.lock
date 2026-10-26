@@ -6878,6 +6878,7 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7045,6 +7046,9 @@ dependencies = [
  "pollster 0.3.0",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-core",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-builtins",
  "runmat-config",
  "runmat-execution",
@@ -7053,10 +7057,12 @@ dependencies = [
  "runmat-fea-source",
  "runmat-filesystem",
  "runmat-gc",
+ "runmat-geometry-core",
  "runmat-hir",
  "runmat-java",
  "runmat-jit",
  "runmat-lexer",
+ "runmat-meshing-core",
  "runmat-mex",
  "runmat-mir",
  "runmat-native-codegen",
@@ -7320,6 +7326,7 @@ version = "0.6.2"
 dependencies = [
  "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-types",
  "schemars",
  "serde",
  "serde_json",
@@ -7331,6 +7338,7 @@ name = "runmat-geometry-fixtures"
 version = "0.6.2"
 dependencies = [
  "runmat-geometry-core",
+ "runmat-types",
 ]
 
 [[package]]
@@ -7346,6 +7354,7 @@ dependencies = [
  "runmat-build-identity",
  "runmat-geometry-core",
  "runmat-geometry-ops",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7361,8 +7370,24 @@ dependencies = [
  "delaunator",
  "runmat-build-identity",
  "runmat-geometry-core",
+ "runmat-types",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-geometry-wasm-host"
+version = "0.6.2"
+dependencies = [
+ "base64 0.22.1",
+ "runmat-analysis-execution",
+ "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-geometry-io",
+ "runmat-meshing-core",
+ "runmat-meshing-execution",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7516,6 +7541,7 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-size",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7531,6 +7557,7 @@ dependencies = [
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "runmat-meshing-size",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7568,6 +7595,7 @@ dependencies = [
  "runmat-build-identity",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
+ "runmat-types",
  "serde",
  "serde_json",
 ]
@@ -7585,6 +7613,7 @@ dependencies = [
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-size",
+ "runmat-types",
  "serde",
  "sha2 0.10.9",
  "tracing",
@@ -7603,6 +7632,7 @@ dependencies = [
  "runmat-meshing-curve",
  "runmat-meshing-size",
  "runmat-meshing-surface",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -8197,6 +8227,8 @@ dependencies = [
  "miette",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
@@ -8210,6 +8242,7 @@ dependencies = [
  "runmat-geometry-io",
  "runmat-hir",
  "runmat-logging",
+ "runmat-meshing-core",
  "runmat-package",
  "runmat-package-cache",
  "runmat-plot",

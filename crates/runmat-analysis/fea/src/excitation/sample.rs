@@ -76,12 +76,14 @@ pub(crate) fn sample_signal<Q>(
     match &signal.representation {
         SignalRepresentation::Constant(value) => real_value(value, &component),
         SignalRepresentation::Tabulated(table) => {
+            let axis = table.coordinate_field(None).map_err(RealizationError::new)?;
             if matches!(sample, ExcitationSamplePoint::Static) {
                 return sample_static_table(&table.knots, &component);
             }
             let (abscissa, approach) = sample_abscissa(sample, &table.domain)?;
             sample_table(
                 &table.knots,
+                &axis,
                 abscissa,
                 approach,
                 table.interpolation,
@@ -164,7 +166,13 @@ pub(crate) fn expect_vector3_or_direction(
 fn sample_abscissa(
     sample: ExcitationSamplePoint<'_>,
     domain: &TabulatedSignalDomain,
-) -> Result<(f64, SignalSampleApproach), RealizationError> {
+) -> Result<
+    (
+        runmat_types::physical::DimensionedScalar,
+        SignalSampleApproach,
+    ),
+    RealizationError,
+> {
     let (value, approach) = match (sample, domain) {
         (
             ExcitationSamplePoint::TimeSeconds { value, approach },
@@ -182,6 +190,7 @@ fn sample_abscissa(
             },
             TabulatedSignalDomain::StudyParameter {
                 parameter_id: axis_parameter,
+                ..
             },
         ) if parameter_id == axis_parameter => (canonical_value, approach),
         _ => {
@@ -191,6 +200,12 @@ fn sample_abscissa(
         }
     };
     if value.is_finite() {
+        let descriptor = domain
+            .axis_descriptor(None)
+            .map_err(RealizationError::new)?;
+        let value =
+            runmat_types::physical::DimensionedScalar::try_from_descriptor(descriptor, value)
+                .map_err(|e| RealizationError::new(e.to_string()))?;
         Ok((value, approach))
     } else {
         Err(RealizationError::new(
@@ -201,12 +216,23 @@ fn sample_abscissa(
 
 fn sample_table<Q>(
     knots: &[SignalKnot<Q>],
-    x: f64,
+    axis: &runmat_types::physical::Quantity<
+        runmat_types::physical::DynamicDimension,
+        runmat_analysis_core::problem::signal::SignalAxisCoordinates<'_, Q>,
+    >,
+    x: runmat_types::physical::DimensionedScalar,
     approach: SignalSampleApproach,
     interpolation: SignalInterpolation,
     extrapolation: SignalExtrapolation,
     component: impl Fn(&Q) -> f64,
 ) -> Result<SampledValue, RealizationError> {
+    if axis.scalar_count() != knots.len() || !axis.descriptor().is_compatible_with(x.descriptor()) {
+        return Err(RealizationError::new(
+            "sample coordinate units do not match the signal axis",
+        ));
+    }
+    // Generic interpolation now runs under the retained typed axis header.
+    let x = x.canonical_value();
     if knots.is_empty()
         || knots.iter().any(|knot| !knot.abscissa.is_finite())
         || knots

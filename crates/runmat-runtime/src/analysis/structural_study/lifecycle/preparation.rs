@@ -402,9 +402,8 @@ pub fn analysis_prepare_structural_study_intent_op(
     let mut intent = PreparedStructuralStudyIntent {
         study_id: study.spec.study_id.clone(),
         geometry_source_digest,
-        geometry_units: study.spec.geometry.units,
+        geometry_unit_evidence: study.spec.geometry.source.unit_evidence.clone(),
         meshing_request: super::super::resolve_intent_meshing_request(
-            study.spec.geometry.units,
             study.spec.meshing_settings.clone(),
         )
         .map_err(|message| {

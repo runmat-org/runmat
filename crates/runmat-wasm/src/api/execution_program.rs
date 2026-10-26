@@ -56,3 +56,22 @@ pub async fn execute_worker_program(request: JsValue) -> Result<JsValue, JsValue
         .serialize(&serializer)
         .map_err(|error| JsValue::from_str(&format!("worker response encoding failed: {error}")))
 }
+
+#[wasm_bindgen(js_name = workerProgramInventory)]
+pub fn worker_program_inventory() -> Result<JsValue, JsValue> {
+    crate::runtime::execution::selected::encode(
+        &crate::runtime::execution::selected::inventory().map_err(|e| JsValue::from_str(&e))?,
+    )
+}
+
+#[wasm_bindgen(js_name = createWorkerProgramInvocation)]
+pub fn create_worker_program_invocation(
+    request: JsValue,
+) -> Result<crate::runtime::execution::selected::WorkerProgramInvocation, JsValue> {
+    runmat_runtime::builtins::wasm_registry::register_all();
+    crate::api::init::ensure_internal_builtins();
+    let request = serde_wasm_bindgen::from_value::<BrowserWorkerRequest>(request)
+        .map_err(|e| JsValue::from_str(&format!("invalid selected worker request: {e}")))?;
+    crate::runtime::execution::selected::WorkerProgramInvocation::new(request)
+        .map_err(|e| JsValue::from_str(&e))
+}

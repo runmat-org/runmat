@@ -22,17 +22,23 @@ fn longitudinal_impressed_current_is_not_projected_to_a_solenoidal_source() {
         {
             let electric = fixture::longitudinal(sample.position_m);
             // curl(E)=0, so J=-(sigma+i*omega*epsilon)E. No current cleaning.
-            source.current_density_a_per_m2 = electric.map(|value| ComplexPhasor {
-                real: -0.3 * value,
-                imaginary: -value,
-            });
+            source.current_density_a_per_m2 =
+                runmat_types::physical::Quantity::new(electric.map(|value| ComplexPhasor {
+                    real: -0.3 * value,
+                    imaginary: -value,
+                }));
         }
         let result = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
         let mut defect = 0.0;
         let mut exact_norm = 0.0;
         for sample in &result.samples {
             let expected = fixture::longitudinal(sample.position_m);
-            for (value, exact) in sample.electric_field_v_per_m.into_iter().zip(expected) {
+            for (value, exact) in sample
+                .electric_field_v_per_m
+                .canonical_value()
+                .into_iter()
+                .zip(expected)
+            {
                 defect += sample.volume_weight_m3
                     * ((value.real - exact).powi(2) + value.imaginary.powi(2));
                 exact_norm += sample.volume_weight_m3 * exact.powi(2);
@@ -65,8 +71,18 @@ fn exact_sparse_plan_and_heterogeneous_element_laws_preserve_owned_assignment() 
         },
     );
     for (index, volume) in input.volumes.iter_mut().enumerate() {
-        volume.conductivity_s_per_m = if index % 2 == 0 { 0.3 } else { 0.8 };
-        volume.permittivity_f_per_m = if index % 2 == 0 { 1.0 } else { 2.0 };
+        volume.conductivity_s_per_m =
+            runmat_types::physical::ElectricalConductivity::new(if index % 2 == 0 {
+                0.3
+            } else {
+                0.8
+            });
+        volume.permittivity_f_per_m =
+            runmat_types::physical::ElectricPermittivity::new(if index % 2 == 0 {
+                1.0
+            } else {
+                2.0
+            });
     }
     let plan = MaxwellSystemPlan::derive(&mesh).unwrap();
     let identity = plan.identity().unwrap();
@@ -80,13 +96,16 @@ fn exact_sparse_plan_and_heterogeneous_element_laws_preserve_owned_assignment() 
         for axis in 0..3 {
             assert!(
                 difference(
-                    actual.electric_field_v_per_m[axis],
-                    expected.electric_field_v_per_m[axis]
+                    actual.electric_field_v_per_m.canonical_value()[axis],
+                    expected.electric_field_v_per_m.canonical_value()[axis]
                 ) < 1e-15
             );
         }
     }
-    assert!((base.ohmic_power_w - reordered.ohmic_power_w).abs() < 1e-12);
+    assert!(
+        (base.ohmic_power_w.canonical_value() - reordered.ohmic_power_w.canonical_value()).abs()
+            < 1e-12
+    );
     let (foreign, _) = fixture::problem(
         ElementOrder::Tet4,
         1,
@@ -118,9 +137,15 @@ fn manufactured_complex_pec_mode_has_independent_field_and_power_convergence() {
             let expected_b = fixture::flux(sample.position_m, phase);
             for axis in 0..3 {
                 electric += sample.volume_weight_m3
-                    * difference(sample.electric_field_v_per_m[axis], expected_e[axis]);
+                    * difference(
+                        sample.electric_field_v_per_m.canonical_value()[axis],
+                        expected_e[axis],
+                    );
                 flux += sample.volume_weight_m3
-                    * difference(sample.flux_density_t[axis], expected_b[axis]);
+                    * difference(
+                        sample.flux_density_t.canonical_value()[axis],
+                        expected_b[axis],
+                    );
             }
         }
         let error = (electric.sqrt(), flux.sqrt());
@@ -134,7 +159,9 @@ fn manufactured_complex_pec_mode_has_independent_field_and_power_convergence() {
         if cells == 6 {
             assert!(error.0 < 0.25);
             assert!(error.1 < 0.60);
-            assert!((result.ohmic_power_w - exact_loss).abs() / exact_loss < 0.25);
+            assert!(
+                (result.ohmic_power_w.canonical_value() - exact_loss).abs() / exact_loss < 0.25
+            );
         }
     }
     for pair in errors.windows(2) {
@@ -179,10 +206,13 @@ fn phase_and_affine_geometry_order_preserve_signed_complex_fields() {
             for axis in 0..3 {
                 for (a, b) in [
                     (
-                        actual.electric_field_v_per_m[axis],
-                        expected.electric_field_v_per_m[axis],
+                        actual.electric_field_v_per_m.canonical_value()[axis],
+                        expected.electric_field_v_per_m.canonical_value()[axis],
                     ),
-                    (actual.flux_density_t[axis], expected.flux_density_t[axis]),
+                    (
+                        actual.flux_density_t.canonical_value()[axis],
+                        expected.flux_density_t.canonical_value()[axis],
+                    ),
                 ] {
                     let b = ComplexPhasor {
                         real: b.real * phase.real - b.imaginary * phase.imaginary,
@@ -192,7 +222,10 @@ fn phase_and_affine_geometry_order_preserve_signed_complex_fields() {
                 }
             }
         }
-        assert!((result.ohmic_power_w - base.ohmic_power_w).abs() < 1e-10);
+        assert!(
+            (result.ohmic_power_w.canonical_value() - base.ohmic_power_w.canonical_value()).abs()
+                < 1e-10
+        );
     }
 }
 
@@ -210,15 +243,18 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
         assert!(solve_full_pec_volume(&mesh, changed, 1e-10).is_err());
     };
     let mut changed = input.clone();
-    changed.angular_frequency_rad_per_s = 0.0;
+    changed.angular_frequency_rad_per_s = runmat_types::physical::AngularFrequency::new(0.0);
     reject(&changed);
-    changed.angular_frequency_rad_per_s = f64::NAN;
+    changed.angular_frequency_rad_per_s = runmat_types::physical::AngularFrequency::new(f64::NAN);
     reject(&changed);
     let mut changed = input.clone();
-    changed.volumes[0].permittivity_f_per_m = -1.0;
+    changed.volumes[0].permittivity_f_per_m =
+        runmat_types::physical::ElectricPermittivity::new(-1.0);
     reject(&changed);
-    changed.volumes[0].permittivity_f_per_m = 1.0;
-    changed.volumes[0].conductivity_s_per_m = 0.0;
+    changed.volumes[0].permittivity_f_per_m =
+        runmat_types::physical::ElectricPermittivity::new(1.0);
+    changed.volumes[0].conductivity_s_per_m =
+        runmat_types::physical::ElectricalConductivity::new(0.0);
     reject(&changed);
     let mut changed = input.clone();
     changed.volumes.push(changed.volumes[0]);
@@ -230,17 +266,27 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
     changed.source_current[0] = changed.source_current[1].clone();
     reject(&changed);
     let mut changed = input.clone();
-    changed.source_current[0].current_density_a_per_m2[0].real = f64::INFINITY;
+    changed.source_current[0].current_density_a_per_m2 = runmat_types::physical::Quantity::new({
+        let mut values = changed.source_current[0]
+            .current_density_a_per_m2
+            .canonical_value();
+        values[0].real = f64::INFINITY;
+        values
+    });
     reject(&changed);
     let mut changed = input.clone();
-    changed.angular_frequency_rad_per_s = 1e-200;
+    changed.angular_frequency_rad_per_s = runmat_types::physical::AngularFrequency::new(1e-200);
     reject(&changed);
     let mut changed = input.clone();
     for source in &mut changed.source_current {
-        for value in &mut source.current_density_a_per_m2 {
-            value.real *= 1e-200;
-            value.imaginary *= 1e-200;
-        }
+        source.current_density_a_per_m2 = source.current_density_a_per_m2
+            .try_map_canonical_storage(|mut values| {
+                for value in &mut values {
+                    value.real *= 1e-200;
+                    value.imaginary *= 1e-200;
+                }
+                values
+            }).unwrap();
     }
     // Nonzero forcing must never be mistaken for zero through squared-norm underflow.
     reject(&changed);
@@ -256,15 +302,13 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
     assert!(solve_full_pec_volume(&mesh, &input, 0.0).is_err());
     let mut zero = input.clone();
     for source in &mut zero.source_current {
-        for value in &mut source.current_density_a_per_m2 {
-            value.real = 0.0;
-            value.imaginary = 0.0;
-        }
+        source.current_density_a_per_m2 = runmat_types::physical::Quantity::new([ComplexPhasor::ZERO; 3]);
     }
     let zero = solve_full_pec_volume(&mesh, &zero, 1e-10).unwrap();
-    assert_eq!(zero.ohmic_power_w, 0.0);
+    assert_eq!(zero.ohmic_power_w.canonical_value(), 0.0);
     assert!(zero.samples.iter().all(|sample| sample
         .electric_field_v_per_m
+        .canonical_value()
         .iter()
         .all(|value| value.real == 0.0 && value.imaginary == 0.0)));
 }

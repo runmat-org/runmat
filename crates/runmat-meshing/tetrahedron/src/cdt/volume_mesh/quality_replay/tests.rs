@@ -153,7 +153,10 @@ fn diagnostics_reject_changed_identity_controls_topology_and_hostile_bounds() {
         options,
         LIMITS
     ));
-    topology.nodes[0].coordinates_m = topology.nodes[1].coordinates_m;
+    topology.nodes[0].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new(topology.nodes[1].coordinates_m.canonical_value());
     let corrupt = VolumeQualitySnapshot {
         topology: &topology,
         provenance: &provenance,

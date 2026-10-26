@@ -99,7 +99,11 @@ fn locate_in_element(
     }
     let mut coordinates = [[0.0; 3]; 10];
     for (coordinate, index) in coordinates.iter_mut().zip(&element.node_indices) {
-        *coordinate = projection.nodes.get(*index)?.coordinates_m;
+        *coordinate = projection
+            .nodes
+            .get(*index)?
+            .coordinates_m
+            .canonical_value();
     }
     let coordinates = &coordinates[..expected];
     let coordinate_scale = coordinates

@@ -31,7 +31,7 @@ pub(crate) fn compile_model_connector_plan(
     let coordinates_m = topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let node_identities = topology
         .nodes
@@ -43,7 +43,10 @@ pub(crate) fn compile_model_connector_plan(
         ConnectorAssemblyContext {
             topology_identity: topology.identity,
             layout: &layout,
-            coordinates_m: &coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(&coordinates_m),
             node_identities: &node_identities,
         },
         |connector, target, role| {

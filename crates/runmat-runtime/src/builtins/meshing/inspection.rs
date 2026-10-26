@@ -18,7 +18,11 @@ pub(super) fn nodes(mesh: Value) -> BuiltinResult<Value> {
     let nodes = &payload.artifact.topology.nodes;
     let mut coordinates = Vec::with_capacity(nodes.len() * 3);
     for axis in 0..3 {
-        coordinates.extend(nodes.iter().map(|node| node.coordinates_m[axis]));
+        coordinates.extend(
+            nodes
+                .iter()
+                .map(|node| node.coordinates_m.canonical_value()[axis]),
+        );
     }
     let mut result = StructValue::new();
     result.insert(
@@ -213,7 +217,7 @@ pub(super) fn quality_value(mesh: &SolverMeshArtifact) -> BuiltinResult<Value> {
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<HashMap<_, _>>();
     let mut ids = Vec::with_capacity(mesh.topology.volume_elements.len());
     let mut jacobians = Vec::with_capacity(ids.capacity());

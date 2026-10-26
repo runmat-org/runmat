@@ -1,6 +1,6 @@
 use crate::{
     CheckedCallArgument, CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration,
-    FeaDiagnostic, FeaType, PhysicalDimension,
+    FeaDiagnostic, FeaType,
 };
 use runmat_analysis_core::{
     AuthoredInputType, AuthoredModelInputRef, AuthoredNumericExpression,
@@ -39,13 +39,17 @@ pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     id: &str,
     quantity: PhysicalQuantityKind,
-    dimension: PhysicalDimension,
     value: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredParameterizedSignal> {
-    let expected = super::super::super::input::authored_type(&FeaType::Quantity(dimension))?;
+    if value.validate_quantity_kind(quantity).is_err() {
+        invalid(declaration, value, diagnostics);
+        return None;
+    }
+    let descriptor = runmat_types::physical::DynamicDimension::quantity_type(quantity);
+    let expected = AuthoredInputType::Quantity(descriptor);
     let (value, frame) = match &value.value_type {
-        FeaType::Quantity(actual) if *actual == dimension => (
+        FeaType::Quantity(actual) if actual.is_compatible_with(descriptor) => (
             AuthoredSignalExpression::Scalar(expression(
                 declaration,
                 value,
@@ -57,7 +61,7 @@ pub(super) fn lower(
         FeaType::Vector {
             element,
             length: Some(3),
-        } if element.as_ref() == &FeaType::Quantity(dimension) => {
+        } if element.is_quantity(descriptor) => {
             let values = vector_values(value)?;
             let values = values
                 .iter()
@@ -113,12 +117,39 @@ fn expression(
         super::super::super::input::authored_type(&value.value_type)?
     };
     let kind = match &value.kind {
-        CheckedExpressionKind::Number(source) => AuthoredNumericExpressionKind::Literal {
-            value: source.parse().ok()?,
-        },
+        CheckedExpressionKind::Number(source) => {
+            let number = source.parse().ok()?;
+            if let AuthoredInputType::Quantity(dimension) = value_type {
+                AuthoredNumericExpressionKind::Quantity {
+                    value: Box::new(AuthoredNumericExpression {
+                        value_type: AuthoredInputType::Real,
+                        kind: AuthoredNumericExpressionKind::Literal { value: number },
+                    }),
+                    unit: runmat_types::physical::UnitDefinition::try_with_angle(
+                        dimension.dimension(),
+                        1.0,
+                        0.0,
+                        dimension.angle_power(),
+                    )
+                    .ok()?,
+                    semantic_kind: None,
+                    source_unit_symbol: "canonical contextual value".into(),
+                }
+            } else {
+                AuthoredNumericExpressionKind::Literal { value: number }
+            }
+        }
         CheckedExpressionKind::CadParameterValue(source) => {
-            AuthoredNumericExpressionKind::Literal {
-                value: source.value_si(),
+            AuthoredNumericExpressionKind::Quantity {
+                value: Box::new(AuthoredNumericExpression {
+                    value_type: AuthoredInputType::Real,
+                    kind: AuthoredNumericExpressionKind::Literal {
+                        value: source.measure.source_value(),
+                    },
+                }),
+                unit: *source.measure.source_unit(),
+                semantic_kind: value.quantity_kind_hint().ok()?,
+                source_unit_symbol: source.measure.source_symbol().into(),
             }
         }
         CheckedExpressionKind::Reference(path) if matches!(path.as_slice(), [namespace, _] if namespace == "input") => {
@@ -158,36 +189,19 @@ fn expression(
         },
         CheckedExpressionKind::Quantity {
             value: inner,
-            scale_bits,
-            offset_bits,
-        } => {
-            let scalar = expression(declaration, inner, AuthoredInputType::Real, diagnostics)?;
-            let scaled = AuthoredNumericExpression {
-                value_type,
-                kind: AuthoredNumericExpressionKind::Binary {
-                    operator: AuthoredNumericOperator::Multiply,
-                    left: Box::new(scalar),
-                    right: Box::new(AuthoredNumericExpression {
-                        value_type,
-                        kind: AuthoredNumericExpressionKind::Literal {
-                            value: f64::from_bits(*scale_bits),
-                        },
-                    }),
-                },
-            };
-            let offset = f64::from_bits(*offset_bits);
-            if offset == 0.0 {
-                return Some(scaled);
-            }
-            AuthoredNumericExpressionKind::Binary {
-                operator: AuthoredNumericOperator::Add,
-                left: Box::new(scaled),
-                right: Box::new(AuthoredNumericExpression {
-                    value_type,
-                    kind: AuthoredNumericExpressionKind::Literal { value: offset },
-                }),
-            }
-        }
+            unit,
+            source_unit_symbol,
+        } => AuthoredNumericExpressionKind::Quantity {
+            value: Box::new(expression(
+                declaration,
+                inner,
+                AuthoredInputType::Real,
+                diagnostics,
+            )?),
+            unit: *unit,
+            semantic_kind: value.quantity_kind_hint().ok()?,
+            source_unit_symbol: source_unit_symbol.clone(),
+        },
         _ => {
             invalid(declaration, value, diagnostics);
             return None;

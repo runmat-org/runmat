@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "source_digest": [
+    24,
+    219,
+    36,
+    11,
+    90,
+    117,
+    190,
+    102,
+    183,
+    153,
+    22,
+    240,
+    149,
+    165,
+    43,
+    126,
+    223,
+    217,
+    219,
+    13,
+    153,
+    80,
+    171,
+    58,
+    3,
+    32,
+    28,
+    234,
+    157,
+    254,
+    160,
+    4
+  ],
+  "regions": [
+    {
+      "region_id": "body",
+      "role": "solid",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:1c3ded4f98cde10da9e3f84f3f063f21c2004a750e98101b938e124e3d2fc17c"
+      },
+      "cardinality": "exactly_one"
+    },
+    {
+      "region_id": "fixed_end",
+      "role": "face",
+      "selector": {
+        "kind": "persistent_id",
+        "value": "persistent-entity:sha256:b9e42d3da22eff70036e0272a250ef17a8c2c7c044e72f9aeebe636ac7b6c07e"
+      },
+      "cardinality": "exactly_one"
+    }
+  ]
+}

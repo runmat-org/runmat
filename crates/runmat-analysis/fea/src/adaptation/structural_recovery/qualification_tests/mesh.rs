@@ -24,11 +24,14 @@ pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> So
                 nodes.push(SolverMeshNode {
                     node_id: index as u64 + 1,
                     stable_identity: digest("corner", index as u64),
-                    coordinates_m: [
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([
                         x as f64 / divisions as f64,
                         y as f64 / divisions as f64,
                         z as f64 / divisions as f64,
-                    ],
+                    ]),
                     provenance: vec![solid.clone()],
                     exact_parameters: Vec::new(),
                 });
@@ -86,9 +89,13 @@ pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> So
                         left.stable_identity,
                         right.stable_identity,
                     ]),
-                    coordinates_m: std::array::from_fn(|axis| {
-                        0.5 * (left.coordinates_m[axis] + right.coordinates_m[axis])
-                    }),
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(std::array::from_fn(|axis| {
+                        0.5 * (left.coordinates_m.canonical_value()[axis]
+                            + right.coordinates_m.canonical_value()[axis])
+                    })),
                     provenance: vec![solid.clone()],
                     exact_parameters: Vec::new(),
                 });
@@ -142,7 +149,7 @@ pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> So
         .collect::<Vec<_>>();
     let mut boundary_faces = Vec::new();
     for (corners, owners) in face_owners.iter().filter(|(_, owners)| owners.len() == 1) {
-        let coordinates = corners.map(|id| nodes[id as usize - 1].coordinates_m);
+        let coordinates = corners.map(|id| nodes[id as usize - 1].coordinates_m.canonical_value());
         let source = if coordinates.iter().all(|point| point[0].abs() <= 1.0e-12) {
             "root"
         } else if coordinates
@@ -233,7 +240,7 @@ pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> So
 }
 
 fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
-    let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m);
+    let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m.canonical_value());
     let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
     let ad = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];

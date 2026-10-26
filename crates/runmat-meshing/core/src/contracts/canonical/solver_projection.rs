@@ -8,7 +8,7 @@ use super::{
     SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
-pub const SOLVER_MESH_PROJECTION_SCHEMA_VERSION: u16 = 1;
+pub const SOLVER_MESH_PROJECTION_SCHEMA_VERSION: u16 = 2;
 pub const SOLVER_MESH_VALIDATION_SCHEMA_VERSION: u16 = 1;
 
 /// Canonical solver topology before the final validation manifest is known.

@@ -21,7 +21,8 @@ pub(in crate::cdt::solver_topology::order_elevation) struct EdgeGeometryRequest<
 }
 
 pub(in crate::cdt::solver_topology::order_elevation) struct ExactEdgePoint {
-    pub coordinates_m: [f64; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub exact_parameters: Vec<SolverNodeExactParameter>,
 }
 
@@ -46,7 +47,12 @@ pub(super) fn midpoint_geometry(
             fraction: 0.5,
         },
     )?
-    .map(|point| (point.coordinates_m, point.exact_parameters))
+    .map(|point| {
+        (
+            point.coordinates_m.canonical_value(),
+            point.exact_parameters,
+        )
+    })
     .ok_or_else(|| invalid("exact midpoint leaves its source trim domain"))
 }
 
@@ -66,11 +72,14 @@ pub(in crate::cdt::solver_topology::order_elevation) fn edge_geometry(
         return surface_midpoint(input, evaluation, options, request);
     }
     Ok(Some(ExactEdgePoint {
-        coordinates_m: interpolate3(
-            request.left.coordinates_m,
-            request.right.coordinates_m,
-            request.fraction,
-        ),
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                interpolate3(
+                    request.left.coordinates_m.canonical_value(),
+                    request.right.coordinates_m.canonical_value(),
+                    request.fraction,
+                ),
+            ),
         exact_parameters: Vec::new(),
     }))
 }
@@ -94,7 +103,10 @@ pub(in crate::cdt::solver_topology::order_elevation) fn surface_geometry(
         evaluator_uv,
     });
     Ok(Some(ExactEdgePoint {
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         exact_parameters,
     }))
 }
@@ -125,7 +137,7 @@ fn curve_midpoint(
         .transforms
         .world_transform_for(edge_id)
         .map_err(error::geometry)?;
-    let coordinates_m = transform.transform_point(local);
+    let coordinates_m = transform.transform_point(local.canonical_value());
     let storage = crate::cdt::solver_topology::storage::Storage(Some(evaluation.control));
     let mut parameters = storage.vector(1)?;
     parameters.push(SolverNodeExactParameter::Curve {
@@ -151,7 +163,10 @@ fn curve_midpoint(
         }
     }
     Ok(Some(ExactEdgePoint {
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         exact_parameters: parameters,
     }))
 }
@@ -188,8 +203,10 @@ fn surface_midpoint(
         });
     }
     Ok(Some(ExactEdgePoint {
-        coordinates_m: coordinates
-            .ok_or_else(|| invalid("surface midpoint has no exact evaluation"))?,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates.ok_or_else(|| invalid("surface midpoint has no exact evaluation"))?,
+            ),
         exact_parameters: parameters,
     }))
 }
@@ -220,6 +237,7 @@ pub(super) fn pcurve_uvs<'a>(
                 parameter,
                 evaluation.control,
             )
+            .map(|uv| uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)))
             .map_err(error::geometry)?,
         );
     }
@@ -286,7 +304,7 @@ fn evaluate_surface_candidate(
         .transforms
         .world_transform_for(&face.id)
         .map_err(error::geometry)?;
-    let point = transform.transform_point(local);
+    let point = transform.transform_point(local.canonical_value());
     if point.iter().any(|value| !value.is_finite()) {
         return Err(invalid("exact midpoint evaluation is not finite"));
     }
@@ -401,8 +419,15 @@ fn points_match(input: &ProjectionInput<'_>, left: [f64; 3], right: [f64; 3]) ->
         .request
         .tolerance
         .source_tolerance_m
-        .max(input.request.tolerance.absolute_floor_m)
-        .max(input.request.tolerance.maximum_healing_displacement_m);
+        .canonical_value()
+        .max(input.request.tolerance.absolute_floor_m.canonical_value())
+        .max(
+            input
+                .request
+                .tolerance
+                .maximum_healing_displacement_m
+                .canonical_value(),
+        );
     let squared_distance = left
         .into_iter()
         .zip(right)

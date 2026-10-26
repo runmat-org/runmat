@@ -417,7 +417,7 @@ fn validate_initial_conditions(
                 steps,
             )
             .and_then(|()| match &value.value {
-                InitialValue::Uniform(temperature) if temperature.kelvin < 0.0 => {
+                InitialValue::Uniform(temperature) if temperature.canonical_value() < 0.0 => {
                     Err("initial temperature must be at or above zero kelvin".to_string())
                 }
                 _ => Ok(()),

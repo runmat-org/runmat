@@ -30,8 +30,8 @@ fn retaining_intervals_for_motion_changes_only_ephemeral_history() {
         ..TransientSolveOptions::default()
     };
     let time_domain = TransientTimeDomain {
-        start_time_s: 0.0,
-        end_time_s: 1.0,
+        start_time_s: runmat_types::physical::Time::new(0.0),
+        end_time_s: runmat_types::physical::Time::new(1.0),
         step_boundaries: &[],
     };
     let initial_displacement = vec![0.0; summary.dof_count];

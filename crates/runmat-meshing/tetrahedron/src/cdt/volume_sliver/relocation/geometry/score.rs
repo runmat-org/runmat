@@ -49,7 +49,8 @@ impl SmoothingObjective {
                     })
                     .count() as u8;
                 StarCell {
-                    points: vertices.map(|vertex| topology.node(vertex).coordinates_m),
+                    points: vertices
+                        .map(|vertex| topology.node(vertex).coordinates_m.canonical_value()),
                     source_slot: vertices
                         .iter()
                         .position(|vertex| *vertex as usize == source_index)

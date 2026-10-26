@@ -19,7 +19,13 @@ fn split(trial: &mut WorkingTrial<'_, '_>, identity: StableDigest) {
     let point = std::array::from_fn(|axis| {
         vertices
             .iter()
-            .map(|vertex| trial.topology().node(*vertex).coordinates_m[axis])
+            .map(|vertex| {
+                trial
+                    .topology()
+                    .node(*vertex)
+                    .coordinates_m
+                    .canonical_value()[axis]
+            })
             .sum::<f64>()
             / 4.0
     });

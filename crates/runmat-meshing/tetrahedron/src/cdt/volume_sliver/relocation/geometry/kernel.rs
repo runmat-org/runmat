@@ -53,7 +53,7 @@ fn relocated_star_minimum_jacobian_with_metrics(
                 if vertex as usize == source_index {
                     point
                 } else {
-                    topology.node(vertex).coordinates_m
+                    topology.node(vertex).coordinates_m.canonical_value()
                 }
             });
             crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(points, metrics(*tetrahedron))
@@ -82,7 +82,7 @@ pub(in crate::cdt::volume_sliver) fn sliver_height_target(
         .map(|identity| {
             topology
                 .node_index(identity)
-                .map(|index| topology.node(index).coordinates_m)
+                .map(|index| topology.node(index).coordinates_m.canonical_value())
                 .ok_or_else(|| {
                     error(
                         DelaunayVolumeSliverErrorKind::InvalidTopology,
@@ -112,7 +112,7 @@ pub(in crate::cdt::volume_sliver) fn sliver_height_target(
         return Ok(None);
     }
     let unit_normal = normal.map(|value| value / normal_length);
-    let coordinates = topology.node(source_index).coordinates_m;
+    let coordinates = topology.node(source_index).coordinates_m.canonical_value();
     let signed_height = subtract(coordinates, first)
         .into_iter()
         .zip(unit_normal)

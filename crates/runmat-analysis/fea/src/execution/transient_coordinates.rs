@@ -53,7 +53,13 @@ impl ModalProjectionEvidence {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModalTransientCoordinateState {
-    pub displacement: Vec<f64>,
-    pub velocity: Vec<f64>,
-    pub acceleration: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub displacement:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Displacement, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub velocity:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub acceleration:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Acceleration, Vec<f64>>,
 }

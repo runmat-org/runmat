@@ -37,10 +37,13 @@ pub(super) fn choices(
         if !protected.contains(&ids) {
             continue;
         }
-        let points = face.map(|v| topology.node(v).coordinates_m);
+        let points = face.map(|v| topology.node(v).coordinates_m.canonical_value());
         for (index, (point, score)) in super::super::offcenter::points_for_face(
             points,
-            topology.node(vertices[opposite]).coordinates_m,
+            topology
+                .node(vertices[opposite])
+                .coordinates_m
+                .canonical_value(),
             source.resolved_metric,
             target,
             cancellation,
@@ -51,7 +54,10 @@ pub(super) fn choices(
             result.push(EdgeStarChoice {
                 edge_identities: [ids[0], ids[1]],
                 index: 30_000 + (opposite * 32 + index) as u16,
-                coordinates_m: point,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(point),
                 construction: Point3Construction::Explicit,
                 proposal_score: score,
                 strategy: InsertionStrategy::BoundaryOffcenter { neighbor_index },

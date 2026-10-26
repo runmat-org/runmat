@@ -2,9 +2,12 @@
 use super::*;
 use std::collections::BTreeMap;
 pub(super) struct ProjectedInitialFields {
-    pub velocity_m_per_s: Vec<[f64; 3]>,
-    pub pressure_fluctuation_pa: Vec<f64>,
-    pub face_volume_flux_m3_per_s: Vec<f64>,
+    pub velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, Vec<[f64; 3]>>,
+    pub pressure_fluctuation_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    pub face_volume_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, Vec<f64>>,
 }
 pub(super) fn integrate(
     p: &CanonicalFluidProblem<'_>,
@@ -54,7 +57,7 @@ pub(super) fn integrate(
         let value = if assigned == 0 {
             0.
         } else {
-            absolute - p.pressure_reference_pa[row]
+            absolute - p.pressure_reference_pa.canonical_values()[row]
         };
         if !value.is_finite() || mean.iter().any(|v| !v.is_finite()) {
             return Err(Error::Invalid("nonfinite original initial cell mean"));
@@ -80,8 +83,17 @@ pub(super) fn integrate(
         q.push(flux);
     }
     Ok(ProjectedInitialFields {
-        velocity_m_per_s: u,
-        pressure_fluctuation_pa: fluctuation,
-        face_volume_flux_m3_per_s: q,
+        velocity_m_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Velocity,
+            _,
+        >::new(u),
+        pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Pressure,
+            _,
+        >::new(fluctuation),
+        face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::VolumeFlowRate,
+            _,
+        >::new(q),
     })
 }

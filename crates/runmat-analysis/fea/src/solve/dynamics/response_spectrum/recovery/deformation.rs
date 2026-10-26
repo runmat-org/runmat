@@ -183,7 +183,7 @@ fn recover_direction(
                 combine_modal_responses(
                     &vectors,
                     &frequencies,
-                    contribution.damping_ratio,
+                    contribution.damping_ratio.canonical_value(),
                     contribution.modal_combination,
                 )?,
                 vec![0.0; reference.values.len()],
@@ -193,7 +193,7 @@ fn recover_direction(
                 &vectors,
                 &frequencies,
                 &contribution.rigid_coefficients,
-                contribution.damping_ratio,
+                contribution.damping_ratio.canonical_value(),
                 contribution.modal_combination,
             )?
         };

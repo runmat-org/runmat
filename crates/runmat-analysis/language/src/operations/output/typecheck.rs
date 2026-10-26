@@ -154,14 +154,14 @@ fn project_type(operation: OutputOperation, value: &FeaType) -> Result<FeaType, 
         OutputOperation::Real | OutputOperation::Imaginary => Ok(FeaType::Field(field.clone())),
         OutputOperation::Phase => Ok(projected_field(
             field,
-            Box::new(dimensionless_shape(&field.value)),
+            Box::new(phase_shape(&field.value)),
             None,
         )),
         OutputOperation::VonMises => match field.value.as_ref() {
             FeaType::Vector {
                 element,
                 length: Some(6),
-            } if element.as_ref() == &FeaType::Quantity(crate::PhysicalDimension::PRESSURE) => {
+            } if (element.as_ref()).is_quantity((crate::PhysicalDimension::PRESSURE).into()) => {
                 Ok(projected_field(
                     field,
                     element.clone(),
@@ -230,7 +230,7 @@ fn series_result_type(
 
 fn square_numeric_type(value: &FeaType) -> Option<FeaType> {
     match value {
-        FeaType::Quantity(dimension) => Some(FeaType::Quantity(dimension.power(2)?)),
+        FeaType::Quantity(dimension) => Some(FeaType::Quantity((dimension.power(2)?).into())),
         FeaType::Integer | FeaType::Real | FeaType::Complex => Some(value.clone()),
         FeaType::Vector { element, length } => Some(FeaType::Vector {
             element: Box::new(square_numeric_type(element)?),
@@ -265,18 +265,16 @@ fn validate_sample_axis(
     };
     let valid = match domain {
         FeaSeriesDomain::Time => {
-            element.as_ref() == &FeaType::Quantity(crate::PhysicalDimension::TIME)
+            (element.as_ref()).is_quantity((crate::PhysicalDimension::TIME).into())
         }
         FeaSeriesDomain::Frequency => {
-            element.as_ref() == &FeaType::Quantity(crate::PhysicalDimension::FREQUENCY)
+            (element.as_ref()).is_quantity((crate::PhysicalDimension::FREQUENCY).into())
         }
         FeaSeriesDomain::Mode => matches!(element.as_ref(), FeaType::Integer),
-        FeaSeriesDomain::LoadFactor => matches!(
-            element.as_ref(),
-            FeaType::Integer
-                | FeaType::Real
-                | FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS)
-        ),
+        FeaSeriesDomain::LoadFactor => {
+            (matches!(element.as_ref(), FeaType::Integer | FeaType::Real)
+                || element.is_quantity(crate::PhysicalDimension::DIMENSIONLESS.into()))
+        }
         FeaSeriesDomain::StudyParameter(_) => element.is_numeric(),
     };
     valid
@@ -345,11 +343,11 @@ fn numeric_shape(value: &FeaType) -> bool {
     value.is_numeric() || matches!(value, FeaType::Vector { element, .. } if element.is_numeric())
 }
 
-fn scalar_dimension(value: &FeaType) -> Option<crate::PhysicalDimension> {
+fn scalar_dimension(value: &FeaType) -> Option<runmat_types::physical::DynamicDimension> {
     match value {
         FeaType::Quantity(dimension) => Some(*dimension),
         FeaType::Integer | FeaType::Real | FeaType::Complex => {
-            Some(crate::PhysicalDimension::DIMENSIONLESS)
+            Some(crate::PhysicalDimension::DIMENSIONLESS.into())
         }
         FeaType::Vector { element, .. } => scalar_dimension(element),
         _ => None,
@@ -358,8 +356,12 @@ fn scalar_dimension(value: &FeaType) -> Option<crate::PhysicalDimension> {
 
 fn scale_numeric_type(value: &FeaType, measure: crate::PhysicalDimension) -> Option<FeaType> {
     match value {
-        FeaType::Quantity(dimension) => Some(FeaType::Quantity(dimension.multiply(measure)?)),
-        FeaType::Integer | FeaType::Real | FeaType::Complex => Some(FeaType::Quantity(measure)),
+        FeaType::Quantity(dimension) => Some(FeaType::Quantity(
+            (dimension.multiply(measure.into())?).into(),
+        )),
+        FeaType::Integer | FeaType::Real | FeaType::Complex => {
+            Some(FeaType::Quantity((measure).into()))
+        }
         FeaType::Vector { element, length } => Some(FeaType::Vector {
             element: Box::new(scale_numeric_type(element, measure)?),
             length: *length,
@@ -418,7 +420,7 @@ fn resultant_type(
             .ok_or("moment dimension overflows")?;
     }
     Ok(FeaType::Vector {
-        element: Box::new(FeaType::Quantity(dimension)),
+        element: Box::new(FeaType::Quantity((dimension).into())),
         length: Some(3),
     })
 }
@@ -435,12 +437,18 @@ fn projected_field(
     })
 }
 
-fn dimensionless_shape(value: &FeaType) -> FeaType {
+fn phase_shape(value: &FeaType) -> FeaType {
     match value {
         FeaType::Vector { length, .. } => FeaType::Vector {
-            element: Box::new(FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS)),
+            element: Box::new(FeaType::Quantity(
+                runmat_types::physical::DynamicDimension::quantity_type(
+                    runmat_types::physical::QuantityKind::ComplexPhase,
+                ),
+            )),
             length: *length,
         },
-        _ => FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS),
+        _ => FeaType::Quantity(runmat_types::physical::DynamicDimension::quantity_type(
+            runmat_types::physical::QuantityKind::ComplexPhase,
+        )),
     }
 }

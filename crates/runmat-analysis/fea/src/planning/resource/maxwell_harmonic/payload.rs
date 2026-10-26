@@ -37,7 +37,9 @@ struct Sampling<'a> {
 }
 #[derive(Serialize)]
 struct Input<'a> {
-    angular_frequency_rad_per_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    angular_frequency_rad_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::AngularFrequency, f64>,
     sampling: Sampling<'a>,
     volumes: Repeated<'a, MaxwellVolumeData>,
     source_current: Repeated<'a, MaxwellCurrentSample>,
@@ -49,15 +51,30 @@ struct Response<'a> {
     mesh_digest: StableDigest,
     projection_digest: Digest,
     sampling_digest: Digest,
-    angular_frequency_rad_per_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    angular_frequency_rad_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::AngularFrequency, f64>,
     edge_node_identities: Repeated<'a, [StableDigest; 2]>,
-    edge_circulations_v: Repeated<'a, ComplexPhasor>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    edge_circulations_v: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ElectricPotential,
+        Repeated<'a, ComplexPhasor>,
+    >,
     samples: Repeated<'a, MaxwellFieldSample>,
-    electric_energy_j: f64,
-    magnetic_energy_j: f64,
-    source_power_va: ComplexPhasor,
-    ohmic_power_w: f64,
-    reactive_power_var: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    electric_energy_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    magnetic_energy_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    source_power_va: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ApparentPower,
+        ComplexPhasor,
+    >,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    ohmic_power_w: runmat_types::physical::Quantity<runmat_types::physical::kind::Power, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    reactive_power_var:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::ReactivePower, f64>,
     relative_physical_residual: f64,
     relative_complex_power_error: f64,
     relative_charge_continuity_residual: f64,
@@ -103,13 +120,16 @@ pub(super) fn profile(
     };
     let volume = MaxwellVolumeData {
         element_identity: stable,
-        permeability_h_per_m: 0.0,
-        permittivity_f_per_m: 0.0,
-        conductivity_s_per_m: 0.0,
+        permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(0.0),
+        permittivity_f_per_m: runmat_types::physical::ElectricPermittivity::new(0.0),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
     };
     let current = MaxwellCurrentSample {
         sample_identity: stable,
-        current_density_a_per_m2: [zero; 3],
+        current_density_a_per_m2: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ElectricCurrentDensity,
+            _,
+        >::new([zero; 3]),
     };
     let field = MaxwellFieldSample {
         sample_identity: stable,
@@ -117,11 +137,26 @@ pub(super) fn profile(
         ordinal: 0,
         position_m: [0.0; 3],
         volume_weight_m3: 0.0,
-        electric_field_v_per_m: [zero; 3],
-        flux_density_t: [zero; 3],
-        magnetic_field_a_per_m: [zero; 3],
-        electric_displacement_c_per_m2: [zero; 3],
-        conduction_current_density_a_per_m2: [zero; 3],
+        electric_field_v_per_m: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ElectricField,
+            _,
+        >::new([zero; 3]),
+        flux_density_t: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::MagneticFluxDensity,
+            _,
+        >::new([zero; 3]),
+        magnetic_field_a_per_m: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::MagneticFieldIntensity,
+            _,
+        >::new([zero; 3]),
+        electric_displacement_c_per_m2: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ElectricDisplacement,
+            _,
+        >::new([zero; 3]),
+        conduction_current_density_a_per_m2: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::ElectricCurrentDensity,
+            _,
+        >::new([zero; 3]),
     };
     let value = ResultProjection {
         source_workload: w.identity().map_err(invalid)?,
@@ -135,7 +170,10 @@ pub(super) fn profile(
             .filter(|d| d.persistence != runmat_analysis_core::StatePersistence::CheckpointOnly)
             .collect(),
         input: Input {
-            angular_frequency_rad_per_s: 0.0,
+            angular_frequency_rad_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::AngularFrequency,
+                _,
+            >::new(0.0),
             sampling: Sampling {
                 sampling_digest: digest,
                 data: SamplingData {
@@ -180,24 +218,43 @@ pub(super) fn profile(
             mesh_digest: stable,
             projection_digest: digest,
             sampling_digest: digest,
-            angular_frequency_rad_per_s: 0.0,
+            angular_frequency_rad_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::AngularFrequency,
+                _,
+            >::new(0.0),
             edge_node_identities: Repeated {
                 value: &pair,
                 count: edges,
             },
-            edge_circulations_v: Repeated {
+            edge_circulations_v: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ElectricPotential,
+                _,
+            >::new(Repeated {
                 value: &zero,
                 count: edges,
-            },
+            }),
             samples: Repeated {
                 value: &field,
                 count: samples,
             },
-            electric_energy_j: 0.0,
-            magnetic_energy_j: 0.0,
-            source_power_va: zero,
-            ohmic_power_w: 0.0,
-            reactive_power_var: 0.0,
+            electric_energy_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(0.0),
+            magnetic_energy_j: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Energy,
+                _,
+            >::new(0.0),
+            source_power_va: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ApparentPower,
+                _,
+            >::new(zero),
+            ohmic_power_w:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Power, _>::new(0.0),
+            reactive_power_var: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::ReactivePower,
+                _,
+            >::new(0.0),
             relative_physical_residual: 0.0,
             relative_complex_power_error: 0.0,
             relative_charge_continuity_residual: 0.0,
@@ -205,4 +262,12 @@ pub(super) fn profile(
         },
     };
     runmat_canonical_codec::profile_serialized_shape(&value, LIMITS).map_err(invalid)
+}
+
+impl<T: runmat_types::physical::QuantityStorage> runmat_types::physical::QuantityStorage
+    for Repeated<'_, T>
+{
+    fn all_finite(&self) -> bool {
+        self.value.all_finite()
+    }
 }

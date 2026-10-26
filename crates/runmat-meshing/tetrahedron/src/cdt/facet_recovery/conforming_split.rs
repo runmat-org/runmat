@@ -113,8 +113,8 @@ pub(super) fn try_split_recovered_segment_edge(
         .map_err(super::segment_error)?;
     if current.topology.nodes.iter().any(|existing| {
         crate::cdt::segment_recovery::coordinates_share_representable_location(
-            existing.coordinates_m,
-            node.coordinates_m,
+            existing.coordinates_m.canonical_value(),
+            node.coordinates_m.canonical_value(),
         )
     }) {
         work.reject("conflicting segment midpoint duplicates an existing node position");
@@ -161,7 +161,7 @@ fn insert_conformingly(
             "conforming facet {:?} split produced exact-zero tetrahedron {:?} at coordinates {:?}; inserted construction {:?}",
             selected_edge,
             tetrahedron,
-            tetrahedron.map(|index| mutation.nodes[index as usize].coordinates_m),
+            tetrahedron.map(|index| mutation.nodes[index as usize].coordinates_m.canonical_value()),
             node.construction,
         ));
         return Ok(None);

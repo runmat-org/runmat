@@ -36,7 +36,7 @@ pub(in crate::cdt::volume_sliver) fn candidates<'ctx>(
         if state.topology().vertex_is_boundary(index) {
             continue;
         }
-        let start = state.topology().node(index).coordinates_m;
+        let start = state.topology().node(index).coordinates_m.canonical_value();
         let mut coordinates = smooth_vertex_star_points_with_metrics(
             state.topology(),
             index as usize,

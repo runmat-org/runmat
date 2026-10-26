@@ -20,15 +20,19 @@ pub type ShellMatrix18 = [[f64; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_DOF_COUN
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShellSection {
-    pub thickness_m: f64,
-    pub reference_offset_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thickness_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_offset_m: runmat_types::physical::Length,
     pub shear_correction: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShellMaterial {
-    pub youngs_modulus_pa: f64,
-    pub poisson_ratio: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub poisson_ratio: runmat_types::physical::PoissonRatio,
     pub shear_modulus_pa: f64,
 }
 
@@ -43,7 +47,7 @@ pub struct ShellLocalFrame {
     pub x: [f64; 3],
     pub y: [f64; 3],
     pub z: [f64; 3],
-    pub area_m2: f64,
+    pub area_m2: runmat_types::physical::Area,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -70,8 +74,8 @@ pub enum ShellElementError {
 
 impl ShellSection {
     pub fn validate(self) -> Result<(), ShellElementError> {
-        if positive_finite(self.thickness_m)
-            && self.reference_offset_m.is_finite()
+        if positive_finite(self.thickness_m.canonical_value())
+            && self.reference_offset_m.canonical_value().is_finite()
             && positive_finite(self.shear_correction)
         {
             Ok(())
@@ -83,11 +87,11 @@ impl ShellSection {
 
 impl ShellMaterial {
     pub fn validate(self) -> Result<(), ShellElementError> {
-        if positive_finite(self.youngs_modulus_pa)
+        if positive_finite(self.youngs_modulus_pa.canonical_value())
             && positive_finite(self.shear_modulus_pa)
-            && self.poisson_ratio.is_finite()
-            && self.poisson_ratio > -1.0
-            && self.poisson_ratio < 0.5
+            && self.poisson_ratio.canonical_value().is_finite()
+            && self.poisson_ratio.canonical_value() > -1.0
+            && self.poisson_ratio.canonical_value() < 0.5
         {
             Ok(())
         } else {
@@ -125,7 +129,7 @@ impl ShellElementGeometry {
             x,
             y,
             z,
-            area_m2: 0.5 * normal_norm,
+            area_m2: runmat_types::physical::Area::new(0.5 * normal_norm),
         })
     }
 }
@@ -173,27 +177,27 @@ fn global_stiffness_from_operators(
         &mut local,
         &operators.membrane,
         matrices.extensional,
-        frame.area_m2,
+        frame.area_m2.canonical_value(),
     );
     add_bdb3_pair(
         &mut local,
         &operators.membrane,
         matrices.coupling,
         &operators.bending,
-        frame.area_m2,
+        frame.area_m2.canonical_value(),
     );
     add_bdb3_pair(
         &mut local,
         &operators.bending,
         matrices.coupling,
         &operators.membrane,
-        frame.area_m2,
+        frame.area_m2.canonical_value(),
     );
     add_bdb3(
         &mut local,
         &operators.bending,
         matrices.bending,
-        frame.area_m2,
+        frame.area_m2.canonical_value(),
     );
     for shape in [
         [2.0 / 3.0, 1.0 / 6.0, 1.0 / 6.0],
@@ -204,10 +208,10 @@ fn global_stiffness_from_operators(
             &mut local,
             &assumed_shear_operator(operators.dx, operators.dy, operators.jacobian, shape),
             matrices.transverse_shear,
-            frame.area_m2 / 3.0,
+            frame.area_m2.canonical_value() / 3.0,
         );
     }
-    let drilling_stiffness = matrices.drilling_stiffness_per_area * frame.area_m2;
+    let drilling_stiffness = matrices.drilling_stiffness_per_area * frame.area_m2.canonical_value();
     for drilling in &operators.drilling {
         add_outer(
             &mut local,

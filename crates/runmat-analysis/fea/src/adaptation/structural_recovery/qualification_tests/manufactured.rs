@@ -14,8 +14,8 @@ pub(super) fn manufactured_quadratic_solid_solution_converges_for_tet4_and_is_ex
     else {
         panic!("expected isotropic linear elasticity");
     };
-    elasticity.youngs_modulus_pa = 100.0;
-    elasticity.poisson_ratio = 0.25;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
     replace_fixture_excitations(
         &mut model,
         vec![FixtureExcitation {
@@ -58,7 +58,7 @@ pub(super) fn manufactured_quadratic_solid_solution_converges_for_tet4_and_is_ex
             .iter()
             .zip(summary.physical_load.chunks_exact(3))
         {
-            let [x, y, z] = node.coordinates_m;
+            let [x, y, z] = node.coordinates_m.canonical_value();
             for axis in 0..3 {
                 force[axis] += nodal[axis];
             }
@@ -81,7 +81,9 @@ pub(super) fn manufactured_quadratic_solid_solution_converges_for_tet4_and_is_ex
         model.constraints = boundary_nodes
             .into_iter()
             .map(|node_id| {
-                let x = mesh.topology.nodes[node_id as usize - 1].coordinates_m[0];
+                let x = mesh.topology.nodes[node_id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[0];
                 AnalysisConstraint::Structural(StructuralConstraint {
                     constraint_id: format!("quadratic_boundary_{node_id}"),
                     frame: CoordinateFrame::Global,
@@ -124,7 +126,7 @@ pub(super) fn manufactured_quadratic_solid_solution_converges_for_tet4_and_is_ex
             .chunks_exact(3)
             .zip(&mesh.topology.nodes)
             .map(|(value, node)| {
-                (value[0] - 0.1 * node.coordinates_m[0].powi(2))
+                (value[0] - 0.1 * node.coordinates_m.canonical_value()[0].powi(2))
                     .abs()
                     .max(value[1].abs())
                     .max(value[2].abs())
@@ -141,7 +143,11 @@ pub(super) fn manufactured_quadratic_solid_solution_converges_for_tet4_and_is_ex
             .map(|(value, element)| {
                 let x = element.node_ids[..4]
                     .iter()
-                    .map(|id| mesh.topology.nodes[*id as usize - 1].coordinates_m[0])
+                    .map(|id| {
+                        mesh.topology.nodes[*id as usize - 1]
+                            .coordinates_m
+                            .canonical_value()[0]
+                    })
                     .sum::<f64>()
                     / 4.0;
                 value

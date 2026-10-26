@@ -53,9 +53,7 @@ fn exact_singular_edge_is_a_complete_authoritative_fixture() {
     assert_eq!(derivatives.first_m, [0.0; 3]);
     assert_eq!(derivatives.second_m, [0.0; 3]);
     assert_eq!(
-        evaluator
-            .arc_length_m(curve_id, domain, 1.0e-12, &control)
-            .unwrap(),
+        evaluator.arc_length_m.canonical_value()(curve_id, domain, 1.0e-12, &control).unwrap(),
         0.0
     );
     let projection = evaluator

@@ -24,7 +24,9 @@ const IDENTITY_LIMITS: CanonicalLimits =
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct CanonicalStructuralNode {
     pub identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub owns_solid_translation: bool,
     pub owns_explicit_rotation: bool,
 }
@@ -131,8 +133,8 @@ fn model_scale(mesh: &SolverMeshArtifact) -> f64 {
             [f64::INFINITY, f64::NEG_INFINITY],
             |[minimum, maximum], node| {
                 [
-                    minimum.min(node.coordinates_m[axis]),
-                    maximum.max(node.coordinates_m[axis]),
+                    minimum.min(node.coordinates_m.canonical_value()[axis]),
+                    maximum.max(node.coordinates_m.canonical_value()[axis]),
                 ]
             },
         )

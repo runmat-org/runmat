@@ -69,8 +69,12 @@ fn canonicalize_typed_table<Q: CanonicalQuantity>(
     let domain = match &table.domain {
         TabulatedSignalDomain::TimeSeconds => GeneratorDomain::TimeSeconds,
         TabulatedSignalDomain::FrequencyHertz => GeneratorDomain::FrequencyHertz,
-        TabulatedSignalDomain::StudyParameter { parameter_id } => GeneratorDomain::StudyParameter {
+        TabulatedSignalDomain::StudyParameter {
+            parameter_id,
+            quantity,
+        } => GeneratorDomain::StudyParameter {
             parameter_id: parameter_id.clone(),
+            quantity: *quantity,
         },
     };
     let knots = table
@@ -286,7 +290,22 @@ pub fn materialize_signal_for_solver(
 ) -> AnalysisBridgeResult<PhysicalSignal> {
     realization.validate()?;
     validate_realization_artifact_inventory(authored, realization)?;
-    if authored.signal_id() != &realization.signal_id
+    let axis = authored
+        .generator()
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("signal materialization requires a generator axis".into())
+        })?
+        .domain
+        .axis_descriptor(None)
+        .map_err(AnalysisBridgeError::Invalid)?;
+    if admitted.schema_version != 2
+        || admitted.sample_points.descriptor() != axis
+        || realization
+            .domain
+            .axis_descriptor(None)
+            .map_err(AnalysisBridgeError::Invalid)?
+            != axis
+        || authored.signal_id() != &realization.signal_id
         || authored.quantity() != realization.quantity
         || authored.shape() != &realization.shape
         || authored.precision() != realization.precision
@@ -298,6 +317,7 @@ pub fn materialize_signal_for_solver(
             != Some(admitted.callable.qualified_name.as_str())
         || realization.sample_points().map(f64::to_bits).ne(admitted
             .sample_points
+            .canonical_values()
             .iter()
             .copied()
             .map(f64::to_bits))
@@ -469,8 +489,12 @@ fn signal_domain(domain: &GeneratorDomain) -> TabulatedSignalDomain {
     match domain {
         GeneratorDomain::TimeSeconds => TabulatedSignalDomain::TimeSeconds,
         GeneratorDomain::FrequencyHertz => TabulatedSignalDomain::FrequencyHertz,
-        GeneratorDomain::StudyParameter { parameter_id } => TabulatedSignalDomain::StudyParameter {
+        GeneratorDomain::StudyParameter {
+            parameter_id,
+            quantity,
+        } => TabulatedSignalDomain::StudyParameter {
             parameter_id: parameter_id.clone(),
+            quantity: *quantity,
         },
     }
 }

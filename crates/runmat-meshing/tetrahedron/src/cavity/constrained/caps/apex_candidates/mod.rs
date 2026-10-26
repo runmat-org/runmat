@@ -8,7 +8,8 @@ use optimized::{optimized_inplane_inward_cap_apex_candidate, optimized_normal_ca
 
 #[derive(Debug, Clone, Copy)]
 pub(in super::super) struct LocalCapApexCandidate {
-    pub(in super::super) coordinates_m: [f64; 3],
+    pub(in super::super) coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub(in super::super) source: &'static str,
 }
 
@@ -21,11 +22,14 @@ pub(in super::super) fn local_cap_apex_candidates(
     let mut candidates = Vec::<LocalCapApexCandidate>::new();
     for fraction in [0.03, 0.06, 0.1, 0.16, 0.25, 0.38, 0.55, 0.75] {
         candidates.push(LocalCapApexCandidate {
-            coordinates_m: [
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
                 surface_point[0] + (cavity_centroid[0] - surface_point[0]) * fraction,
                 surface_point[1] + (cavity_centroid[1] - surface_point[1]) * fraction,
                 surface_point[2] + (cavity_centroid[2] - surface_point[2]) * fraction,
-            ],
+            ]),
             source: "centroid_inward",
         });
     }
@@ -76,11 +80,14 @@ pub(in super::super) fn local_cap_apex_candidates(
         for scale in [0.08, 0.14, 0.22, 0.35, 0.55, 0.85, 1.25] {
             let distance = max_edge_length * scale;
             candidates.push(LocalCapApexCandidate {
-                coordinates_m: [
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([
                     surface_point[0] + direction[0] * distance,
                     surface_point[1] + direction[1] * distance,
                     surface_point[2] + direction[2] * distance,
-                ],
+                ]),
                 source,
             });
         }
@@ -131,7 +138,10 @@ pub(in super::super) fn local_cap_apex_candidates(
             for inward_scale in [0.08, 0.16, 0.28, 0.42] {
                 for lateral_scale in [0.12, 0.24, 0.38] {
                     candidates.push(LocalCapApexCandidate {
-                        coordinates_m: [
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new([
                             surface_point[0]
                                 + inward_direction[0] * max_edge_length * inward_scale
                                 + in_plane_direction[0] * max_edge_length * lateral_scale,
@@ -141,18 +151,21 @@ pub(in super::super) fn local_cap_apex_candidates(
                             surface_point[2]
                                 + inward_direction[2] * max_edge_length * inward_scale
                                 + in_plane_direction[2] * max_edge_length * lateral_scale,
-                        ],
+                        ]),
                         source: "inplane_inward",
                     });
                     candidates.push(LocalCapApexCandidate {
-                        coordinates_m: [
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new([
                             surface_point[0] + inward_direction[0] * max_edge_length * inward_scale
                                 - in_plane_direction[0] * max_edge_length * lateral_scale,
                             surface_point[1] + inward_direction[1] * max_edge_length * inward_scale
                                 - in_plane_direction[1] * max_edge_length * lateral_scale,
                             surface_point[2] + inward_direction[2] * max_edge_length * inward_scale
                                 - in_plane_direction[2] * max_edge_length * lateral_scale,
-                        ],
+                        ]),
                         source: "inplane_inward",
                     });
                 }

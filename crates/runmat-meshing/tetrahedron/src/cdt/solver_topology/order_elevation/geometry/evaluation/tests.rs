@@ -15,7 +15,10 @@ fn node(parameters: &[f64], edge: &PersistentEntityId) -> SolverMeshNode {
     SolverMeshNode {
         node_id: 1,
         stable_identity: StableDigest::from_bytes([1; 32]),
-        coordinates_m: [0.0; 3],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                [0.0; 3],
+            ),
         provenance: vec![edge.clone()],
         exact_parameters: parameters
             .iter()
@@ -35,7 +38,10 @@ fn surface_node(
     SolverMeshNode {
         node_id: 1,
         stable_identity: StableDigest::from_bytes([1; 32]),
-        coordinates_m: [0.0; 3],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                [0.0; 3],
+            ),
         provenance: vec![face.clone()],
         exact_parameters: parameters
             .iter()

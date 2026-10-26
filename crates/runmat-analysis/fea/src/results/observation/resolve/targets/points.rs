@@ -41,7 +41,7 @@ pub(super) fn resolve_interpolated_points(
     let mut samples = reserved(positions.len())?;
     for (ordinal, position) in positions.iter().enumerate() {
         let location = projection
-            .locate_volume_point(position.meters)?
+            .locate_volume_point(position.canonical_value())?
             .ok_or_else(|| target_error(spec, "point lies outside the admitted solid topology"))?;
         let ordinal =
             u64::try_from(ordinal).map_err(|_| ObservationError::Limit("path sample ordinal"))?;
@@ -75,11 +75,9 @@ pub(super) fn resolve_probe(
     };
     match materialized_field_location(spec) {
         FieldLocation::Node => {
-            let mut matches = topology
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, node)| node.coordinates_m == position.meters);
+            let mut matches = topology.nodes.iter().enumerate().filter(|(_, node)| {
+                node.coordinates_m.canonical_value() == position.canonical_value()
+            });
             match (matches.next(), matches.next()) {
                 (Some((index, _)), None) => nodes_target(
                     selected_indices(std::iter::once(index), maximum)?,
@@ -101,7 +99,7 @@ pub(super) fn resolve_probe(
             let mut matches = elements
                 .iter()
                 .enumerate()
-                .filter(|(_, element)| element.centroid_m == position.meters);
+                .filter(|(_, element)| element.centroid_m == position.canonical_value());
             match (matches.next(), matches.next()) {
                 (Some((index, _)), None) => elements_target(
                     selected_indices(std::iter::once(index), maximum)?,

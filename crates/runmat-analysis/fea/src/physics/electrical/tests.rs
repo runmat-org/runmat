@@ -38,11 +38,11 @@ pub(crate) fn model(equation: StaticElectricalEquation) -> AnalysisModel {
     );
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
     model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 3.0,
-        relative_permittivity: 4.0,
-        relative_permeability: 1.0,
-        resistive_heating_coefficient: 0.0,
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(4.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
         conductivity_frequency_response: Vec::new(),
     });
     model
@@ -73,7 +73,9 @@ fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalElectrica
 
 fn coefficient(equation: StaticElectricalEquation) -> f64 {
     match equation {
-        StaticElectricalEquation::Electrostatics => 4.0 * VACUUM_PERMITTIVITY_F_PER_M,
+        StaticElectricalEquation::Electrostatics => {
+            4.0 * VACUUM_PERMITTIVITY_F_PER_M.canonical_value()
+        }
         StaticElectricalEquation::SteadyConduction => 3.0,
     }
 }
@@ -113,16 +115,29 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
                 mesh.topology.volume_elements.len()
             );
             let projection = AnalysisProjection::derive(&mesh).unwrap();
-            for (&potential, node) in response.potential_v.iter().zip(&projection.nodes) {
-                assert!((potential - 2.0 * node.coordinates_m[0]).abs() < 1e-8);
+            for (&potential, node) in response
+                .potential_v
+                .canonical_values()
+                .iter()
+                .zip(&projection.nodes)
+            {
+                assert!((potential - 2.0 * node.coordinates_m.canonical_value()[0]).abs() < 1e-8);
             }
-            for field in &response.element_electric_field_v_per_m {
+            for field in response.element_electric_field_v_per_m.canonical_values() {
                 assert!((field[0] + 2.0).abs() < 1e-8);
                 assert!(field[1].abs() < 1e-8 && field[2].abs() < 1e-8);
             }
             let a = coefficient(equation);
-            assert_relative(response.terminals[0].outward_flux, 2.0 * a, 1e-8);
-            assert_relative(response.terminals[1].outward_flux, -2.0 * a, 1e-8);
+            assert_relative(
+                response.terminals[0].outward_flux.canonical_value(),
+                2.0 * a,
+                1e-8,
+            );
+            assert_relative(
+                response.terminals[1].outward_flux.canonical_value(),
+                -2.0 * a,
+                1e-8,
+            );
             assert!(response.relative_flux_imbalance < 1e-8);
             assert!(response.relative_energy_identity_error < 1e-8);
             match response.constitutive {
@@ -131,8 +146,8 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
                     displacement_c_per_m2,
                     ..
                 } => {
-                    assert_relative(total_energy_j, 2.0 * a, 1e-8);
-                    for displacement in displacement_c_per_m2 {
+                    assert_relative(total_energy_j.canonical_value(), 2.0 * a, 1e-8);
+                    for displacement in displacement_c_per_m2.canonical_values() {
                         assert_relative(displacement[0], -2.0 * a, 1e-8);
                     }
                 }
@@ -141,8 +156,8 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
                     current_density_a_per_m2,
                     ..
                 } => {
-                    assert_relative(total_joule_power_w, 4.0 * a, 1e-8);
-                    for current in current_density_a_per_m2 {
+                    assert_relative(total_joule_power_w.canonical_value(), 4.0 * a, 1e-8);
+                    for current in current_density_a_per_m2.canonical_values() {
                         assert_relative(current[0], -2.0 * a, 1e-8);
                     }
                 }
@@ -176,7 +191,8 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
                             .iter()
                             .find(|node| node.node_id == *id)
                             .unwrap()
-                            .coordinates_m[0]
+                            .coordinates_m
+                            .canonical_value()[0]
                     })
                     .sum::<f64>()
                     / 4.0;
@@ -187,8 +203,12 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
             let mut second = model.materials[0].clone();
             second.material_id = "second".into();
             let electrical = second.electrical.as_mut().unwrap();
-            electrical.conductivity_s_per_m *= 4.0;
-            electrical.relative_permittivity *= 4.0;
+            electrical.conductivity_s_per_m = runmat_types::physical::Quantity::new(
+                electrical.conductivity_s_per_m.canonical_value() * (4.0),
+            );
+            electrical.relative_permittivity = runmat_types::physical::Quantity::new(
+                electrical.relative_permittivity.canonical_value() * (4.0),
+            );
             model.materials.push(second);
             model.material_assignments[0].target = PropertyRegionTarget::solid("layer_left");
             let mut second = model.material_assignments[0].clone();
@@ -210,8 +230,12 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
             );
             let response = solve(&model, &mesh);
             let projection = AnalysisProjection::derive(&mesh).unwrap();
-            for (node, &potential) in projection.nodes.iter().zip(&response.potential_v) {
-                let x = node.coordinates_m[0];
+            for (node, &potential) in projection
+                .nodes
+                .iter()
+                .zip(response.potential_v.canonical_values())
+            {
+                let x = node.coordinates_m.canonical_value()[0];
                 let exact = if x <= 0.5 {
                     1.6 * x
                 } else {
@@ -229,24 +253,32 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
                     total_energy_j,
                     ..
                 } => {
-                    assert_relative(*total_energy_j, 0.8 * a, 1e-8);
-                    displacement_c_per_m2
+                    assert_relative(total_energy_j.canonical_value(), 0.8 * a, 1e-8);
+                    displacement_c_per_m2.canonical_values()
                 }
                 ElectricalConstitutiveResponse::SteadyConduction {
                     current_density_a_per_m2,
                     total_joule_power_w,
                     ..
                 } => {
-                    assert_relative(*total_joule_power_w, 1.6 * a, 1e-8);
-                    current_density_a_per_m2
+                    assert_relative(total_joule_power_w.canonical_value(), 1.6 * a, 1e-8);
+                    current_density_a_per_m2.canonical_values()
                 }
             };
             for value in flux {
                 assert_relative(value[0], -1.6 * a, 1e-8);
                 assert!(value[1].abs() < a * 1e-8 && value[2].abs() < a * 1e-8);
             }
-            assert_relative(response.terminals[0].outward_flux, 1.6 * a, 1e-8);
-            assert_relative(response.terminals[1].outward_flux, -1.6 * a, 1e-8);
+            assert_relative(
+                response.terminals[0].outward_flux.canonical_value(),
+                1.6 * a,
+                1e-8,
+            );
+            assert_relative(
+                response.terminals[1].outward_flux.canonical_value(),
+                -1.6 * a,
+                1e-8,
+            );
         }
     }
 }
@@ -266,14 +298,20 @@ fn constant_gauge_potential_produces_exactly_zero_field_and_power() {
             1e6,
         );
         let response = solve(&model, &mesh);
-        assert!(response.potential_v.iter().all(|value| *value == 1e6));
+        assert!(response
+            .potential_v
+            .canonical_values()
+            .iter()
+            .all(|value| *value == 1e6));
         assert!(response
             .element_electric_field_v_per_m
+            .canonical_values()
             .iter()
             .flatten()
             .all(|value| *value == 0.0));
         assert!(response
             .nodal_outward_flux
+            .canonical_values()
             .iter()
             .all(|value| *value == 0.0));
         assert_eq!(response.relative_energy_identity_error, 0.0);
@@ -302,7 +340,7 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
                     .collect::<std::collections::BTreeSet<_>>();
                 for node in boundary {
                     let node = &projection.nodes[node];
-                    let [x, y, _] = node.coordinates_m;
+                    let [x, y, _] = node.coordinates_m.canonical_value();
                     prescribe(
                         &mut model,
                         format!("node_{}", node.node_id),
@@ -321,9 +359,10 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
                             for (local, &node) in element.node_indices.iter().enumerate() {
                                 for axis in 0..3 {
                                     coordinate[axis] += point.shape_values()[local]
-                                        * projection.nodes[node].coordinates_m[axis];
+                                        * projection.nodes[node].coordinates_m.canonical_value()
+                                            [axis];
                                     field[axis] -= point.physical_shape_gradients()[local][axis]
-                                        * response.potential_v[node];
+                                        * response.potential_v.canonical_values()[node];
                                 }
                             }
                             let reference = [-2.0 * coordinate[0], 2.0 * coordinate[1], 0.0];
@@ -345,11 +384,11 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
                     let (total, factor) = match response.constitutive {
                         ElectricalConstitutiveResponse::Electrostatics {
                             total_energy_j, ..
-                        } => (total_energy_j, 0.5),
+                        } => (total_energy_j.canonical_value(), 0.5),
                         ElectricalConstitutiveResponse::SteadyConduction {
                             total_joule_power_w,
                             ..
-                        } => (total_joule_power_w, 1.0),
+                        } => (total_joule_power_w.canonical_value(), 1.0),
                     };
                     assert_relative(total, factor * coefficient(equation) * 8.0 / 3.0, 1e-8);
                 }
@@ -401,7 +440,7 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         .electrical
         .as_mut()
         .unwrap()
-        .conductivity_s_per_m = 0.0;
+        .conductivity_s_per_m = runmat_types::physical::ElectricalConductivity::new(0.0);
     assert!(solve_canonical_static(
         &bad,
         &mesh,

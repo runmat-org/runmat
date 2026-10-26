@@ -1,19 +1,13 @@
+geometry selection.
+// Engineering physics belongs in the importing study.
+
 geometry bracket {
     file = "./geometry/box.brep"
     units = m
 
-    region body : solid {
-        select id "solid_000001"
-        expect exactly_one
-    }
-    region support : face {
-        select id "face_000001"
-        expect exactly_one
-    }
-    region load_face : face {
-        select id "face_000002"
-        expect exactly_one
-    }
+    region body : solid { select name "body"; expect exactly_one }
+    region support : face { select name "support"; expect exactly_one }
+    region load_face : face { select name "load_face"; expect exactly_one }
 }
 
 mesh bracket on geometry.bracket {

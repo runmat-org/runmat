@@ -14,19 +14,19 @@ pub fn point_in_closed_triangle_surface(
     triangles: &[Triangle3],
     tolerance: MeshingTolerance,
 ) -> PointInClosedSurface {
-    let on_boundary = if tolerance.absolute_m == 0.0 {
+    let on_boundary = if tolerance.absolute_m.canonical_value() == 0.0 {
         triangles
             .iter()
             .any(|triangle| point_on_triangle_exact(point, *triangle))
     } else {
-        triangles
-            .iter()
-            .any(|triangle| point_triangle_distance(point, *triangle) <= tolerance.absolute_m)
+        triangles.iter().any(|triangle| {
+            point_triangle_distance(point, *triangle) <= tolerance.absolute_m.canonical_value()
+        })
     };
     if on_boundary {
         return PointInClosedSurface::OnBoundary;
     }
-    let epsilon = tolerance.absolute_m;
+    let epsilon = tolerance.absolute_m.canonical_value();
     let probes = [
         ([1.0, 0.0, 0.0], [-0.37, 0.19, 0.11]),
         ([0.0, 1.0, 0.0], [0.13, -0.41, 0.23]),
@@ -82,11 +82,12 @@ pub fn ray_has_odd_surface_intersections(
         let Some(hit) = ray_triangle_intersection(origin, direction, *triangle, tolerance) else {
             continue;
         };
-        if hit.distance > tolerance.absolute_m {
+        if hit.distance > tolerance.absolute_m.canonical_value() {
             intersections.push(hit.distance);
         }
     }
     intersections.sort_by(f64::total_cmp);
-    intersections.dedup_by(|left, right| (*left - *right).abs() <= tolerance.absolute_m);
+    intersections
+        .dedup_by(|left, right| (*left - *right).abs() <= tolerance.absolute_m.canonical_value());
     intersections.len() % 2 == 1
 }

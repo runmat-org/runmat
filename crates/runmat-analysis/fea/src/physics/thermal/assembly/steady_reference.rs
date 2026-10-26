@@ -21,7 +21,7 @@ impl ThermalOperatorAssembly {
             reference_by_component.push(
                 nodes
                     .iter()
-                    .find_map(|&node| self.prescribed_temperature_k[node]),
+                    .find_map(|&node| self.prescribed_temperature_k.canonical_values()[node]),
             );
             for &node in nodes {
                 component_by_node[node] = component_index;
@@ -36,7 +36,7 @@ impl ThermalOperatorAssembly {
             else {
                 continue;
             };
-            if coefficient.watts_per_square_meter_kelvin <= 0.0 {
+            if coefficient.canonical_value() <= 0.0 {
                 continue;
             }
             let ambient = sample_ambient_temperature(

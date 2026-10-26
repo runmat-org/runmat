@@ -131,15 +131,15 @@ pub(super) fn topology() -> ExactBRepTopology {
             curve_evaluator_id: curve_evaluator("curve:1"),
             start_vertex_id: Some(vertex.clone()),
             end_vertex_id: Some(vertex.clone()),
-            tolerance_m: 1.0e-8,
+            tolerance_m: crate::physical::Length::new(1.0e-8),
             is_closed: true,
             is_periodic: true,
             is_degenerate: false,
         }],
         vertices: vec![ExactVertex {
             id: vertex,
-            point_m: [1.0, 0.0, 0.0],
-            tolerance_m: 1.0e-8,
+            point_m: crate::physical::Position::new([1.0, 0.0, 0.0]),
+            tolerance_m: crate::physical::Length::new(1.0e-8),
         }],
         interfaces: Vec::new(),
         contacts: Vec::new(),
@@ -266,15 +266,15 @@ fn add_independent_contact_face(topology: &mut ExactBRepTopology) -> PersistentE
         curve_evaluator_id: curve_evaluator("curve:contact"),
         start_vertex_id: Some(vertex.clone()),
         end_vertex_id: Some(vertex.clone()),
-        tolerance_m: 1.0e-8,
+        tolerance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(1.0e-8),
         is_closed: true,
         is_periodic: true,
         is_degenerate: false,
     });
     topology.vertices.push(ExactVertex {
         id: vertex,
-        point_m: [1.0, 0.0, 0.0],
-        tolerance_m: 1.0e-8,
+        point_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 0.0, 0.0]),
+        tolerance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(1.0e-8),
     });
     face
 }
@@ -621,8 +621,11 @@ fn noncanonical_order_and_summary_substitution_fail() {
     let mut noncanonical = topology();
     noncanonical.vertices.push(ExactVertex {
         id: id(PersistentEntityKind::Vertex, "a-before-existing"),
-        point_m: [1.0, 0.0, 0.0],
-        tolerance_m: 0.0,
+        point_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+            [1.0, 0.0, 0.0],
+        ),
+        tolerance_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(0.0),
     });
     let mut summary = model();
     summary.vertex_count = 2;

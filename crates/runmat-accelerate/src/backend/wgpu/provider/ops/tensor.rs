@@ -1787,7 +1787,9 @@ mod linear_launch_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{
+        register_test_wgpu_provider, register_wgpu_provider, WgpuProviderOptions,
+    };
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 

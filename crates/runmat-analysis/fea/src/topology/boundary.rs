@@ -17,7 +17,7 @@ pub(super) fn project_boundary_face(
 ) -> Result<ProjectedBoundaryFace, AnalysisProjectionError> {
     let mut coordinates = [[0.0; 3]; 6];
     for (coordinate, index) in coordinates.iter_mut().zip(&node_indices) {
-        *coordinate = nodes[*index].coordinates_m;
+        *coordinate = nodes[*index].coordinates_m.canonical_value();
     }
     let mut area = 0.0;
     let mut first_moment_m3 = [0.0; 3];
@@ -63,6 +63,6 @@ pub(super) fn project_boundary_face(
         } else {
             BoundaryNormalOrientation::ExteriorOutward
         },
-        area_m2: area,
+        area_m2: runmat_types::physical::Area::new(area),
     })
 }

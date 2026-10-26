@@ -163,6 +163,7 @@ impl SandboxFsProvider {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
+    fn supports_workspace_transactions(&self) -> bool { true }
     fn workspace_access(&self, root: &Path, writable: bool, maximum_resident_bytes: u64) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
         if self.captured_io.is_some() {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "captured authority does not expose coherent workspace access"));

@@ -12,7 +12,10 @@ fn borrowed_coordinate_gather_preserves_sparse_ids_connectivity_order_and_errors
         .map(|(index, coordinates)| SolverMeshNode {
             node_id: (index as u64 + 1) * 17,
             stable_identity: StableDigest::from_bytes([index as u8 + 1; 32]),
-            coordinates_m: *coordinates,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(*coordinates),
             provenance: Vec::new(),
             exact_parameters: Vec::new(),
         })

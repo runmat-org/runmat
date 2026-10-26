@@ -30,7 +30,7 @@ fn quadratic_h_transfer_retains_scalar_vector_modes_and_rejects_linear_fallback(
         if source_ids.contains(&node.stable_identity) {
             continue;
         }
-        let [x, y, z] = node.coordinates_m;
+        let [x, y, z] = node.coordinates_m.canonical_value();
         let bary = [1.0 - x - y - z, x, y, z];
         let mut weights = bary.map(|l| 2.0 * l * l - l).to_vec();
         for [a, b] in [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]] {
@@ -70,7 +70,7 @@ fn quadratic_h_transfer_retains_scalar_vector_modes_and_rejects_linear_fallback(
                 .topology
                 .nodes
                 .iter()
-                .flat_map(|n| modes(n.coordinates_m)[..components].to_vec())
+                .flat_map(|n| modes(n.coordinates_m.canonical_value())[..components].to_vec())
                 .collect(),
         );
         let reference = AnalysisField::host_f64(
@@ -80,7 +80,7 @@ fn quadratic_h_transfer_retains_scalar_vector_modes_and_rejects_linear_fallback(
                 .topology
                 .nodes
                 .iter()
-                .flat_map(|n| modes(n.coordinates_m)[..components].to_vec())
+                .flat_map(|n| modes(n.coordinates_m.canonical_value())[..components].to_vec())
                 .collect(),
         );
         let transferred =

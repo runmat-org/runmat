@@ -29,7 +29,9 @@ fn canonical_quadratic_mesh_keeps_node_element_and_region_bindings() {
             );
             assert_eq!(
                 boundary.vertices[*index as usize],
-                original.topology.nodes[*index as usize].coordinates_m
+                original.topology.nodes[*index as usize]
+                    .coordinates_m
+                    .canonical_value()
             );
         }
     }

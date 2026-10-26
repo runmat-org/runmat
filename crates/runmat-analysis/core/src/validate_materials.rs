@@ -86,7 +86,10 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
         return Err(invalid_material(material, "name must be non-empty"));
     }
     validate_provenance(material)?;
-    if material.mass_density_kg_per_m3.is_none()
+    if material
+        .mass_density_kg_per_m3
+        .map(|quantity| quantity.canonical_value())
+        .is_none()
         && material.elasticity.is_none()
         && material.damping.is_none()
         && material.thermal.is_none()
@@ -100,7 +103,10 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
             "at least one constitutive capability must be declared",
         ));
     }
-    if let Some(density) = material.mass_density_kg_per_m3 {
+    if let Some(density) = material
+        .mass_density_kg_per_m3
+        .map(|quantity| quantity.canonical_value())
+    {
         require_positive(material, "mass density", density)?;
     }
     if material.fluid.is_some() {
@@ -110,10 +116,14 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     }
     if let Some(crate::MaterialElasticityModel::IsotropicLinear(mechanical)) = &material.elasticity
     {
-        require_positive(material, "Young's modulus", mechanical.youngs_modulus_pa)?;
-        if !mechanical.poisson_ratio.is_finite()
-            || mechanical.poisson_ratio <= -1.0
-            || mechanical.poisson_ratio >= 0.5
+        require_positive(
+            material,
+            "Young's modulus",
+            mechanical.youngs_modulus_pa.canonical_value(),
+        )?;
+        if !mechanical.poisson_ratio.canonical_value().is_finite()
+            || mechanical.poisson_ratio.canonical_value() <= -1.0
+            || mechanical.poisson_ratio.canonical_value() >= 0.5
         {
             return Err(invalid_material(
                 material,
@@ -125,37 +135,38 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
         require_positive(
             material,
             "lamina longitudinal modulus",
-            lamina.longitudinal_modulus_pa,
+            lamina.longitudinal_modulus_pa.canonical_value(),
         )?;
         require_positive(
             material,
             "lamina transverse modulus",
-            lamina.transverse_modulus_pa,
+            lamina.transverse_modulus_pa.canonical_value(),
         )?;
         require_positive(
             material,
             "lamina in-plane shear modulus",
-            lamina.in_plane_shear_modulus_pa,
+            lamina.in_plane_shear_modulus_pa.canonical_value(),
         )?;
         require_positive(
             material,
             "lamina transverse shear modulus 13",
-            lamina.transverse_shear_modulus_13_pa,
+            lamina.transverse_shear_modulus_13_pa.canonical_value(),
         )?;
         require_positive(
             material,
             "lamina transverse shear modulus 23",
-            lamina.transverse_shear_modulus_23_pa,
+            lamina.transverse_shear_modulus_23_pa.canonical_value(),
         )?;
-        if !lamina.major_poisson_ratio.is_finite() {
+        if !lamina.major_poisson_ratio.canonical_value().is_finite() {
             return Err(invalid_material(
                 material,
                 "lamina major Poisson ratio must be finite",
             ));
         }
-        let reciprocal = lamina.major_poisson_ratio * lamina.transverse_modulus_pa
-            / lamina.longitudinal_modulus_pa;
-        if 1.0 - lamina.major_poisson_ratio * reciprocal <= 0.0 {
+        let reciprocal = lamina.major_poisson_ratio.canonical_value()
+            * lamina.transverse_modulus_pa.canonical_value()
+            / lamina.longitudinal_modulus_pa.canonical_value();
+        if 1.0 - lamina.major_poisson_ratio.canonical_value() * reciprocal <= 0.0 {
             return Err(invalid_material(
                 material,
                 "lamina plane-stress compliance must be positive definite",
@@ -169,9 +180,10 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     {
         if !mass_coefficient.is_finite()
             || !stiffness_coefficient.is_finite()
-            || mass_coefficient.per_second < 0.0
-            || stiffness_coefficient.seconds < 0.0
-            || (mass_coefficient.per_second == 0.0 && stiffness_coefficient.seconds == 0.0)
+            || mass_coefficient.canonical_value() < 0.0
+            || stiffness_coefficient.canonical_value() < 0.0
+            || (mass_coefficient.canonical_value() == 0.0
+                && stiffness_coefficient.canonical_value() == 0.0)
         {
             return Err(invalid_material(
                 material,
@@ -184,29 +196,39 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
         require_nonnegative(
             material,
             "thermal reference temperature",
-            thermal.reference_temperature_k,
+            thermal.reference_temperature_k.canonical_value(),
         )?;
         require_finite(
             material,
             "temperature coefficient of modulus",
-            thermal.modulus_temp_coeff_per_k,
+            thermal.modulus_temp_coeff_per_k.canonical_value(),
         )?;
         require_positive(
             material,
             "thermal conductivity",
-            thermal.conductivity_w_per_mk,
+            thermal.conductivity_w_per_mk.canonical_value(),
         )?;
-        require_positive(material, "specific heat", thermal.specific_heat_j_per_kgk)?;
+        require_positive(
+            material,
+            "specific heat",
+            thermal.specific_heat_j_per_kgk.canonical_value(),
+        )?;
         require_finite(
             material,
             "thermal expansion coefficient",
-            thermal.expansion_coefficient_per_k,
+            thermal.expansion_coefficient_per_k.canonical_value(),
         )?;
     }
 
     if let Some(acoustic) = &material.acoustic {
-        require_positive(material, "speed of sound", acoustic.speed_of_sound_m_per_s)?;
-        if !acoustic.damping_ratio.is_finite() || !(0.0..1.0).contains(&acoustic.damping_ratio) {
+        require_positive(
+            material,
+            "speed of sound",
+            acoustic.speed_of_sound_m_per_s.canonical_value(),
+        )?;
+        if !acoustic.damping_ratio.canonical_value().is_finite()
+            || !(0.0..1.0).contains(&acoustic.damping_ratio.canonical_value())
+        {
             return Err(invalid_material(
                 material,
                 "acoustic damping ratio must be finite and in [0, 1)",
@@ -218,27 +240,27 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
         require_nonnegative(
             material,
             "electrical reference temperature",
-            electrical.reference_temperature_k,
+            electrical.reference_temperature_k.canonical_value(),
         )?;
         require_nonnegative(
             material,
             "electrical conductivity",
-            electrical.conductivity_s_per_m,
+            electrical.conductivity_s_per_m.canonical_value(),
         )?;
         require_finite(
             material,
             "resistive heating coefficient",
-            electrical.resistive_heating_coefficient,
+            electrical.resistive_heating_coefficient.canonical_value(),
         )?;
         require_positive(
             material,
             "relative permittivity",
-            electrical.relative_permittivity,
+            electrical.relative_permittivity.canonical_value(),
         )?;
         require_positive(
             material,
             "relative permeability",
-            electrical.relative_permeability,
+            electrical.relative_permeability.canonical_value(),
         )?;
         validate_frequency_response(material, &electrical.conductivity_frequency_response)?;
     }
@@ -254,11 +276,11 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
                 "J2 plasticity requires isotropic linear elasticity",
             )
         })?;
-        require_positive(material, "yield stress", *yield_stress_pa)?;
+        require_positive(material, "yield stress", yield_stress_pa.canonical_value())?;
         require_nonnegative(
             material,
             "isotropic hardening modulus",
-            *isotropic_hardening_modulus_pa,
+            isotropic_hardening_modulus_pa.canonical_value(),
         )?;
     }
     Ok(())
@@ -315,11 +337,11 @@ fn validate_provenance(material: &MaterialModel) -> Result<(), AnalysisValidatio
     for property in &source.adopted_properties {
         if property.source_property_id.trim().is_empty()
             || property.source_name.trim().is_empty()
-            || property.source_unit.trim().is_empty()
+            || property.value.source_symbol().trim().is_empty()
             || property.source_entity_id == 0
             || property.representation_entity_id == 0
-            || !property.value_si.is_finite()
-            || !property.source_value.is_finite()
+            || property.value.validate().is_err()
+            || !property.value.source_value().is_finite()
             || !properties.insert(property.property)
         {
             return Err(invalid_material(
@@ -329,9 +351,9 @@ fn validate_provenance(material: &MaterialModel) -> Result<(), AnalysisValidatio
         }
         for condition in &property.environment {
             if condition.name.trim().is_empty()
-                || condition.source_unit.trim().is_empty()
-                || !condition.value_si.is_finite()
-                || !condition.source_value.is_finite()
+                || condition.value.source_symbol().trim().is_empty()
+                || condition.value.validate().is_err()
+                || !condition.value.source_value().is_finite()
             {
                 return Err(invalid_material(
                     material,
@@ -340,18 +362,22 @@ fn validate_provenance(material: &MaterialModel) -> Result<(), AnalysisValidatio
             }
         }
         let canonical = match property.property {
-            ImportedCadMaterialPropertyKind::MassDensity => material.mass_density_kg_per_m3,
+            ImportedCadMaterialPropertyKind::MassDensity => material
+                .mass_density_kg_per_m3
+                .map(|quantity| quantity.canonical_value()),
             ImportedCadMaterialPropertyKind::YoungsModulus => material
                 .require_mechanical()
                 .ok()
-                .map(|mechanical| mechanical.youngs_modulus_pa),
+                .map(|mechanical| mechanical.youngs_modulus_pa.canonical_value()),
             ImportedCadMaterialPropertyKind::PoissonRatio => material
                 .require_mechanical()
                 .ok()
-                .map(|mechanical| mechanical.poisson_ratio),
+                .map(|mechanical| mechanical.poisson_ratio.canonical_value()),
             _ => None,
         };
-        if canonical.is_some_and(|value| value.to_bits() != property.value_si.to_bits()) {
+        if canonical
+            .is_some_and(|value| value.to_bits() != property.value.canonical_value().to_bits())
+        {
             return Err(invalid_material(
                 material,
                 "canonical material values must equal their adopted CAD conversion evidence",
@@ -370,7 +396,7 @@ fn validate_frequency_response(
         require_positive(
             material,
             "conductivity response frequency",
-            point.frequency_hz,
+            point.frequency_hz.canonical_value(),
         )?;
         if previous_frequency.is_some_and(|previous| point.frequency_hz <= previous) {
             return Err(invalid_material(
@@ -474,28 +500,28 @@ mod tests {
             material_id: "steel".to_string(),
             name: "Steel".to_string(),
             provenance: crate::MaterialProvenance::Authored,
-            mass_density_kg_per_m3: Some(7850.0),
+            mass_density_kg_per_m3: (Some(7850.0)).map(runmat_types::physical::MassDensity::new),
             elasticity: Some(MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
-                    youngs_modulus_pa: 200.0e9,
-                    poisson_ratio: 0.3,
+                    youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+                    poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
                 },
             )),
             damping: None,
             thermal: Some(MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
-                conductivity_w_per_mk: 45.0,
-                specific_heat_j_per_kgk: 500.0,
-                expansion_coefficient_per_k: 1.2e-5,
+                reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(-2.5e-4),
+                conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(45.0),
+                specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(500.0),
+                expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             }),
             acoustic: None,
             electrical: Some(MaterialElectricalModel {
-                reference_temperature_k: 293.15,
-                conductivity_s_per_m: 1.0,
-                resistive_heating_coefficient: 0.0,
-                relative_permittivity: 1.0,
-                relative_permeability: 1.0,
+                reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
+                resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+                relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+                relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
                 conductivity_frequency_response: Vec::new(),
             }),
             plastic: None,
@@ -505,28 +531,32 @@ mod tests {
     #[test]
     fn validates_constitutive_ranges() {
         let mut invalid = material();
-        invalid.electrical.as_mut().unwrap().conductivity_s_per_m = -1.0;
+        invalid.electrical.as_mut().unwrap().conductivity_s_per_m =
+            runmat_types::physical::ElectricalConductivity::new(-1.0);
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut invalid = material();
-        invalid.require_mechanical_mut().unwrap().poisson_ratio = 0.5;
+        invalid.require_mechanical_mut().unwrap().poisson_ratio =
+            runmat_types::physical::PoissonRatio::new(0.5);
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut invalid = material();
-        invalid.require_mechanical_mut().unwrap().poisson_ratio = -1.0;
+        invalid.require_mechanical_mut().unwrap().poisson_ratio =
+            runmat_types::physical::PoissonRatio::new(-1.0);
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut auxetic = material();
-        auxetic.require_mechanical_mut().unwrap().poisson_ratio = -0.25;
+        auxetic.require_mechanical_mut().unwrap().poisson_ratio =
+            runmat_types::physical::PoissonRatio::new(-0.25);
         validate_materials(&[auxetic], &[]).expect("finite auxetic material should be valid");
 
         let mut damped = material();
@@ -559,7 +589,7 @@ mod tests {
         validate_materials(&[density_only.clone()], &[])
             .expect("a density-only material is meaningful for compatible formulations");
 
-        density_only.mass_density_kg_per_m3 = None;
+        density_only.mass_density_kg_per_m3 = (None).map(runmat_types::physical::MassDensity::new);
         assert!(matches!(
             validate_materials(&[density_only], &[]),
             Err(AnalysisValidationError::InvalidMaterial { detail, .. })

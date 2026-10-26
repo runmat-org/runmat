@@ -34,7 +34,7 @@ fn exact_plane_geometry_measures_metric_and_physical_triangle_quality() {
     assert!(geometry.maximum_metric_edge_length > 0.0);
     assert!(geometry.minimum_metric_angle_rad > 0.0);
     assert!(geometry.maximum_physical_aspect_ratio >= 1.0);
-    assert!(geometry.maximum_chordal_deviation_m < 1.0e-14);
+    assert!(geometry.maximum_chordal_deviation_m.canonical_value() < 1.0e-14);
     assert_eq!(geometry.maximum_normal_deviation_rad, 0.0);
     assert!(geometry
         .vertices
@@ -257,16 +257,16 @@ fn request() -> MetricFieldRequest {
 fn curve_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: 0.01,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
             maximum_tangent_change_rad: 0.2,
             minimum_metric_edge_length: 0.1,
             maximum_metric_edge_length: 1.0,
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
-        geometry_absolute_error_m: 1.0e-10,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: 1.0e-10,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
     }
 }
 

@@ -57,6 +57,7 @@ fn validate_browser_owned_builtin_admission(
         topology: BrowserWorkerTopology::Coordinator,
         max_workers: 1,
         owned_builtin_work: true,
+        selected_program_work: false,
     };
     let inventory = browser_inventory(isolated_worker, Vec::new());
     if !runmat_execution_runner::scheduler::fits(
@@ -69,7 +70,7 @@ fn validate_browser_owned_builtin_admission(
     Ok(())
 }
 
-fn validate_browser_graph_admission(
+pub(super) fn validate_browser_graph_admission(
     request: &runmat_execution_artifact::GraphExecutionRequest,
 ) -> Result<(), String> {
     request
@@ -121,7 +122,7 @@ pub(crate) async fn execute_local_program(
     runmat_vm::execute_program_request(request).await
 }
 
-fn validate_browser_admission(request: &ProgramExecutionRequest) -> Result<(), String> {
+pub(super) fn validate_browser_admission(request: &ProgramExecutionRequest) -> Result<(), String> {
     request
         .validate_for_portable_host()
         .map_err(|error| format!("browser host rejected invalid program artifact: {error}"))?;

@@ -6,7 +6,9 @@ mod construction_storage;
 
 enum StructuralCouplingInput<'a> {
     Authored {
-        solved_nodal_temperature_k: Option<&'a [f64]>,
+        solved_nodal_temperature_k: Option<
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &'a [f64]>,
+        >,
         solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
     },
     ElasticPerturbation,
@@ -87,7 +89,9 @@ pub(crate) fn assemble_structural_system_with_execution(
     requirement: StructuralFormulationRequirement,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
-    solved_nodal_temperature_k: Option<&[f64]>,
+    solved_nodal_temperature_k: Option<
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &[f64]>,
+    >,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_with_mesh(
         model,
@@ -206,7 +210,9 @@ pub(crate) struct AssemblyExecution<'a> {
     pub(super) structural_requirement: Option<StructuralFormulationRequirement>,
     pub(super) supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
     pub(super) local_execution: crate::planning::resource::LocalExecutionPlan,
-    pub(super) solved_nodal_temperature_k: Option<&'a [f64]>,
+    pub(super) solved_nodal_temperature_k: Option<
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &'a [f64]>,
+    >,
     pub(super) solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
 }
 
@@ -220,5 +226,33 @@ impl AssemblyExecution<'_> {
             solved_nodal_temperature_k: None,
             solid_energy: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod physical_admission_tests {
+    use super::*;
+    #[test]
+    fn absent_formulation_cannot_report_success_from_a_synthetic_multiphysics_rhs() {
+        let model =
+            crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+        let error = assemble_linear_system_impl(
+            &model,
+            &RealizedExcitations::default(),
+            None,
+            None,
+            None,
+            AssemblyExecution {
+                structural_requirement: None,
+                supplied_constraint_plan: None,
+                local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
+                solved_nodal_temperature_k: None,
+                solid_energy: None,
+            },
+        )
+        .expect_err("missing physical formulation must reject before assembly");
+        assert!(
+            matches!(error, LinearAssemblyError::CouplingRealization(message) if message.contains("explicit structural formulation"))
+        );
     }
 }

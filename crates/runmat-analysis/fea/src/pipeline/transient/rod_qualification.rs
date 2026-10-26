@@ -44,9 +44,10 @@ fn model(mesh: &SolverMeshArtifact, damped: bool) -> AnalysisModel {
     else {
         panic!("isotropic fixture")
     };
-    elasticity.youngs_modulus_pa = YOUNGS;
-    elasticity.poisson_ratio = 0.0;
-    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(YOUNGS);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].damping = damped.then_some(MechanicalDampingModel::Rayleigh {
         mass_coefficient: RayleighMassCoefficient::new(ALPHA),
         stiffness_coefficient: RayleighStiffnessCoefficient::new(BETA),
@@ -62,7 +63,10 @@ fn model(mesh: &SolverMeshArtifact, damped: bool) -> AnalysisModel {
                 StructuralTranslationDof::Uz,
             ]
             .into_iter()
-            .filter(|dof| node.coordinates_m[0] == 0.0 || *dof != StructuralTranslationDof::Ux)
+            .filter(|dof| {
+                node.coordinates_m.canonical_value()[0] == 0.0
+                    || *dof != StructuralTranslationDof::Ux
+            })
             .map(|dof| TranslationDofValue {
                 dof,
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -111,7 +115,7 @@ fn model(mesh: &SolverMeshArtifact, damped: bool) -> AnalysisModel {
                 frame: CoordinateFrame::Global,
                 value: InitialValue::UniformVector3(
                     [
-                        reference::shape(node.coordinates_m[0]) * AMPLITUDE,
+                        reference::shape(node.coordinates_m.canonical_value()[0]) * AMPLITUDE,
                         0.0,
                         0.0,
                     ]

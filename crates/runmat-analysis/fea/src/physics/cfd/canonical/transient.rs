@@ -15,18 +15,38 @@ use runmat_execution::Digest;
 /// Absolute pressure is a reporting projection and is deliberately absent.
 #[derive(Clone, Copy)]
 pub struct CanonicalFluidFields<'a> {
-    pub velocity_m_per_s: &'a [[f64; 3]],
-    pub pressure_reference_pa: &'a [f64],
-    pub pressure_fluctuation_pa: &'a [f64],
-    pub face_volume_flux_m3_per_s: &'a [f64],
+    pub velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, &'a [[f64; 3]]>,
+    pub pressure_reference_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, &'a [f64]>,
+    pub pressure_fluctuation_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, &'a [f64]>,
+    pub face_volume_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, &'a [f64]>,
 }
 impl CanonicalFluidResult {
     pub fn original_fields(&self) -> CanonicalFluidFields<'_> {
         CanonicalFluidFields {
-            velocity_m_per_s: &self.velocity_m_per_s,
-            pressure_fluctuation_pa: &self.pressure_fluctuation_pa,
-            pressure_reference_pa: &self.pressure_reference_pa,
-            face_volume_flux_m3_per_s: &self.face_volume_flux_m3_per_s,
+            velocity_m_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Velocity,
+                _,
+            >::new(self.velocity_m_per_s.canonical_values()),
+            pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(
+                self.pressure_fluctuation_pa.canonical_values()
+            ),
+            pressure_reference_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(self.pressure_reference_pa.canonical_values()),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::VolumeFlowRate,
+                _,
+            >::new(
+                self.face_volume_flux_m3_per_s.canonical_values()
+            ),
         }
     }
 }
@@ -98,25 +118,30 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
         // Admission precedes predecessor traversal, encoding and warm-start copies.
         let reservation = resources::reserve(self)?;
         let n = self.topology.cells.len();
-        if previous.pressure_reference_pa.len() != n
+        if previous.pressure_reference_pa.canonical_values().len() != n
             || previous
                 .pressure_reference_pa
+                .canonical_values()
                 .iter()
                 .any(|v| !v.is_finite())
-            || previous.velocity_m_per_s.len() != n
-            || previous.pressure_fluctuation_pa.len() != n
+            || previous.velocity_m_per_s.canonical_values().len() != n
+            || previous.pressure_fluctuation_pa.canonical_values().len() != n
             || previous
                 .velocity_m_per_s
+                .canonical_values()
                 .iter()
                 .flatten()
-                .chain(previous.pressure_fluctuation_pa)
+                .chain(previous.pressure_fluctuation_pa.canonical_values().iter())
                 .any(|v| !v.is_finite())
         {
             return Err(Error::Invalid("original transient predecessor shape/value"));
         }
         self.pressure_reference_plan
-            .validate(self, previous.pressure_fluctuation_pa)?;
-        let continuity = super::continuity::incidence(self, previous.face_volume_flux_m3_per_s)?;
+            .validate(self, previous.pressure_fluctuation_pa.canonical_values())?;
+        let continuity = super::continuity::incidence(
+            self,
+            previous.face_volume_flux_m3_per_s.canonical_values(),
+        )?;
         if continuity
             .relative
             .iter()
@@ -125,7 +150,7 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
             return Err(Error::Invalid("initial original incompressible flux"));
         }
         let derivative = TimeDerivative {
-            previous_velocity: previous.velocity_m_per_s,
+            previous_velocity: previous.velocity_m_per_s.canonical_values(),
             duration_s,
         };
         for cell in 0..n {
@@ -137,10 +162,10 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
                 self.numerical_input_identity,
                 start_time_s,
                 end_time_s,
-                previous.velocity_m_per_s,
-                previous.pressure_fluctuation_pa,
-                previous.pressure_reference_pa,
-                previous.face_volume_flux_m3_per_s,
+                previous.velocity_m_per_s.canonical_values(),
+                previous.pressure_fluctuation_pa.canonical_values(),
+                previous.pressure_reference_pa.canonical_values(),
+                previous.face_volume_flux_m3_per_s.canonical_values(),
             ),
         )?;
         Ok(CanonicalFluidBackwardEulerStep {

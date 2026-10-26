@@ -1,3 +1,4 @@
+mod affine;
 use super::{parse_unit_expression, FeaType, PhysicalDimension};
 use crate::{
     AnalysisOperationCatalog, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
@@ -66,8 +67,8 @@ pub enum CheckedExpressionKind {
     },
     Quantity {
         value: Box<CheckedExpression>,
-        scale_bits: u64,
-        offset_bits: u64,
+        unit: runmat_types::physical::UnitDefinition,
+        source_unit_symbol: String,
     },
     Missing,
 }
@@ -195,7 +196,10 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                 let unit_source = &self.check.source[unit.span.start..unit.span.end];
                 match parse_unit_expression(unit_source) {
                     Ok(unit) => {
-                        let value_type = match quantity_type(&value.value_type, unit.dimension) {
+                        let value_type = match quantity_type(
+                            &value.value_type,
+                            runmat_types::physical::DynamicDimension::from_unit(unit),
+                        ) {
                             Some(value_type) => value_type,
                             None => {
                                 self.error(
@@ -209,8 +213,8 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                         (
                             CheckedExpressionKind::Quantity {
                                 value: Box::new(value),
-                                scale_bits: unit.scale_bits,
-                                offset_bits: unit.offset_bits,
+                                unit,
+                                source_unit_symbol: unit_source.to_owned(),
                             },
                             value_type,
                         )
@@ -223,11 +227,28 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
             }
             FeaExpressionKind::Missing => (CheckedExpressionKind::Missing, FeaType::Error),
         };
-        CheckedExpression {
+        let mut checked = CheckedExpression {
             kind,
             value_type,
             span: expression.span,
+        };
+        match checked.quantity_kind_hint() {
+            Ok(Some(kind)) => {
+                if let Some(value_type) = checked.value_type.with_quantity_kind(kind) {
+                    checked.value_type = value_type;
+                }
+            }
+            Err(error) => {
+                self.error(
+                    "fea.semantic.invalid_affine_quantity",
+                    error.to_string(),
+                    expression.span,
+                );
+                checked.value_type = FeaType::Error;
+            }
+            _ => {}
         }
+        checked
     }
 
     fn check_reference(&mut self, reference: &FeaReference) -> (CheckedExpressionKind, FeaType) {
@@ -456,6 +477,48 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
         right: &CheckedExpression,
         span: Span,
     ) -> FeaType {
+        if matches!(
+            operator,
+            FeaBinaryOperator::Add | FeaBinaryOperator::Subtract
+        ) && [left, right].iter().any(|value| {
+            matches!(
+                value.quantity_kind_hint(),
+                Ok(Some(
+                    runmat_types::physical::QuantityKind::Temperature
+                        | runmat_types::physical::QuantityKind::TemperatureDifference
+                ))
+            )
+        }) {
+            if let (Some(a), Some(b)) = (
+                left.value_type.quantity_descriptor(),
+                right.value_type.quantity_descriptor(),
+            ) {
+                if a.dimension() == b.dimension() && a.angle_power() == b.angle_power() {
+                    let expression = CheckedExpression {
+                        kind: CheckedExpressionKind::Binary {
+                            left: Box::new(left.clone()),
+                            operator,
+                            right: Box::new(right.clone()),
+                        },
+                        value_type: FeaType::Quantity(a.without_semantic_kind()),
+                        span,
+                    };
+                    return match expression.quantity_kind_hint() {
+                        Ok(kind) => FeaType::Quantity(
+                            a.with_semantic_kind(kind).expect("checked affine result"),
+                        ),
+                        Err(error) => {
+                            self.error(
+                                "fea.semantic.invalid_affine_quantity",
+                                error.to_string(),
+                                span,
+                            );
+                            FeaType::Error
+                        }
+                    };
+                }
+            }
+        }
         match operator {
             FeaBinaryOperator::Equal
             | FeaBinaryOperator::NotEqual
@@ -512,11 +575,11 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                     FeaType::Error
                 } else if matches!(
                     left.value_type,
-                    FeaType::Quantity(PhysicalDimension::DIMENSIONLESS)
-                        | FeaType::Integer
-                        | FeaType::Real
-                        | FeaType::Complex
-                ) {
+                    FeaType::Integer | FeaType::Real | FeaType::Complex
+                ) || left
+                    .value_type
+                    .is_quantity(PhysicalDimension::DIMENSIONLESS.into())
+                {
                     left.value_type.clone()
                 } else {
                     self.error(

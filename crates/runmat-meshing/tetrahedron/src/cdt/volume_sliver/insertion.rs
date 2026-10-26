@@ -107,7 +107,8 @@ struct VisibilityContext<'a> {
 struct EdgeStarChoice {
     edge_identities: [StableDigest; 2],
     index: u16,
-    coordinates_m: [f64; 3],
+    coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     construction: Point3Construction,
     proposal_score: f64,
     strategy: InsertionStrategy,

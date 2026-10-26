@@ -247,7 +247,7 @@ pub struct GeometryInspectionRequest {
     pub referrer: LogicalSourcePath,
     pub logical_path: LogicalSourcePath,
     /// Authored source units used to normalize exact topology identity.
-    pub source_units: runmat_geometry_core::UnitSystem,
+    pub source_units: Option<runmat_geometry_core::LengthUnit>,
     pub expected_content_digest: Option<SourceDigest>,
 }
 
@@ -264,6 +264,12 @@ pub enum GeometryInspectionCapability {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryInspection {
+    /// Extents measured from the already imported preview, in canonical metres.
+    /// Advisory planning evidence only; not an exact meshing bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_extent_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named_selections: Option<runmat_geometry_core::GeometryNamedSelections>,
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,
@@ -271,7 +277,9 @@ pub struct GeometryInspection {
     /// Length unit the geometry was inspected in: the authored `units`, or the
     /// single length unit the file itself declares when `units` is omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved_units: Option<runmat_geometry_core::UnitSystem>,
+    pub resolved_units: Option<runmat_geometry_core::LengthUnit>,
+    #[serde(default)]
+    pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
 }
 
 pub trait GeometryInspectionSource {

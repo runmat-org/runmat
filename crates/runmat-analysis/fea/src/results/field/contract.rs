@@ -297,6 +297,9 @@ impl RecoveredFieldDefinition {
     }
 
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
+        if self.quantity.quantity_descriptor().is_none() {
+            return Err(RecoveredFieldError::MissingQuantityDescriptor);
+        }
         if self.field_id.trim().is_empty() {
             return Err(RecoveredFieldError::EmptyIdentifier);
         }
@@ -784,6 +787,10 @@ fn sample_identity(
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum RecoveredFieldError {
+    #[error("recovered field requires a physics/procedure-specific physical quantity descriptor")]
+    MissingQuantityDescriptor,
+    #[error("recovered field physical storage contains an invalid quantity or nonfinite value")]
+    InvalidPhysicalStorage,
     #[error("recovered field identifiers must be nonempty")]
     EmptyIdentifier,
     #[error("recovered field quantity and value shape disagree")]

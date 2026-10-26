@@ -21,10 +21,20 @@ fn cold_original_both_orders_pass_but_fresh_rehashed_edge_substitution_fails() {
             .data
             .response
             .edge_circulations_v
+            .canonical_values()
             .iter()
             .position(|value| *value != crate::physics::maxwell::ComplexPhasor::ZERO)
             .unwrap();
-        changed.data.response.edge_circulations_v[interior].real += 1.0;
+        changed.data.response.edge_circulations_v = changed
+            .data
+            .response
+            .edge_circulations_v
+            .clone()
+            .try_map_canonical_storage(|mut values| {
+                values[interior].real += 1.0;
+                values
+            })
+            .unwrap();
         // Structural validation and a fresh digest do not confer source authority.
         let bytes = changed.canonical_bytes().unwrap();
         assert!(MaxwellHarmonicSolverResult::from_canonical_bytes_for(
@@ -46,21 +56,37 @@ fn coherently_changed_retained_fields_fail_original_matrix_free_equation() {
         let mut response = original.response().clone();
         // Test-only exact binary scaling keeps E/B mutually consistent with
         // the edge coefficients, while violating the unmodified original J.
-        for edge in &mut response.edge_circulations_v {
-            *edge = *edge * 2.0;
-        }
+        response.edge_circulations_v = response
+            .edge_circulations_v
+            .clone()
+            .try_map_canonical_storage(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value * 2.0)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         for sample in &mut response.samples {
-            for field in [
-                &mut sample.electric_field_v_per_m,
-                &mut sample.flux_density_t,
-                &mut sample.magnetic_field_a_per_m,
-                &mut sample.electric_displacement_c_per_m2,
-                &mut sample.conduction_current_density_a_per_m2,
-            ] {
-                for value in field {
-                    *value = *value * 2.0;
-                }
-            }
+            sample.electric_field_v_per_m = sample
+                .electric_field_v_per_m
+                .try_map_canonical_storage(|values| values.map(|value| value * 2.0))
+                .unwrap();
+            sample.flux_density_t = sample
+                .flux_density_t
+                .try_map_canonical_storage(|values| values.map(|value| value * 2.0))
+                .unwrap();
+            sample.magnetic_field_a_per_m = sample
+                .magnetic_field_a_per_m
+                .try_map_canonical_storage(|values| values.map(|value| value * 2.0))
+                .unwrap();
+            sample.electric_displacement_c_per_m2 = sample
+                .electric_displacement_c_per_m2
+                .try_map_canonical_storage(|values| values.map(|value| value * 2.0))
+                .unwrap();
+            sample.conduction_current_density_a_per_m2 = sample
+                .conduction_current_density_a_per_m2
+                .try_map_canonical_storage(|values| values.map(|value| value * 2.0))
+                .unwrap();
         }
         let error = crate::physics::maxwell::validate_retained_consistency(
             &mesh,

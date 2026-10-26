@@ -25,7 +25,7 @@ pub(super) fn verify(
     for (&actual, node) in fields[0].iter().zip(&projection.nodes) {
         near(
             actual,
-            gauge + voltage * node.coordinates_m[0],
+            gauge + voltage * node.coordinates_m.canonical_value()[0],
             voltage.abs(),
             "potential",
         );
@@ -106,7 +106,7 @@ pub(super) fn verify(
         let mut side = None;
         for id in &terminal.ordered_node_ids {
             let index = r.ordered_node_ids.iter().position(|n| n == id).unwrap();
-            let x = projection.nodes[index].coordinates_m[0];
+            let x = projection.nodes[index].coordinates_m.canonical_value()[0];
             let is_low = x.abs() < 1e-12;
             assert!(is_low || (x - 1.0).abs() < 1e-12);
             if let Some(previous) = side {
@@ -137,9 +137,12 @@ pub(super) fn verify(
             .unwrap();
         assert_eq!(owner.element_id, element.element_id);
         let material = owner.material.electrical.as_ref().unwrap();
-        assert_eq!(material.relative_permittivity, 4.0);
-        assert_eq!(material.conductivity_s_per_m, 3.0);
-        assert_eq!(material.resistive_heating_coefficient, 0.0);
+        assert_eq!(material.relative_permittivity.canonical_value(), 4.0);
+        assert_eq!(material.conductivity_s_per_m.canonical_value(), 3.0);
+        assert_eq!(
+            material.resistive_heating_coefficient.canonical_value(),
+            0.0
+        );
     }
 }
 

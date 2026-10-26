@@ -87,7 +87,17 @@ fn resource_arithmetic_is_checked_and_malformed_serialization_fails_closed() {
         assert!(slots::<ProjectedElement>(usize::MAX, 2).is_err());
     }
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    mesh.topology.nodes[0].coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         AnalysisProjection::derivation_resident_bytes_estimate(&mesh),
         Err(AnalysisProjectionError::ResourceEstimate(_))

@@ -209,7 +209,7 @@ fn recover_element_strain(
         } => {
             let element_displacement = gather_displacement::<4, 12>(node_indices, displacement)?;
             let b = strain_displacement_matrix(Tetrahedron4ElementGeometry {
-                nodes_m: *coordinates_m,
+                nodes_m: coordinates_m.canonical_value(),
             })
             .map_err(|source| StructuralFieldRecoveryError::Tetrahedron4 {
                 element_id: element.element_id.clone(),
@@ -223,7 +223,7 @@ fn recover_element_strain(
                     .sum()
             });
             let volume = Tetrahedron4ElementGeometry {
-                nodes_m: *coordinates_m,
+                nodes_m: coordinates_m.canonical_value(),
             }
             .volume_m3()
             .map_err(|source| StructuralFieldRecoveryError::Tetrahedron4 {
@@ -239,7 +239,7 @@ fn recover_element_strain(
             node_indices,
             coordinates_m,
         } => Tetrahedron10ElementGeometry {
-            nodes_m: *coordinates_m,
+            nodes_m: coordinates_m.canonical_value(),
         }
         .quadrature_strain(gather_displacement::<10, 30>(node_indices, displacement)?)
         .map(|points| ElementRecoveryPoints {
@@ -293,21 +293,24 @@ mod tests {
             element_id: "cancelled".into(),
             region_id: "body".into(),
             material: SolidMaterial {
-                youngs_modulus_pa: 10.0,
-                poisson_ratio: 0.25,
-                density_kg_per_m3: 1.0,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(10.0),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+                density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
             },
             thermal_eigenstrain: None,
             prescribed_temperature_k: None,
             solved_thermal_quadrature: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices: [0, 1, 2, 3],
-                coordinates_m: [
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([
                     [0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0],
                     [0.0, 0.0, 1.0],
-                ],
+                ]),
             },
         };
         let elements = [element.clone(), element];
@@ -328,17 +331,20 @@ mod tests {
     fn recovery_uses_each_elements_assigned_material() {
         let geometry = SolidRecoveryGeometry::Tetrahedron4 {
             node_indices: [0, 1, 2, 3],
-            coordinates_m: [
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
                 [0.0, 0.0, 1.0],
-            ],
+            ]),
         };
         let material = |youngs_modulus_pa| SolidMaterial {
-            youngs_modulus_pa,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(youngs_modulus_pa),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
         let elements = [
             SolidRecoveryElementSummary {
@@ -429,16 +435,19 @@ mod tests {
             element_id: format!("tet-{node_indices:?}"),
             region_id: "body".into(),
             material: SolidMaterial {
-                youngs_modulus_pa: 100.0,
-                poisson_ratio: 0.25,
-                density_kg_per_m3: 1.0,
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(100.0),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+                density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
             },
             thermal_eigenstrain: None,
             prescribed_temperature_k: None,
             solved_thermal_quadrature: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices,
-                coordinates_m: node_indices.map(|node| coordinates[node]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(node_indices.map(|node| coordinates[node])),
             },
         });
         let displacement = coordinates
@@ -483,8 +492,10 @@ mod tests {
         }
 
         let mut heterogeneous = elements.clone();
-        heterogeneous[1].material.youngs_modulus_pa = 200.0;
-        heterogeneous[3].material.youngs_modulus_pa = 200.0;
+        heterogeneous[1].material.youngs_modulus_pa =
+            runmat_types::physical::YoungsModulus::new(200.0);
+        heterogeneous[3].material.youngs_modulus_pa =
+            runmat_types::physical::YoungsModulus::new(200.0);
         let mixed = recover_solid_fields_with_plan(
             &heterogeneous,
             &displacement,
@@ -534,13 +545,16 @@ mod tests {
             midpoint(corners[2], corners[3]),
         ];
         let material = |youngs_modulus_pa| SolidMaterial {
-            youngs_modulus_pa,
-            poisson_ratio: 0.25,
-            density_kg_per_m3: 1.0,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(youngs_modulus_pa),
+            poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
         let geometry = SolidRecoveryGeometry::Tetrahedron10 {
             node_indices: std::array::from_fn(|index| index),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         };
         let elements = [
             SolidRecoveryElementSummary {

@@ -68,7 +68,14 @@ fn fresh_workers_reuse_original_metric_and_changed_quality_invalidates_it() {
     assert_eq!(*first, *second);
     assert_eq!(count.load(Ordering::Relaxed), 1);
     let mut changed = request.clone();
-    changed.quality.curve.maximum_chordal_deviation_m *= 0.5;
+    changed.quality.curve.maximum_chordal_deviation_m = runmat_types::physical::Quantity::new(
+        changed
+            .quality
+            .curve
+            .maximum_chordal_deviation_m
+            .canonical_value()
+            * (0.5),
+    );
     load(&changed);
     assert_eq!(count.load(Ordering::Relaxed), 2);
     load(&request);

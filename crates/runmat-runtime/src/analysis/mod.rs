@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg(not(target_arch = "wasm32"))]
 use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
@@ -27,7 +28,6 @@ use runmat_analysis_fea::{
     FeaBucklingRunResult, FeaProgressHandler, FeaRunResult, ModalSolveOptions, SolverMethod,
     SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
 };
-use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::operations::{
@@ -180,7 +180,7 @@ pub struct PreparedStructuralLinearRun {
     context: OperationContext,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructuralStudyStepNumericalResult {
     pub step_id: ProcedureStepId,
     pub solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
@@ -188,7 +188,7 @@ pub struct StructuralStudyStepNumericalResult {
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructuralStudySequenceNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub steps: Vec<StructuralStudyStepNumericalResult>,
@@ -333,15 +333,17 @@ pub use contracts::{
     analysis_procedure_ids, AcousticFrequencyResultsData, AnalysisAcousticRunOptions,
     AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult, AnalysisDocumentKind,
-    AnalysisDocumentRunResult, AnalysisExecutionCapability, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload,
-    AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
-    AnalysisFieldPageValues, AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions,
-    AnalysisFieldSelection, AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisFsiRunOptions, AnalysisImmutableValueSpec, AnalysisModalRunOptions,
-    AnalysisModelSourceEvidence, AnalysisModelSourceFileEvidence, AnalysisModelSourceKind,
-    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions,
-    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisDocumentRunResult, AnalysisExecutionDuration, AnalysisExecutionCandidate, AnalysisExecutionCapability,
+    AnalysisExecutionChoices, AnalysisExecutionMode, AnalysisExecutionPlan,
+    AnalysisExecutionReadiness, AnalysisExecutionStep, AnalysisFieldBinding,
+    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
+    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
+    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
+    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
+    AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
+    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
@@ -482,7 +484,7 @@ pub fn analysis_validate_study_op(
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
     let mut issue_codes = validate_study_issue_codes(spec);
     let model_validation_detail =
-        validate_model_against_geometry(&spec.model, spec.geometry.units, &CoordinateFrame::Global)
+        validate_model_against_geometry(&spec.model, &CoordinateFrame::Global)
             .err()
             .map(|error| error.to_string());
     issue_codes.sort();
@@ -1599,12 +1601,7 @@ fn prepare_study_semantics(
             })
             .collect::<Vec<_>>(),
     );
-    analysis_validate(
-        &model,
-        spec.geometry.units,
-        &CoordinateFrame::Global,
-        context.clone(),
-    )?;
+    analysis_validate(&model, &CoordinateFrame::Global, context.clone())?;
     Ok(PreparedStudySequence {
         spec: spec.clone(),
         context,
@@ -1903,11 +1900,10 @@ pub fn analysis_run_study_sweep_op(
 
 pub fn analysis_validate(
     model: &AnalysisModel,
-    geometry_units: UnitSystem,
     geometry_frame: &CoordinateFrame,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisValidateResult>, OperationErrorEnvelope> {
-    validate_model_against_geometry(model, geometry_units, geometry_frame)
+    validate_model_against_geometry(model, geometry_frame)
         .map_err(|err| map_validate_error(err, model, &context))?;
 
     Ok(OperationEnvelope::new(
@@ -2570,8 +2566,8 @@ fn execute_cht_with_options(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    if !cfd_domain.density.kilograms_per_cubic_meter.is_finite()
-        || cfd_domain.density.kilograms_per_cubic_meter <= 0.0
+    if !cfd_domain.density.canonical_value().is_finite()
+        || cfd_domain.density.canonical_value() <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -2586,12 +2582,12 @@ fn execute_cht_with_options(
             "fea.run_cht requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
-                cfd_domain.density.kilograms_per_cubic_meter.to_string(),
+                cfd_domain.density.canonical_value().to_string(),
             )]),
         ));
     }
-    if !cfd_domain.dynamic_viscosity.pascal_seconds.is_finite()
-        || cfd_domain.dynamic_viscosity.pascal_seconds <= 0.0
+    if !cfd_domain.dynamic_viscosity.canonical_value().is_finite()
+        || cfd_domain.dynamic_viscosity.canonical_value() <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -2606,13 +2602,16 @@ fn execute_cht_with_options(
             "fea.run_cht requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity.pascal_seconds.to_string(),
+                cfd_domain.dynamic_viscosity.canonical_value().to_string(),
             )]),
         ));
     }
-    if !cfd_domain.turbulence_intensity.ratio.is_finite()
-        || cfd_domain.turbulence_intensity.ratio < 0.0
-        || cfd_domain.turbulence_intensity.ratio > 1.0
+    if !cfd_domain
+        .turbulence_intensity
+        .canonical_value()
+        .is_finite()
+        || cfd_domain.turbulence_intensity.canonical_value() < 0.0
+        || cfd_domain.turbulence_intensity.canonical_value() > 1.0
     {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -2627,7 +2626,10 @@ fn execute_cht_with_options(
             "fea.run_cht requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
-                cfd_domain.turbulence_intensity.ratio.to_string(),
+                cfd_domain
+                    .turbulence_intensity
+                    .canonical_value()
+                    .to_string(),
             )]),
         ));
     }
@@ -2922,7 +2924,9 @@ fn execute_cht_with_options(
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
             energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
             residual_norms: thermal_run.residual_norms,
-            reference_temperature_k: thermal_run.reference_temperature_k,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                thermal_run.reference_temperature_k.canonical_value(),
+            ),
             initial_state: thermal_run.initial_state,
         }),
         transient_results: None,
@@ -3022,8 +3026,8 @@ fn execute_fsi_with_options(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    if !cfd_domain.density.kilograms_per_cubic_meter.is_finite()
-        || cfd_domain.density.kilograms_per_cubic_meter <= 0.0
+    if !cfd_domain.density.canonical_value().is_finite()
+        || cfd_domain.density.canonical_value() <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
@@ -3038,12 +3042,12 @@ fn execute_fsi_with_options(
             "fea.run_fsi requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
-                cfd_domain.density.kilograms_per_cubic_meter.to_string(),
+                cfd_domain.density.canonical_value().to_string(),
             )]),
         ));
     }
-    if !cfd_domain.dynamic_viscosity.pascal_seconds.is_finite()
-        || cfd_domain.dynamic_viscosity.pascal_seconds <= 0.0
+    if !cfd_domain.dynamic_viscosity.canonical_value().is_finite()
+        || cfd_domain.dynamic_viscosity.canonical_value() <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
@@ -3058,13 +3062,16 @@ fn execute_fsi_with_options(
             "fea.run_fsi requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity.pascal_seconds.to_string(),
+                cfd_domain.dynamic_viscosity.canonical_value().to_string(),
             )]),
         ));
     }
-    if !cfd_domain.turbulence_intensity.ratio.is_finite()
-        || cfd_domain.turbulence_intensity.ratio < 0.0
-        || cfd_domain.turbulence_intensity.ratio > 1.0
+    if !cfd_domain
+        .turbulence_intensity
+        .canonical_value()
+        .is_finite()
+        || cfd_domain.turbulence_intensity.canonical_value() < 0.0
+        || cfd_domain.turbulence_intensity.canonical_value() > 1.0
     {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
@@ -3079,7 +3086,10 @@ fn execute_fsi_with_options(
             "fea.run_fsi requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
-                cfd_domain.turbulence_intensity.ratio.to_string(),
+                cfd_domain
+                    .turbulence_intensity
+                    .canonical_value()
+                    .to_string(),
             )]),
         ));
     }
@@ -3336,10 +3346,13 @@ fn validate_thermal_run_model(
 ) -> Result<(), OperationErrorEnvelope> {
     if let Some((material, thermal)) = model.materials.iter().find_map(|material| {
         let thermal = material.thermal.as_ref()?;
-        (!thermal.conductivity_w_per_mk.is_finite()
-            || thermal.conductivity_w_per_mk <= 0.0
-            || !thermal.specific_heat_j_per_kgk.is_finite()
-            || thermal.specific_heat_j_per_kgk <= 0.0)
+        (!thermal.conductivity_w_per_mk.canonical_value().is_finite()
+            || thermal.conductivity_w_per_mk.canonical_value() <= 0.0
+            || !thermal
+                .specific_heat_j_per_kgk
+                .canonical_value()
+                .is_finite()
+            || thermal.specific_heat_j_per_kgk.canonical_value() <= 0.0)
             .then_some((material, thermal))
     }) {
         return Err(operation_error(
@@ -3358,11 +3371,14 @@ fn validate_thermal_run_model(
                 ("material_id".to_string(), material.material_id.clone()),
                 (
                     "conductivity_w_per_mk".to_string(),
-                    thermal.conductivity_w_per_mk.to_string(),
+                    thermal.conductivity_w_per_mk.canonical_value().to_string(),
                 ),
                 (
                     "specific_heat_j_per_kgk".to_string(),
-                    thermal.specific_heat_j_per_kgk.to_string(),
+                    thermal
+                        .specific_heat_j_per_kgk
+                        .canonical_value()
+                        .to_string(),
                 ),
             ]),
         ));
@@ -3388,7 +3404,9 @@ fn validate_thermal_run_model(
         };
         (!value
             .study_constant(&model.signals)
-            .is_some_and(|temperature| temperature.is_finite() && temperature.kelvin > 0.0))
+            .is_some_and(|temperature| {
+                temperature.is_finite() && temperature.canonical_value() > 0.0
+            }))
         .then_some(constraint.constraint_id.as_str())
     });
     let invalid_boundary = model.boundaries.iter().find_map(|boundary| {
@@ -3402,9 +3420,11 @@ fn validate_thermal_run_model(
             } => {
                 !ambient_temperature
                     .study_constant(&model.signals)
-                    .is_some_and(|temperature| temperature.is_finite() && temperature.kelvin > 0.0)
+                    .is_some_and(|temperature| {
+                        temperature.is_finite() && temperature.canonical_value() > 0.0
+                    })
                     || !coefficient.is_finite()
-                    || coefficient.watts_per_square_meter_kelvin < 0.0
+                    || coefficient.canonical_value() < 0.0
             }
             _ => false,
         };
@@ -4570,11 +4590,21 @@ fn resolve_solver_mesh_artifact(
 }
 
 fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
     let tmp = path.with_extension(format!(
         "tmp-{}-{}",
         std::process::id(),
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
     ));
+    // Browser workers have no process identity. Use the existing browser entropy
+    // provider for independent staging names, preserving atomic rename publication.
+    #[cfg(target_arch = "wasm32")]
+    let tmp = {
+        let mut nonce = [0_u8; 16];
+        getrandom::getrandom(&mut nonce)
+            .map_err(|err| format!("failed to name temporary study evidence file: {err}"))?;
+        path.with_extension(format!("tmp-{:032x}", u128::from_le_bytes(nonce)))
+    };
     fs_write(&tmp, bytes)
         .map_err(|err| format!("failed to write temporary study evidence file: {err}"))?;
     fs_rename(&tmp, path).map_err(|err| {
@@ -4629,7 +4659,7 @@ fn model_contact_interface_options(
                 max_penetration_ratio,
                 friction_coefficient: match contact.friction {
                     ContactFriction::Frictionless => 0.0,
-                    ContactFriction::Coulomb { coefficient } => coefficient.ratio,
+                    ContactFriction::Coulomb { coefficient } => coefficient.canonical_value(),
                 },
             }),
             AnalysisInterfaceKind::FluidStructure(_)
@@ -4755,10 +4785,10 @@ fn validate_coupled_flow_interfaces(
                 let invalid_transfer = match cht_interface.transfer {
                     ThermalInterfaceTransfer::Perfect => false,
                     ThermalInterfaceTransfer::Conductance(conductance) => {
-                        !conductance.is_finite() || conductance.watts_per_square_meter_kelvin <= 0.0
+                        !conductance.is_finite() || conductance.canonical_value() <= 0.0
                     }
                     ThermalInterfaceTransfer::Resistance(resistance) => {
-                        !resistance.is_finite() || resistance.square_meter_kelvin_per_watt <= 0.0
+                        !resistance.is_finite() || resistance.canonical_value() <= 0.0
                     }
                 };
                 if invalid_transfer {
@@ -4826,3 +4856,8 @@ fn diagnostic_metric_bool(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+
+mod document_run_result;
+pub use document_run_result::{
+    analysis_document_study_result, project_study_field_bindings, project_study_result_views,
+};

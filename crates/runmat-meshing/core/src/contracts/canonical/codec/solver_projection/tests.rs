@@ -113,7 +113,17 @@ fn solver_terminal_operations_observe_mid_operation_cancellation_and_tampering()
         }
         let receipt = SolverMeshValidation::from_validated_projection(&projection).unwrap();
         let mut tampered = projection;
-        tampered.topology.nodes[0].coordinates_m[0] = f64::NAN;
+        {
+            let quantity_change = f64::NAN;
+            let quantity_index = 0;
+            let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert!(tampered
             .validate_with_cancellation(&NeverCancelled)
             .is_err());
@@ -139,7 +149,17 @@ fn fresh_authority_preserves_wire_and_keeps_raw_and_cold_checks_independent() {
         assert_eq!(fresh.encode(&NeverCancelled).unwrap(), bytes);
         assert_eq!(SolverMeshProjection::canonical_decode(&bytes).unwrap(), raw);
         let mut invalid = fresh.into_projection();
-        invalid.topology.nodes[0].coordinates_m[0] = f64::NAN;
+        {
+            let quantity_change = f64::NAN;
+            let quantity_index = 0;
+            let quantity_slot = &mut invalid.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert!(invalid.canonical_encode().is_err());
         assert!(crate::ValidatedSolverMeshTopology::new(
             invalid.topology,

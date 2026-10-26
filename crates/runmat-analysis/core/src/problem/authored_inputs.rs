@@ -1,5 +1,5 @@
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
-use runmat_types::QuantityDimension;
+use runmat_types::physical::DynamicDimension;
 use serde::{Deserialize, Serialize};
 
 use super::model_authoring::AuthoredMaterialRef;
@@ -13,7 +13,7 @@ pub enum AuthoredInputType {
     Real,
     Complex,
     String,
-    Quantity(QuantityDimension),
+    Quantity(DynamicDimension),
     Material,
     Region(GeometryRegionRole),
 }
@@ -25,15 +25,9 @@ pub enum AuthoredInputValue {
     Boolean(bool),
     Integer(i64),
     Real(f64),
-    Complex {
-        real: f64,
-        imaginary: f64,
-    },
+    Complex { real: f64, imaginary: f64 },
     String(String),
-    Quantity {
-        dimension: QuantityDimension,
-        value_si: f64,
-    },
+    Quantity(runmat_types::physical::DimensionedScalar),
     Material(AuthoredMaterialRef),
     Region(GeometryRegionRef),
 }
@@ -113,6 +107,14 @@ impl AuthoredInputDefinition {
 }
 
 impl AuthoredInputType {
+    pub fn accepts_type(self, actual: Self) -> bool {
+        self == actual
+            || matches!((self,actual), (Self::Quantity(a),Self::Quantity(b)) if a.is_compatible_with(b))
+            || matches!(
+                (self, actual),
+                (Self::Real, Self::Integer) | (Self::Complex, Self::Integer | Self::Real)
+            )
+    }
     fn is_ordered(self) -> bool {
         matches!(self, Self::Integer | Self::Real | Self::Quantity(_))
     }
@@ -126,14 +128,14 @@ impl AuthoredInputValue {
             Self::Real(_) => AuthoredInputType::Real,
             Self::Complex { .. } => AuthoredInputType::Complex,
             Self::String(_) => AuthoredInputType::String,
-            Self::Quantity { dimension, .. } => AuthoredInputType::Quantity(*dimension),
+            Self::Quantity(value) => AuthoredInputType::Quantity(value.descriptor()),
             Self::Material(_) => AuthoredInputType::Material,
             Self::Region(region) => AuthoredInputType::Region(region.role),
         }
     }
 
     pub fn matches(&self, expected: AuthoredInputType) -> bool {
-        self.value_type() == expected
+        expected.accepts_type(self.value_type())
             || matches!(
                 (expected, self),
                 (AuthoredInputType::Real, Self::Integer(_))
@@ -143,10 +145,8 @@ impl AuthoredInputValue {
 
     pub fn validate(&self) -> Result<(), AuthoredInputError> {
         match self {
-            Self::Real(value)
-            | Self::Quantity {
-                value_si: value, ..
-            } if !value.is_finite() => Err(AuthoredInputError::NonFiniteValue),
+            Self::Real(value) if !value.is_finite() => Err(AuthoredInputError::NonFiniteValue),
+            Self::Quantity(value) if !value.is_finite() => Err(AuthoredInputError::NonFiniteValue),
             Self::Complex { real, imaginary } if !real.is_finite() || !imaginary.is_finite() => {
                 Err(AuthoredInputError::NonFiniteValue)
             }
@@ -171,16 +171,12 @@ impl AuthoredInputValue {
         match (self, other) {
             (Self::Integer(left), Self::Integer(right)) => Ok(left <= right),
             (Self::Real(left), Self::Real(right)) => Ok(left <= right),
-            (
-                Self::Quantity {
-                    dimension: left_dimension,
-                    value_si: left,
-                },
-                Self::Quantity {
-                    dimension: right_dimension,
-                    value_si: right,
-                },
-            ) if left_dimension == right_dimension => Ok(left <= right),
+            (Self::Quantity(left), Self::Quantity(right))
+                if left.descriptor().is_compatible_with(right.descriptor())
+                    && !matches!((left.semantic_kind(), right.semantic_kind()), (Some(a),Some(b)) if a != b) =>
+            {
+                Ok(left.canonical_value() <= right.canonical_value())
+            }
             _ => Err(AuthoredInputError::IncomparableBounds),
         }
     }
@@ -211,24 +207,37 @@ pub enum AuthoredInputError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_types::PhysicalDimension;
 
     #[test]
     fn quantity_bounds_use_canonical_units_and_reject_bad_defaults() {
         let definition = AuthoredInputDefinition {
             input_id: "load".into(),
-            value_type: AuthoredInputType::Quantity(QuantityDimension::Force),
-            default: Some(AuthoredInputValue::Quantity {
-                dimension: QuantityDimension::Force,
-                value_si: 6.0,
-            }),
-            minimum: Some(AuthoredInputValue::Quantity {
-                dimension: QuantityDimension::Force,
-                value_si: 0.0,
-            }),
-            maximum: Some(AuthoredInputValue::Quantity {
-                dimension: QuantityDimension::Force,
-                value_si: 5.0,
-            }),
+            value_type: AuthoredInputType::Quantity((PhysicalDimension::FORCE).into()),
+            default: Some(AuthoredInputValue::Quantity(
+                runmat_types::physical::DimensionedScalar::try_from_dimension(
+                    PhysicalDimension::FORCE,
+                    None,
+                    6.0,
+                )
+                .unwrap(),
+            )),
+            minimum: Some(AuthoredInputValue::Quantity(
+                runmat_types::physical::DimensionedScalar::try_from_dimension(
+                    PhysicalDimension::FORCE,
+                    None,
+                    0.0,
+                )
+                .unwrap(),
+            )),
+            maximum: Some(AuthoredInputValue::Quantity(
+                runmat_types::physical::DimensionedScalar::try_from_dimension(
+                    PhysicalDimension::FORCE,
+                    None,
+                    5.0,
+                )
+                .unwrap(),
+            )),
         };
         assert_eq!(
             definition.validate(),

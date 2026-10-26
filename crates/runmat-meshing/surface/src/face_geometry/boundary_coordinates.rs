@@ -33,7 +33,11 @@ impl<'a> ExactBoundaryNodeCoordinates<'a> {
                 control.checkpoint()?;
                 control.consume_search_work(1)?;
                 if node.node_id == StableDigest::ZERO
-                    || node.coordinates_m.iter().any(|v| !v.is_finite())
+                    || node
+                        .coordinates_m
+                        .canonical_value()
+                        .iter()
+                        .any(|v| !v.is_finite())
                 {
                     return Err(invalid("invalid shared boundary coordinate"));
                 }
@@ -88,7 +92,9 @@ impl<'a> ExactBoundaryNodeCoordinates<'a> {
         drop(scratch_storage);
         for pair in nodes.windows(2) {
             control.checkpoint()?;
-            if pair[0].node_id == pair[1].node_id && pair[0].coordinates_m != pair[1].coordinates_m
+            if pair[0].node_id == pair[1].node_id
+                && pair[0].coordinates_m.canonical_value()
+                    != pair[1].coordinates_m.canonical_value()
             {
                 return Err(invalid(
                     "one shared node identity has inconsistent original curve coordinates",
@@ -112,7 +118,7 @@ impl<'a> ExactBoundaryNodeCoordinates<'a> {
             .nodes
             .binary_search_by_key(&id, |node| node.node_id)
             .ok()
-            .map(|index| self.nodes[index].coordinates_m))
+            .map(|index| self.nodes[index].coordinates_m.canonical_value()))
     }
 }
 fn invalid(reason: &str) -> GeometryEvaluationError {

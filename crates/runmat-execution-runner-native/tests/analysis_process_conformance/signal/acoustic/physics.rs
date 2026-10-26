@@ -154,7 +154,7 @@ fn execute(
     assert_eq!(
         cold.results()
             .iter()
-            .map(|r| r.frequency().hertz)
+            .map(|r| r.frequency().canonical_value())
             .collect::<Vec<_>>(),
         FREQUENCIES
     );
@@ -177,10 +177,11 @@ fn workload(drive: Drive, signal: PhysicalSignal) -> AcousticHarmonicWorkload {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
     }];
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
     model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
     let mut step = ProcedureStep::acoustic_harmonic("acoustic-spectrum");

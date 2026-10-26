@@ -47,4 +47,11 @@ fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, contents);
 fs.writeFileSync(path.join(path.dirname(output), 'fea-assessment-guards.ts'),
   renderGuards(body, ['PublishedStudyAssessment', 'PublishedCaseAssessments', 'PublishedStudyReassessment', 'FeaSemanticProgram', 'FeaSourceCheckContract']));
+const physicalUnitSource=fs.readFileSync(path.join(repoRoot,"crates/runmat-types/src/physical/unit.rs"),"utf8");
+const lengthUnits=[...physicalUnitSource.matchAll(/pub const ([A-Z][A-Za-z0-9_]*):\s*Self\s*=\s*Self::catalog\(([0-9._]+)\);/g)];
+if (!lengthUnits.length) throw new Error("Shared length-unit catalog did not expose any constants");
+const dimension={length:1,mass:0,time:0,current:0,temperature:0,amount:0,luminous_intensity:0,information:0};
+const values=Object.fromEntries(lengthUnits.map(match=>[match[1].replace(/([a-z])([A-Z])/g,"$1_$2").toLowerCase(),{dimension,scale:Number(match[2].replaceAll("_","")),offset:0}]));
+fs.writeFileSync(path.join(path.dirname(output),"physical-unit-catalog.ts"),
+  "// @generated from runmat-types physical unit constants; do not edit.\nimport type { LengthUnit } from './fea-semantic-contracts.js';\nexport const PHYSICAL_LENGTH_UNITS = "+JSON.stringify(values,null,2)+" as const satisfies Record<string, LengthUnit>;\n");
 console.log(`Generated ${output}.`);

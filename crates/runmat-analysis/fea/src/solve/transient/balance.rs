@@ -22,15 +22,21 @@ pub(super) struct TransientBalanceStep<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct TransientBalanceHistory {
-    initial_mechanical_energy_j: f64,
+    initial_mechanical_energy_j: runmat_types::physical::Energy,
     balances: Vec<StructuralDynamicBalanceSnapshot>,
     reaction_snapshots: Vec<Vec<f64>>,
-    strain_energy_j: Vec<f64>,
-    kinetic_energy_j: Vec<f64>,
-    external_work_j: Vec<f64>,
-    support_work_j: Vec<f64>,
-    damping_dissipation_j: Vec<f64>,
-    energy_balance_residual_j: Vec<f64>,
+    strain_energy_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    kinetic_energy_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    external_work_history:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    support_work_history:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    damping_dissipation_history:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    energy_balance_residual_history:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
     relative_energy_balance_error: Vec<f64>,
 }
 
@@ -118,15 +124,17 @@ impl TransientBalanceHistory {
         let kinetic = kinetic_energy(summary.operator.operators(), state)?;
         let initial_mechanical_energy_j = strain + kinetic;
         Ok(Self {
-            initial_mechanical_energy_j,
+            initial_mechanical_energy_j: runmat_types::physical::Energy::new(
+                initial_mechanical_energy_j,
+            ),
             balances: vec![balance.clone()],
             reaction_snapshots: vec![constrained_reaction(summary, &balance)?],
-            strain_energy_j: vec![strain],
-            kinetic_energy_j: vec![kinetic],
-            external_work_j: vec![0.0],
-            support_work_j: vec![0.0],
-            damping_dissipation_j: vec![0.0],
-            energy_balance_residual_j: vec![0.0],
+            strain_energy_j: runmat_types::physical::Quantity::new(vec![strain]),
+            kinetic_energy_j: runmat_types::physical::Quantity::new(vec![kinetic]),
+            external_work_history: runmat_types::physical::Quantity::new(vec![0.0]),
+            support_work_history: runmat_types::physical::Quantity::new(vec![0.0]),
+            damping_dissipation_history: runmat_types::physical::Quantity::new(vec![0.0]),
+            energy_balance_residual_history: runmat_types::physical::Quantity::new(vec![0.0]),
             relative_energy_balance_error: vec![0.0],
         })
     }
@@ -137,15 +145,15 @@ impl TransientBalanceHistory {
         accumulator: StructuralTransientBalanceAccumulator,
     ) -> Result<Self, DynamicBalanceError> {
         if [
-            accumulator.initial_mechanical_energy_j,
-            accumulator.applied_load_work_j,
-            accumulator.support_work_j,
-            accumulator.damping_dissipation_j,
+            accumulator.initial_mechanical_energy_j.canonical_value(),
+            accumulator.applied_load_work_j.canonical_value(),
+            accumulator.support_work_j.canonical_value(),
+            accumulator.damping_dissipation_j.canonical_value(),
         ]
         .iter()
         .any(|value| !value.is_finite())
-            || accumulator.initial_mechanical_energy_j < 0.0
-            || accumulator.damping_dissipation_j < 0.0
+            || accumulator.initial_mechanical_energy_j.canonical_value() < 0.0
+            || accumulator.damping_dissipation_j.canonical_value() < 0.0
         {
             return Err(DynamicBalanceError::NonFinite);
         }
@@ -156,16 +164,21 @@ impl TransientBalanceHistory {
         let kinetic = kinetic_energy(summary.operator.operators(), state)?;
         let mechanical = strain + kinetic;
         let residual = mechanical
-            - accumulator.initial_mechanical_energy_j
-            - accumulator.applied_load_work_j
-            - accumulator.support_work_j
-            + accumulator.damping_dissipation_j;
+            - accumulator.initial_mechanical_energy_j.canonical_value()
+            - accumulator.applied_load_work_j.canonical_value()
+            - accumulator.support_work_j.canonical_value()
+            + accumulator.damping_dissipation_j.canonical_value();
         let scale = mechanical
             .abs()
-            .max(accumulator.initial_mechanical_energy_j.abs())
-            .max(accumulator.applied_load_work_j.abs())
-            .max(accumulator.support_work_j.abs())
-            .max(accumulator.damping_dissipation_j.abs());
+            .max(
+                accumulator
+                    .initial_mechanical_energy_j
+                    .canonical_value()
+                    .abs(),
+            )
+            .max(accumulator.applied_load_work_j.canonical_value().abs())
+            .max(accumulator.support_work_j.canonical_value().abs())
+            .max(accumulator.damping_dissipation_j.canonical_value().abs());
         let relative = if scale == 0.0 {
             0.0
         } else {
@@ -175,25 +188,53 @@ impl TransientBalanceHistory {
             return Err(DynamicBalanceError::NonFinite);
         }
         Ok(Self {
-            initial_mechanical_energy_j: accumulator.initial_mechanical_energy_j,
+            initial_mechanical_energy_j: runmat_types::physical::Energy::new(
+                accumulator.initial_mechanical_energy_j.canonical_value(),
+            ),
             reaction_snapshots: vec![constrained_reaction(summary, &balance)?],
             balances: vec![balance],
-            strain_energy_j: vec![strain],
-            kinetic_energy_j: vec![kinetic],
-            external_work_j: vec![accumulator.applied_load_work_j],
-            support_work_j: vec![accumulator.support_work_j],
-            damping_dissipation_j: vec![accumulator.damping_dissipation_j],
-            energy_balance_residual_j: vec![residual],
+            strain_energy_j: runmat_types::physical::Quantity::new(vec![strain]),
+            kinetic_energy_j: runmat_types::physical::Quantity::new(vec![kinetic]),
+            external_work_history: runmat_types::physical::Quantity::new(vec![accumulator
+                .applied_load_work_j
+                .canonical_value()]),
+            support_work_history: runmat_types::physical::Quantity::new(vec![accumulator
+                .support_work_j
+                .canonical_value()]),
+            damping_dissipation_history: runmat_types::physical::Quantity::new(vec![accumulator
+                .damping_dissipation_j
+                .canonical_value()]),
+            energy_balance_residual_history: runmat_types::physical::Quantity::new(vec![residual]),
             relative_energy_balance_error: vec![relative],
         })
     }
 
     pub(super) fn accumulator(&self) -> StructuralTransientBalanceAccumulator {
         StructuralTransientBalanceAccumulator {
-            initial_mechanical_energy_j: self.initial_mechanical_energy_j,
-            applied_load_work_j: self.external_work_j.last().copied().unwrap_or(0.0),
-            support_work_j: self.support_work_j.last().copied().unwrap_or(0.0),
-            damping_dissipation_j: self.damping_dissipation_j.last().copied().unwrap_or(0.0),
+            initial_mechanical_energy_j: runmat_types::physical::Energy::new(
+                self.initial_mechanical_energy_j.canonical_value(),
+            ),
+            applied_load_work_j: runmat_types::physical::Energy::new(
+                self.external_work_history
+                    .canonical_values()
+                    .last()
+                    .copied()
+                    .unwrap_or(0.0),
+            ),
+            support_work_j: runmat_types::physical::Energy::new(
+                self.support_work_history
+                    .canonical_values()
+                    .last()
+                    .copied()
+                    .unwrap_or(0.0),
+            ),
+            damping_dissipation_j: runmat_types::physical::Energy::new(
+                self.damping_dissipation_history
+                    .canonical_values()
+                    .last()
+                    .copied()
+                    .unwrap_or(0.0),
+            ),
         }
     }
 
@@ -267,11 +308,26 @@ impl TransientBalanceHistory {
             });
         }
         let damping_dissipation_increment = damping_dissipation_increment.max(0.0);
-        let external_work =
-            self.external_work_j.last().copied().unwrap_or(0.0) + external_work_increment;
-        let support_work =
-            self.support_work_j.last().copied().unwrap_or(0.0) + support_work_increment;
-        let damping_dissipation = self.damping_dissipation_j.last().copied().unwrap_or(0.0)
+        let external_work = self
+            .external_work_history
+            .canonical_values()
+            .last()
+            .copied()
+            .unwrap_or(0.0)
+            + external_work_increment;
+        let support_work = self
+            .support_work_history
+            .canonical_values()
+            .last()
+            .copied()
+            .unwrap_or(0.0)
+            + support_work_increment;
+        let damping_dissipation = self
+            .damping_dissipation_history
+            .canonical_values()
+            .last()
+            .copied()
+            .unwrap_or(0.0)
             + damping_dissipation_increment;
         let strain = strain_energy(
             step.published_summary.operator.operators(),
@@ -282,11 +338,14 @@ impl TransientBalanceHistory {
             step.published_state,
         )?;
         let mechanical = strain + kinetic;
-        let residual = mechanical - self.initial_mechanical_energy_j - external_work - support_work
+        let residual = mechanical
+            - self.initial_mechanical_energy_j.canonical_value()
+            - external_work
+            - support_work
             + damping_dissipation;
         let scale = mechanical
             .abs()
-            .max(self.initial_mechanical_energy_j.abs())
+            .max(self.initial_mechanical_energy_j.canonical_value().abs())
             .max(external_work.abs())
             .max(support_work.abs())
             .max(damping_dissipation.abs());
@@ -312,12 +371,24 @@ impl TransientBalanceHistory {
         self.reaction_snapshots
             .push(constrained_reaction(step.published_summary, &balance)?);
         self.balances.push(balance);
-        self.strain_energy_j.push(strain);
-        self.kinetic_energy_j.push(kinetic);
-        self.external_work_j.push(external_work);
-        self.support_work_j.push(support_work);
-        self.damping_dissipation_j.push(damping_dissipation);
-        self.energy_balance_residual_j.push(residual);
+        self.strain_energy_j
+            .try_push(runmat_types::physical::Energy::new(strain))
+            .map_err(|_| DynamicBalanceError::NonFinite)?;
+        self.kinetic_energy_j
+            .try_push(runmat_types::physical::Energy::new(kinetic))
+            .map_err(|_| DynamicBalanceError::NonFinite)?;
+        self.external_work_history
+            .try_push(runmat_types::physical::Energy::new(external_work))
+            .map_err(|_| DynamicBalanceError::NonFinite)?;
+        self.support_work_history
+            .try_push(runmat_types::physical::Energy::new(support_work))
+            .map_err(|_| DynamicBalanceError::NonFinite)?;
+        self.damping_dissipation_history
+            .try_push(runmat_types::physical::Energy::new(damping_dissipation))
+            .map_err(|_| DynamicBalanceError::NonFinite)?;
+        self.energy_balance_residual_history
+            .try_push(runmat_types::physical::Energy::new(residual))
+            .map_err(|_| DynamicBalanceError::NonFinite)?;
         self.relative_energy_balance_error.push(relative);
         Ok(())
     }
@@ -351,27 +422,27 @@ impl TransientBalanceHistory {
     }
 
     pub(super) fn strain_energy_j(&self) -> &[f64] {
-        &self.strain_energy_j
+        self.strain_energy_j.canonical_values()
     }
 
     pub(super) fn kinetic_energy_j(&self) -> &[f64] {
-        &self.kinetic_energy_j
+        self.kinetic_energy_j.canonical_values()
     }
 
     pub(super) fn external_work_j(&self) -> &[f64] {
-        &self.external_work_j
+        self.external_work_history.canonical_values()
     }
 
     pub(super) fn support_work_j(&self) -> &[f64] {
-        &self.support_work_j
+        self.support_work_history.canonical_values()
     }
 
     pub(super) fn damping_dissipation_j(&self) -> &[f64] {
-        &self.damping_dissipation_j
+        self.damping_dissipation_history.canonical_values()
     }
 
     pub(super) fn energy_balance_residual_j(&self) -> &[f64] {
-        &self.energy_balance_residual_j
+        self.energy_balance_residual_history.canonical_values()
     }
 
     pub(super) fn relative_energy_balance_error(&self) -> &[f64] {

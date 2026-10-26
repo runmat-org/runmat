@@ -22,9 +22,9 @@ pub(super) fn prepare(
         .execute(
             "unit-box",
             &ResolvedGeometryFeatureOperation::Box {
-                width_m: 1.0,
-                depth_m: 1.0,
-                height_m: 1.0,
+                width_m: runmat_types::physical::Length::new(1.0),
+                depth_m: runmat_types::physical::Length::new(1.0),
+                height_m: runmat_types::physical::Length::new(1.0),
             },
             &GeometryFeatureProviderSelection::None,
             &[],
@@ -50,6 +50,8 @@ pub(super) fn prepare(
         .replace("EQUATION", equation)
         .replace("LOW_V", &gauge.to_string())
         .replace("HIGH_V", &(gauge + voltage).to_string());
+    let source = source.replace("FIRST_FACE_ID", &imported.source_face_ids[&0].analysis_selection_id().unwrap())
+        .replace("SECOND_FACE_ID", &imported.source_face_ids[&1].analysis_selection_id().unwrap());
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     [
         imported.source_face_ids[&0].clone(),
@@ -69,7 +71,11 @@ pub(super) fn verify_faces(mesh: &SolverMeshArtifact, ids: &[PersistentEntityId;
             }
             count += 1;
             for index in &face.node_indices {
-                assert!((projection.nodes[*index].coordinates_m[0] - ordinal as f64).abs() < 1e-12);
+                assert!(
+                    (projection.nodes[*index].coordinates_m.canonical_value()[0] - ordinal as f64)
+                        .abs()
+                        < 1e-12
+                );
             }
             assert!(normal * face.oriented_area_vector_m2[0] > 0.0);
             area += face.oriented_area_vector_m2[0].abs();
@@ -85,9 +91,9 @@ geometry part {
     units = m
     region body : solid { select result
         expect exactly_one }
-    region low : face { select id "face_000001"
+    region low : face { select persistent_id "FIRST_FACE_ID"
         expect exactly_one }
-    region high : face { select id "face_000002"
+    region high : face { select persistent_id "SECOND_FACE_ID"
         expect exactly_one }
 }
 mesh volume on geometry.part {

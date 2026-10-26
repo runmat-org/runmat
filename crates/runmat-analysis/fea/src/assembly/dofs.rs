@@ -35,6 +35,22 @@ impl StructuralDofKind {
         )
     }
 
+    /// State and work-conjugate quantity kinds are different for translational
+    /// and rotational rows. Equal numeric storage does not erase this distinction.
+    pub const fn state_quantity(self) -> runmat_types::physical::QuantityKind {
+        match self {
+            Self::Ux | Self::Uy | Self::Uz => runmat_types::physical::QuantityKind::Displacement,
+            Self::Rx | Self::Ry | Self::Rz => runmat_types::physical::QuantityKind::Rotation,
+        }
+    }
+
+    pub const fn conjugate_quantity(self) -> runmat_types::physical::QuantityKind {
+        match self {
+            Self::Ux | Self::Uy | Self::Uz => runmat_types::physical::QuantityKind::Force,
+            Self::Rx | Self::Ry | Self::Rz => runmat_types::physical::QuantityKind::Moment,
+        }
+    }
+
     pub(crate) const fn from_constraint(dof: crate::constraints::CanonicalStructuralDof) -> Self {
         use crate::constraints::CanonicalStructuralDof;
         use runmat_analysis_core::{StructuralRotationDof, StructuralTranslationDof};
@@ -107,6 +123,39 @@ impl Default for StructuralDofLayout {
 }
 
 impl StructuralDofLayout {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let mut row = 0;
+        for (node_index, set) in self.node_sets.iter().enumerate() {
+            if !StructuralDofKind::ORDER
+                .into_iter()
+                .filter(|kind| set.contains(*kind))
+                .eq(set.active.iter().copied())
+            {
+                return Err("structural DOF sets must be ordered and unique");
+            }
+            for kind in &set.active {
+                if self.rows.get(row)
+                    != Some(&StructuralDofAddress {
+                        node_index,
+                        kind: *kind,
+                    })
+                {
+                    return Err("structural DOF rows disagree with node sets");
+                }
+                row += 1;
+            }
+        }
+        if row != self.rows.len()
+            || self
+                .reference_point_count
+                .checked_mul(6)
+                .and_then(|count| count.checked_add(row))
+                .is_none()
+        {
+            return Err("structural DOF rows or reference-point layout are inconsistent");
+        }
+        Ok(())
+    }
     pub fn from_node_sets(node_sets: Vec<StructuralNodeDofSet>) -> Self {
         let rows = node_sets
             .iter()
@@ -225,6 +274,73 @@ impl StructuralDofLayout {
         self.rows.get(row).copied()
     }
 
+    /// Includes appended reference-point rows; those rows share the same six-DOF ordering.
+    pub fn row_kind(&self, row: usize) -> Option<StructuralDofKind> {
+        if let Some(address) = self.rows.get(row) {
+            return Some(address.kind);
+        }
+        (row < self.total_dof_count())
+            .then(|| StructuralDofKind::ORDER[(row - self.rows.len()) % 6])
+    }
+
+    /// A mixed structural matrix has dimensions per row/column pair, never one
+    /// scalar matrix dimension. Derivative order 0/1/2 selects stiffness/damping/mass.
+    pub fn operator_entry_dimension(
+        &self,
+        row: usize,
+        column: usize,
+        derivative_order: u8,
+    ) -> Option<runmat_types::PhysicalDimension> {
+        if derivative_order > 2 {
+            return None;
+        }
+        Some(
+            self.operator_entry_descriptor(row, column, derivative_order)?
+                .dimension(),
+        )
+    }
+
+    /// Full coefficient descriptor, including inverse radians for rotational
+    /// state columns. This is output/input times the derivative-time role.
+    pub fn operator_entry_descriptor(
+        &self,
+        row: usize,
+        column: usize,
+        derivative_order: u8,
+    ) -> Option<runmat_types::physical::DynamicDimension> {
+        use runmat_types::physical::DynamicDimension;
+        if derivative_order > 2 {
+            return None;
+        }
+        let load = DynamicDimension::quantity_type(self.row_kind(row)?.conjugate_quantity());
+        let state = DynamicDimension::quantity_type(self.row_kind(column)?.state_quantity());
+        load.divide(state)?.multiply(
+            DynamicDimension::from(runmat_types::PhysicalDimension::TIME)
+                .power(derivative_order as i8)?,
+        )
+    }
+
+    pub fn state_component(
+        &self,
+        row: usize,
+        value: f64,
+    ) -> Option<runmat_types::physical::AnyQuantity> {
+        runmat_types::physical::AnyQuantity::try_new(self.row_kind(row)?.state_quantity(), value)
+            .ok()
+    }
+
+    pub fn load_component(
+        &self,
+        row: usize,
+        value: f64,
+    ) -> Option<runmat_types::physical::AnyQuantity> {
+        runmat_types::physical::AnyQuantity::try_new(
+            self.row_kind(row)?.conjugate_quantity(),
+            value,
+        )
+        .ok()
+    }
+
     pub fn node_set(&self, node_index: usize) -> Option<&StructuralNodeDofSet> {
         self.node_sets.get(node_index)
     }
@@ -264,6 +380,36 @@ mod tests {
     }
 
     #[test]
+    fn mixed_operator_dimensions_include_reference_points() {
+        use runmat_types::{physical::QuantityKind, PhysicalDimension as D};
+        let layout = StructuralDofLayout::from_node_sets(vec![
+            StructuralNodeDofSet::translational_rotational(),
+        ])
+        .with_reference_points(1);
+        assert_eq!(layout.row_kind(6), Some(StructuralDofKind::Ux));
+        assert_eq!(layout.row_kind(11), Some(StructuralDofKind::Rz));
+        assert_eq!(layout.row_kind(12), None);
+        assert_eq!(
+            layout.state_component(11, 0.5).unwrap().kind(),
+            QuantityKind::Rotation
+        );
+        assert_eq!(
+            layout.load_component(11, 2.0).unwrap().kind(),
+            QuantityKind::Moment
+        );
+        assert_eq!(
+            layout.operator_entry_dimension(0, 0, 0),
+            D::FORCE.divide(D::LENGTH)
+        );
+        assert_eq!(layout.operator_entry_dimension(3, 3, 0), Some(D::MOMENT));
+        assert_eq!(layout.operator_entry_dimension(0, 0, 2), Some(D::MASS));
+        assert_ne!(
+            layout.operator_entry_dimension(0, 3, 0),
+            layout.operator_entry_dimension(3, 3, 0)
+        );
+    }
+
+    #[test]
     fn reduced_translational_layout_preserves_requested_row_count() {
         let layout = StructuralDofLayout::reduced_translational_rows(5);
 
@@ -273,5 +419,71 @@ mod tests {
         assert_eq!(layout.rotational_dof_count(), 0);
         assert_eq!(layout.index(1, StructuralDofKind::Ux), Some(3));
         assert_eq!(layout.index(1, StructuralDofKind::Uz), None);
+    }
+}
+
+/// Layout views distinguish state derivatives from their work-conjugate loads.
+#[derive(Debug, Clone, Copy)]
+pub struct StructuralQuantityLayout<'a> {
+    pub dofs: &'a StructuralDofLayout,
+    pub lane: StructuralQuantityLane,
+}
+impl<'a, 'b> PartialEq<StructuralQuantityLayout<'b>> for StructuralQuantityLayout<'a> {
+    fn eq(&self, other: &StructuralQuantityLayout<'b>) -> bool {
+        self.dofs == other.dofs && self.lane == other.lane
+    }
+}
+impl Eq for StructuralQuantityLayout<'_> {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralQuantityLane {
+    State { derivative_order: u8 },
+    Load,
+}
+impl runmat_types::physical::QuantityLayout for StructuralQuantityLayout<'_> {
+    fn component_count(&self) -> usize {
+        self.dofs.total_dof_count()
+    }
+    fn component_descriptor(
+        &self,
+        index: usize,
+    ) -> Option<runmat_types::physical::DynamicDimension> {
+        use runmat_types::physical::DynamicDimension;
+        let row = self.dofs.row_kind(index)?;
+        match self.lane {
+            StructuralQuantityLane::Load => Some(
+                DynamicDimension::quantity_type(row.conjugate_quantity())
+                    .with_semantic_kind(Some(row.conjugate_quantity()))
+                    .ok()?,
+            ),
+            StructuralQuantityLane::State { derivative_order } => {
+                if derivative_order > 2 {
+                    return None;
+                }
+                let state = DynamicDimension::quantity_type(row.state_quantity());
+                if derivative_order == 0 {
+                    state.with_semantic_kind(Some(row.state_quantity())).ok()
+                } else {
+                    state.divide(
+                        DynamicDimension::from(runmat_types::PhysicalDimension::TIME)
+                            .power(derivative_order as i8)?,
+                    )
+                }
+            }
+        }
+    }
+}
+impl StructuralDofLayout {
+    pub fn physical_field<'a>(
+        &'a self,
+        lane: StructuralQuantityLane,
+        values: &'a [f64],
+    ) -> Result<
+        runmat_types::physical::QuantityField<StructuralQuantityLayout<'a>, &'a [f64]>,
+        runmat_types::physical::QuantityFieldError,
+    > {
+        runmat_types::physical::QuantityField::try_new(
+            StructuralQuantityLayout { dofs: self, lane },
+            values,
+        )
     }
 }

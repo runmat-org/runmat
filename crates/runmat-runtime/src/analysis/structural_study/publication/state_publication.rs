@@ -56,7 +56,7 @@ pub(super) fn validate_entry_scoped_acoustic_states(
                 || state.kind != declaration.kind
                 || state.completeness != declaration.completeness
                 || state.persistence != declaration.persistence
-                || payload.frequency.hertz != planned.frequency_hz()
+                || payload.frequency.canonical_value() != planned.frequency_hz()
                 || !seen.insert((planned.ordinal(), declaration.state_id.clone()))
             {
                 return Err(invalid(

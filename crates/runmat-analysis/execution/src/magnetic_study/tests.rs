@@ -88,7 +88,15 @@ fn magnetic_study_exact_authored_sources_and_phase_guards_both_orders() {
             .electrical
             .as_mut()
             .unwrap()
-            .relative_permeability *= 2.0;
+            .relative_permeability = runmat_types::physical::Quantity::new(
+            changed.product.compiled.model.materials[0]
+                .electrical
+                .as_mut()
+                .unwrap()
+                .relative_permeability
+                .canonical_value()
+                * (2.0),
+        );
         assert!(MagneticStudyCoordinator::new(changed).is_err());
     }
 }

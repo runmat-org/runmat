@@ -115,9 +115,11 @@ impl<'a, T: VolumeTopologyRead + ?Sized> Frontier<'a, T> {
         };
         while let Some(key) = self.pending.pop_first() {
             let face = &self.faces[&key];
-            let [a, b, c] = face.vertices.map(|v| self.topology.node(v).coordinates_m);
+            let [a, b, c] = face
+                .vertices
+                .map(|v| self.topology.node(v).coordinates_m.canonical_value());
             let value = crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(
-                [a, b, c, self.node.coordinates_m],
+                [a, b, c, self.node.coordinates_m.canonical_value()],
                 metrics(face.vertices)?,
             )
             .unwrap_or(0.);

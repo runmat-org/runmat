@@ -5,7 +5,7 @@ use runmat_execution_artifact::ArtifactAccess;
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinition, GeometryDefinitionSource, GeometryDigest,
     GeometryFeature, GeometryFeatureGraph, GeometryFeatureOperation, GeometryFeatureRef,
-    GeometryScalarExpression, GeometrySourceFormat, ImportedGeometryDefinition, UnitSystem,
+    GeometryScalarExpression, GeometrySourceFormat, ImportedGeometryDefinition, LengthUnit,
 };
 use runmat_geometry_ops::{GeometryFeatureCapabilities, GeometryFeatureKind};
 
@@ -98,10 +98,12 @@ fn imported_source_is_chunked_and_bound_to_declared_bytes_and_units() {
         module_path: "project/main.fea".into(),
         geometry_id: "part".into(),
         parameters: Vec::new(),
-        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+            named_selections: None,
+            unit_evidence: Default::default(),
             logical_path: "project/part.brep".into(),
             format: GeometrySourceFormat::Brep,
-            units: UnitSystem::Millimeter,
+            unit_fallback: Some(LengthUnit::Millimeter),
             content_digest: GeometryDigest::from_bytes(*digest.bytes()),
             topology_digest: GeometryDigest::from_bytes(*Digest::sha256(b"topology").bytes()),
             capabilities: GeometryAuthoringCapabilities {
@@ -127,7 +129,10 @@ fn imported_source_is_chunked_and_bound_to_declared_bytes_and_units() {
 
     assert_eq!(source.objects.len(), 3);
     assert_eq!(source.roots.len(), 3);
-    assert_eq!(request.import_options.source_units, UnitSystem::Millimeter);
+    assert_eq!(
+        request.import_options.source_units,
+        Some(LengthUnit::Millimeter)
+    );
     let GeometryMaterializationSource::Imported {
         source_digest,
         encoded_length,
@@ -159,10 +164,12 @@ fn definition_and_prepared_source_kind_must_converge() {
         module_path: "project/main.fea".into(),
         geometry_id: "part".into(),
         parameters: Vec::new(),
-        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+            named_selections: None,
+            unit_evidence: Default::default(),
             logical_path: "project/part.brep".into(),
             format: GeometrySourceFormat::Brep,
-            units: UnitSystem::Meter,
+            unit_fallback: Some(LengthUnit::Meter),
             content_digest: GeometryDigest::from_bytes(*digest.bytes()),
             topology_digest: GeometryDigest::from_bytes(*Digest::sha256(b"topology").bytes()),
             capabilities: GeometryAuthoringCapabilities {

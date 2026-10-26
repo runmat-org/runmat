@@ -64,15 +64,16 @@ pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner
         let target = neighbors
             .iter()
             .try_fold([0.0; 3], |mut sum, id| {
-                let point =
-                    topology.nodes[geometry::node_slot(&topology.nodes, *id)?].coordinates_m;
+                let point = topology.nodes[geometry::node_slot(&topology.nodes, *id)?]
+                    .coordinates_m
+                    .canonical_value();
                 for axis in 0..3 {
                     sum[axis] += point[axis];
                 }
                 Ok::<_, DelaunaySolverTopologyError>(sum)
             })?
             .map(|sum| sum / neighbors.len() as f64);
-        let initial = topology.nodes[index].coordinates_m;
+        let initial = topology.nodes[index].coordinates_m.canonical_value();
         let initial_profile = jacobian::optimization_margin_profile_elements(
             topology,
             incident.iter().copied(),
@@ -83,9 +84,12 @@ pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner
         let mut best_profile = storage.vector(initial_profile.len())?;
         for fraction in RELOCATION_FRACTIONS {
             consume_candidate_work(candidate_work, options, cancellation)?;
-            topology.nodes[index].coordinates_m = std::array::from_fn(|axis| {
+            topology.nodes[index].coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(std::array::from_fn(|axis| {
                 initial[axis] * (1.0 - fraction) + target[axis] * fraction
-            });
+            }));
             // Restoration is unconditional even when an orientation/profile/admission check fails.
             let result = (|| {
                 let attempt = GeometryAllocationScope::new(control);
@@ -120,22 +124,31 @@ pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner
                         {
                             best_profile.clear();
                             best_profile.extend_from_slice(&profile);
-                            best = Some(topology.nodes[index].coordinates_m);
+                            best = Some(topology.nodes[index].coordinates_m.canonical_value());
                         }
                         Ok(false)
                     }
                     Err(failure) => Err(failure),
                 }
             })();
-            let coordinates = topology.nodes[index].coordinates_m;
-            topology.nodes[index].coordinates_m = initial;
+            let coordinates = topology.nodes[index].coordinates_m.canonical_value();
+            topology.nodes[index].coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(initial);
             if result? {
-                topology.nodes[index].coordinates_m = coordinates;
+                topology.nodes[index].coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates);
                 return Ok(1);
             }
         }
         if let Some(coordinates) = best {
-            topology.nodes[index].coordinates_m = coordinates;
+            topology.nodes[index].coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates);
             return Ok(1);
         }
     }
@@ -157,7 +170,9 @@ fn corner_signs(
             .ok_or_else(|| invalid("interior-corner incident element is absent"))?;
         let mut points = [[0.0; 3]; 4];
         for (point, id) in points.iter_mut().zip(&element.node_ids[..4]) {
-            *point = topology.nodes[geometry::node_slot(&topology.nodes, *id)?].coordinates_m;
+            *point = topology.nodes[geometry::node_slot(&topology.nodes, *id)?]
+                .coordinates_m
+                .canonical_value();
         }
         signs.push(orient3d(points).map_err(|failure| {
             invalid(format!("interior-corner orientation failed: {failure:?}"))

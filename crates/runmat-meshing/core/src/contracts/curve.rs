@@ -19,7 +19,9 @@ pub struct CurveMeshNode {
     #[serde(default)]
     pub source_vertex_id: Option<TopologyEntityId>,
     pub parameter: f64,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -27,5 +29,6 @@ pub struct CurveMeshElement {
     pub element_id: TopologyEntityId,
     pub source_edge_id: TopologyEntityId,
     pub node_ids: [TopologyEntityId; 2],
-    pub length_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub length_m: runmat_types::physical::Length,
 }

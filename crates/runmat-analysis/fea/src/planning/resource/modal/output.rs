@@ -9,6 +9,8 @@ pub(in crate::planning::resource) fn result_output(
     values: u64,
     modes: u64,
     residual_vectors: u64,
+    full_dofs: u64,
+    layout_nodes: u64,
 ) -> Result<PreparedOutputResourceFacts, ResourcePlanningError> {
     let numeric = numeric_inventory_profile(values)?;
     // Per mode: fixed basis/directional/eigenspace map keys, scalar field
@@ -24,6 +26,19 @@ pub(in crate::planning::resource) fn result_output(
         )?,
         checked_mul(residual_vectors, 16 * 1024, "modal residual metadata")?,
         "modal metadata",
+    )?;
+    // The basis retains one full physical DOF layout, shared by projected systems.
+    // Include node-set arrays, ordered active-kind enum spellings, row maps, row
+    // indices and the checked mass-normalization header. These are not repeated
+    // for every mode, but cannot disappear from admission just because Arc shares them.
+    let metadata = checked_add(
+        metadata,
+        checked_add(
+            checked_mul(full_dofs, 96, "modal physical DOF row metadata")?,
+            checked_mul(layout_nodes, 96, "modal physical node-set metadata")?,
+            "modal physical coordinate metadata",
+        )?,
+        "modal metadata and coordinate layout",
     )?;
     let metadata_resident =
         runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
@@ -52,7 +67,7 @@ mod tests {
     #[test]
     fn full_search_capacity_does_not_treat_every_numeric_byte_as_a_map_node() {
         let values = super::super::modal_output_value_count(60_000, 256, 3).unwrap();
-        let facts = result_output(values, 256, 3).unwrap();
+        let facts = result_output(values, 256, 3, 60_000, 20_000).unwrap();
         let generic = crate::planning::resource::projected_canonical_output_resource_facts(
             facts.encoded_payload_bytes_upper_bound.0,
         )
@@ -60,7 +75,7 @@ mod tests {
         assert!(generic.construction_resident_bytes_admission_budget.0 > 8 * 1024 * 1024 * 1024);
         assert!(facts.construction_resident_bytes_admission_budget.0 < 2 * 1024 * 1024 * 1024);
         assert!(
-            result_output(values, 257, 3)
+            result_output(values, 257, 3, 60_000, 20_000)
                 .unwrap()
                 .construction_resident_bytes_admission_budget
                 > facts.construction_resident_bytes_admission_budget

@@ -29,9 +29,9 @@ pub(super) fn thermal_preload(
     for node in &mesh.topology.nodes {
         // Same restraints in preload and modal consumers; no artificial support release.
         // All x DOFs fixed, but y/z remain free apart from three rigid-mode pins.
-        let axes: &[usize] = if node.coordinates_m == [0.0, 0.0, 0.0] {
+        let axes: &[usize] = if node.coordinates_m.canonical_value() == [0.0, 0.0, 0.0] {
             &[0, 1, 2]
-        } else if node.coordinates_m == [0.0, 1.0, 0.0] {
+        } else if node.coordinates_m.canonical_value() == [0.0, 1.0, 0.0] {
             &[0, 2]
         } else {
             &[0]
@@ -105,8 +105,8 @@ pub(super) fn thermal_preload(
             .unwrap();
     assert_eq!(source, retained_source);
     let mechanical = model.materials[0].require_mechanical().unwrap();
-    let axial_stress = -mechanical.youngs_modulus_pa * ALPHA * delta;
-    let stress_scale = mechanical.youngs_modulus_pa * ALPHA * DELTA;
+    let axial_stress = -mechanical.youngs_modulus_pa.canonical_value() * ALPHA * delta;
+    let stress_scale = mechanical.youngs_modulus_pa.canonical_value() * ALPHA * DELTA;
     let stress = field(&preload.run, crate::FEA_FIELD_STRUCTURAL_STRESS);
     assert_eq!(stress.len(), 6);
     assert!((stress[0] - axial_stress).abs() < stress_scale * 1.0e-7);
@@ -115,11 +115,13 @@ pub(super) fn thermal_preload(
         .all(|value| value.abs() < stress_scale * 1.0e-7));
     let displacement = field(&preload.run, crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     assert_eq!(displacement.len(), mesh.topology.nodes.len() * 3);
-    let dilation = ALPHA * delta * (1.0 + mechanical.poisson_ratio);
+    let dilation = ALPHA * delta * (1.0 + mechanical.poisson_ratio.canonical_value());
     for (node, u) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
         assert!(u[0].abs() < 1.0e-12);
         for (axis, value) in u.iter().enumerate().skip(1) {
-            assert!((value - dilation * node.coordinates_m[axis]).abs() < 1.0e-11);
+            assert!(
+                (value - dilation * node.coordinates_m.canonical_value()[axis]).abs() < 1.0e-11
+            );
         }
     }
     let topology = Digest::from_bytes(*mesh.canonical_digest.bytes());

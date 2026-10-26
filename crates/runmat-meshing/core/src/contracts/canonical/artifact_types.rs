@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const SOLVER_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 8;
+pub const SOLVER_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 9;
 /// Tet10 midside-node order after the four corners: 01, 12, 20, 03, 13, 23.
 pub const TETRAHEDRON_MIDSIDE_EDGE_CORNERS: [[usize; 2]; 6] =
     [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
@@ -53,7 +53,9 @@ pub enum BoundaryFaceRole {
 pub struct SolverMeshNode {
     pub node_id: u64,
     pub stable_identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     pub provenance: Vec<PersistentEntityId>,
     pub exact_parameters: Vec<SolverNodeExactParameter>,
 }

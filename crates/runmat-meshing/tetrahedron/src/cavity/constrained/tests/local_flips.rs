@@ -10,7 +10,7 @@ fn shared_face_flip_preserves_component_boundary_and_volume() {
         .map(|node_ids| {
             raw_refill_tetrahedron_with_rejection_reason(
                 node_ids,
-                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m),
+                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m.canonical_value()),
                 options,
             )
             .expect("fixture tetrahedron should pass quality")
@@ -53,7 +53,7 @@ fn shared_face_flip_rejects_boundary_face() {
         .map(|node_ids| {
             raw_refill_tetrahedron_with_rejection_reason(
                 node_ids,
-                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m),
+                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m.canonical_value()),
                 options,
             )
             .expect("fixture tetrahedron should pass quality")
@@ -79,14 +79,14 @@ fn local_flip_refill_diagnostics_record_quality_rejections() {
     let options = refill_options();
     let node_coordinates = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let tetrahedra = [[0, 1, 2, 3], [0, 2, 1, 4]]
         .into_iter()
         .map(|node_ids| {
             raw_refill_tetrahedron_with_rejection_reason(
                 node_ids,
-                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m),
+                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m.canonical_value()),
                 options,
             )
             .expect("fixture tetrahedron should pass quality")
@@ -130,6 +130,7 @@ fn shared_edge_flip_preserves_component_boundary_and_volume() {
                         .find(|node| node.node_id == node_id)
                         .expect("fixture node should exist")
                         .coordinates_m
+                        .canonical_value()
                 }),
                 options,
             )
@@ -175,7 +176,7 @@ fn shared_edge_flip_rejects_non_three_tetrahedron_ring() {
         .map(|node_ids| {
             raw_refill_tetrahedron_with_rejection_reason(
                 node_ids,
-                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m),
+                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m.canonical_value()),
                 options,
             )
             .expect("fixture tetrahedron should pass quality")

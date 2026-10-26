@@ -97,7 +97,8 @@ pub struct SizingSampleApplication {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshSizingField {
     #[serde(default)]
-    pub global_target_size_m: Option<f64>,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
+    pub global_target_size_m: Option<runmat_types::physical::Length>,
     #[serde(default)]
     pub min_size_m: Option<f64>,
     #[serde(default)]
@@ -125,6 +126,7 @@ impl MeshSizingField {
 
     fn initial_query_result(&self) -> SizingQueryResult {
         self.global_target_size_m
+            .map(|quantity| quantity.canonical_value())
             .and_then(|target_size_m| self.clamped_target_size_m(target_size_m))
             .map(|target_size_m| SizingQueryResult {
                 target_size_m: Some(target_size_m),
@@ -161,6 +163,7 @@ impl MeshSizingField {
         let mut target_size_m = target_size_m;
         if let (Some(global_target_size_m), Some(growth_rate)) = (
             self.global_target_size_m
+                .map(|quantity| quantity.canonical_value())
                 .filter(|value| value.is_finite() && *value > 0.0),
             self.growth_rate
                 .filter(|value| value.is_finite() && *value >= 1.0),
@@ -348,14 +351,19 @@ mod tests {
     fn mesh_sizing_field_deserializes_without_anisotropic_samples() {
         let sizing: MeshSizingField =
             serde_json::from_str(r#"{"global_target_size_m":0.1}"#).expect("sizing field");
-        assert_eq!(sizing.global_target_size_m, Some(0.1));
+        assert_eq!(
+            sizing
+                .global_target_size_m
+                .map(|quantity| quantity.canonical_value()),
+            Some(0.1)
+        );
         assert!(sizing.anisotropic_samples.is_empty());
     }
 
     #[test]
     fn segment_sizing_query_uses_samples_on_segment() {
         let sizing = MeshSizingField {
-            global_target_size_m: Some(1.0),
+            global_target_size_m: Some(runmat_types::physical::Length::new(1.0)),
             samples: vec![
                 SizingSample {
                     position_m: [0.5, 0.0, 0.0],
@@ -391,7 +399,7 @@ mod tests {
     #[test]
     fn segment_sizing_query_uses_samples_within_target_radius() {
         let sizing = MeshSizingField {
-            global_target_size_m: Some(1.0),
+            global_target_size_m: Some(runmat_types::physical::Length::new(1.0)),
             samples: vec![SizingSample {
                 position_m: [0.5, 0.25, 0.0],
                 target_size_m: 0.3,
@@ -413,7 +421,7 @@ mod tests {
     #[test]
     fn segment_sizing_query_clamps_local_samples() {
         let sizing = MeshSizingField {
-            global_target_size_m: Some(1.0),
+            global_target_size_m: Some(runmat_types::physical::Length::new(1.0)),
             min_size_m: Some(0.25),
             max_size_m: Some(0.75),
             samples: vec![SizingSample {
@@ -437,7 +445,7 @@ mod tests {
     #[test]
     fn point_sizing_query_reports_anisotropic_metric_source() {
         let sizing = MeshSizingField {
-            global_target_size_m: Some(1.0),
+            global_target_size_m: Some(runmat_types::physical::Length::new(1.0)),
             samples: vec![SizingSample {
                 position_m: [0.25, 0.0, 0.0],
                 target_size_m: 0.4,
@@ -470,7 +478,7 @@ mod tests {
     #[test]
     fn invalid_point_sizing_query_is_unset() {
         let sizing = MeshSizingField {
-            global_target_size_m: Some(1.0),
+            global_target_size_m: Some(runmat_types::physical::Length::new(1.0)),
             ..MeshSizingField::default()
         };
 

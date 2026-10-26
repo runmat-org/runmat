@@ -18,7 +18,10 @@ pub(super) fn apply_projected_force(
     force_components_n: [f64; 3],
 ) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
     let faces = boundary_faces_matching(projection, target);
-    let area = faces.iter().map(|face| face.area_m2).sum::<f64>();
+    let area = faces
+        .iter()
+        .map(|face| face.area_m2.canonical_value())
+        .sum::<f64>();
     if !area.is_finite() || area <= 0.0 {
         return Err(SolverMeshRegionMappingError::InvalidAnalysisProjection(
             format!(
@@ -137,7 +140,7 @@ fn integrate_surface_vector(
                     ),
                 ));
             }
-            let face_force = force.map(|value| value * (face.area_m2 / area));
+            let face_force = force.map(|value| value * (face.area_m2.canonical_value() / area));
             for (&node_index, &measure) in face.node_indices.iter().zip(&nodal_measure) {
                 let nodal_force = scale_vector(face_force, measure / partition_area);
                 add_translational_rhs(layout, rhs, node_index, nodal_force);

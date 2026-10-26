@@ -21,7 +21,8 @@ use super::{
 #[derive(Clone, Copy)]
 struct CandidateChoice {
     kind: DelaunayRefinementCandidateKind,
-    coordinates_m: [f64; 3],
+    coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     construction_node_identities: [runmat_meshing_core::StableDigest; 4],
     construction_point_index: u16,
 }
@@ -71,7 +72,11 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
         .tetrahedron(tetrahedron_index as u32)
         .expect("resolved quality source")
         .vertex_indices
-        .map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
+        .map(|vertex| {
+            topology.nodes()[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
     // Topology indices are canonically ordered by persistent identity for the
     // published contract. Candidate arithmetic is geometric, so its operand
     // order must instead be invariant under a source-revision identity change.
@@ -92,7 +97,10 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
         if center_is_admissible {
             choices.push(CandidateChoice {
                 kind: DelaunayRefinementCandidateKind::MetricCircumcenter,
-                coordinates_m: center,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(center),
                 construction_node_identities: quality.node_identities,
                 construction_point_index: 0,
             });
@@ -113,7 +121,10 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
                 .filter_map(|(index, coordinates_m)| {
                     Some(CandidateChoice {
                         kind: DelaunayRefinementCandidateKind::MetricOffcenter,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                         construction_node_identities: quality.node_identities,
                         construction_point_index: u16::try_from(index).ok()?,
                     })
@@ -131,7 +142,10 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
                 let construction_point_index = u16::try_from(index).ok()?;
                 Some(coordinates.map(|coordinates_m| CandidateChoice {
                     kind: DelaunayRefinementCandidateKind::InteriorPoint,
-                    coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(coordinates_m),
                     construction_node_identities: quality.node_identities,
                     construction_point_index,
                 }))
@@ -168,7 +182,7 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
         ));
     }
     Ok(DelaunayVolumeRefinementCandidate {
-        node: super::DelaunayVolumeNode::explicit(identity, choice.coordinates_m),
+        node: super::DelaunayVolumeNode::explicit(identity, choice.coordinates_m.canonical_value()),
         kind: choice.kind,
         construction_node_identities: choice.construction_node_identities,
         construction_point_index: choice.construction_point_index,
@@ -285,7 +299,7 @@ fn first_available_choice(
         );
         if !excluded_node_identities.contains(&identity)
             && topology.node_index(identity).is_none()
-            && !topology.contains_position(choice.coordinates_m)
+            && !topology.contains_position(choice.coordinates_m.canonical_value())
         {
             return Ok(Some((choice, identity)));
         }
@@ -325,9 +339,11 @@ pub(super) fn strictly_inside_region_from(
                 "candidate point-location walk reached an absent tetrahedron",
             )
         })?;
-        let points = tetrahedron
-            .vertex_indices
-            .map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
+        let points = tetrahedron.vertex_indices.map(|vertex| {
+            topology.nodes()[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         let mut crossing = None;
         for replace in 0..4 {
             let mut simplex = points;
@@ -371,9 +387,11 @@ pub(super) fn strictly_inside_region_from(
         if tetrahedron.region_id.as_ref() != Some(region_id) {
             continue;
         }
-        let points = tetrahedron
-            .vertex_indices
-            .map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
+        let points = tetrahedron.vertex_indices.map(|vertex| {
+            topology.nodes()[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         if strictly_inside(points, candidate)? {
             return Ok(true);
         }

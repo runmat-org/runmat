@@ -21,18 +21,19 @@ pub(super) struct NonlinearSolveInput<'a> {
     pub assembly: &'a ThermalOperatorAssembly,
     pub model: &'a AnalysisModel,
     pub sample: ExcitationSamplePoint<'a>,
-    pub reference_temperature_k: &'a [f64],
+    pub reference_temperature:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &'a [f64]>,
     pub initial_departure_k: &'a [f64],
     pub previous_departure_k: Option<&'a [f64]>,
     pub time_step_s: f64,
-    pub time_s: f64,
+    pub time_s: runmat_types::physical::Time,
     pub algebra: &'a dyn LinearAlgebraBackend,
     pub facts: &'a crate::planning::resource::ThermalPreassemblyResourceFacts,
     pub residual_target: f64,
 }
 
 pub(super) struct NonlinearOutcome {
-    pub solve: LinearSolveResult,
+    pub solve: ThermalSolveResult,
     pub relative_linear_residual: f64,
     pub energy_balance: ThermalEnergyBalance,
     pub evidence: ThermalNonlinearSampleEvidence,
@@ -67,16 +68,22 @@ pub(super) fn add_count(total: &mut u32, count: u32) -> Result<(), FeaRunError> 
 
 pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, FeaRunError> {
     let mut current = input.initial_departure_k.to_vec();
-    for (node, prescribed) in input.assembly.prescribed_temperature_k.iter().enumerate() {
+    for (node, prescribed) in input
+        .assembly
+        .prescribed_temperature_k
+        .canonical_values()
+        .iter()
+        .enumerate()
+    {
         if let Some(value) = prescribed {
-            current[node] = value - input.reference_temperature_k[node];
+            current[node] = value - input.reference_temperature.canonical_value()[node];
         }
     }
     let evaluate = |temperature: &[f64]| {
         input.assembly.nonlinear_residual(
             input.model,
             input.sample,
-            input.reference_temperature_k,
+            input.reference_temperature.canonical_value(),
             temperature,
             input.previous_departure_k,
             input.time_step_s,
@@ -84,7 +91,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
     };
     let free_norm = |residual: &[f64]| {
         norm(residual.iter().enumerate().filter_map(|(node, value)| {
-            input.assembly.prescribed_temperature_k[node]
+            input.assembly.prescribed_temperature_k.canonical_values()[node]
                 .is_none()
                 .then_some(*value)
         }))
@@ -104,7 +111,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             .nonlinear_increment_operator(
                 input.model,
                 input.sample,
-                input.reference_temperature_k,
+                input.reference_temperature.canonical_value(),
                 &current,
                 input.previous_departure_k,
                 input.time_step_s,
@@ -113,9 +120,9 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
         let linear_rhs_norm = rhs_norm(&operator.linear_rhs());
         // Tightening the correction equation may be needed for the declared physical power
         // closure. It never relaxes either the original stopping policy or acceptance target.
-        let linear_target = if residual.physical_power_scale_w > 0.0 {
+        let linear_target = if residual.physical_power_scale_w.canonical_value() > 0.0 {
             input.residual_target.min(
-                0.5 * input.residual_target * residual.physical_power_scale_w
+                0.5 * input.residual_target * residual.physical_power_scale_w.canonical_value()
                     / ((current.len() as f64).sqrt() * linear_rhs_norm),
             )
         } else {
@@ -141,19 +148,25 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             &mut correction.accelerator_evidence,
             &input.facts.metadata.backend_evidence,
         )?;
-        let before_norm = free_norm(&residual.residual_w);
+        let before_norm = free_norm(residual.residual_w.canonical_values());
         let mut alpha = 1.0;
         let mut accepted = None;
         for trial in 0..MAX_TRIALS {
             let mut candidate = current
                 .iter()
-                .zip(&correction.solution)
+                .zip(correction.solution.canonical_values())
                 .map(|(temperature, delta)| temperature + alpha * delta)
                 .collect::<Vec<_>>();
             // Known prescribed temperatures remain exact even during backtracking.
-            for (node, prescribed) in input.assembly.prescribed_temperature_k.iter().enumerate() {
+            for (node, prescribed) in input
+                .assembly
+                .prescribed_temperature_k
+                .canonical_values()
+                .iter()
+                .enumerate()
+            {
                 if let Some(value) = prescribed {
-                    candidate[node] = value - input.reference_temperature_k[node];
+                    candidate[node] = value - input.reference_temperature.canonical_value()[node];
                 }
             }
             // The physical evaluator checks Kelvin at actual radiation quadrature points;
@@ -166,8 +179,11 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
                 Err(error) => return Err(FeaRunError::Assembly(error.to_string())),
             };
             if let Some(trial_residual) = trial_residual {
-                let after_norm = free_norm(&trial_residual.residual_w);
-                let equilibrium = relative(after_norm, trial_residual.physical_power_scale_w);
+                let after_norm = free_norm(trial_residual.residual_w.canonical_values());
+                let equilibrium = relative(
+                    after_norm,
+                    trial_residual.physical_power_scale_w.canonical_value(),
+                );
                 if after_norm.is_finite()
                     && equilibrium.is_finite()
                     && (after_norm <= (1.0 - 1.0e-4 * alpha) * before_norm
@@ -192,7 +208,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             norm(candidate.iter().zip(&current).map(|(a, b)| a - b)),
             norm(candidate.iter().copied()).max(norm(current.iter().copied())),
         );
-        let reference = input.reference_temperature_k[0];
+        let reference = input.reference_temperature.canonical_value()[0];
         // Energy recovery accepts one component-constant reference; steady disconnected
         // bodies can use different references, so convert that case to absolute coordinates.
         let balance = if let Some(previous) = input.previous_departure_k {
@@ -207,7 +223,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
         } else {
             let absolute = candidate
                 .iter()
-                .zip(input.reference_temperature_k)
+                .zip(input.reference_temperature.canonical_value())
                 .map(|(value, reference)| value + reference)
                 .collect::<Vec<_>>();
             input
@@ -224,18 +240,20 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             && increment <= input.residual_target
             && balance.relative_residual <= input.residual_target
         {
-            correction.solution = current;
+            correction.solution = ThermalDeparture::new(current);
             return Ok(NonlinearOutcome {
                 solve: correction,
                 relative_linear_residual: maximum_linear_residual,
                 energy_balance: balance,
                 evidence: ThermalNonlinearSampleEvidence {
-                    time_s: input.time_s,
+                    time_s: runmat_types::physical::Time::new(input.time_s.canonical_value()),
                     iteration_count,
                     backtracking_count,
                     relative_equilibrium_residual: equilibrium,
                     relative_increment: increment,
-                    power_scale_w: residual.physical_power_scale_w,
+                    power_scale_w: runmat_types::physical::Power::new(
+                        residual.physical_power_scale_w.canonical_value(),
+                    ),
                 },
                 host_sync_count,
                 device_apply_count,
@@ -260,27 +278,34 @@ pub(super) fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutco
         .zip(&references)
         .map(|(temperature, reference)| temperature - reference)
         .collect::<Vec<_>>();
-    let mut accepted = solve(NonlinearSolveInput {
+    let accepted = solve(NonlinearSolveInput {
         assembly: input.assembly,
         model: input.model,
         sample: input.sample,
-        reference_temperature_k: &references,
+        reference_temperature: runmat_types::physical::Quantity::new(references.as_slice()),
         initial_departure_k: &initial,
         previous_departure_k: None,
         time_step_s: 1.0,
-        time_s: input.time_origin_s,
+        time_s: runmat_types::physical::Time::new(input.time_origin_s),
         algebra: input.algebra,
         facts: input.facts,
         residual_target: input.residual_target,
     })?;
-    for (node, temperature) in accepted.solve.solution.iter_mut().enumerate() {
-        *temperature = input.assembly.prescribed_temperature_k[node]
-            .unwrap_or(*temperature + references[node]);
-    }
+    let accepted_solve = accepted.solve.try_map_solution(|departure| {
+        let mut values = departure.into_canonical_values();
+        for (node, temperature) in values.iter_mut().enumerate() {
+            *temperature = input.assembly.prescribed_temperature_k.canonical_values()[node]
+                .unwrap_or(*temperature + references[node]);
+        }
+        runmat_types::physical::Quantity::<runmat_types::physical::kind::Temperature, _>::try_new(
+            values,
+        )
+        .map_err(|error| FeaRunError::Solve(error.to_string()))
+    })?;
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(
         input.assembly,
-        &accepted.solve.solution,
+        accepted_solve.solution.canonical_values(),
         None,
         1.0,
         0.0,
@@ -297,7 +322,7 @@ pub(super) fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutco
         device_apply_count: accepted.device_apply_count,
         device_apply_attempt_count: accepted.device_apply_attempt_count,
         accelerator_evidence: accepted.accelerator_evidence,
-        last_solve: accepted.solve,
+        last_solve: accepted_solve.map_solution(|_state| ()),
     })
 }
 

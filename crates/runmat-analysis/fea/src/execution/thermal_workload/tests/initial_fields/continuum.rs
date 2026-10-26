@@ -74,10 +74,10 @@ fn uniform_ramp_heating_has_continuum_backward_euler_time_convergence() {
             }
             for (index, balance) in result.energy_balances.iter().enumerate() {
                 let power = 2.0 * B * result.time_points_s[index + 1];
-                assert!((balance.applied_power_w - power).abs() < 1e-9);
-                assert!((balance.storage_rate_w - power).abs() < 1e-8);
-                assert!(balance.prescribed_boundary_power_w.abs() < 1e-10);
-                assert!(balance.boundary_loss_w.abs() < 1e-10);
+                assert!((balance.applied_power_w.canonical_value() - power).abs() < 1e-9);
+                assert!((balance.storage_rate_w.canonical_value() - power).abs() < 1e-8);
+                assert!(balance.prescribed_boundary_power_w.canonical_value().abs() < 1e-10);
+                assert!(balance.boundary_loss_w.canonical_value().abs() < 1e-10);
                 assert!(balance.relative_residual < 1e-10, "{balance:?}");
             }
             for field in result
@@ -155,8 +155,11 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
         let producer = producer_input.execute(&mesh).unwrap();
         producer.validate_complete().unwrap();
         let source_balance = producer.energy_balances[0];
-        assert!((source_balance.applied_power_w - GENERATION).abs() < 1e-8);
-        assert!((source_balance.prescribed_boundary_power_w - GENERATION).abs() < 1e-8);
+        assert!((source_balance.applied_power_w.canonical_value() - GENERATION).abs() < 1e-8);
+        assert!(
+            (source_balance.prescribed_boundary_power_w.canonical_value() - GENERATION).abs()
+                < 1e-8
+        );
         assert!(source_balance.relative_residual < 1e-10);
         if quadratic {
             // The actual quadratic-space steady producer is independently exact; retain
@@ -167,7 +170,7 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
                 .iter()
                 .zip(producer.temperature_snapshots[0].as_host_f64().unwrap())
             {
-                let x = node.coordinates_m[0];
+                let x = node.coordinates_m.canonical_value()[0];
                 assert!((value - REFERENCE - GENERATION * x * (1.0 - x) / 2.0).abs() < 1e-8);
             }
         }
@@ -206,11 +209,11 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
                     .unwrap()
             );
             for balance in &result.energy_balances {
-                assert!(balance.applied_power_w.abs() < 1e-10);
-                assert!(balance.boundary_loss_w.abs() < 1e-10);
+                assert!(balance.applied_power_w.canonical_value().abs() < 1e-10);
+                assert!(balance.boundary_loss_w.canonical_value().abs() < 1e-10);
                 assert!(balance.relative_residual < 1e-10, "{balance:?}");
-                assert!(balance.storage_rate_w <= 1e-9);
-                assert!(balance.prescribed_boundary_power_w >= -1e-9);
+                assert!(balance.storage_rate_w.canonical_value() <= 1e-9);
+                assert!(balance.prescribed_boundary_power_w.canonical_value() >= -1e-9);
             }
             results.push(result);
         }

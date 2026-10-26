@@ -18,7 +18,7 @@ pub(super) fn retains_affine_edge_nodes(
             .nodes
             .get(id.checked_sub(1)? as usize)
             .filter(|node| node.node_id == id)
-            .map(|node| node.coordinates_m)
+            .map(|node| node.coordinates_m.canonical_value())
     };
     for (edge, midpoint) in midpoints {
         control.checkpoint().map_err(error::geometry)?;

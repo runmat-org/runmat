@@ -32,8 +32,8 @@ pub(super) fn realize(
                 .map(|domain| &mut domain.reference_temperature),
         )
     {
-        if reference.kelvin == 0.0 {
-            reference.kelvin = 0.0;
+        if reference.canonical_value() == 0.0 {
+            *reference = runmat_types::physical::Quantity::new(0.0);
         }
     }
     let electromagnetic = coalesce(
@@ -74,18 +74,13 @@ mod tests {
         });
         let mut negative = positive.clone();
         negative.model_id = "negative".into();
-        negative
-            .thermal
-            .as_mut()
-            .unwrap()
-            .reference_temperature
-            .kelvin = -0.0;
+        negative.thermal.as_mut().unwrap().reference_temperature =
+            runmat_types::physical::Quantity::new(-0.0);
         negative
             .thermo_mechanical
             .as_mut()
             .unwrap()
-            .reference_temperature
-            .kelvin = -0.0;
+            .reference_temperature = runmat_types::physical::Quantity::new(-0.0);
         let forward = realize(&[&positive, &negative]).unwrap();
         let reverse = realize(&[&negative, &positive]).unwrap();
         assert_eq!(
@@ -96,19 +91,19 @@ mod tests {
             .0
             .unwrap()
             .reference_temperature
-            .kelvin
+            .canonical_value()
             .is_sign_negative());
         assert!(!reverse
             .1
             .unwrap()
             .reference_temperature
-            .kelvin
+            .canonical_value()
             .is_sign_negative());
         assert!(negative
             .thermal
             .unwrap()
             .reference_temperature
-            .kelvin
+            .canonical_value()
             .is_sign_negative());
     }
 

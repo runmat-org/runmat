@@ -173,7 +173,7 @@ pub(in crate::semantic::model) fn required_quantity(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
     let value = required_assignment(declaration, statements, name, diagnostics)?;
-    if value.value_type != FeaType::Quantity(dimension) {
+    if !(value.value_type).is_quantity((dimension).into()) {
         invalid(
             declaration,
             value,
@@ -199,7 +199,7 @@ pub(in crate::semantic::model) fn optional_property_quantity(
     let Some(value) = optional_property_assignment(statements, name) else {
         return Some(None);
     };
-    if value.value_type != FeaType::Quantity(dimension) {
+    if !(value.value_type).is_quantity((dimension).into()) {
         invalid(
             declaration,
             value,
@@ -313,7 +313,7 @@ pub(in crate::semantic::model) fn required_vector(
         let expected = if dimension == PhysicalDimension::DIMENSIONLESS {
             matches!(component.value_type, FeaType::Integer | FeaType::Real)
         } else {
-            component.value_type == FeaType::Quantity(dimension)
+            (component.value_type).is_quantity((dimension).into())
         };
         if !expected {
             invalid(
@@ -334,11 +334,9 @@ pub(in crate::semantic::model) fn scalar(value: &CheckedExpression) -> Option<f6
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
         CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-        } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            unit.to_canonical(scalar(value)?).ok()
+        }
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = scalar(operand)?;
             Some(match operator {

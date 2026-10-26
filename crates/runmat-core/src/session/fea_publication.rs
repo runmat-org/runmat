@@ -37,11 +37,12 @@ fn relative(path: &LogicalSourcePath) -> Result<PathBuf, String> {
         return Err("source edit path must name a workspace-relative file".into());
     }
     let path = Path::new(path.as_str());
-    if !matches!(
+    let metadata = path.to_str().is_some_and(runmat_geometry_core::is_geometry_selection_metadata_path);
+    if !metadata && !matches!(
         path.extension().and_then(|value| value.to_str()),
         Some("fea" | "m")
     ) {
-        return Err("checked source publication accepts only FEA and MATLAB sources".into());
+        return Err("checked source publication accepts FEA, MATLAB, and CAD named-selection metadata".into());
     }
     Ok(path.to_path_buf())
 }
@@ -80,10 +81,14 @@ impl RunMatSession {
         let publication_edits = edits
             .iter()
             .map(|edit| match edit {
-                FeaWorkspaceEdit::Write { path, bytes } => Ok(WorkspaceEdit::Write {
-                    path: relative(path)?,
-                    bytes: bytes.clone(),
-                }),
+                FeaWorkspaceEdit::Write { path, bytes } => {
+                    let relative = relative(path)?;
+                    if runmat_geometry_core::is_geometry_selection_metadata_path(path.as_str()) {
+                        let metadata: runmat_geometry_core::GeometryNamedSelections = serde_json::from_slice(bytes).map_err(|e| format!("Invalid CAD selection metadata: {e}"))?;
+                        metadata.validate().map_err(|e| e.to_string())?;
+                    }
+                    Ok(WorkspaceEdit::Write { path: relative, bytes: bytes.clone() })
+                },
                 FeaWorkspaceEdit::Remove { path } => Ok(WorkspaceEdit::Remove {
                     path: relative(path)?,
                 }),

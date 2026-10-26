@@ -418,7 +418,7 @@ fn sampled_foreign_layout_mesh_weighted_requests_probes_and_histories_fail_close
     });
     let mut probe = native_spec(&field);
     probe.target = ObservationTarget::Point {
-        position: Position { meters: [0.1; 3] },
+        position: Position::new([0.1; 3]),
     };
     probe.output_location = FieldLocation::Point;
     for (request, source) in [

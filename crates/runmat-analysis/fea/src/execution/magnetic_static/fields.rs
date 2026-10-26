@@ -31,9 +31,9 @@ impl<'a> NativeMagneticValues<'a> {
         };
         (0..count).map(move |i| match self {
             Self::Circulation(v) => v[i],
-            Self::Potential(v) => v[i / 3].vector_potential_wb_per_m[i % 3],
-            Self::Flux(v) => v[i / 3].flux_density_t[i % 3],
-            Self::Intensity(v) => v[i / 3].magnetic_field_a_per_m[i % 3],
+            Self::Potential(v) => v[i / 3].vector_potential_wb_per_m.canonical_value()[i % 3],
+            Self::Flux(v) => v[i / 3].flux_density_t.canonical_value()[i % 3],
+            Self::Intensity(v) => v[i / 3].magnetic_field_a_per_m.canonical_value()[i % 3],
         })
     }
 }
@@ -55,8 +55,10 @@ pub(in crate::execution) fn native_magnetic_fields(
     [
         NativeMagneticField {
             field_id: "magnetic.edge_circulation",
-            values: NativeMagneticValues::Circulation(&response.edge_circulations_wb),
-            shape: vec![response.edge_circulations_wb.len()],
+            values: NativeMagneticValues::Circulation(
+                response.edge_circulations_wb.canonical_values(),
+            ),
+            shape: vec![response.edge_circulations_wb.canonical_values().len()],
         },
         NativeMagneticField {
             field_id: "magnetic.vector_potential",
@@ -154,7 +156,11 @@ fn native_magnetic_field_plan(
             ObservationQuantity::MagneticEdgeCirculation,
             FieldLocation::Edge,
             RecoveredFieldEntityDomain::OrientedEdges,
-            result.response().edge_circulations_wb.len(),
+            result
+                .response()
+                .edge_circulations_wb
+                .canonical_values()
+                .len(),
         ),
         (
             ObservationQuantity::MagneticVectorPotential,

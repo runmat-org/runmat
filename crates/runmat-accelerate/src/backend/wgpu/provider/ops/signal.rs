@@ -3291,7 +3291,7 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{
-        register_test_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+        register_test_wgpu_provider, register_wgpu_provider, WgpuProvider, WgpuProviderOptions,
     };
     use num_complex::Complex;
     use runmat_accelerate_api::{
@@ -3317,13 +3317,22 @@ mod tests {
         Some(f(provider.provider()))
     }
 
+    // Prepared coefficient objects retain their provider for process lifetime.
+    // Keep ordinary tensor tests scoped; use the registered facade only for
+    // tests that exercise this explicit retained-provider contract.
+    fn with_retained_wgpu_provider<R>(f: impl FnOnce(&'static dyn AccelProvider) -> R) -> Option<R> {
+        register_wgpu_provider(WgpuProviderOptions::default())
+            .ok()
+            .map(|provider| f(provider))
+    }
+
     fn run_envelope(method: ProviderEnvelopeMethod, values: &[f64], shape: &[usize]) -> Vec<f64> {
         with_wgpu_provider(|provider| run_envelope_on(provider, method, values, shape))
             .unwrap_or_default()
     }
 
     fn run_envelope_on(
-        provider: &'static dyn AccelProvider,
+        provider: &dyn AccelProvider,
         method: ProviderEnvelopeMethod,
         values: &[f64],
         shape: &[usize],
@@ -3968,7 +3977,7 @@ mod tests {
 
     #[test]
     fn iir_filter_nonleading_axis_uses_order_first_state_geometry() {
-        let Some(()) = with_wgpu_provider(|provider| {
+        let Some(()) = with_retained_wgpu_provider(|provider| {
             let x = provider
                 .upload(&HostTensorView {
                     data: &[
@@ -4029,7 +4038,7 @@ mod tests {
 
     #[test]
     fn iir_filter_third_axis_uses_order_first_state_geometry() {
-        let Some(()) = with_wgpu_provider(|provider| {
+        let Some(()) = with_retained_wgpu_provider(|provider| {
             let x = provider
                 .upload(&HostTensorView {
                     data: &[

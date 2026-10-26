@@ -22,6 +22,7 @@ fn empty_wgpu_upload_admission_counts_physical_storage_without_copy_volume() {
             family: ProviderOperationFamily::Upload,
         }],
         element_types: vec![element_type],
+        sparse: None,
         max_rank: None,
         max_allocation_bytes: Some(limit),
         concurrency: ProviderConcurrencyCapabilities {
@@ -164,6 +165,7 @@ fn exact_wgpu_upload_uses_physical_width_for_every_numeric_class() {
                     family: ProviderOperationFamily::Upload,
                 }],
                 element_types: vec![class],
+                sparse: None,
                 max_rank: None,
                 max_allocation_bytes: Some(limit),
                 concurrency: ProviderConcurrencyCapabilities {

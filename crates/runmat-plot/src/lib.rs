@@ -13,6 +13,7 @@ pub mod data;
 pub mod event;
 pub mod geometry;
 pub mod geometry_scene;
+pub mod geometry_observation;
 pub mod gpu;
 pub(crate) mod wgpu_compat;
 
@@ -131,10 +132,10 @@ pub fn show_plot_unified(
 #[cfg(not(target_arch = "wasm32"))]
 fn render_figure_to_file(figure: plots::Figure, path: &str) -> Result<String, String> {
     use crate::export::ImageExporter;
-    // Use the headless GPU exporter that shares the same render pipeline
-    let rt =
-        tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {e}"))?;
-    rt.block_on(async move {
+    // The export futures are wgpu work and need no tokio reactor. Driving them with pollster keeps this
+    // callable from any context: plotting builtins reach it from inside the script's runtime, where
+    // creating another tokio runtime panics ("Cannot start a runtime from within a runtime").
+    pollster::block_on(async move {
         let mut fig = figure.clone();
         let exporter = ImageExporter::new().await?;
         exporter.export_png(&mut fig, path).await?;

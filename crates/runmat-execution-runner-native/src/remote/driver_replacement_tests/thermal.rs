@@ -35,6 +35,8 @@ pub(super) fn write_authored_project(root: &std::path::Path, case: Case) {
     std::fs::write(root.join("src/heated.fea"), case.source()).unwrap();
     std::fs::create_dir_all(root.join("src/geometry")).unwrap();
     std::fs::write(root.join("src/geometry/box.brep"), BOX).unwrap();
+    std::fs::create_dir_all(root.join("src/geometry/.runmat/geometry")).unwrap();
+    std::fs::write(root.join("src/geometry/.runmat/geometry/box.brep.json"), include_bytes!("../../../../../docs/simulation/examples/geometry/.runmat/geometry/box.brep.json")).unwrap();
 }
 
 pub(super) fn prepare_authored_root(

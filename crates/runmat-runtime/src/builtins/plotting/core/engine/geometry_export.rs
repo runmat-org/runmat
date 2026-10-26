@@ -18,6 +18,43 @@ pub async fn render_geometry_scene_snapshot(
     render_geometry_scene_snapshot_inner(handle, width, height, view, None).await
 }
 
+/// Apply the same read-only observation used by native hosts before camera fitting.
+#[cfg(feature = "plot-core")]
+pub async fn render_geometry_scene_observation_snapshot(
+    handle: u32,
+    width: u32,
+    height: u32,
+    view: Option<String>,
+    visibility: Option<serde_json::Value>,
+    section: Option<serde_json::Value>,
+    selected_region_ids: Vec<String>,
+) -> BuiltinResult<Vec<u8>> {
+    let source = clone_geometry_scene(handle)
+        .ok_or_else(|| engine_error(format!("geometry scene handle {handle} does not exist")))?;
+    let scene = runmat_plot::geometry_observation::observation_scene(
+        &source,
+        visibility,
+        section,
+        selected_region_ids,
+    )
+    .map_err(engine_error)?;
+    render_geometry_observation_inner(scene, width, height, view, None).await
+}
+
+#[cfg(feature = "plot-core")]
+pub fn measure_geometry_scene_observation(
+    handle: u32,
+    kind: &str,
+    region_ids: &[String],
+) -> BuiltinResult<serde_json::Value> {
+    let scene = clone_geometry_scene(handle)
+        .ok_or_else(|| engine_error(format!("geometry scene handle {handle} does not exist")))?;
+    Ok(
+        runmat_plot::geometry_observation::measure_scene(&scene, kind, region_ids)
+            .map_err(engine_error)?,
+    )
+}
+
 /// Render saved geometry with the same camera used by interactive playback.
 #[cfg(feature = "plot-core")]
 pub async fn render_geometry_scene_snapshot_with_camera_state(
@@ -38,8 +75,6 @@ async fn render_geometry_scene_snapshot_inner(
     camera_state: Option<web::PlotSurfaceCameraState>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderGeometrySceneImage";
-    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
-
     log::debug!(
         "runmat-runtime: render_geometry_scene_snapshot.start handle={} width={} height={} view={}",
         handle,
@@ -54,6 +89,30 @@ async fn render_geometry_scene_snapshot_inner(
         )
     })?;
 
+    render_geometry_observation_inner(scene, width, height, view, camera_state).await
+}
+
+/// Render a request-local observation without changing a registered interactive scene.
+#[cfg(feature = "plot-core")]
+pub async fn render_geometry_observation_snapshot(
+    scene: runmat_plot::GeometryScene,
+    width: u32,
+    height: u32,
+    view: Option<String>,
+) -> BuiltinResult<Vec<u8>> {
+    render_geometry_observation_inner(scene, width, height, view, None).await
+}
+
+#[cfg(feature = "plot-core")]
+async fn render_geometry_observation_inner(
+    scene: runmat_plot::GeometryScene,
+    width: u32,
+    height: u32,
+    view: Option<String>,
+    camera_state: Option<web::PlotSurfaceCameraState>,
+) -> BuiltinResult<Vec<u8>> {
+    const SNAPSHOT_CONTEXT: &str = "renderGeometrySceneImage";
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
     let mut settings = ImageExportSettings::default();
     if width > 0 {
         settings.width = width;
@@ -94,8 +153,8 @@ async fn render_geometry_scene_snapshot_inner(
         .await
         .map_err(|err| {
             log::warn!(
-                "runmat-runtime: render_geometry_scene_snapshot.failed handle={} error={}",
-                handle,
+                "runmat-runtime: render_geometry_scene_snapshot.failed scene={} error={}",
+                scene.scene_id,
                 err
             );
             map_control_flow_with_builtin(
@@ -107,8 +166,8 @@ async fn render_geometry_scene_snapshot_inner(
             )
         })?;
     log::debug!(
-        "runmat-runtime: render_geometry_scene_snapshot.ok handle={} bytes={}",
-        handle,
+        "runmat-runtime: render_geometry_scene_snapshot.ok scene={} bytes={}",
+        scene.scene_id,
         bytes.len()
     );
     Ok(bytes)

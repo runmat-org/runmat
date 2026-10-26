@@ -65,6 +65,8 @@ pub(crate) struct GeometryScreenAnnotation {
     pub color: [f32; 4],
     pub kind: GeometrySceneAnnotationKind,
     pub label: String,
+    /// Projected vector extent reserved for the actual arrow, even without a caption.
+    pub vector_extent: Option<[[f32; 2]; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1190,11 +1192,18 @@ impl PlotRenderer {
                     && matches!(plot, crate::plots::PlotElement::Mesh(_))
             })
         });
-        let fixed_aspect = meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
+        let fixed_aspect =
+            meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
         if fixed_aspect || has_geometry_mesh {
             return Vec3::splat(1.0 / largest);
         }
-        let axis = |extent: f32| if extent > largest * 1.0e-6 { 1.0 / extent } else { 1.0 / largest };
+        let axis = |extent: f32| {
+            if extent > largest * 1.0e-6 {
+                1.0 / extent
+            } else {
+                1.0 / largest
+            }
+        };
         Vec3::new(axis(size.x), axis(size.y), axis(size.z))
     }
 
@@ -1557,6 +1566,8 @@ impl PlotRenderer {
         // Update uniforms
         let mut cam = self.camera().clone();
         let view_proj_matrix = cam.view_proj_matrix();
+        self.wgpu_renderer
+            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
 
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
@@ -1676,6 +1687,8 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         cam.update_aspect_ratio(aspect_ratio);
         let view_proj_matrix = cam.view_proj_matrix();
+        self.wgpu_renderer
+            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
             .update_uniforms(emission, view_proj_matrix, model_matrix);
@@ -2017,7 +2030,7 @@ impl PlotRenderer {
                     }
                 }
             }
-            // drop render_pass at end of scope
+            // Drop render_pass at end of scope.
         }
 
         let render_time = start_time.elapsed().as_secs_f64() * 1000.0;
@@ -2211,6 +2224,8 @@ impl PlotRenderer {
             }
         }
         let view_proj_matrix = cam.view_proj_matrix();
+        self.wgpu_renderer
+            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
         let model_matrix = self.axes_model_matrix(axes_index);
         self.wgpu_renderer.update_uniforms_for_axes(
             emission,
@@ -2602,7 +2617,8 @@ impl PlotRenderer {
 
             // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
             // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
-            self.world_axis_triads.insert(axes_index, (axis_steps, axis_lens));
+            self.world_axis_triads
+                .insert(axes_index, (axis_steps, axis_lens));
             let max_ticks = 6usize;
             let mut add_ticks = |axis: Vec3, perp: Vec3, step: f64, axis_len: f32, col: Vec4| {
                 if step <= 0.0 {
@@ -3849,8 +3865,8 @@ impl PlotRenderer {
             .region_annotations
             .iter()
             .filter_map(|annotation| {
-                let label = annotation.label.as_deref()?.trim();
-                if label.is_empty() {
+                let label = annotation.label.as_deref().unwrap_or("").trim();
+                if label.is_empty() && annotation.direction.is_none() {
                     return None;
                 }
                 let anchor = scene.region_anchor(&annotation.region_id)?;
@@ -3874,6 +3890,28 @@ impl PlotRenderer {
                     color: annotation.color.unwrap_or([0.9, 0.9, 0.9, 1.0]),
                     kind: annotation.kind,
                     label: label.to_string(),
+                    vector_extent: annotation.direction.and_then(|direction| {
+                        let points =
+                            scene.annotation_vector_points(&annotation.region_id, direction)?;
+                        let mut minimum = [f32::INFINITY; 2];
+                        let mut maximum = [f32::NEG_INFINITY; 2];
+                        for point in points {
+                            let clip = view_projection * point.extend(1.0);
+                            if !clip.is_finite() || clip.w <= 0.0 {
+                                return None;
+                            }
+                            let ndc = clip.truncate() / clip.w;
+                            let screen = [
+                                (ndc.x + 1.0) * 0.5 * viewport_size[0],
+                                (1.0 - ndc.y) * 0.5 * viewport_size[1],
+                            ];
+                            for axis in 0..2 {
+                                minimum[axis] = minimum[axis].min(screen[axis]);
+                                maximum[axis] = maximum[axis].max(screen[axis]);
+                            }
+                        }
+                        Some([minimum, maximum])
+                    }),
                 })
             })
             .collect()
@@ -4186,7 +4224,12 @@ impl PlotRenderer {
     pub fn reference_line_labels_for_axes(
         &self,
         axes_index: usize,
-    ) -> Vec<(crate::plots::ReferenceLineOrientation, f64, String, Option<glam::Vec4>)> {
+    ) -> Vec<(
+        crate::plots::ReferenceLineOrientation,
+        f64,
+        String,
+        Option<glam::Vec4>,
+    )> {
         self.last_figure
             .as_ref()
             .map(|f| f.reference_line_labels_for_axes(axes_index))
@@ -4298,7 +4341,8 @@ impl PlotRenderer {
     /// (`axis equal`, `daspect`); `None` when the box stretches to fill.
     pub fn overlay_plot_box_aspect_for_axes(&self, axes_index: usize) -> Option<f64> {
         let meta = self.last_figure.as_ref()?.axes_metadata(axes_index)?;
-        if !(meta.axis_equal || meta.data_aspect_ratio_mode == "manual") || meta.x_log || meta.y_log {
+        if !(meta.axis_equal || meta.data_aspect_ratio_mode == "manual") || meta.x_log || meta.y_log
+        {
             return None;
         }
         let (x_min, x_max, y_min, y_max) = self.display_bounds_for_axes(axes_index)?;

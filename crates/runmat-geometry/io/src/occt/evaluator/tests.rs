@@ -6,8 +6,8 @@ use crate::{
 };
 use runmat_geometry_core::{
     ExactContactDefinition, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    GeometryHealingOperationKind, MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
-    TrimDomainLocation, UnitSystem,
+    GeometryHealingOperationKind, LengthUnit, MassPropertiesEvaluatorId, SurfaceEvaluatorId,
+    TrimClassifierId, TrimDomainLocation,
 };
 use sha2::Digest as _;
 
@@ -67,7 +67,7 @@ fn exact_evaluator_reconstructs_from_the_transferable_closure() {
     let direct = OcctExactEvaluator::new(&imported).unwrap();
     let reconstructed = OcctExactEvaluator::from_closure(
         &imported.representation,
-        imported.meters_per_source_unit,
+        imported.kernel_units.meters_per_unit(),
         &imported.topology,
         &imported.evaluators,
     )
@@ -86,7 +86,7 @@ fn exact_evaluator_reconstructs_from_the_transferable_closure() {
     assert_eq!(
         OcctExactEvaluator::from_closure(
             &poisoned_representation,
-            imported.meters_per_source_unit,
+            imported.kernel_units.meters_per_unit(),
             &imported.topology,
             &imported.evaluators,
         )
@@ -209,6 +209,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             )
             .unwrap()
             .centroid_m
+            .canonical_value()
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -298,9 +299,9 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(solid_mass.volume_m3, 6.0);
-    assert_eq!(solid_mass.surface_area_m2, 22.0);
-    assert_eq!(solid_mass.centroid_m, [0.5, 1.0, 1.5]);
+    assert_eq!(solid_mass.volume_m3.canonical_value(), 6.0);
+    assert_eq!(solid_mass.surface_area_m2.canonical_value(), 22.0);
+    assert_eq!(solid_mass.centroid_m.canonical_value(), [0.5, 1.0, 1.5]);
 
     let sheet_mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
         &evaluator,
@@ -308,9 +309,9 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(sheet_mass.volume_m3, 0.0);
-    assert_eq!(sheet_mass.surface_area_m2, 8.0);
-    assert_eq!(sheet_mass.centroid_m, [1.0, 2.0, 10.0]);
+    assert_eq!(sheet_mass.volume_m3.canonical_value(), 0.0);
+    assert_eq!(sheet_mass.surface_area_m2.canonical_value(), 8.0);
+    assert_eq!(sheet_mass.centroid_m.canonical_value(), [1.0, 2.0, 10.0]);
 
     let mut mislabeled = imported.clone();
     let sheet_record = mislabeled
@@ -483,9 +484,9 @@ fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(mass.volume_m3, 12.0);
-    assert_eq!(mass.surface_area_m2, 44.0);
-    assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+    assert_eq!(mass.volume_m3.canonical_value(), 12.0);
+    assert_eq!(mass.surface_area_m2.canonical_value(), 44.0);
+    assert_eq!(mass.centroid_m.canonical_value(), [5.5, 1.0, 1.5]);
 }
 
 #[test]
@@ -524,8 +525,8 @@ fn persistent_entity_names_ignore_compound_child_order_and_are_bounded() {
             &Unlimited,
         )
         .unwrap();
-        assert_eq!(mass.volume_m3, 12.0);
-        assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+        assert_eq!(mass.volume_m3.canonical_value(), 12.0);
+        assert_eq!(mass.centroid_m.canonical_value(), [5.5, 1.0, 1.5]);
     }
 
     let limited = ExactCadImportOptions {
@@ -605,8 +606,8 @@ fn duplicate_consolidation_collapses_indistinguishable_compound_children() {
         &Unlimited,
     )
     .unwrap();
-    assert_eq!(mass.volume_m3, 6.0);
-    assert_eq!(mass.centroid_m, [0.5, 1.0, 1.5]);
+    assert_eq!(mass.volume_m3.canonical_value(), 6.0);
+    assert_eq!(mass.centroid_m.canonical_value(), [0.5, 1.0, 1.5]);
 
     let unchanged = import_exact_cad(
         "box.brep",
@@ -660,7 +661,7 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
 
     let mut options = ExactCadImportOptions::default();
     options.analysis.healing.repair_tolerance_scale_gaps = true;
-    options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    options.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-6);
     let imported = import_exact_cad(
         "gapped_sheet.brep",
         GAPPED_SHEET,
@@ -692,7 +693,8 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
 
     let mut sewing_options = ExactCadImportOptions::default();
     sewing_options.analysis.healing.sew = true;
-    sewing_options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    sewing_options.analysis.maximum_healing_displacement_m =
+        runmat_types::physical::Length::new(1.0e-6);
     let sewn = import_exact_cad(
         "gapped_sheet.brep",
         GAPPED_SHEET,
@@ -708,7 +710,7 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
     );
 
     let mut too_small = options;
-    too_small.analysis.maximum_healing_displacement_m = 1.0e-8;
+    too_small.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-8);
     assert!(matches!(
         import_exact_cad(
             "gapped_sheet.brep",
@@ -739,7 +741,7 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         .analysis
         .healing
         .simplify_short_edges_and_sliver_faces = true;
-    options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    options.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-6);
     let repaired_short_edge = import_exact_cad(
         "short_edge_face.brep",
         SHORT_EDGE_FACE,
@@ -831,7 +833,7 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         .is_some());
 
     let mut too_small = options.clone();
-    too_small.analysis.maximum_healing_displacement_m = 1.0e-8;
+    too_small.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-8);
     let unchanged = import_exact_cad(
         "short_edge_face.brep",
         SHORT_EDGE_FACE,
@@ -1060,10 +1062,11 @@ fn cavity_import_preserves_outer_and_void_shell_nesting() {
         &Unlimited,
     )
     .unwrap();
-    assert!((mass.volume_m3 - 992.0).abs() < 1.0e-10);
-    assert!((mass.surface_area_m2 - 624.0).abs() < 1.0e-10);
+    assert!((mass.volume_m3.canonical_value() - 992.0).abs() < 1.0e-10);
+    assert!((mass.surface_area_m2.canonical_value() - 624.0).abs() < 1.0e-10);
     assert!(mass
         .centroid_m
+        .canonical_value()
         .iter()
         .all(|coordinate| (coordinate - 5.0).abs() < 1.0e-12));
 }
@@ -1145,8 +1148,8 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &evaluator, mass_id, &Unlimited,
     )
     .unwrap();
-    assert!((mass_properties.volume_m3 - 6.0).abs() < 1.0e-12);
-    assert!((mass_properties.surface_area_m2 - 22.0).abs() < 1.0e-12);
+    assert!((mass_properties.volume_m3.canonical_value() - 6.0).abs() < 1.0e-12);
+    assert!((mass_properties.surface_area_m2.canonical_value() - 22.0).abs() < 1.0e-12);
     assert_eq!(
         runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
             &evaluator, mass_id, &Cancelled,
@@ -1342,8 +1345,8 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &evaluator, surface_id, surface_uv, &Unlimited,
     )
     .unwrap();
-    assert!(curvature.minimum_1_per_m.abs() < 1.0e-12);
-    assert!(curvature.maximum_1_per_m.abs() < 1.0e-12);
+    assert!(curvature.minimum_1_per_m.canonical_value().abs() < 1.0e-12);
+    assert!(curvature.maximum_1_per_m.canonical_value().abs() < 1.0e-12);
     let displaced =
         std::array::from_fn(|axis| surface_derivatives.point_m[axis] + normal[axis] * 0.25);
     let surface_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
@@ -1420,7 +1423,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     );
 
     let millimeter_options = ExactCadImportOptions {
-        source_units: UnitSystem::Millimeter,
+        source_units: Some(LengthUnit::Millimeter),
         ..ExactCadImportOptions::default()
     };
     let millimeter_import = import_exact_cad(
@@ -1477,9 +1480,16 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &Unlimited,
     )
     .unwrap();
-    assert!((millimeter_mass.volume_m3 - mass_properties.volume_m3 * 1.0e-9).abs() < 1.0e-20);
     assert!(
-        (millimeter_mass.surface_area_m2 - mass_properties.surface_area_m2 * 1.0e-6).abs()
+        (millimeter_mass.volume_m3.canonical_value()
+            - mass_properties.volume_m3.canonical_value() * 1.0e-9)
+            .abs()
+            < 1.0e-20
+    );
+    assert!(
+        (millimeter_mass.surface_area_m2.canonical_value()
+            - mass_properties.surface_area_m2.canonical_value() * 1.0e-6)
+            .abs()
             < 1.0e-18
     );
 
@@ -1496,7 +1506,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     else {
         panic!("box mass properties must be kernel validated")
     };
-    properties.volume_m3 += 1.0;
+    properties.volume_m3 = properties.volume_m3 + runmat_geometry_core::physical::Volume::new(1.0);
     assert_eq!(
         OcctExactEvaluator::new(&corrupt_mass).err().unwrap().kind,
         GeometryEvaluationErrorKind::InconsistentGeometry

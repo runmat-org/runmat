@@ -45,9 +45,9 @@ fn magnetic_portable_source_bound_cold_result_preserves_both_orders_and_signs() 
             );
             assert!(cold.response().relative_energy_work_error < 1.6e-9);
             if current == 0.0 {
-                assert_eq!(cold.response().magnetic_energy_j, 0.0);
+                assert_eq!(cold.response().magnetic_energy_j.canonical_value(), 0.0);
             } else {
-                assert!(cold.response().magnetic_energy_j > 0.0);
+                assert!(cold.response().magnetic_energy_j.canonical_value() > 0.0);
             }
         }
     }
@@ -71,7 +71,7 @@ fn magnetic_cold_import_rejects_lineage_inventory_fields_and_integral_substituti
         .electrical
         .as_mut()
         .unwrap()
-        .relative_permeability = 2.0;
+        .relative_permeability = runmat_types::physical::RelativePermeability::new(2.0);
     assert!(r.validate_for(&material, &mesh).is_err());
     assert!(r.validate_for(&w, &slab_mesh(1)).is_err());
     for mutation in 0..8 {

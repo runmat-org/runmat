@@ -120,7 +120,8 @@ impl TopologyMutation {
             for node in &self.nodes {
                 checkpoint()?;
                 if !next.node_indices.get(&node.identity).is_some_and(|index| {
-                    next.nodes[*index as usize].coordinates_m == node.coordinates_m
+                    next.nodes[*index as usize].coordinates_m.canonical_value()
+                        == node.coordinates_m.canonical_value()
                         && next.nodes[*index as usize].construction == node.construction
                 }) {
                     reusable = false;
@@ -152,12 +153,12 @@ fn entry(node: crate::cdt::DelaunayVolumeNode) -> SpatialPoint<StableDigest> {
     let bounds = runmat_meshing_core::quality::predicate::constructed_point_bounds(
         runmat_meshing_core::quality::predicate::SpatialPredicatePoint {
             identity: node.identity,
-            coordinates: node.coordinates_m,
+            coordinates: node.coordinates_m.canonical_value(),
             construction: node.construction,
         },
     )
     .expect("canonical finite point construction");
-    SpatialPoint::with_bounds(node.coordinates_m, bounds, node.identity)
+    SpatialPoint::with_bounds(node.coordinates_m.canonical_value(), bounds, node.identity)
         .expect("canonical construction enclosure")
 }
 

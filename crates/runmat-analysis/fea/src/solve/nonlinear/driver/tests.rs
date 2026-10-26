@@ -28,7 +28,7 @@ fn uniaxial(order: ElementOrder) -> (AnalysisModel, AssemblySummary, NonlinearSo
         ]
         .into_iter()
         .enumerate()
-        .filter(|(axis, _)| node.coordinates_m[*axis] == 0.0)
+        .filter(|(axis, _)| node.coordinates_m.canonical_value()[*axis] == 0.0)
         .map(|(_, dof)| TranslationDofValue {
             dof,
             value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -55,7 +55,7 @@ fn uniaxial(order: ElementOrder) -> (AnalysisModel, AssemblySummary, NonlinearSo
         .into_iter()
         .enumerate()
         {
-            if node.coordinates_m[axis] == 0.0 {
+            if node.coordinates_m.canonical_value()[axis] == 0.0 {
                 fixed.push(
                     summary
                         .structural_dof_layout
@@ -64,7 +64,7 @@ fn uniaxial(order: ElementOrder) -> (AnalysisModel, AssemblySummary, NonlinearSo
                 );
             }
         }
-        let x = node.coordinates_m;
+        let x = node.coordinates_m.canonical_value();
         // Independent inclined-face traction integral: sigma_xx=5.6, area_x=1/2.
         // Tri3 weights area/3; affine Tri6 has zero corner weights, area/3 midside.
         if (x.iter().sum::<f64>() - 1.0).abs() < 1e-14 {

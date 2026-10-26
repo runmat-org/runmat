@@ -11,14 +11,31 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ElectricalConstitutiveResponse {
     Electrostatics {
-        displacement_c_per_m2: Vec<[f64; 3]>,
-        energy_density_j_per_m3: Vec<f64>,
-        total_energy_j: f64,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        displacement_c_per_m2: runmat_types::physical::Quantity<
+            runmat_types::physical::kind::ElectricDisplacement,
+            Vec<[f64; 3]>,
+        >,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        energy_density_j_per_m3:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::EnergyDensity, Vec<f64>>,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        total_energy_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
     },
     SteadyConduction {
-        current_density_a_per_m2: Vec<[f64; 3]>,
-        joule_density_w_per_m3: Vec<f64>,
-        total_joule_power_w: f64,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        current_density_a_per_m2: runmat_types::physical::Quantity<
+            runmat_types::physical::kind::ElectricCurrentDensity,
+            Vec<[f64; 3]>,
+        >,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        joule_density_w_per_m3: runmat_types::physical::Quantity<
+            runmat_types::physical::kind::HeatGenerationDensity,
+            Vec<f64>,
+        >,
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        total_joule_power_w:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Power, f64>,
     },
 }
 
@@ -29,7 +46,8 @@ pub struct ElectricalTerminalResponse {
     pub ordered_node_ids: Vec<u64>,
     /// Outward dielectric flux (C) or conduction current (A), from the original weak
     /// operator, not a field-average extrapolation. Electrode charge has opposite sign.
-    pub outward_flux: f64,
+    pub outward_flux:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,18 +57,29 @@ pub struct CanonicalElectricalResponse {
     pub mesh_digest: runmat_meshing_core::StableDigest,
     pub ordered_node_ids: Vec<u64>,
     pub ordered_element_ids: Vec<u64>,
-    pub potential_v: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub potential_v:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::ElectricPotential, Vec<f64>>,
     /// Component-wise gauge departure retained before adding absolute potentials.
-    pub potential_increment_v: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub potential_increment_v:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::ElectricPotential, Vec<f64>>,
     /// Volume averages. Quadratic products below are integrated BEFORE averaging.
-    pub element_electric_field_v_per_m: Vec<[f64; 3]>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub element_electric_field_v_per_m: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::ElectricField,
+        Vec<[f64; 3]>,
+    >,
     pub constitutive: ElectricalConstitutiveResponse,
     pub terminals: Vec<ElectricalTerminalResponse>,
-    pub nodal_outward_flux: Vec<f64>,
+    pub nodal_outward_flux:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, Vec<f64>>,
     pub charge_sources: Option<super::ElectricalChargeSources>,
     /// Gauge-departure work (J electrostatic, W conduction), not stored energy/2.
-    pub volume_source_work: f64,
-    pub terminal_work: f64,
+    pub volume_source_work:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, f64>,
+    pub terminal_work:
+        runmat_types::physical::Quantity<runmat_types::physical::DynamicDimension, f64>,
     pub relative_flux_imbalance: f64,
     pub relative_energy_identity_error: f64,
     /// Absolute L2 residual of the dimensionless Dirichlet-lifted system.
@@ -67,16 +96,23 @@ pub(super) fn solve(
     admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     let count = assembly.projection.nodes.len();
+    assembly
+        .coefficients
+        .require_kind(equation.constitutive_coefficient_kind())
+        .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
     let constrained = assembly
         .prescribed
         .iter()
         .map(Option::is_some)
         .collect::<Vec<_>>();
-    // Dimensionless solve scaling prevents identity Dirichlet rows in volts from
-    // overwhelming the free electrostatic residual (epsilon is ~1e-11 SI).
+    // Material-coefficient normalization prevents identity Dirichlet rows in volts
+    // from overwhelming free electrostatic rows (epsilon is ~1e-11 SI).
+    // Free rows retain Potential×Length units; prescribed rows retain Potential.
+    // This is a mixed-row numerical system, not a dimensionless physical operator.
     // The original physical operator is retained for flux and energy accounting.
     let scale = assembly
         .coefficients
+        .canonical_values()
         .iter()
         .copied()
         .reduce(f64::max)
@@ -146,6 +182,25 @@ pub(super) fn solve(
         Some(proof),
     )
     .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let physical_flux =
+        runmat_types::physical::DynamicDimension::quantity_type(equation.conjugate_flux_kind())
+            .with_semantic_kind(Some(equation.conjugate_flux_kind()))
+            .expect("electrical conjugate flux");
+    let normalized_equation = physical_flux
+        .divide(assembly.coefficients.descriptor())
+        .ok_or_else(|| {
+            ElectricalStaticError::Operator("invalid electrical normalization descriptor".into())
+        })?;
+    let system = crate::algebra::PhysicalScalarSystem::<
+        runmat_types::physical::kind::ElectricPotential,
+    >::try_new(system, normalized_equation)
+    .map_err(|error| ElectricalStaticError::Operator(error.into()))?;
+    system
+        .require_equation(normalized_equation)
+        .map_err(|error| ElectricalStaticError::Operator(error.into()))?;
+    system
+        .physical_operator()
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
     let backend = crate::solve::backend::cpu_reference::CpuReferenceBackend;
     let lifted_rhs = system.linear_rhs();
     let rhs_norm = backend.dot(&lifted_rhs, &lifted_rhs).sqrt();
@@ -157,21 +212,33 @@ pub(super) fn solve(
         constrained,
         scale.recip(),
     );
-    let solution = crate::solve::linear::solve_operator_system_scoped(
-        &system,
-        crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
-        crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
-        &backend,
-        None,
-        crate::solve::linear::ScopedLinearSolveSettings {
-            plan: crate::planning::resource::LocalExecutionPlan::serial(),
-            admission,
-            relative_tolerance: residual_target,
-            preparation: Some(&mut preparation),
-        },
-    )
-    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
-    if !solution.converged || solution.solution.iter().any(|value| !value.is_finite()) {
+    let solution = system
+        .with_canonical_system(|numerical| {
+            crate::solve::linear::solve_operator_system_scoped(
+                numerical,
+                crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+                crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+                &backend,
+                None,
+                crate::solve::linear::ScopedLinearSolveSettings {
+                    plan: crate::planning::resource::LocalExecutionPlan::serial(),
+                    admission,
+                    relative_tolerance: residual_target,
+                    preparation: Some(&mut preparation),
+                },
+            )
+        })
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let solution = system
+        .admit_solution(solution)
+        .map_err(|error| ElectricalStaticError::Operator(error.into()))?;
+    if !solution.converged
+        || solution
+            .solution
+            .canonical_values()
+            .iter()
+            .any(|value| !value.is_finite())
+    {
         return Err(ElectricalStaticError::NotConverged {
             iterations: solution.iterations,
             residual: solution.residual_norm,
@@ -193,23 +260,24 @@ pub(super) fn solve(
         ));
     }
     let increment = solution.solution;
-    let potential = increment
+    let increment_values = increment.canonical_values();
+    let potential = increment_values
         .iter()
         .zip(&reference)
         .map(|(value, reference)| value + reference)
         .collect();
-    let reactions = spmv(&assembly.stiffness, &increment)
+    let reactions = spmv(&assembly.stiffness, increment_values)
         .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
-    let recovery = recovery::recover(&assembly, &increment)?;
+    let recovery = recovery::recover(&assembly, increment_values)?;
     let integrals = recovery
         .squared_field_integral
         .iter()
-        .zip(&assembly.coefficients)
+        .zip(assembly.coefficients.canonical_values())
         .map(|(square, coefficient)| square * coefficient)
         .collect::<Vec<_>>();
     let total = integrals.iter().sum::<f64>();
     let volume_source_work = assembly.charge_sources.as_ref().map_or(0.0, |source| {
-        increment
+        increment_values
             .iter()
             .zip(&source.nodal_charge_c)
             .map(|(value, charge)| value * charge)
@@ -225,7 +293,7 @@ pub(super) fn solve(
                 .charge_sources
                 .as_ref()
                 .map_or(0.0, |source| source.nodal_charge_c[node]);
-            increment[node] * (reactions[node] - charge)
+            increment_values[node] * (reactions[node] - charge)
         })
         .sum::<f64>();
     let weak_total = volume_source_work + terminal_work;
@@ -234,24 +302,46 @@ pub(super) fn solve(
     let constitutive = match equation {
         StaticElectricalEquation::Electrostatics => {
             ElectricalConstitutiveResponse::Electrostatics {
-                displacement_c_per_m2: recovery.flux,
-                energy_density_j_per_m3: integrals
-                    .iter()
-                    .zip(&recovery.volumes)
-                    .map(|(value, volume)| 0.5 * value / volume)
-                    .collect(),
-                total_energy_j: 0.5 * total,
+                displacement_c_per_m2: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::ElectricDisplacement,
+                    _,
+                >::new(recovery.flux),
+                energy_density_j_per_m3: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::EnergyDensity,
+                    _,
+                >::new(
+                    integrals
+                        .iter()
+                        .zip(&recovery.volumes)
+                        .map(|(value, volume)| 0.5 * value / volume)
+                        .collect(),
+                ),
+                total_energy_j: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Energy,
+                    _,
+                >::new(0.5 * total),
             }
         }
         StaticElectricalEquation::SteadyConduction => {
             ElectricalConstitutiveResponse::SteadyConduction {
-                current_density_a_per_m2: recovery.flux,
-                joule_density_w_per_m3: integrals
-                    .iter()
-                    .zip(&recovery.volumes)
-                    .map(|(value, volume)| value / volume)
-                    .collect(),
-                total_joule_power_w: total,
+                current_density_a_per_m2: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::ElectricCurrentDensity,
+                    _,
+                >::new(recovery.flux),
+                joule_density_w_per_m3: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::HeatGenerationDensity,
+                    _,
+                >::new(
+                    integrals
+                        .iter()
+                        .zip(&recovery.volumes)
+                        .map(|(value, volume)| value / volume)
+                        .collect(),
+                ),
+                total_joule_power_w: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Power,
+                    _,
+                >::new(total),
             }
         }
     };
@@ -269,18 +359,24 @@ pub(super) fn solve(
     let terminals = assembly
         .terminal_nodes
         .iter()
-        .map(|(id, nodes)| ElectricalTerminalResponse {
-            constraint_id: id.clone(),
-            ordered_node_ids: nodes
-                .iter()
-                .map(|&node| assembly.projection.nodes[node].node_id)
-                .collect(),
-            outward_flux: nodes.iter().map(|&node| nodal_outward_flux[node]).sum(),
+        .map(|(id, nodes)| {
+            Ok::<_, ElectricalStaticError>(ElectricalTerminalResponse {
+                constraint_id: id.clone(),
+                ordered_node_ids: nodes
+                    .iter()
+                    .map(|&node| assembly.projection.nodes[node].node_id)
+                    .collect(),
+                outward_flux: runmat_types::physical::Quantity::try_from_descriptor(
+                    physical_flux,
+                    nodes.iter().map(|&node| nodal_outward_flux[node]).sum(),
+                )
+                .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let flux_scale = terminals
         .iter()
-        .map(|terminal| terminal.outward_flux.abs())
+        .map(|terminal| terminal.outward_flux.canonical_value().abs())
         .sum::<f64>();
     let integrated_charge = assembly
         .charge_sources
@@ -292,7 +388,7 @@ pub(super) fn solve(
         .map_or(0.0, |source| source.absolute_charge_c);
     let relative_flux_imbalance = (terminals
         .iter()
-        .map(|terminal| terminal.outward_flux)
+        .map(|terminal| terminal.outward_flux.canonical_value())
         .sum::<f64>()
         - integrated_charge)
         .abs()
@@ -329,15 +425,33 @@ pub(super) fn solve(
             .iter()
             .map(|element| element.element_id)
             .collect(),
-        potential_v: potential,
+        potential_v: runmat_types::physical::Quantity::try_new(potential)
+            .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
         potential_increment_v: increment,
-        element_electric_field_v_per_m: recovery.electric_field,
+        element_electric_field_v_per_m: runmat_types::physical::Quantity::try_new(
+            recovery.electric_field,
+        )
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
         constitutive,
         terminals,
-        nodal_outward_flux,
+        nodal_outward_flux: runmat_types::physical::Quantity::try_from_descriptor(
+            physical_flux,
+            nodal_outward_flux,
+        )
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
         charge_sources: assembly.charge_sources,
-        volume_source_work,
-        terminal_work,
+        volume_source_work: runmat_types::physical::Quantity::try_from_dimension(
+            equation.work_kind().dimension(),
+            Some(equation.work_kind()),
+            volume_source_work,
+        )
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
+        terminal_work: runmat_types::physical::Quantity::try_from_dimension(
+            equation.work_kind().dimension(),
+            Some(equation.work_kind()),
+            terminal_work,
+        )
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
         relative_flux_imbalance,
         relative_energy_identity_error,
         linear_absolute_residual: solution.residual_norm,

@@ -2469,7 +2469,8 @@ pub struct ThermalResultsData {
     #[serde(default)]
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub initial_state: runmat_analysis_fea::ThermalInitialStateEvidence,
 }
 
@@ -2825,4 +2826,49 @@ mod tests {
             .expect_err("orphan execution entries must fail")
             .contains("absent from sequence"));
     }
+}
+
+/// Placement choices for a checked, prepared source revision. A missing time
+/// estimate stays absent; a deadline is never presented as predicted duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisExecutionMode {
+    SingleCore,
+    MultiCore,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisExecutionReadiness {
+    Ready,
+    DesktopRequired,
+    Unavailable,
+}
+/// Recent successful timings of this exact study and allocation on this runtime.
+/// Bounds describe observed variability; they are not a cross-machine promise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisExecutionDuration {
+    pub lower_millis: u64,
+    pub upper_millis: u64,
+    pub sample_count: u64,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisExecutionCandidate {
+    pub mode: AnalysisExecutionMode,
+    pub cores: Option<u32>,
+    pub memory_bytes: Option<u64>,
+    pub estimated_millis: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_evidence: Option<AnalysisExecutionDuration>,
+    pub readiness: AnalysisExecutionReadiness,
+    pub reason: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisExecutionChoices {
+    pub schema_version: u16,
+    pub plan_id: String,
+    pub revision: [u8; 32],
+    pub candidates: Vec<AnalysisExecutionCandidate>,
 }

@@ -34,14 +34,14 @@ pub(crate) fn translation_basis(
             if magnitude(cross(axis, reference)) <= GEOMETRY_TOLERANCE {
                 return Err(StructuralFrameError::Degenerate);
             }
-            let from_origin = subtract(point, frame.origin.meters);
+            let from_origin = subtract(point, frame.origin.canonical_value());
             let radial = subtract(from_origin, scale(axis, dot(from_origin, axis)));
             let radial = unit_vector(radial)?;
             let azimuthal = unit_vector(cross(axis, radial))?;
             Ok([radial, azimuthal, axis])
         }
         CoordinateFrame::Spherical(frame) => {
-            let radial = unit_vector(subtract(point, frame.origin.meters))?;
+            let radial = unit_vector(subtract(point, frame.origin.canonical_value()))?;
             let polar_axis = unit_vector(frame.polar_axis)?;
             let azimuth_reference = unit_vector(frame.azimuth_reference)?;
             require_orthogonal(polar_axis, azimuth_reference)?;

@@ -208,10 +208,10 @@ pub(super) fn finish_transient_run(
     run.diagnostics.push(mechanical_energy_history_diagnostic(
         &transient.kinetic_energy_snapshots,
         &transient.strain_energy_snapshots,
-        &transient.external_work_j,
-        &transient.support_work_j,
-        &transient.damping_dissipation_j,
-        &transient.energy_balance_residual_j,
+        transient.external_work_j.canonical_values(),
+        transient.support_work_j.canonical_values(),
+        transient.damping_dissipation_j.canonical_values(),
+        transient.energy_balance_residual_j.canonical_values(),
         &transient.relative_energy_balance_error,
     ));
 
@@ -253,19 +253,19 @@ pub(super) fn finish_transient_run(
         })
         .collect::<Vec<_>>();
     let external_work_snapshots = scalar_snapshots(
-        &transient.external_work_j,
+        transient.external_work_j.canonical_values(),
         fea_transient_external_work_field_id,
     );
     let support_work_snapshots = scalar_snapshots(
-        &transient.support_work_j,
+        transient.support_work_j.canonical_values(),
         fea_transient_support_work_field_id,
     );
     let damping_dissipation_snapshots = scalar_snapshots(
-        &transient.damping_dissipation_j,
+        transient.damping_dissipation_j.canonical_values(),
         fea_transient_damping_dissipation_field_id,
     );
     let energy_balance_residual_snapshots = scalar_snapshots(
-        &transient.energy_balance_residual_j,
+        transient.energy_balance_residual_j.canonical_values(),
         fea_transient_energy_balance_residual_field_id,
     );
     let relative_energy_balance_error_snapshots = scalar_snapshots(

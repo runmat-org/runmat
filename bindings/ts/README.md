@@ -55,6 +55,23 @@ await session.executeRequest({
 
 GPU initialization is opportunistic in browser contexts. If WebGPU is unavailable, RunMat logs a warning and continues on CPU.
 
+### Building the exact CAD browser host
+
+The browser CAD module uses the same Rust/C++ OCCT importer as desktop for preview
+and validated exact topology. Build it with Rust 1.93.0, its
+`wasm32-unknown-emscripten` target, and an activated Emscripten 4.0.23 SDK:
+
+```bash
+rustup target add wasm32-unknown-emscripten --toolchain 1.93.0
+npm run build:occt
+npm run test:exact-cad:wasm
+```
+
+`npm run build` includes this module. Its JavaScript, Wasm, and OCCT license files
+are packaged under `dist/occt`. The qualification test uses the compiled module
+with the browser runtime, including invalid-input recovery. Keep the module and
+runtime from the same package build. CAD import runs in the runtime worker.
+
 ## Execution Results
 
 `executeRequest` resolves to an `ExecuteResult` with structured data for UI hosts:

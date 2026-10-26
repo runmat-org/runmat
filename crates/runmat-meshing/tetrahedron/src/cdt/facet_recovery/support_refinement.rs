@@ -260,7 +260,14 @@ pub(super) fn refine_support_triangle_interior(
     let mut vertices = triangle
         .map(|identity| {
             node_index(&recovery.topology, identity)
-                .map(|index| (identity, recovery.topology.nodes[index].coordinates_m))
+                .map(|index| {
+                    (
+                        identity,
+                        recovery.topology.nodes[index]
+                            .coordinates_m
+                            .canonical_value(),
+                    )
+                })
                 .ok_or_else(|| {
                     error(
                         DelaunayFacetRecoveryErrorKind::InvalidTopology,
@@ -284,7 +291,10 @@ pub(super) fn refine_support_triangle_interior(
     let Some(node) = candidate_node(
         recovery,
         CandidateInsertion {
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             construction: Point3Construction::TriangleDyadic {
                 vertices: construction_vertices,
                 weights_numerator: [2, 1, 1],
@@ -454,7 +464,7 @@ pub(super) fn triangle_has_positive_area_on(
 ) -> Result<bool, DelaunayFacetRecoveryError> {
     let points = triangle.map(|identity| {
         node_index(topology, identity)
-            .map(|index| topology.nodes()[index].coordinates_m)
+            .map(|index| topology.nodes()[index].coordinates_m.canonical_value())
             .ok_or_else(|| {
                 error(
                     DelaunayFacetRecoveryErrorKind::InvalidTopology,

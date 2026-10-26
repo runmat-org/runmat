@@ -277,13 +277,15 @@ pub fn geometry_parameter_input_type(
         GeometryParameterType::Boolean => AuthoredInputType::Boolean,
         GeometryParameterType::Scalar => AuthoredInputType::Real,
         GeometryParameterType::Length => {
-            AuthoredInputType::Quantity(runmat_types::QuantityDimension::Length)
+            AuthoredInputType::Quantity((runmat_types::PhysicalDimension::LENGTH).into())
         }
         GeometryParameterType::Angle => {
-            AuthoredInputType::Quantity(runmat_types::QuantityDimension::Dimensionless)
+            AuthoredInputType::Quantity(runmat_types::physical::DynamicDimension::quantity_type(
+                runmat_types::physical::QuantityKind::Angle,
+            ))
         }
         GeometryParameterType::Text => AuthoredInputType::String,
-        GeometryParameterType::Vector3 => return None,
+        GeometryParameterType::Vector3 | GeometryParameterType::QuantityVector3(_) => return None,
     })
 }
 

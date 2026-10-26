@@ -19,9 +19,9 @@ pub(super) fn solve_with_time(
     let n = p.topology.cells.len();
     let (mut u, mut pressure_fluctuation, mut q) = match initial {
         Some(fields) => (
-            fields.velocity_m_per_s.to_vec(),
-            fields.pressure_fluctuation_pa.to_vec(),
-            fields.face_volume_flux_m3_per_s.to_vec(),
+            fields.velocity_m_per_s.canonical_values().to_vec(),
+            fields.pressure_fluctuation_pa.canonical_values().to_vec(),
+            fields.face_volume_flux_m3_per_s.canonical_values().to_vec(),
         ),
         None => {
             let u = vec![[0.0; 3]; n];
@@ -134,7 +134,7 @@ pub(super) fn solve_with_time(
         if residual.accepted(p.policy.physical_relative_tolerance) {
             let pressure_pa = pressure_fluctuation
                 .iter()
-                .zip(&p.pressure_reference_pa)
+                .zip(p.pressure_reference_pa.canonical_values())
                 .map(|(value, reference)| {
                     let absolute = value + reference;
                     if absolute.is_finite() {
@@ -147,11 +147,28 @@ pub(super) fn solve_with_time(
             return Ok(CanonicalFluidResult {
                 numerical_input_identity,
                 authored_authority_identity: p.authored_authority_identity,
-                velocity_m_per_s: u,
-                pressure_pa,
-                pressure_fluctuation_pa: pressure_fluctuation,
-                pressure_reference_pa: p.pressure_reference_pa.clone(),
-                face_volume_flux_m3_per_s: q,
+                velocity_m_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(u),
+                pressure_pa: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Pressure,
+                    _,
+                >::new(pressure_pa),
+                pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Pressure,
+                    _,
+                >::new(pressure_fluctuation),
+                pressure_reference_pa: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Pressure,
+                    _,
+                >::new(
+                    p.pressure_reference_pa.canonical_values().clone()
+                ),
+                face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::VolumeFlowRate,
+                    _,
+                >::new(q),
                 outer_iterations: iteration,
                 linear_iterations,
                 residual,

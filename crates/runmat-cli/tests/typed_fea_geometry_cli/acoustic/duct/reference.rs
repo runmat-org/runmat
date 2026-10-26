@@ -47,7 +47,7 @@ pub(super) fn errors(
         .iter()
         .zip(pressure.chunks_exact(2))
         .map(|(node, p)| {
-            let exact = wave(node.coordinates_m[0]);
+            let exact = wave(node.coordinates_m.canonical_value()[0]);
             (p[0] - exact[0]).powi(2) + (p[1] - exact[1]).powi(2)
         })
         .sum::<f64>()
@@ -57,17 +57,26 @@ pub(super) fn errors(
         .iter()
         .zip(velocity.chunks_exact(6))
         .map(|(element, v)| {
-            let xs =
-                std::array::from_fn(|i| projection.nodes[element.node_indices[i]].coordinates_m[0]);
+            let xs = std::array::from_fn(|i| {
+                projection.nodes[element.node_indices[i]]
+                    .coordinates_m
+                    .canonical_value()[0]
+            });
             // The physical mean formula requires affine geometry, including Tet10 edges.
             if element.node_indices.len() == 10 {
                 for (edge, pair) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
                     .iter()
                     .enumerate()
                 {
-                    let mid = projection.nodes[element.node_indices[4 + edge]].coordinates_m;
-                    let a = projection.nodes[element.node_indices[pair[0]]].coordinates_m;
-                    let b = projection.nodes[element.node_indices[pair[1]]].coordinates_m;
+                    let mid = projection.nodes[element.node_indices[4 + edge]]
+                        .coordinates_m
+                        .canonical_value();
+                    let a = projection.nodes[element.node_indices[pair[0]]]
+                        .coordinates_m
+                        .canonical_value();
+                    let b = projection.nodes[element.node_indices[pair[1]]]
+                        .coordinates_m
+                        .canonical_value();
                     for (axis, coordinate) in mid.iter().enumerate() {
                         assert!((*coordinate - 0.5 * (a[axis] + b[axis])).abs() < 1e-12);
                     }

@@ -1,10 +1,13 @@
+geometry selection.
+// Engineering physics belongs in the importing study.
+
 geometry part {
  file = "./geometry/box.brep"; units = m
- region bulk : solid { select id "solid_000001"; expect exactly_one }
- region left : face { select id "face_000001"; expect exactly_one }
- region right : face { select id "face_000002"; expect exactly_one }
- region bottom_y : face { select id "face_000003"; expect exactly_one }
- region bottom_z : face { select id "face_000005"; expect exactly_one }
+ region bulk : solid { select name "bulk"; expect exactly_one }
+ region left : face { select name "left"; expect exactly_one }
+ region right : face { select name "right"; expect exactly_one }
+ region bottom_y : face { select name "bottom_y"; expect exactly_one }
+ region bottom_z : face { select name "bottom_z"; expect exactly_one }
 }
 mesh volume on geometry.part {
  tetrahedra { order = linear; target_size = 1.5 m; maximum_deviation = 0.02 m }

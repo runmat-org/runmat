@@ -29,8 +29,8 @@ fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
         &control,
     )
     .unwrap();
-    assert_near(at_quarter.point_m[0], 0.0, 1.0e-14);
-    assert_near(at_quarter.point_m[1], 1.0, 1.0e-14);
+    assert_near(at_quarter.point_m.canonical_value()[0], 0.0, 1.0e-14);
+    assert_near(at_quarter.point_m.canonical_value()[1], 1.0, 1.0e-14);
     assert_eq!(
         evaluator.unit_tangent(&curve_id, 0.0, &control).unwrap(),
         [0.0, 1.0, 0.0]
@@ -38,7 +38,8 @@ fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
     assert_near(
         evaluator
             .curvature_1_per_m(&curve_id, 0.3, &control)
-            .unwrap(),
+            .unwrap()
+            .canonical_value(),
         1.0,
         1.0e-14,
     );
@@ -50,18 +51,30 @@ fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
                     start: 0.0,
                     end: std::f64::consts::TAU,
                 },
-                1.0e-12,
+                crate::physical::Length::new(1.0e-12),
                 &control,
             )
-            .unwrap(),
+            .unwrap()
+            .canonical_value(),
         std::f64::consts::TAU,
         1.0e-14,
     );
     let projection = evaluator
-        .inverse_project(&curve_id, [2.0, 0.0, 0.0], 1.0e-10, &control)
+        .inverse_project(
+            &curve_id,
+            crate::physical::Position::new([2.0, 0.0, 0.0]),
+            crate::physical::Length::new(1.0e-10),
+            &control,
+        )
         .unwrap();
-    assert_near(projection.parameter, 0.0, 1.0e-10);
-    assert_near(projection.distance_m, 1.0, 1.0e-12);
+    assert_near(
+        projection
+            .parameter
+            .with_native_coordinate(|value, _frame| value),
+        0.0,
+        1.0e-10,
+    );
+    assert_near(projection.distance_m.canonical_value(), 1.0, 1.0e-12);
 
     let pcurve_id = PcurveEvaluatorId::new("pcurve:1").unwrap();
     let pcurve = ExactPcurveEvaluator::derivatives(
@@ -71,8 +84,16 @@ fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
         &control,
     )
     .unwrap();
-    assert_near(pcurve.point_uv[0], 0.0, 1.0e-14);
-    assert_near(pcurve.point_uv[1], 1.0, 1.0e-14);
+    assert_near(
+        pcurve.point_uv[0].with_native_coordinate(|value, _frame| value),
+        0.0,
+        1.0e-14,
+    );
+    assert_near(
+        pcurve.point_uv[1].with_native_coordinate(|value, _frame| value),
+        1.0,
+        1.0e-14,
+    );
 }
 
 #[test]
@@ -82,7 +103,7 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     topology.edges[0].is_closed = false;
     let mut end_vertex = topology.vertices[0].clone();
     end_vertex.id.source_topology_id = "vertex-end".into();
-    end_vertex.point_m = [1.0, 0.0, 0.0];
+    end_vertex.point_m = crate::physical::Position::new([1.0, 0.0, 0.0]);
     topology.edges[0].end_vertex_id = Some(end_vertex.id.clone());
     topology.vertices.push(end_vertex);
     let mut registry = registry();
@@ -91,7 +112,14 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
             definition: NurbsCurve3 {
                 degree: 2,
                 knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                control_points_m: vec![[0.0, 0.0, 0.0], [0.5, 1.0, 0.0], [1.0, 0.0, 0.0]],
+                control_points_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(vec![
+                    [0.0, 0.0, 0.0],
+                    [0.5, 1.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                ]),
                 weights: vec![1.0, 1.0, 1.0],
                 domain: ParameterRange {
                     start: 0.0,
@@ -122,11 +150,24 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     let control = generous_control();
     let id = CurveEvaluatorId::new("curve:1").unwrap();
     let value = ExactCurveEvaluator::derivatives(&evaluator, &id, 0.5, &control).unwrap();
-    assert_eq!(value.point_m, [0.5, 0.5, 0.0]);
-    assert_eq!(value.first_m, [1.0, 0.0, 0.0]);
-    assert_eq!(value.second_m, [0.0, -4.0, 0.0]);
+    assert_eq!(value.point_m.canonical_value(), [0.5, 0.5, 0.0]);
+    assert_eq!(
+        value
+            .first_m
+            .with_canonical_storage(|values, _frames| *values),
+        [1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        value
+            .second_m
+            .with_canonical_storage(|values, _frames| *values),
+        [0.0, -4.0, 0.0]
+    );
     assert_near(
-        evaluator.curvature_1_per_m(&id, 0.5, &control).unwrap(),
+        evaluator
+            .curvature_1_per_m(&id, 0.5, &control)
+            .unwrap()
+            .canonical_value(),
         4.0,
         1.0e-12,
     );
@@ -137,11 +178,11 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
                 start: 0.0,
                 end: 1.0,
             },
-            1.0e-10,
+            crate::physical::Length::new(1.0e-10),
             &control,
         )
         .unwrap();
-    assert_near(length, 1.478_942_857_5, 1.0e-9);
+    assert_near(length.canonical_value(), 1.478_942_857_5, 1.0e-9);
     let repeated_length = evaluator
         .arc_length_m(
             &id,
@@ -149,16 +190,30 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
                 start: 0.0,
                 end: 1.0,
             },
-            1.0e-10,
+            crate::physical::Length::new(1.0e-10),
             &generous_control(),
         )
         .unwrap();
-    assert_eq!(length.to_bits(), repeated_length.to_bits());
+    assert_eq!(
+        length.canonical_value().to_bits(),
+        repeated_length.canonical_value().to_bits()
+    );
     let projection = evaluator
-        .inverse_project(&id, [0.5, 0.6, 0.0], 1.0e-10, &control)
+        .inverse_project(
+            &id,
+            crate::physical::Position::new([0.5, 0.6, 0.0]),
+            crate::physical::Length::new(1.0e-10),
+            &control,
+        )
         .unwrap();
-    assert_near(projection.parameter, 0.5, 1.0e-8);
-    assert_near(projection.distance_m, 0.1, 1.0e-8);
+    assert_near(
+        projection
+            .parameter
+            .with_native_coordinate(|value, _frame| value),
+        0.5,
+        1.0e-8,
+    );
+    assert_near(projection.distance_m.canonical_value(), 0.1, 1.0e-8);
     let pcurve = ExactPcurveEvaluator::derivatives(
         &evaluator,
         &PcurveEvaluatorId::new("pcurve:1").unwrap(),
@@ -166,9 +221,21 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
         &control,
     )
     .unwrap();
-    assert_near(pcurve.point_uv[0], 0.5, 1.0e-14);
-    assert_near(pcurve.point_uv[1], 1.0 / 3.0, 1.0e-14);
-    assert_near(pcurve.first_uv[0], 4.0 / 3.0, 1.0e-14);
+    assert_near(
+        pcurve.point_uv[0].with_native_coordinate(|value, _frame| value),
+        0.5,
+        1.0e-14,
+    );
+    assert_near(
+        pcurve.point_uv[1].with_native_coordinate(|value, _frame| value),
+        1.0 / 3.0,
+        1.0e-14,
+    );
+    assert_near(
+        pcurve.first_uv[0].with_native_coefficient(|value, _numerator, _denominators| value),
+        4.0 / 3.0,
+        1.0e-14,
+    );
 
     let error = evaluator
         .arc_length_m(
@@ -177,7 +244,7 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
                 start: 0.0,
                 end: 1.0,
             },
-            1.0e-12,
+            crate::physical::Length::new(1.0e-12),
             &BudgetControl::new(5, u64::MAX),
         )
         .unwrap_err();
@@ -197,10 +264,10 @@ fn analytic_line_projection_clamps_to_its_exact_domain() {
     let mut topology = topology();
     topology.edges[0].is_periodic = false;
     topology.edges[0].is_closed = false;
-    topology.vertices[0].point_m = [1.0, 0.0, 0.0];
+    topology.vertices[0].point_m = crate::physical::Position::new([1.0, 0.0, 0.0]);
     let mut end_vertex = topology.vertices[0].clone();
     end_vertex.id.source_topology_id = "vertex-end".into();
-    end_vertex.point_m = [5.0, 0.0, 0.0];
+    end_vertex.point_m = crate::physical::Position::new([5.0, 0.0, 0.0]);
     topology.edges[0].end_vertex_id = Some(end_vertex.id.clone());
     topology.vertices.push(end_vertex);
     let mut registry = registry();
@@ -210,7 +277,10 @@ fn analytic_line_projection_clamps_to_its_exact_domain() {
     };
     registry.curves[0].implementation = ExactCurveImplementation::Portable {
         definition: ExactCurveDefinition::Line {
-            origin_m: [1.0, 0.0, 0.0],
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [1.0, 0.0, 0.0],
+                ),
             direction_m_per_parameter: [2.0, 0.0, 0.0],
             domain,
         },
@@ -228,21 +298,38 @@ fn analytic_line_projection_clamps_to_its_exact_domain() {
     let id = CurveEvaluatorId::new("curve:1").unwrap();
     let control = generous_control();
     assert_eq!(
-        ExactCurveEvaluator::point(&evaluator, &id, 1.0, &control).unwrap(),
+        ExactCurveEvaluator::point(&evaluator, &id, 1.0, &control)
+            .unwrap()
+            .canonical_value(),
         [3.0, 0.0, 0.0]
     );
     assert_eq!(
         evaluator
-            .arc_length_m(&id, domain, 1.0e-12, &control)
-            .unwrap(),
+            .arc_length_m(&id, domain, crate::physical::Length::new(1.0e-12), &control)
+            .unwrap()
+            .canonical_value(),
         4.0
     );
     let projection = evaluator
-        .inverse_project(&id, [8.0, 1.0, 0.0], 1.0e-12, &control)
+        .inverse_project(
+            &id,
+            crate::physical::Position::new([8.0, 1.0, 0.0]),
+            crate::physical::Length::new(1.0e-12),
+            &control,
+        )
         .unwrap();
-    assert_eq!(projection.parameter, 2.0);
-    assert_eq!(projection.point_m, [5.0, 0.0, 0.0]);
-    assert_near(projection.distance_m, 10.0f64.sqrt(), 1.0e-14);
+    assert_eq!(
+        projection
+            .parameter
+            .with_native_coordinate(|value, _frame| value),
+        2.0
+    );
+    assert_eq!(projection.point_m.canonical_value(), [5.0, 0.0, 0.0]);
+    assert_near(
+        projection.distance_m.canonical_value(),
+        10.0f64.sqrt(),
+        1.0e-14,
+    );
 }
 
 #[test]
@@ -268,14 +355,19 @@ fn kernel_ownership_cancellation_and_budgets_fail_explicitly() {
         ExactCurveEvaluator::point(&evaluator, &id, 0.0, &BudgetControl::cancelled()).unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::Cancelled);
     let error = evaluator
-        .inverse_project(&id, [0.0, 2.0, 0.0], 1.0e-12, &BudgetControl::new(1, 1))
+        .inverse_project(
+            &id,
+            crate::physical::Position::new([0.0, 2.0, 0.0]),
+            crate::physical::Length::new(1.0e-12),
+            &BudgetControl::new(1, 1),
+        )
         .unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::BudgetExceeded);
     let error = evaluator
         .inverse_project(
             &id,
-            [0.0, 2.0, 0.0],
-            1.0e-12,
+            crate::physical::Position::new([0.0, 2.0, 0.0]),
+            crate::physical::Length::new(1.0e-12),
             &BudgetControl::new(u64::MAX, 0),
         )
         .unwrap_err();

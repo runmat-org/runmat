@@ -25,12 +25,17 @@ fn prepared_candidate_locations_match_exhaustive_ieee_equality_with_bounded_quer
             [0.25; 3],
             [0.25f64.next_up(), 0.25, 0.25],
             [-2.0; 3],
-            topology.nodes.last().unwrap().coordinates_m,
+            topology
+                .nodes
+                .last()
+                .unwrap()
+                .coordinates_m
+                .canonical_value(),
         ] {
             let reference = topology
                 .nodes
                 .iter()
-                .any(|node| node.coordinates_m == point);
+                .any(|node| node.coordinates_m.canonical_value() == point);
             probe.calls.store(0, Ordering::Relaxed);
             assert_eq!(index.contains_location(point, &probe).unwrap(), reference);
             assert!(
@@ -91,13 +96,13 @@ fn accepted_point_append_is_transactional_and_preserves_original_coordinate_look
         Err(error) if error.kind==DelaunayVolumeRefinementCandidateErrorKind::Cancelled));
     assert_eq!(index.locations.len(), topology.nodes.len());
     assert!(!index
-        .contains_location(first.coordinates_m, &unlimited)
+        .contains_location(first.coordinates_m.canonical_value(), &unlimited)
         .unwrap());
     index.append(&[first, second], &unlimited).unwrap();
     assert_eq!(index.locations.len(), topology.nodes.len() + 2);
     for point in [
-        first.coordinates_m,
-        second.coordinates_m,
+        first.coordinates_m.canonical_value(),
+        second.coordinates_m.canonical_value(),
         [-0.0, 0.0, 0.0],
         [5.0; 3],
     ] {
@@ -105,7 +110,7 @@ fn accepted_point_append_is_transactional_and_preserves_original_coordinate_look
             .nodes
             .iter()
             .chain([&first, &second])
-            .any(|node| node.coordinates_m == point);
+            .any(|node| node.coordinates_m.canonical_value() == point);
         assert_eq!(
             index.contains_location(point, &unlimited).unwrap(),
             reference
@@ -125,7 +130,7 @@ fn insertion_view_retains_canonical_authority_and_coordinate_uniqueness() {
             view.node_index(node.identity),
             topology.node_index(node.identity)
         );
-        assert!(view.contains_position(node.coordinates_m));
+        assert!(view.contains_position(node.coordinates_m.canonical_value()));
     }
     for point in [[-0.0; 3], [0.25; 3], [0.125; 3], [f64::MAX; 3]] {
         assert_eq!(

@@ -272,7 +272,7 @@ pub use self::engine::{
     render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
     render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
     render_figure_snapshot, render_figure_snapshot_with_camera_state,
-    render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state,
+    measure_geometry_scene_observation, render_geometry_scene_observation_snapshot, render_geometry_observation_snapshot, render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state,
 };
 pub(crate) use self::error::{plotting_error, plotting_error_with_source};
 pub use self::figure_scene::present_figure_on_surface;

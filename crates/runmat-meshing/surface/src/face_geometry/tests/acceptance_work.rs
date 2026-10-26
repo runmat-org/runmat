@@ -63,7 +63,7 @@ fn insufficient_adaptive_sample_budget_rejects_before_geometry_work() {
             minimum_metric_edge_length: 0.01,
             minimum_metric_angle_degrees: 0.1,
             maximum_physical_aspect_ratio: 1000.0,
-            maximum_chordal_deviation_m: 0.0001,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0001),
             maximum_normal_deviation_degrees: 180.0,
         },
         crate::ExactFaceAcceptanceOptions {

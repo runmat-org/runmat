@@ -72,7 +72,7 @@ pub(super) fn velocity<'a>(
         InitialValue::FieldArtifact(_) => {
             return Ok(Vector::Field(field(condition, source, fields)?))
         }
-        InitialValue::UniformVector3(v) => v.map(|v| v.meters_per_second),
+        InitialValue::UniformVector3(v) => v.map(|v| v.canonical_value()),
         InitialValue::SignalSample {
             signal_id,
             abscissa,
@@ -121,7 +121,7 @@ pub(super) fn pressure<'a>(
         InitialValue::FieldArtifact(_) => {
             return Ok(Scalar::Field(field(condition, source, fields)?))
         }
-        InitialValue::Uniform(v) => v.pascals,
+        InitialValue::Uniform(v) => v.canonical_value(),
         InitialValue::SignalSample {
             signal_id,
             abscissa,

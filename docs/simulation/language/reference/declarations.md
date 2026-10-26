@@ -71,7 +71,7 @@ geometry bracket {
     file = "./geometry/bracket.step"
     units = mm
     region body : solid {
-        select id "solid_000001"
+        select name "body"
         expect exactly_one
     }
 }

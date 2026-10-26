@@ -84,7 +84,7 @@ pub struct ExactFaceGeometry {
     pub maximum_metric_edge_length: f64,
     pub minimum_metric_angle_rad: f64,
     pub maximum_physical_aspect_ratio: f64,
-    pub maximum_chordal_deviation_m: f64,
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_normal_deviation_rad: f64,
 }
 

@@ -17,6 +17,7 @@ pub struct CadPreviewSessionStart {
     pub path: String,
     pub format: GeometryFormat,
     pub face_count: u64,
+    selection_projection: std::sync::Arc<crate::ExactSelectionProjection>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +40,13 @@ pub fn start_cad_preview_session(
     let Some(occt_format) = OcctCadFormat::from_geometry_format(format) else {
         return Err(GeometryImportError::UnsupportedFormat);
     };
+    let selection_projection = std::sync::Arc::new(crate::ExactSelectionProjection::import(
+        path,
+        bytes,
+        format,
+        options.source_units,
+        context,
+    )?);
     let session = occt::start_cad_preview_session(path, bytes, occt_format, &options, context)?;
     context.check_cancelled()?;
     Ok(CadPreviewSessionStart {
@@ -46,20 +54,20 @@ pub fn start_cad_preview_session(
         path: path.to_string(),
         format,
         face_count: session.face_count,
+        selection_projection,
     })
 }
 
 pub fn read_cad_preview_session_chunk(
-    session_id: u64,
-    path: &str,
-    format: GeometryFormat,
+    session: &CadPreviewSessionStart,
     target_triangles: u64,
     max_faces: u64,
     options: GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<CadPreviewSessionChunk, GeometryImportError> {
     context.check_cancelled()?;
-    let Some(occt_format) = OcctCadFormat::from_geometry_format(format) else {
+    let session_id = session.session_id;
+    let Some(occt_format) = OcctCadFormat::from_geometry_format(session.format) else {
         return Err(GeometryImportError::UnsupportedFormat);
     };
     let chunk = occt::read_cad_preview_session_chunk(
@@ -70,7 +78,9 @@ pub fn read_cad_preview_session_chunk(
         context,
     )?;
     context.check_cancelled()?;
-    let result = cad::build_topology_result(path, occt_format, chunk.topology, None, options)?;
+    let mut result =
+        cad::build_topology_result(&session.path, occt_format, chunk.topology, None, options)?;
+    session.selection_projection.bind(&mut result.asset)?;
     Ok(CadPreviewSessionChunk {
         session_id,
         done: chunk.done,

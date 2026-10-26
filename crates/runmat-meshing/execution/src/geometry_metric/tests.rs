@@ -120,12 +120,26 @@ fn concurrent_consumers_prepare_once_preserve_authority_and_admit_each_borrow() 
         .unwrap();
     assert_eq!(count.load(Ordering::Relaxed), 2);
     assert!(!Arc::ptr_eq(&next, &fields[0]));
-    changed.quality.surface.maximum_chordal_deviation_m *= 0.5;
+    changed.quality.surface.maximum_chordal_deviation_m = runmat_types::physical::Quantity::new(
+        changed
+            .quality
+            .surface
+            .maximum_chordal_deviation_m
+            .canonical_value()
+            * (0.5),
+    );
     provider
         .geometry_metric(&geometry, evaluator.as_ref(), &control, &changed)
         .unwrap();
     assert_eq!(count.load(Ordering::Relaxed), 3);
-    changed.quality.curve.maximum_chordal_deviation_m *= 0.5;
+    changed.quality.curve.maximum_chordal_deviation_m = runmat_types::physical::Quantity::new(
+        changed
+            .quality
+            .curve
+            .maximum_chordal_deviation_m
+            .canonical_value()
+            * (0.5),
+    );
     provider
         .geometry_metric(&geometry, evaluator.as_ref(), &control, &changed)
         .unwrap();

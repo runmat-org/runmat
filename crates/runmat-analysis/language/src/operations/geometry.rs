@@ -123,16 +123,22 @@ fn operation(name: &str, parameters: &[(&str, OperationTypePattern)]) -> Operati
 }
 
 fn length() -> OperationTypePattern {
-    OperationTypePattern::Quantity(runmat_types::QuantityDimension::Length)
+    OperationTypePattern::Quantity(runmat_types::physical::DynamicDimension::from(
+        runmat_types::PhysicalDimension::LENGTH,
+    ))
 }
 
 fn angle() -> OperationTypePattern {
-    OperationTypePattern::Quantity(runmat_types::QuantityDimension::Dimensionless)
+    OperationTypePattern::Quantity(runmat_types::physical::DynamicDimension::quantity_type(
+        runmat_types::physical::QuantityKind::Angle,
+    ))
 }
 
 fn length_vector() -> OperationTypePattern {
     OperationTypePattern::VectorQuantity {
-        dimension: runmat_types::QuantityDimension::Length,
+        dimension: runmat_types::physical::DynamicDimension::from(
+            runmat_types::PhysicalDimension::LENGTH,
+        ),
         length: Some(3),
     }
 }

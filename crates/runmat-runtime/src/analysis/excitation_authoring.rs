@@ -16,7 +16,7 @@ pub(crate) enum ConstantExcitation {
     ElectricCurrent {
         real_amperes: f64,
         imaginary_amperes: f64,
-        frequency_hz: Option<f64>,
+        frequency_hz: Option<runmat_types::physical::Frequency>,
     },
 }
 

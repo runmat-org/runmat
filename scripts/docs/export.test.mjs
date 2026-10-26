@@ -8,7 +8,7 @@ import { hash, verifyArtifact, inventory, writeManifest } from "./manifest.mjs";
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "runmat-docs-export-test-"));
     const source = resolve(import.meta.dirname, "../..");
-    for (const file of ["docs/catalog.json", "docs/simulation/manual.json", "docs/simulation/examples/catalog.json", "docs/simulation/physics/structural-static.md", "docs/simulation/validation/methodology.md", "docs/simulation/validation/structural.md", "docs/simulation/examples/structural-static-experimental.fea", "docs/simulation/examples/geometry/two-box-assembly.step"]) {
+    for (const file of ["docs/catalog.json", "docs/simulation/manual.json", "docs/simulation/examples/catalog.json", "docs/simulation/physics/structural-static.md", "docs/simulation/validation/methodology.md", "docs/simulation/validation/structural.md", "docs/simulation/examples/structural-static-experimental.fea", "docs/simulation/examples/geometry/.runmat/geometry/two-box-assembly.step.json", "docs/simulation/examples/geometry/two-box-assembly.step"]) {
         mkdirSync(join(root, file, ".."), { recursive: true });
         cpSync(join(source, file), join(root, file));
     }
@@ -37,7 +37,7 @@ test("repeat exports preserve exact manifests and complete deterministic example
         assert.equal(first.content_hash, second.content_hash);
         verifyArtifact(options.output);
         const catalog = JSON.parse(readFileSync(join(options.output, "examples/catalog.json")));
-        assert.deepEqual(catalog.examples[0].files.map(file => file.path), ["structural-static-experimental.fea", "geometry/two-box-assembly.step"]);
+        assert.deepEqual(catalog.examples[0].files.map(file => file.path), ["structural-static-experimental.fea", "geometry/two-box-assembly.step", "geometry/.runmat/geometry/two-box-assembly.step.json"]);
         const example = catalog.examples[0];
         assert.equal(hash(JSON.stringify(example.package_identity)), example.digest);
         assert.equal(example.package_identity.entry, example.entry);
@@ -68,7 +68,7 @@ test("omitting the referenced STEP geometry rejects the package", () => {
     try {
         const path = join(root, "docs/simulation/examples/catalog.json");
         const catalog = JSON.parse(readFileSync(path));
-        catalog.examples[0].files = [catalog.examples[0].entry];
+        catalog.examples[0].files = catalog.examples[0].files.filter(file => !file.endsWith(".step"));
         writeFileSync(path, JSON.stringify(catalog));
         assert.throws(() => buildSourceDocs(options), /Undeclared example dependency/);
     }

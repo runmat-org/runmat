@@ -47,7 +47,7 @@ pub(super) fn seed_carved_regions(
         if let Some(existing) = topology
             .nodes
             .iter()
-            .find(|node| node.coordinates_m == coordinates_m)
+            .find(|node| node.coordinates_m.canonical_value() == coordinates_m)
         {
             if existing.identity == region_seed_identity(region) {
                 node_identities.push(existing.identity);
@@ -132,9 +132,11 @@ fn region_seed(
         .iter()
         .filter(|tetrahedron| tetrahedron.region_id.as_ref() == Some(region))
         .map(|tetrahedron| {
-            let points = tetrahedron
-                .vertex_indices
-                .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            let points = tetrahedron.vertex_indices.map(|vertex| {
+                topology.nodes[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            });
             (points, tetrahedron_volume(points))
         })
         .collect::<Vec<_>>();

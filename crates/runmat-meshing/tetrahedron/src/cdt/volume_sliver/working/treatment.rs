@@ -301,7 +301,7 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
             state
                 .topology()
                 .node_index(identity)
-                .map(|index| state.topology().node(index).coordinates_m)
+                .map(|index| state.topology().node(index).coordinates_m.canonical_value())
         });
         let error = error(DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization, format!(
             "no legal reconnection, interior relocation, or protected-boundary insertion improves volume defect {} at {:?} with {} boundary nodes and {} protected facets, optimization ratio {}, scaled Jacobian {}, and target {}; reconnection rejections {:?}; relocation rejections {:?}; insertion rejections {:?}; first insertion rejection details {:?}",

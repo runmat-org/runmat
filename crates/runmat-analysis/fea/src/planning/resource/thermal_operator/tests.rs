@@ -89,11 +89,29 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
             rejected.to_string().contains("OutsidePlannedPattern"),
             "{rejected}"
         );
-        let live_assembly_arrays = std::mem::size_of_val(assembly.applied_source.as_slice())
-            + std::mem::size_of_val(assembly.positive_robin_weight.as_slice())
-            + std::mem::size_of_val(assembly.prescribed_temperature_k.as_slice())
-            + std::mem::size_of_val(assembly.element_conductivity_w_per_mk.as_slice())
-            + std::mem::size_of_val(assembly.element_volumetric_capacity_j_per_m3k.as_slice());
+        let live_assembly_arrays =
+            std::mem::size_of_val(assembly.applied_source.canonical_values().as_slice())
+                + std::mem::size_of_val(
+                    assembly.positive_robin_weight.canonical_values().as_slice(),
+                )
+                + std::mem::size_of_val(
+                    assembly
+                        .prescribed_temperature_k
+                        .canonical_values()
+                        .as_slice(),
+                )
+                + std::mem::size_of_val(
+                    assembly
+                        .element_conductivity_w_per_mk
+                        .canonical_values()
+                        .as_slice(),
+                )
+                + std::mem::size_of_val(
+                    assembly
+                        .element_volumetric_capacity_j_per_m3k
+                        .canonical_values()
+                        .as_slice(),
+                );
         let construction_property_arrays = 2 * projection.elements.len() * 8;
         assert_eq!(
             facts.workspace().assembly_vector_bytes.0,

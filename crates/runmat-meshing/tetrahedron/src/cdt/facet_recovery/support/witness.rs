@@ -20,6 +20,7 @@ pub(super) fn report(
             id,
             recovery.topology.nodes()[node]
                 .coordinates_m
+                .canonical_value()
                 .map(f64::to_bits),
             recovery.topology.nodes()[node].construction,
             membership.get(&id),
@@ -29,6 +30,7 @@ pub(super) fn report(
         node_index(recovery.topology, id).map(|index| {
             recovery.topology.nodes()[index]
                 .coordinates_m
+                .canonical_value()
                 .map(f64::to_bits)
         })
     });

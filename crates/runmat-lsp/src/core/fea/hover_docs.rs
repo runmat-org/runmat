@@ -4,6 +4,7 @@
 //! checked program, so this catalog cannot become a second semantic schema.
 
 use runmat_analysis_language::{FeaType, PhysicalDimension};
+use runmat_types::physical::{DynamicDimension, QuantityKind};
 
 pub(super) struct AuthoringDoc {
     pub summary: &'static str,
@@ -12,8 +13,8 @@ pub(super) struct AuthoringDoc {
 
 pub(super) fn fallback_authoring_doc() -> AuthoringDoc {
     AuthoringDoc {
-        summary: "Checked property of the enclosing typed FEA resource.",
-        detail: "RunMat derives this property's value type from the canonical authoring contract and validates its shape, physical dimension, and admissibility before execution.",
+        summary: "Checked property of this simulation.",
+        detail: "RunMat checks this property's value, shape, and physical units before running the simulation.",
     }
 }
 
@@ -227,13 +228,26 @@ fn type_name(value: &FeaType) -> String {
         FeaType::Record(_) => "record".into(),
         FeaType::Unknown => "inferred value".into(),
         FeaType::Error => "invalid value".into(),
-        _ => "typed FEA value".into(),
+        _ => "simulation value".into(),
     }
 }
 
 fn dimension_help(
-    dimension: PhysicalDimension,
+    descriptor: DynamicDimension,
 ) -> Option<(&'static str, &'static str, &'static str)> {
+    if descriptor.kind() == Some(QuantityKind::TemperatureDifference) {
+        return Some(("temperature difference", "K", "`10 K`, `5 delta_degC`"));
+    }
+    if descriptor == DynamicDimension::quantity_type(QuantityKind::Angle)
+        || descriptor.kind() == Some(QuantityKind::Angle)
+    {
+        return Some(("angle", "rad", "`45 deg`, `0.5 rad`"));
+    }
+    // A nominal angle power cannot be described using its SI exponents alone.
+    if descriptor.angle_power() != 0 {
+        return None;
+    }
+    let dimension = descriptor.dimension();
     Some(if dimension == PhysicalDimension::DIMENSIONLESS {
         ("dimensionless", "1", "`0.3`, `2 %`")
     } else if dimension == PhysicalDimension::LENGTH {

@@ -47,7 +47,7 @@ pub(super) fn measure(
         .topology
         .nodes
         .iter()
-        .map(|n| (n.node_id, n.coordinates_m))
+        .map(|n| (n.node_id, n.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut means = BTreeMap::<_, (f64, f64)>::new();
     assert_eq!(
@@ -142,7 +142,9 @@ fn split_tetrahedral_norms_equal_independent_piecewise_cube_integrals() {
             let mut total_volume = 0.0;
             for element in &mesh.topology.volume_elements {
                 let tet = std::array::from_fn(|i| {
-                    mesh.topology.nodes[element.node_ids[i] as usize - 1].coordinates_m
+                    mesh.topology.nodes[element.node_ids[i] as usize - 1]
+                        .coordinates_m
+                        .canonical_value()
                 });
                 for piece in pieces(tet, factor) {
                     total_volume += volume(piece);

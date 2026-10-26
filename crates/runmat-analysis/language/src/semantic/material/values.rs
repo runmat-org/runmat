@@ -103,7 +103,7 @@ fn quantity(
     dimension: PhysicalDimension,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
-    if value.value_type != FeaType::Quantity(dimension) {
+    if !(value.value_type).is_quantity((dimension).into()) {
         invalid(
             declaration,
             name,
@@ -113,6 +113,21 @@ fn quantity(
         );
         return None;
     }
+    if dimension == PhysicalDimension::TEMPERATURE
+        && value
+            .validate_quantity_kind(runmat_types::physical::QuantityKind::Temperature)
+            .is_err()
+    {
+        invalid(
+            declaration,
+            name,
+            "absolute reference temperature",
+            value,
+            diagnostics,
+        );
+        return None;
+    }
+
     canonical_scalar(value)
 }
 
@@ -132,20 +147,16 @@ pub(super) fn typed_quantity(
     value: &CheckedExpression,
     dimension: PhysicalDimension,
 ) -> Option<f64> {
-    (value.value_type == FeaType::Quantity(dimension)).then(|| canonical_scalar(value))?
+    ((value.value_type).is_quantity((dimension).into())).then(|| canonical_scalar(value))?
 }
 
 fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
         CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
-        CheckedExpressionKind::Quantity {
-            value,
-            scale_bits,
-            offset_bits,
-        } => Some(
-            canonical_scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits),
-        ),
+        CheckedExpressionKind::Quantity { value, unit, .. } => {
+            unit.to_canonical(canonical_scalar(value)?).ok()
+        }
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = canonical_scalar(operand)?;
             Some(match operator {

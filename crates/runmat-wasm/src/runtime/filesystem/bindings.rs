@@ -48,6 +48,9 @@ pub(super) struct JsFsFuncs {
 }
 
 impl JsFsFuncs {
+    pub(super) fn supports_workspace_transactions(&self) -> bool {
+        self.capture_workspace.is_some() && self.publish_workspace.is_some() && self.lookup_workspace_publication.is_some()
+    }
     pub(super) fn supports_read(&self) -> bool {
         self.read_file.is_some()
     }

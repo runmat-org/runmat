@@ -12,9 +12,9 @@ pub use payload::{
     FACETED_SOLID_MEDIA_TYPE,
 };
 
-use super::{GeometryContractError, GeometryTolerancePolicy, UnitSystem};
+use super::{GeometryContractError, GeometryTolerancePolicy};
 
-pub const GEOMETRY_DOCUMENT_SCHEMA_VERSION: u16 = 2;
+pub const GEOMETRY_DOCUMENT_SCHEMA_VERSION: u16 = 3;
 pub const GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -70,8 +70,9 @@ pub struct GeometrySourceIdentity {
     pub importer_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel_version: Option<String>,
-    pub source_units: UnitSystem,
-    pub meters_per_source_unit: f64,
+    pub unit_evidence: runmat_types::physical::LengthUnitEvidence,
+    pub representation_units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::KernelCoordinates>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -83,9 +83,16 @@ pub fn derive_curve_geometry_metric(
                 control,
             )
             .map_err(|error| geometry_error(edge, error))?;
-            let first = transform.transform_vector(derivatives.first_m);
-            let second = transform.transform_vector(derivatives.second_m);
-            let point = transform.transform_point(derivatives.point_m);
+            let derivatives = derivatives
+                .transformed(&transform)
+                .map_err(|error| geometry_error(edge, error))?;
+            let first = derivatives
+                .first_m
+                .with_canonical_storage(|values, _axes| *values);
+            let second = derivatives
+                .second_m
+                .with_canonical_storage(|values, _axes| *values);
+            let point = *derivatives.point_m.canonical_values();
             witness_points.push(point);
             let speed = norm(first);
             let curvature = norm(cross(first, second)) / speed.powi(3);
@@ -102,7 +109,7 @@ pub fn derive_curve_geometry_metric(
             if curvature > 0.0 {
                 let size = curvature_target_size(
                     curvature,
-                    curve_quality.maximum_chordal_deviation_m,
+                    curve_quality.maximum_chordal_deviation_m.canonical_value(),
                     curve_quality.maximum_tangent_change_degrees,
                 )
                 .ok_or_else(|| {

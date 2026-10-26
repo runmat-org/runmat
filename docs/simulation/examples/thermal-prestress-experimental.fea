@@ -1,18 +1,12 @@
+geometry selection.
+// Engineering physics belongs in the importing study.
+
 geometry part {
     file = "./geometry/box.brep"
     units = m
-    region body : solid {
-        select id "solid_000001"
-        expect exactly_one
-    }
-    region support : face {
-        select id "face_000001"
-        expect exactly_one
-    }
-    region hot : face {
-        select id "face_000002"
-        expect exactly_one
-    }
+    region body : solid { select name "body"; expect exactly_one }
+    region support : face { select name "support"; expect exactly_one }
+    region hot : face { select name "hot"; expect exactly_one }
 }
 mesh volume on geometry.part {
     tetrahedra {

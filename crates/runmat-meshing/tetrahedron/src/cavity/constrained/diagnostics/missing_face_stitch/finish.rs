@@ -23,7 +23,10 @@ pub(super) fn finish_missing_face_stitch_candidates(
         .iter()
         .map(|(node_id, coordinates_m)| ConnectivityPoint {
             node_id: *node_id,
-            coordinates_m: *coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(*coordinates_m),
             is_super: false,
         })
         .collect::<Vec<_>>();
@@ -40,7 +43,7 @@ pub(super) fn finish_missing_face_stitch_candidates(
         }
         let tetrahedron_points = tetrahedron
             .vertices
-            .map(|index| connector_points[index].coordinates_m);
+            .map(|index| connector_points[index].coordinates_m.canonical_value());
         if point_in_closed_triangle_surface(
             tetrahedron_centroid(tetrahedron_points),
             boundary_triangles,

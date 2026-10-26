@@ -5,6 +5,8 @@
 #include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
@@ -241,6 +243,11 @@ OcctCurveDerivativesPayload exact_curve_derivatives(std::uint64_t session_id,
   curve.D2(parameter, point, first, second);
   const double scale = value->meters_per_source_unit;
   OcctCurveDerivativesPayload result;
+  // Native line parameters use source-coordinate length; conic parameters are
+  // radians. Other bases retain their named native axis rather than guessed units.
+  result.parameter_unit = curve.GetType() == GeomAbs_Line ? 1 :
+      ((curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0);
+  result.parameter_scale = scale;
   result.point_x = point.X() * scale;
   result.point_y = point.Y() * scale;
   result.point_z = point.Z() * scale;
@@ -325,6 +332,9 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
   }
 
   OcctCurveProjectionPayload result;
+  result.parameter_unit = curve.GetType() == GeomAbs_Line ? 1 :
+      ((curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0);
+  result.parameter_scale = scale;
   result.parameter = best_parameter;
   result.point_x = best_point.X() * scale;
   result.point_y = best_point.Y() * scale;
@@ -367,6 +377,19 @@ OcctPcurveDerivativesPayload exact_pcurve_derivatives(
   gp_Vec2d second;
   pcurve_value.curve->D2(parameter, point, first, second);
   OcctPcurveDerivativesPayload result;
+  const Geom2dAdaptor_Curve curve(pcurve_value.curve);
+  result.parameter_unit = (curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0;
+  const BRepAdaptor_Surface surface(face(*value, face_key), Standard_True);
+  result.parameter_scale = value->meters_per_source_unit;
+  result.u_parameter_unit = 0;
+  result.v_parameter_unit = 0;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: result.u_parameter_unit = 1; result.v_parameter_unit = 1; break;
+    case GeomAbs_Cylinder: result.u_parameter_unit = 2; result.v_parameter_unit = 1; break;
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: result.u_parameter_unit = 2; result.v_parameter_unit = 2; break;
+    default: break;
+  }
   result.range_start = pcurve_value.start;
   result.range_end = pcurve_value.end;
   result.point_u = point.X();

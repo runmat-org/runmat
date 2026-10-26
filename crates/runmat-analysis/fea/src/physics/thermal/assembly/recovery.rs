@@ -42,7 +42,7 @@ impl ThermalOperatorAssembly {
         Ok(self
             .recover_element_temperature_gradients(temperature_k)?
             .into_iter()
-            .zip(&self.element_conductivity_w_per_mk)
+            .zip(self.element_conductivity_w_per_mk.canonical_values())
             .map(|(gradient, conductivity)| gradient.map(|value| -conductivity * value))
             .collect())
     }
@@ -71,8 +71,9 @@ impl ThermalOperatorAssembly {
                                     / time_step_s
                             })
                             .sum::<f64>();
-                        integrated_rate += self.element_volumetric_capacity_j_per_m3k
-                            [element_index]
+                        integrated_rate += self
+                            .element_volumetric_capacity_j_per_m3k
+                            .canonical_values()[element_index]
                             * temperature_rate
                             * point.volume_weight_m3;
                         volume += point.volume_weight_m3;

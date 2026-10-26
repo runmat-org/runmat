@@ -81,6 +81,8 @@ pub(super) fn validate_modal_demand(
         demand.modal_output_value_count_upper_bound.0,
         demand.retained_mode_count_upper_bound.0,
         demand.residual_vector_count.0,
+        demand.operator.sparse.rows.0,
+        demand.operator.topology.nodes.0,
     )?;
     if demand.result_output != expected_result {
         return Err(ResourcePlanningError::Invalid(

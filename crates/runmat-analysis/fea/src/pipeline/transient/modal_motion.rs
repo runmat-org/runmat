@@ -27,7 +27,9 @@ pub(super) fn solve_prescribed_modal_motion_block(
     basis: &ModalBasisArtifact,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, FeaRunError>,
 ) -> Result<StructuralTransientSegment, TransientSolveError<FeaRunError>> {
-    let initial_time_s = input.request.scope.schedule.points[0].time_s;
+    let initial_time_s = input.request.scope.schedule.points[0]
+        .time_s
+        .canonical_value();
     let initial = StructuralMotionSnapshot::reduce(
         input.summary.clone(),
         input.motions,
@@ -81,14 +83,26 @@ pub(super) fn solve_prescribed_modal_motion_block(
                     "modal support-motion snapshot at {time_s} s ({approach:?}) was not retained"
                 ))
                 })?;
-            let displacement = expansion
-                .expand_vector(state.displacement())
+            let displacement = (expansion)
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Displacement,
+                    _,
+                >::new(state.displacement()))
+                .map(|field| field.into_canonical_storage())
                 .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-            let velocity = expansion
-                .expand_vector(state.velocity())
+            let velocity = (expansion)
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Velocity,
+                    _,
+                >::new(state.velocity()))
+                .map(|field| field.into_canonical_storage())
                 .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-            let acceleration = expansion
-                .expand_vector(state.acceleration())
+            let acceleration = (expansion)
+                .expand_state(&runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Acceleration,
+                    _,
+                >::new(state.acceleration()))
+                .map(|field| field.into_canonical_storage())
                 .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
             let expanded = snapshot
                 .lift_homogeneous_state(&displacement, &velocity, &acceleration)

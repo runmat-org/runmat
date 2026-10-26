@@ -190,10 +190,10 @@ impl CanonicalNonlinearSolidBasis {
             }
             let coordinates: &[[f64; 3]] = match &initial_element.geometry {
                 super::super::SolidRecoveryGeometry::Tetrahedron4 { coordinates_m, .. } => {
-                    coordinates_m
+                    coordinates_m.canonical_values()
                 }
                 super::super::SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } => {
-                    coordinates_m
+                    coordinates_m.canonical_values()
                 }
             };
             let mechanical = owned
@@ -203,9 +203,11 @@ impl CanonicalNonlinearSolidBasis {
             if coordinates
                 .iter()
                 .zip(&element.node_indices)
-                .any(|(x, &node)| *x != projection.nodes[node].coordinates_m)
-                || initial_element.material.youngs_modulus_pa != mechanical.youngs_modulus_pa
-                || initial_element.material.poisson_ratio != mechanical.poisson_ratio
+                .any(|(x, &node)| *x != projection.nodes[node].coordinates_m.canonical_value())
+                || initial_element.material.youngs_modulus_pa.canonical_value()
+                    != mechanical.youngs_modulus_pa.canonical_value()
+                || initial_element.material.poisson_ratio.canonical_value()
+                    != mechanical.poisson_ratio.canonical_value()
             {
                 return Err(NonlinearSolidError::Authority(
                     "initial recovery geometry or elasticity differs from compiled owner".into(),

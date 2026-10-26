@@ -111,7 +111,7 @@ impl StructuralMotionSnapshot {
                     constraint_id: constraint_id.clone(),
                 })?;
             displacement.right_hand_side[row] = sample.displacement_m;
-            velocity.right_hand_side[row] = sample.velocity_m_per_s;
+            velocity.right_hand_side[row] = sample.velocity_m_per_s.canonical_value();
             acceleration.right_hand_side[row] = sample.acceleration_m_per_s2;
         }
         let displacement_reduction = displacement.affine_reduction()?;
@@ -159,6 +159,17 @@ impl StructuralMotionSnapshot {
         reduced_summary.affine_constraint_reduction = None;
         reduced_summary.physical_load = reduced_load.clone();
         reduced_summary.operator = reduced_operator;
+        reduced_summary.structural_reduced_basis = Some(
+            crate::assembly::physical_fields::StructuralReducedBasis::try_new(
+                &full_summary.structural_dof_layout,
+                reduction.clone(),
+            )
+            .map_err(|_| {
+                StructuralMotionReductionError::Operator(
+                    "invalid reduced structural coordinate basis".into(),
+                )
+            })?,
+        );
         let mut modal_summary = full_summary.clone();
         modal_summary.physical_load = effective_full;
         modal_summary.constraint_matrix = Some(homogeneous);
@@ -288,14 +299,17 @@ pub(super) fn solve_prescribed_motion(
     let initial = StructuralMotionSnapshot::reduce(
         summary.clone(),
         motions,
-        time_domain.start_time_s,
+        time_domain.start_time_s.canonical_value(),
         SignalSampleApproach::At,
     )
     .map_err(assembly_error)?;
     let reduced_displacement = initial.reduce_displacement(&initial_displacement);
     let reduced_velocity = initial.reduce_velocity(&initial_velocity);
     let snapshots = RefCell::new(BTreeMap::from([(
-        snapshot_key(time_domain.start_time_s, SignalSampleApproach::At),
+        snapshot_key(
+            time_domain.start_time_s.canonical_value(),
+            SignalSampleApproach::At,
+        ),
         initial.clone(),
     )]));
     let mut reduced_assembly_at = |time_s, approach| {
@@ -370,7 +384,7 @@ pub(super) fn solve_prescribed_motion(
             let snapshots = snapshots.borrow();
             retained_snapshot(
                 &snapshots,
-                interval.start_time_s,
+                interval.start_time_s.canonical_value(),
                 interval.start_approach,
                 "integration",
             )?
@@ -392,7 +406,7 @@ pub(super) fn solve_prescribed_motion(
             let snapshots = snapshots.borrow();
             retained_snapshot(
                 &snapshots,
-                interval.end_time_s,
+                interval.end_time_s.canonical_value(),
                 interval.end_approach,
                 "integration",
             )?

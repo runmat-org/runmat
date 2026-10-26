@@ -320,15 +320,15 @@ const FEA_AUTHORING_GEOMETRY_001: Requirement = Requirement {
         locator: WitnessLocator::CargoTest {
             package: "runmat-analysis-language",
             target: CargoTarget::Integration("geometry_features"),
-            name: "imported_source_aliases_and_persistent_ids_remain_distinct",
+            name: "imported_source_aliases_are_rejected",
             source: "crates/runmat-analysis/language/tests/geometry_features.rs",
         },
         claims: &[CoverageClaim {
             obligation: "persistent_topology",
             envelopes: SOURCE_CHECK,
             boundary: concat!(
-                "Compiler checks source alias versus persistent-id selectors remain distinct ",
-                "typed values; no native CAD feature history, regeneration or AP242 export ",
+                "Compiler rejects source aliases as persistent topology identities ",
+                "at the source boundary; no native CAD feature history, regeneration or AP242 export ",
                 "evidence.",
             ),
         }],

@@ -111,11 +111,18 @@ fn oriented_face_nodes(
             continue;
         }
         let points = [
-            input.volume_mesh.topology.nodes[oriented[0] as usize].coordinates_m,
-            input.volume_mesh.topology.nodes[oriented[1] as usize].coordinates_m,
-            input.volume_mesh.topology.nodes[oriented[2] as usize].coordinates_m,
+            input.volume_mesh.topology.nodes[oriented[0] as usize]
+                .coordinates_m
+                .canonical_value(),
+            input.volume_mesh.topology.nodes[oriented[1] as usize]
+                .coordinates_m
+                .canonical_value(),
+            input.volume_mesh.topology.nodes[oriented[2] as usize]
+                .coordinates_m
+                .canonical_value(),
             input.volume_mesh.topology.nodes[tetrahedron.vertex_indices[opposite] as usize]
-                .coordinates_m,
+                .coordinates_m
+                .canonical_value(),
         ];
         match orient3d(points)
             .map_err(|failure| invalid_mesh(format!("face orientation failed: {failure:?}")))?

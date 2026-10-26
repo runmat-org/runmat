@@ -284,7 +284,7 @@ study qualification {
             study: &realized_study,
             geometry_id: "part",
             geometry_revision: 1,
-            units: runmat_geometry_core::UnitSystem::Meter,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
             regions: &Default::default(),
             materials: &resolved.material_catalog,
         },

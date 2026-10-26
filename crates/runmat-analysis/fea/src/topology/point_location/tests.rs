@@ -25,7 +25,9 @@ fn locates_linear_and_quadratic_tetrahedron_points_with_partition_neutral_weight
                 .node_indices
                 .iter()
                 .zip(&location.shape_values)
-                .map(|(node, weight)| projection.nodes[*node].coordinates_m[axis] * weight)
+                .map(|(node, weight)| {
+                    projection.nodes[*node].coordinates_m.canonical_value()[axis] * weight
+                })
                 .sum::<f64>()
         });
         for (actual, expected) in recovered.into_iter().zip([0.2, 0.3, 0.1]) {
@@ -63,9 +65,39 @@ fn quadratic_location_inverts_a_curved_isoparametric_map() {
     let mut projection =
         AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
             .unwrap();
-    projection.nodes[4].coordinates_m[1] = 0.2;
-    projection.nodes[5].coordinates_m[2] = 0.15;
-    projection.nodes[7].coordinates_m[0] = 0.12;
+    {
+        let quantity_change = 0.2;
+        let quantity_index = 1;
+        let quantity_slot = &mut projection.nodes[4].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
+    {
+        let quantity_change = 0.15;
+        let quantity_index = 2;
+        let quantity_slot = &mut projection.nodes[5].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
+    {
+        let quantity_change = 0.12;
+        let quantity_index = 0;
+        let quantity_slot = &mut projection.nodes[7].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     let expected_barycentric = [0.4, 0.2, 0.3, 0.1];
     let (expected_weights, _) = volume_shape(ElementOrder::Tet10, expected_barycentric);
     let position = std::array::from_fn(|axis| {
@@ -73,7 +105,9 @@ fn quadratic_location_inverts_a_curved_isoparametric_map() {
             .node_indices
             .iter()
             .zip(expected_weights)
-            .map(|(node, weight)| projection.nodes[*node].coordinates_m[axis] * weight)
+            .map(|(node, weight)| {
+                projection.nodes[*node].coordinates_m.canonical_value()[axis] * weight
+            })
             .sum::<f64>()
     });
     let location = projection

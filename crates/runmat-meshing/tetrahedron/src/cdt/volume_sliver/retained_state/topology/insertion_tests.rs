@@ -20,9 +20,11 @@ fn identity(value: u64) -> StableDigest {
 
 fn split(topology: &DelaunayVolumeTopology, identity: StableDigest) -> DelaunayVolumeTopology {
     let cell = &topology.tetrahedra[0];
-    let points = cell
-        .vertex_indices
-        .map(|index| topology.nodes[index as usize].coordinates_m);
+    let points = cell.vertex_indices.map(|index| {
+        topology.nodes[index as usize]
+            .coordinates_m
+            .canonical_value()
+    });
     let point =
         std::array::from_fn(|axis| points.iter().map(|point| point[axis]).sum::<f64>() / 4.);
     let mut nodes = topology.nodes.clone();
@@ -129,7 +131,17 @@ fn inserted_node_patches_restore_physical_topology_quality_and_rank_across_index
                 .nodes
                 .binary_search_by_key(&base.nodes[0].identity, |node| node.identity)
                 .unwrap();
-            moved.nodes[index].coordinates_m[0] += 0.001;
+            {
+                let quantity_change = 0.001;
+                let quantity_index = 0;
+                let quantity_slot = &mut moved.nodes[index].coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
             assert!(TopologyPatch::between(&base, &moved).is_err());
             let mut missing = candidate.clone();
             missing.nodes.remove(index);

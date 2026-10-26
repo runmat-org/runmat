@@ -61,8 +61,13 @@ fn pressure_error(
 ) -> f64 {
     let mut error = 0.0;
     let mut scale = 0.0;
-    for (node, pressure) in result.projection.nodes.iter().zip(&result.pressure_pa) {
-        let (real, imaginary) = reference(node.coordinates_m[0]);
+    for (node, pressure) in result
+        .projection
+        .nodes
+        .iter()
+        .zip(result.pressure_pa.canonical_values())
+    {
+        let (real, imaginary) = reference(node.coordinates_m.canonical_value()[0]);
         error += (pressure.real - real).powi(2) + (pressure.imaginary - imaginary).powi(2);
         scale += real.powi(2) + imaginary.powi(2);
     }
@@ -89,14 +94,14 @@ fn tet10_traveling_wave_phase_pressure_velocity_and_power_converge() {
             assert!(result.power_relative_error < 1e-8);
             assert_eq!(result.source_evidence.len(), 1);
             assert!(result.source_evidence[0].accepted);
-            assert!((result.mean_impedance_loss_w - 1.16 / 12.0).abs() < 0.01);
+            assert!((result.mean_impedance_loss_w.canonical_value() - 1.16 / 12.0).abs() < 0.01);
             if cells == 4 {
                 assert!(error < 0.004, "f={frequency}, errors={errors:?}");
                 let velocity_error = result
                     .projection
                     .elements
                     .iter()
-                    .zip(&result.element_velocity_m_per_s)
+                    .zip(result.element_velocity_m_per_s.canonical_values())
                     .map(|(element, velocity)| {
                         let (real, imaginary) = reference(element.centroid_m[0]);
                         (velocity.real[0] - real / 6.0).powi(2)
@@ -110,12 +115,14 @@ fn tet10_traveling_wave_phase_pressure_velocity_and_power_converge() {
                 assert!((velocity_error / result.projection.elements.len() as f64).sqrt() < 0.01);
                 let intensity_error = result
                     .element_mean_intensity_w_per_m2
+                    .canonical_values()
                     .iter()
                     .map(|i| (i[0] - 1.16 / 12.0).powi(2) + i[1].powi(2) + i[2].powi(2))
                     .sum::<f64>();
                 assert!((intensity_error / result.projection.elements.len() as f64).sqrt() < 0.005);
                 let energy_error = result
                     .element_mean_energy_density_j_per_m3
+                    .canonical_values()
                     .iter()
                     .map(|e| (e - 1.16 / 24.0).powi(2))
                     .sum::<f64>();
@@ -148,7 +155,7 @@ fn tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance(
                 };
                 errors.push(pressure_error(&result, reference));
                 assert!(result.relative_residual <= 1e-10);
-                assert!(result.mean_impedance_loss_w.abs() < 1e-14);
+                assert!(result.mean_impedance_loss_w.canonical_value().abs() < 1e-14);
                 assert!(result.power_relative_error < 1e-8);
                 if cells == refinements[2] {
                     assert!(
@@ -160,19 +167,21 @@ fn tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance(
                         .projection
                         .nodes
                         .iter()
-                        .zip(&result.pressure_pa)
-                        .filter(|(n, _)| n.coordinates_m[0] == 0.0)
+                        .zip(result.pressure_pa.canonical_values())
+                        .filter(|(n, _)| n.coordinates_m.canonical_value()[0] == 0.0)
                         .map(|(_, p)| p.imaginary)
                         .sum::<f64>();
                     assert_eq!(boundary.is_sign_positive(), frequency < 1.0);
                     assert!(result
                         .element_mean_intensity_w_per_m2
+                        .canonical_values()
                         .iter()
                         .flatten()
                         .all(|i| i.abs() < 1e-8));
                     let reference_energy = 1.16 / (48.0 * k.sin().powi(2));
                     let energy_error = result
                         .element_mean_energy_density_j_per_m3
+                        .canonical_values()
                         .iter()
                         .map(|e| (e / reference_energy - 1.0).powi(2))
                         .sum::<f64>();

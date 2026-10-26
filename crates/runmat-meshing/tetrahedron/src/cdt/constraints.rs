@@ -33,7 +33,8 @@ impl Default for DelaunayConstraintOptions {
 pub struct DelaunayConstraintNode {
     pub identity: StableDigest,
     pub source_vertex_id: Option<PersistentEntityId>,
-    pub coordinates_m: [f64; 3],
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,7 +78,9 @@ impl DelaunayConstraints {
     pub fn volume_nodes(&self) -> Vec<DelaunayVolumeNode> {
         self.nodes
             .iter()
-            .map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m))
+            .map(|node| {
+                DelaunayVolumeNode::explicit(node.identity, node.coordinates_m.canonical_value())
+            })
             .collect()
     }
 }

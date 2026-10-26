@@ -26,7 +26,7 @@ impl CanonicalNonlinearSolidBasis {
             .zip(contact.node_rows())
         {
             if original.identity != node.stable_identity
-                || original.coordinates_m != node.coordinates_m
+                || original.coordinates_m.canonical_value() != node.coordinates_m.canonical_value()
                 || original.rows != *rows
             {
                 return Err(NonlinearSolidError::Authority(
@@ -53,7 +53,9 @@ impl CanonicalNonlinearSolidBasis {
             if crate::is_fea_cancelled() {
                 return Err(NonlinearSolidError::Cancelled);
             }
-            let p = std::array::from_fn(|axis| node.coordinates_m[axis] + u[node.rows[axis]]);
+            let p = std::array::from_fn(|axis| {
+                node.coordinates_m.canonical_value()[axis] + u[node.rows[axis]]
+            });
             if p.iter().any(|v| !v.is_finite()) {
                 return Err(NonlinearSolidError::Authority(
                     "current body position overflow".into(),
@@ -93,7 +95,10 @@ pub(super) fn prepare_nodes(
             }
             Ok(PreparedBodyNode {
                 identity: n.stable_identity,
-                coordinates_m: n.coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(n.coordinates_m.canonical_value()),
                 rows,
             })
         })

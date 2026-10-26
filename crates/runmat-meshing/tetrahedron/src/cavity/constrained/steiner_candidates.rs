@@ -78,7 +78,7 @@ pub(crate) fn generate_constrained_cavity_interior_steiner_candidates_with_diagn
         ));
     };
     let maximum_candidates = usize::try_from(budget.maximum_candidates).unwrap_or(usize::MAX);
-    let global_candidates = if classification_tolerance.absolute_m == 0.0 {
+    let global_candidates = if classification_tolerance.absolute_m.canonical_value() == 0.0 {
         global_interior_candidates(
             cavity,
             &boundary_nodes,
@@ -93,7 +93,7 @@ pub(crate) fn generate_constrained_cavity_interior_steiner_candidates_with_diagn
     let candidate_node_id = unused_node_id(nodes)?;
     let existing_points = nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let mut faces = cavity
         .boundary_faces
@@ -114,11 +114,17 @@ pub(crate) fn generate_constrained_cavity_interior_steiner_candidates_with_diagn
             .iter()
             .copied()
             .map(|coordinates_m| super::caps::LocalCapApexCandidate {
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
                 source: "boundary_combination",
             })
             .chain(std::iter::once(super::caps::LocalCapApexCandidate {
-                coordinates_m: cavity_centroid,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(cavity_centroid),
                 source: "cavity_centroid",
             }))
             .chain(local_cap_apex_candidates(
@@ -142,7 +148,7 @@ pub(crate) fn generate_constrained_cavity_interior_steiner_candidates_with_diagn
             {
                 return Err(ConstrainedCavityRefillError::Cancelled);
             }
-            let point = candidate.coordinates_m;
+            let point = candidate.coordinates_m.canonical_value();
             if existing_points.contains(&point) {
                 diagnostics.duplicate_position += 1;
                 continue;

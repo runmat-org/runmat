@@ -157,7 +157,9 @@ fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for
         mixed_target_workspace_profile, resolve_mixed_structural_target,
     };
     let mesh = crate::constraints::compilation_tests::mesh(ElementOrder::Tet4);
-    let model = crate::fixtures::mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+    let model = crate::fixtures::mixed_solid_beam_model(
+        mesh.topology.nodes[0].coordinates_m.canonical_value(),
+    );
     let structural = model.structural.as_ref().unwrap();
     let topology = CanonicalStructuralNodeSpace::derive(&mesh, structural).unwrap();
     for target in [

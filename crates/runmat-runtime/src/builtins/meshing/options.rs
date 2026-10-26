@@ -17,10 +17,12 @@ pub(super) fn parse_settings(args: &[Value]) -> BuiltinResult<MeshingRequestSett
             .collect::<String>();
         match name.as_str() {
             "targetsize" => {
-                settings.target_edge_length_m = finite_positive(GENERATE_NAME, &pair[1])?
+                settings.target_edge_length_m =
+                    runmat_types::physical::Length::new(finite_positive(GENERATE_NAME, &pair[1])?)
             }
             "maximumdeviation" => {
-                settings.maximum_chordal_deviation_m = finite_positive(GENERATE_NAME, &pair[1])?
+                settings.maximum_chordal_deviation_m =
+                    runmat_types::physical::Length::new(finite_positive(GENERATE_NAME, &pair[1])?)
             }
             "maximumgradingratio" => {
                 settings.maximum_grading_ratio = finite_positive(GENERATE_NAME, &pair[1])?

@@ -4,7 +4,7 @@ fn relation(primary: usize, secondary: usize, phase_radians: f64) -> UnitPhaseRe
     UnitPhaseRelation {
         primary,
         secondary,
-        phase_radians,
+        phase_radians: runmat_types::physical::Angle::new(phase_radians),
     }
 }
 

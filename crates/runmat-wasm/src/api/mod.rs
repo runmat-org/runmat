@@ -21,3 +21,6 @@ pub(crate) mod session;
 pub(crate) mod streams;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod testing;
+
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod fea_execution;

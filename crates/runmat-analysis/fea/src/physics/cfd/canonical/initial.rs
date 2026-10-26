@@ -8,20 +8,44 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidInitialState {
-    velocity_m_per_s: Vec<[f64; 3]>,
-    pressure_reference_pa: Vec<f64>,
-    pressure_fluctuation_pa: Vec<f64>,
-    face_volume_flux_m3_per_s: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    velocity_m_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Velocity, Vec<[f64; 3]>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_reference_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pressure_fluctuation_pa:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Pressure, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    face_volume_flux_m3_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::VolumeFlowRate, Vec<f64>>,
     applied_condition_ids: Vec<String>,
     default_velocity_nodes: usize,
 }
 impl CanonicalFluidInitialState {
     pub fn original_fields(&self) -> CanonicalFluidFields<'_> {
         CanonicalFluidFields {
-            velocity_m_per_s: &self.velocity_m_per_s,
-            pressure_reference_pa: &self.pressure_reference_pa,
-            pressure_fluctuation_pa: &self.pressure_fluctuation_pa,
-            face_volume_flux_m3_per_s: &self.face_volume_flux_m3_per_s,
+            velocity_m_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Velocity,
+                _,
+            >::new(self.velocity_m_per_s.canonical_values()),
+            pressure_reference_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(self.pressure_reference_pa.canonical_values()),
+            pressure_fluctuation_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(
+                self.pressure_fluctuation_pa.canonical_values()
+            ),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::VolumeFlowRate,
+                _,
+            >::new(
+                self.face_volume_flux_m3_per_s.canonical_values()
+            ),
         }
     }
     pub fn applied_condition_ids(&self) -> &[String] {
@@ -137,8 +161,9 @@ impl CanonicalFluidProblem<'_> {
             face_volume_flux_m3_per_s,
         } = projection::integrate(self, &velocity, &pressure)?;
         self.pressure_reference_plan
-            .validate(self, &pressure_fluctuation_pa)?;
-        let continuity = super::continuity::incidence(self, &face_volume_flux_m3_per_s)?;
+            .validate(self, pressure_fluctuation_pa.canonical_values())?;
+        let continuity =
+            super::continuity::incidence(self, face_volume_flux_m3_per_s.canonical_values())?;
         if continuity
             .relative
             .iter()
@@ -149,10 +174,15 @@ impl CanonicalFluidProblem<'_> {
             ));
         }
         Ok(CanonicalFluidInitialState {
-            velocity_m_per_s,
-            pressure_reference_pa: self.pressure_reference_pa.clone(),
-            pressure_fluctuation_pa,
-            face_volume_flux_m3_per_s,
+            velocity_m_per_s: velocity_m_per_s,
+            pressure_reference_pa: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Pressure,
+                _,
+            >::new(
+                self.pressure_reference_pa.canonical_values().clone()
+            ),
+            pressure_fluctuation_pa: pressure_fluctuation_pa,
+            face_volume_flux_m3_per_s: face_volume_flux_m3_per_s,
             applied_condition_ids,
             default_velocity_nodes,
         })

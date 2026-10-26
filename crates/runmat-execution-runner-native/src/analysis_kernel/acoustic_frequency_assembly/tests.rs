@@ -44,10 +44,11 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
     model.constraints.clear();
     model.boundaries.clear();
     model.materials[0].acoustic = Some(MaterialAcousticModel {
-        speed_of_sound_m_per_s: 2.0,
-        damping_ratio: 0.0,
+        speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
+        damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.materials[0].mass_density_kg_per_m3 =
+        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
     model.material_assignments[0].target = PropertyRegionTarget::solid("solid");
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(frequencies);
@@ -204,7 +205,7 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
                     .result
                     .results()
                     .iter()
-                    .map(|result| result.frequency().hertz)
+                    .map(|result| result.frequency().canonical_value())
                     .collect::<Vec<_>>(),
                 frequencies
             );

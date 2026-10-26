@@ -30,7 +30,10 @@ pub(super) fn find_representable_node(
     for index in candidates {
         work.search_location_step(constraint_index)?;
         let node = topology.nodes()[index as usize];
-        if coordinates_share_representable_location(node.coordinates_m, coordinates) {
+        if coordinates_share_representable_location(
+            node.coordinates_m.canonical_value(),
+            coordinates,
+        ) {
             return Ok(Some(node.identity));
         }
     }

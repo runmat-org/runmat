@@ -1,11 +1,14 @@
 use runmat_parser::fea::FeaReference;
 
 use super::{CheckedExpression, CheckedExpressionKind};
-use crate::{FeaFieldType, FeaType, PhysicalDimension};
+use crate::{FeaFieldType, FeaType};
 
-pub(super) fn quantity_type(value: &FeaType, dimension: PhysicalDimension) -> Option<FeaType> {
+pub(super) fn quantity_type(
+    value: &FeaType,
+    dimension: runmat_types::physical::DynamicDimension,
+) -> Option<FeaType> {
     match value {
-        FeaType::Integer | FeaType::Real => Some(FeaType::Quantity(dimension)),
+        FeaType::Integer | FeaType::Real => Some(FeaType::Quantity((dimension).into())),
         FeaType::Vector { element, length } => Some(FeaType::Vector {
             element: Box::new(quantity_type(element, dimension)?),
             length: *length,

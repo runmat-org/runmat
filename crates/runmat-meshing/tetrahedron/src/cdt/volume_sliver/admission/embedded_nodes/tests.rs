@@ -32,14 +32,16 @@ fn topology(extra: &[[f64; 3]], scale: f64, permutation: [usize; 3]) -> Delaunay
 }
 fn exhaustive(topology: &DelaunayVolumeTopology) -> bool {
     topology.tetrahedra.iter().any(|cell| {
-        let points = cell
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+        let points = cell.vertex_indices.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         topology.nodes.iter().enumerate().any(|(index, node)| {
             !cell.vertex_indices.contains(&(index as u32))
                 && (0..4).all(|replace| {
                     let mut simplex = points;
-                    simplex[replace] = node.coordinates_m;
+                    simplex[replace] = node.coordinates_m.canonical_value();
                     orient3d(simplex).unwrap() == PredicateSign::Positive
                 })
         })
@@ -89,14 +91,16 @@ fn aligned_plane_inventory_is_rejected_before_adaptive_predicates() {
     let bounds = bounds(
         mesh.tetrahedra[0]
             .vertex_indices
-            .map(|vertex| mesh.nodes[vertex as usize].coordinates_m),
+            .map(|vertex| mesh.nodes[vertex as usize].coordinates_m.canonical_value()),
     );
     assert_eq!(mesh.nodes.len(), 1028);
     let entries = mesh
         .nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| SpatialPoint::new(node.coordinates_m, index).unwrap())
+        .map(|(index, node)| {
+            SpatialPoint::new(node.coordinates_m.canonical_value(), index).unwrap()
+        })
         .collect();
     let index = PointSpatialIndex::from_entries_with_checkpoint(entries, &mut || {
         Ok::<_, DelaunayVolumeSliverError>(())

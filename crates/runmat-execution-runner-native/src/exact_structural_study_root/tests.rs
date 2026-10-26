@@ -95,11 +95,11 @@ fn preparation_with_revision(
     let import_options = ExactCadImportOptions::default();
     let meshing_request = resolve_meshing_request(
         GeometryTolerancePolicy {
-            source_tolerance_m: 0.0,
-            absolute_floor_m: 1.0e-12,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_term: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         MeshingRequestSettings::default(),
     )

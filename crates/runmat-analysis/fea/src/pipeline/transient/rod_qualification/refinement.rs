@@ -25,11 +25,11 @@ pub(super) fn errors(
             assert_eq!(values.len(), mesh.topology.nodes.len() * 3);
             for (node, value) in mesh.topology.nodes.iter().zip(values.chunks_exact(3)) {
                 assert!(value[1].abs() < 1.0e-12 && value[2].abs() < 1.0e-12);
-                if node.coordinates_m[0] == 0.0 {
+                if node.coordinates_m.canonical_value()[0] == 0.0 {
                     assert!(value[0].abs() < 1.0e-12);
                 }
-                let difference =
-                    value[0] - reference::shape(node.coordinates_m[0]) * exact[quantity];
+                let difference = value[0]
+                    - reference::shape(node.coordinates_m.canonical_value()[0]) * exact[quantity];
                 squares[quantity] += (difference / scales[quantity]).powi(2);
             }
         }

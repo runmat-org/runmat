@@ -69,7 +69,7 @@ pub struct CadPhysicalMaterialEvidence {
     pub density_value_type: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadRegionOwnership {
     #[serde(default, skip_serializing_if = "Option::is_none")]

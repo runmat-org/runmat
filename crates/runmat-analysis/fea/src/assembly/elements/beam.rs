@@ -9,21 +9,29 @@ pub type BeamTransform12 = [[f64; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUN
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BeamSection {
-    pub area_m2: f64,
-    pub iy_m4: f64,
-    pub iz_m4: f64,
-    pub torsion_j_m4: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub area_m2: runmat_types::physical::Area,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iy_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iz_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub torsion_j_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub outer_fiber_y_m: f64,
+    pub outer_fiber_y_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub outer_fiber_z_m: f64,
+    pub outer_fiber_z_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub torsion_outer_radius_m: f64,
+    pub torsion_outer_radius_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BeamMaterial {
-    pub youngs_modulus_pa: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
     pub shear_modulus_pa: f64,
 }
 
@@ -39,7 +47,7 @@ pub struct BeamLocalFrame {
     pub x: [f64; 3],
     pub y: [f64; 3],
     pub z: [f64; 3],
-    pub length_m: f64,
+    pub length_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -56,10 +64,10 @@ pub enum BeamElementError {
 
 impl BeamSection {
     pub fn validate(self) -> Result<(), BeamElementError> {
-        if positive_finite(self.area_m2)
-            && positive_finite(self.iy_m4)
-            && positive_finite(self.iz_m4)
-            && positive_finite(self.torsion_j_m4)
+        if positive_finite(self.area_m2.canonical_value())
+            && positive_finite(self.iy_m4.canonical_value())
+            && positive_finite(self.iz_m4.canonical_value())
+            && positive_finite(self.torsion_j_m4.canonical_value())
         {
             Ok(())
         } else {
@@ -70,7 +78,9 @@ impl BeamSection {
 
 impl BeamMaterial {
     pub fn validate(self) -> Result<(), BeamElementError> {
-        if positive_finite(self.youngs_modulus_pa) && positive_finite(self.shear_modulus_pa) {
+        if positive_finite(self.youngs_modulus_pa.canonical_value())
+            && positive_finite(self.shear_modulus_pa)
+        {
             Ok(())
         } else {
             Err(BeamElementError::InvalidMaterial)
@@ -96,7 +106,12 @@ impl BeamElementGeometry {
         }
         let y = scale(reference_projection, 1.0 / projection_norm);
         let z = cross(x, y);
-        Ok(BeamLocalFrame { x, y, z, length_m })
+        Ok(BeamLocalFrame {
+            x,
+            y,
+            z,
+            length_m: runmat_types::physical::Length::new(length_m),
+        })
     }
 }
 
@@ -114,10 +129,10 @@ pub fn local_stiffness_matrix(
     let l = length_m;
     let l2 = l * l;
     let l3 = l2 * l;
-    let ea_l = material.youngs_modulus_pa * section.area_m2 / l;
-    let gj_l = material.shear_modulus_pa * section.torsion_j_m4 / l;
-    let eiy = material.youngs_modulus_pa * section.iy_m4;
-    let eiz = material.youngs_modulus_pa * section.iz_m4;
+    let ea_l = material.youngs_modulus_pa.canonical_value() * section.area_m2.canonical_value() / l;
+    let gj_l = material.shear_modulus_pa * section.torsion_j_m4.canonical_value() / l;
+    let eiy = material.youngs_modulus_pa.canonical_value() * section.iy_m4.canonical_value();
+    let eiz = material.youngs_modulus_pa.canonical_value() * section.iz_m4.canonical_value();
 
     let mut k = [[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT];
 
@@ -155,7 +170,7 @@ pub fn global_stiffness_matrix(
     geometry: BeamElementGeometry,
 ) -> Result<BeamMatrix12, BeamElementError> {
     let frame = geometry.local_frame()?;
-    let local = local_stiffness_matrix(section, material, frame.length_m)?;
+    let local = local_stiffness_matrix(section, material, frame.length_m.canonical_value())?;
     let transform = transformation_matrix(frame);
     Ok(transform_transpose_multiply(&transform, &local))
 }
@@ -256,19 +271,19 @@ mod tests {
 
     fn section() -> BeamSection {
         BeamSection {
-            area_m2: 2.0e-4,
-            iy_m4: 1.6e-9,
-            iz_m4: 6.4e-9,
-            torsion_j_m4: 2.4e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.005,
-            torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            area_m2: runmat_types::physical::Area::new(2.0e-4),
+            iy_m4: runmat_types::physical::SecondMomentOfArea::new(1.6e-9),
+            iz_m4: runmat_types::physical::SecondMomentOfArea::new(6.4e-9),
+            torsion_j_m4: runmat_types::physical::SecondMomentOfArea::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Length::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Length::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Length::new(0.011_180_339_887_498_949),
         }
     }
 
     fn material() -> BeamMaterial {
         BeamMaterial {
-            youngs_modulus_pa: 200.0e9,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
             shear_modulus_pa: 79.3e9,
         }
     }
@@ -283,7 +298,7 @@ mod tests {
         .local_frame()
         .expect("frame should build");
 
-        assert_close(frame.length_m, 2.0, 1.0e-12);
+        assert_close(frame.length_m.canonical_value(), 2.0, 1.0e-12);
         assert_close(dot(frame.x, frame.y), 0.0, 1.0e-12);
         assert_close(dot(frame.x, frame.z), 0.0, 1.0e-12);
         assert_close(dot(frame.y, frame.z), 0.0, 1.0e-12);
@@ -296,10 +311,14 @@ mod tests {
     fn beam_local_stiffness_matches_closed_form_terms() {
         let l = 2.5;
         let k = local_stiffness_matrix(section(), material(), l).expect("matrix should build");
-        let ea_l = material().youngs_modulus_pa * section().area_m2 / l;
-        let gj_l = material().shear_modulus_pa * section().torsion_j_m4 / l;
-        let eiy = material().youngs_modulus_pa * section().iy_m4;
-        let eiz = material().youngs_modulus_pa * section().iz_m4;
+        let ea_l = material().youngs_modulus_pa.canonical_value()
+            * section().area_m2.canonical_value()
+            / l;
+        let gj_l = material().shear_modulus_pa * section().torsion_j_m4.canonical_value() / l;
+        let eiy =
+            material().youngs_modulus_pa.canonical_value() * section().iy_m4.canonical_value();
+        let eiz =
+            material().youngs_modulus_pa.canonical_value() * section().iz_m4.canonical_value();
 
         assert_close(k[0][0], ea_l, 1.0e-6);
         assert_close(k[0][6], -ea_l, 1.0e-6);

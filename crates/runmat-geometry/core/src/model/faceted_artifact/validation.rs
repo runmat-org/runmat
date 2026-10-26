@@ -43,7 +43,12 @@ pub(super) fn validate_admitted(
     )?;
     for vertex in &solid.vertices {
         work.checkpoint()?;
-        if vertex.coordinates_m.iter().any(|value| !value.is_finite()) {
+        if vertex
+            .coordinates_m
+            .canonical_value()
+            .iter()
+            .any(|value| !value.is_finite())
+        {
             return Err(invalid("faceted vertex", "coordinates must be finite"));
         }
     }
@@ -168,7 +173,11 @@ fn validate_triangles(
             })?;
             *used = 1;
         }
-        let [a, b, c] = [a, b, c].map(|slot| solid.vertices[slot as usize].coordinates_m);
+        let [a, b, c] = [a, b, c].map(|slot| {
+            solid.vertices[slot as usize]
+                .coordinates_m
+                .canonical_value()
+        });
         let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
         let cross = [

@@ -72,7 +72,7 @@ fn representative_face(cells: usize) -> ExactFaceMesh {
         triangles,
         boundary_segments: vec![],
         joined_chart_cuts: vec![],
-        maximum_chordal_deviation_m: 0.0,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
         maximum_normal_deviation_rad: 0.0,
     }
 }
@@ -387,7 +387,9 @@ fn dense_global_round_trip(face: ExactFaceMesh) {
         triangles: face.triangles,
         boundary_segments: face.boundary_segments,
         shells: vec![],
-        maximum_chordal_deviation_m: face.maximum_chordal_deviation_m,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            face.maximum_chordal_deviation_m.canonical_value(),
+        ),
         maximum_normal_deviation_rad: face.maximum_normal_deviation_rad,
     };
     let control = MemoryControl {

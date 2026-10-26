@@ -116,7 +116,7 @@ fn stale(kind: &str, id: &str) -> Ap242InspectionError {
 mod tests {
     use super::*;
     use runmat_geometry_core::{
-        Ap242Measure, Ap242Parameter, Ap242ParameterAccess, Ap242PhysicalDimension, GeometryDigest,
+        Ap242Measure, Ap242Parameter, Ap242ParameterAccess, GeometryDigest, QuantityKind,
     };
 
     #[test]
@@ -128,11 +128,7 @@ mod tests {
             changes: vec![Ap242Change::SetParameter {
                 parameter_id: "wall".to_string(),
                 previous: previous.clone(),
-                value: Ap242Measure {
-                    value_si: 0.01,
-                    source_value: 10.0,
-                    ..previous
-                },
+                value: previous.with_source_value(10.0).unwrap(),
             }],
         };
         let report = evaluate_change_set(&inventory, &change_set).unwrap();
@@ -149,7 +145,7 @@ mod tests {
     fn rejects_a_change_set_with_stale_source_evidence() {
         let inventory = inventory();
         let mut previous = inventory.parameters[0].value.clone();
-        previous.value_si = 99.0;
+        previous = previous.with_source_value(99.0).unwrap();
         let change_set = Ap242ChangeSet {
             source_digest: GeometryDigest::from_bytes([7; 32]),
             changes: vec![Ap242Change::SetParameter {
@@ -174,12 +170,16 @@ mod tests {
                 representation_entity_id: 12,
                 owner_entity_ids: vec![2],
                 persistent_id: Some("wall".to_string()),
-                value: Ap242Measure {
-                    dimension: Ap242PhysicalDimension::Length,
-                    value_si: 0.008,
-                    source_value: 8.0,
-                    source_unit: "mm".to_string(),
-                },
+                value: Ap242Measure::try_new(
+                    QuantityKind::Length,
+                    8.0,
+                    *runmat_geometry_core::LengthUnit::Millimeter.definition(),
+                    "mm",
+                    runmat_geometry_core::physical::UnitAttribution::FileDeclaration {
+                        context: "STEP fixture #11".into(),
+                    },
+                )
+                .unwrap(),
                 minimum: None,
                 maximum: None,
                 access: Ap242ParameterAccess::ReadOnly,

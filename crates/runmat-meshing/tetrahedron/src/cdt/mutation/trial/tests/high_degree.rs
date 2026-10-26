@@ -40,7 +40,7 @@ fn local_undo_membership_count_is_independent_of_vertex_degree() {
             let point = std::array::from_fn(|axis| {
                 source
                     .iter()
-                    .map(|vertex| trial.node(*vertex).coordinates_m[axis])
+                    .map(|vertex| trial.node(*vertex).coordinates_m.canonical_value()[axis])
                     .sum::<f64>()
                     / 4.0
             });

@@ -1,5 +1,5 @@
 use runmat_execution::identity::ValueId;
-use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
 use runmat_execution::value::{artifact_object_value_id, ValueLimits, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ impl ArtifactAccess {
         self.validate()?;
         descriptor.validate()?;
         let reference = ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: self.value_id(descriptor.digest),
             logical_digest: descriptor.digest,
             encoded_length: descriptor.encoded_length,
@@ -151,6 +151,8 @@ mod tests {
         let second_ref = second
             .reference(&object, ValueRefKind::ResultObject, "runmat.test.v1")
             .unwrap();
+        assert_eq!(first_ref.schema_version, VALUE_PAYLOAD_SCHEMA_VERSION);
+        first_ref.validate(ValueLimits::default()).unwrap();
         assert_eq!(first_ref.logical_digest, second_ref.logical_digest);
         assert_ne!(first_ref.id, second_ref.id);
         first

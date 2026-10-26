@@ -90,6 +90,7 @@ pub use task_outcome::NativeTaskQuiescence;
 mod program_workload;
 mod test_workload;
 mod typed_fea;
+pub use typed_fea::{plan_checked_fea_locally, plan_checked_fea_locally_with_timing};
 mod worker;
 
 pub use analysis_buckling::{
@@ -270,7 +271,7 @@ pub use typed_fea::{
     PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, execute_prepared_fea_study_locally,
+    execute_checked_fea_locally, execute_checked_fea_locally_with_timing, execute_prepared_fea_study_locally,
     CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
     CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,

@@ -106,7 +106,17 @@ fn constrain_everything_except_corner_x(mesh: &SolverMeshArtifact) -> Vec<Analys
 fn curved_tet10_modal_frequency_matches_independent_one_dof_reference() {
     for warp in [0.1, 0.2] {
         let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-        mesh.topology.nodes[4].coordinates_m[0] += warp;
+        {
+            let quantity_change = warp;
+            let quantity_index = 0;
+            let quantity_slot = &mut mesh.topology.nodes[4].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         mesh.canonical_digest = StableDigest::ZERO;
         mesh.seal_canonical_digest().unwrap();
 
@@ -121,9 +131,10 @@ fn curved_tet10_modal_frequency_matches_independent_one_dof_reference() {
         else {
             panic!("expected isotropic linear elasticity");
         };
-        elasticity.youngs_modulus_pa = 100.0;
-        elasticity.poisson_ratio = 0.25;
-        model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+        elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(100.0);
+        elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(0.25);
+        model.materials[0].mass_density_kg_per_m3 =
+            (Some(1.0)).map(runmat_types::physical::MassDensity::new);
         model.materials[0].damping = None;
 
         let result = super::run_modal_with_options(

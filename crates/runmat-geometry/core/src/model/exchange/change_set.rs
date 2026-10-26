@@ -49,7 +49,7 @@ impl Ap242ChangeSet {
                     token("AP242 changed parameter", parameter_id)?;
                     previous.validate()?;
                     value.validate()?;
-                    if previous.dimension != value.dimension {
+                    if previous.kind() != value.kind() {
                         return Err(invalid(
                             "AP242 parameter change",
                             "previous and replacement dimensions must match",
@@ -64,7 +64,7 @@ impl Ap242ChangeSet {
                     token("AP242 changed property", property_id)?;
                     previous.validate()?;
                     value.validate()?;
-                    if previous.dimension != value.dimension {
+                    if previous.kind() != value.kind() {
                         return Err(invalid(
                             "AP242 property change",
                             "previous and replacement dimensions must match",

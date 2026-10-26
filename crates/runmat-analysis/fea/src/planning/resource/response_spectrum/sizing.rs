@@ -1,5 +1,3 @@
-use runmat_analysis_core::SpectrumAbscissa;
-
 use crate::execution::{
     StructuralModalResponseSpectrumAssemblyRequest, StructuralModalResponseSpectrumDirectionRequest,
 };
@@ -66,11 +64,10 @@ pub fn structural_modal_response_spectrum_direction_payload_bytes_upper_bound(
         request.canonical_bytes().map_err(invalid_error)?.len(),
         "request bytes",
     )?;
-    let points = match &request.spectrum().abscissa {
-        SpectrumAbscissa::FrequencyHertz(values) | SpectrumAbscissa::PeriodSeconds(values) => {
-            count(values.len(), "spectrum points")?
-        }
-    };
+    let points = count(
+        request.spectrum().abscissa.canonical_points().len(),
+        "spectrum points",
+    )?;
     let dofs = count(request.scope().physical_dof_count(), "physical DOFs")?;
     add(
         DIRECTION_FIXED_PAYLOAD_BYTES,

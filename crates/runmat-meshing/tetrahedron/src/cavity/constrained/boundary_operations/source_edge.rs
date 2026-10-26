@@ -14,7 +14,7 @@ pub fn split_constrained_cavity_source_edge(
     let target_edge = sorted_edge(edge);
     let boundary_node_map = boundary_nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for node_id in target_edge {
         if !boundary_node_map.contains_key(&node_id) {
@@ -33,7 +33,7 @@ pub fn split_constrained_cavity_source_edge(
 
     let source_node_map = source_nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for tetrahedron in source_tetrahedra {
         for node_id in tetrahedron.node_ids {
@@ -70,14 +70,18 @@ pub fn split_constrained_cavity_source_edge(
     let points = target_edge.map(|node_id| boundary_node_map[&node_id]);
     let split_node = ConstrainedCavityNode {
         node_id: split_node_id,
-        coordinates_m: [
-            0.5 * (points[0][0] + points[1][0]),
-            0.5 * (points[0][1] + points[1][1]),
-            0.5 * (points[0][2] + points[1][2]),
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.5 * (points[0][0] + points[1][0]),
+                0.5 * (points[0][1] + points[1][1]),
+                0.5 * (points[0][2] + points[1][2]),
+            ]),
     };
     let mut node_map_with_split = source_node_map;
-    node_map_with_split.insert(split_node.node_id, split_node.coordinates_m);
+    node_map_with_split.insert(
+        split_node.node_id,
+        split_node.coordinates_m.canonical_value(),
+    );
 
     let selected_original_tetrahedron_ids = cavity
         .removed_tetrahedron_ids

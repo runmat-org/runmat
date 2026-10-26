@@ -312,6 +312,7 @@ fn candidate_geometry_key(
                 topology
                     .node(vertex)
                     .coordinates_m
+                    .canonical_value()
                     .map(crate::cdt::volume_quality::ordered_float_key)
             });
             tetrahedron.sort_unstable();
@@ -332,7 +333,7 @@ fn candidate_minimum_jacobian(
         .iter()
         .filter_map(|vertices| {
             crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(
-                vertices.map(|vertex| topology.node(vertex).coordinates_m),
+                vertices.map(|vertex| topology.node(vertex).coordinates_m.canonical_value()),
                 metric,
             )
         })

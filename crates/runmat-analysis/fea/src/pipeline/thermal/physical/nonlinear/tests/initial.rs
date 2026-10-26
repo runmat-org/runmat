@@ -12,7 +12,7 @@ pub(super) fn solved_linear_profile(mesh: &SolverMeshArtifact) -> InitialFieldBi
         .iter()
         .zip(result.temperature_snapshots[0].as_host_f64().unwrap())
     {
-        assert!((value - (400.0 - 10.0 * node.coordinates_m[0])).abs() < 1.0e-7);
+        assert!((value - (400.0 - 10.0 * node.coordinates_m.canonical_value()[0])).abs() < 1.0e-7);
     }
     let manifest = ThermalSolverResultManifest::from_result(&result).unwrap();
     let entry = manifest.terminal_temperature().unwrap();

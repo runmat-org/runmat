@@ -146,7 +146,9 @@ fn original_plastic_history_survives_native_task_boundaries_for_both_orders() {
                 .chunks_exact(3),
         ) {
             for (axis, strain) in [0.0256, -0.0114, -0.0114].into_iter().enumerate() {
-                assert!((u[axis] - strain * node.coordinates_m[axis]).abs() < 2e-9);
+                assert!(
+                    (u[axis] - strain * node.coordinates_m.canonical_value()[axis]).abs() < 2e-9
+                );
             }
         }
         for tensor in terminal

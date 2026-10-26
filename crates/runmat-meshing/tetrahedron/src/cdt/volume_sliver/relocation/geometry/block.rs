@@ -33,7 +33,7 @@ impl PreparedBlock {
     ) -> Self {
         let start = vertices
             .iter()
-            .map(|vertex| topology.node(*vertex).coordinates_m)
+            .map(|vertex| topology.node(*vertex).coordinates_m.canonical_value())
             .collect();
         let mut scale = 0_f64;
         let cells = cells
@@ -44,7 +44,10 @@ impl PreparedBlock {
                 for a in 0..4 {
                     for b in a + 1..4 {
                         let length = (0..3)
-                            .map(|axis| nodes[a].coordinates_m[axis] - nodes[b].coordinates_m[axis])
+                            .map(|axis| {
+                                nodes[a].coordinates_m.canonical_value()[axis]
+                                    - nodes[b].coordinates_m.canonical_value()[axis]
+                            })
                             .fold(0., f64::hypot);
                         if length > 0. {
                             scale = scale.max(length);
@@ -79,7 +82,10 @@ impl PreparedBlock {
         let nodes = std::array::from_fn(|slot| {
             let mut node = cell.nodes[slot];
             if let Some(index) = cell.slots[slot] {
-                node.coordinates_m = points[index];
+                node.coordinates_m = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(points[index]);
                 node.construction = Point3Construction::Explicit;
             }
             node
@@ -95,7 +101,7 @@ impl PreparedBlock {
         }
         Ok(Some(
             cell.metric
-                .score(nodes.map(|node| node.coordinates_m))
+                .score(nodes.map(|node| node.coordinates_m.canonical_value()))
                 .unwrap_or(0.),
         ))
     }
@@ -111,12 +117,13 @@ impl PreparedBlock {
                     .iter()
                     .zip(&values)
                     .filter(|(cell, _)| !cell.slots.contains(&Some(slot)))
-                    .fold((false, f64::INFINITY), |(inverted, minimum), (_, value)| {
-                        match value {
+                    .fold(
+                        (false, f64::INFINITY),
+                        |(inverted, minimum), (_, value)| match value {
                             Some(value) => (inverted, minimum.min(*value)),
                             None => (true, minimum),
-                        }
-                    })
+                        },
+                    )
             })
             .collect();
         Ok(Accepted { values, complement })
@@ -243,7 +250,9 @@ impl PreparedBlock {
 fn aggregate(values: &[Option<f64>]) -> f64 {
     values
         .iter()
-        .try_fold(f64::INFINITY, |minimum, value| value.map(|v| minimum.min(v)))
+        .try_fold(f64::INFINITY, |minimum, value| {
+            value.map(|v| minimum.min(v))
+        })
         .unwrap_or(0.)
 }
 

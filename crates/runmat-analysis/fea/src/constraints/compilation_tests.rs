@@ -65,7 +65,8 @@ fn solid(order: ElementOrder) -> (AnalysisModel, SolverMeshArtifact) {
 
 fn shared_shell_boundary() -> (AnalysisModel, SolverMeshArtifact) {
     let mut mesh = mesh(ElementOrder::Tet4);
-    let mut model = mixed_solid_beam_shell_model(mesh.topology.nodes[0].coordinates_m);
+    let mut model =
+        mixed_solid_beam_shell_model(mesh.topology.nodes[0].coordinates_m.canonical_value());
     let face_nodes = mesh.topology.boundary_faces[0].node_ids.clone();
     mesh.topology.boundary_faces[0]
         .provenance
@@ -92,7 +93,10 @@ fn shared_shell_boundary() -> (AnalysisModel, SolverMeshArtifact) {
             .iter_mut()
             .find(|node| node.node_id == explicit_id)
             .unwrap();
-        explicit.coordinates_m = node.coordinates_m;
+        explicit.coordinates_m = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(node.coordinates_m.canonical_value());
         explicit.solid_attachment = Some(ConformalSolidAttachment::GeometryVertex { entity });
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -111,12 +115,14 @@ pub(super) fn cases() -> Vec<(&'static str, AnalysisModel, Option<SolverMeshArti
     let (tet4, mesh4) = solid(ElementOrder::Tet4);
     let (tet10, mesh10) = solid(ElementOrder::Tet10);
     let mixed_mesh = mesh(ElementOrder::Tet4);
-    let mixed = mixed_solid_beam_model(mixed_mesh.topology.nodes[0].coordinates_m);
+    let mixed =
+        mixed_solid_beam_model(mixed_mesh.topology.nodes[0].coordinates_m.canonical_value());
     let mut generic = mixed.clone();
     generic.constraints.retain(|constraint| {
         constraint.structural().unwrap().constraint_id == "beam_root_rotation"
     });
-    let mut mixed_shell = mixed_solid_beam_shell_model(mixed_mesh.topology.nodes[0].coordinates_m);
+    let mut mixed_shell =
+        mixed_solid_beam_shell_model(mixed_mesh.topology.nodes[0].coordinates_m.canonical_value());
     mixed_shell
         .constraints
         .push(AnalysisConstraint::Structural(StructuralConstraint {
@@ -255,7 +261,7 @@ fn conflicting_solid_and_generic_prescriptions_retain_typed_provenance() {
     for mixed in [false, true] {
         let (mut model, mesh) = solid(ElementOrder::Tet4);
         if mixed {
-            model = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+            model = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m.canonical_value());
         }
         let target = if mixed {
             RegionTarget::point("node:102")
@@ -286,7 +292,7 @@ fn conflicting_solid_and_generic_prescriptions_retain_typed_provenance() {
 #[test]
 fn duplicate_ids_are_rejected_across_solid_and_generic_lowering() {
     let mesh = mesh(ElementOrder::Tet4);
-    let mut model = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+    let mut model = mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m.canonical_value());
     for constraint in &mut model.constraints {
         if let AnalysisConstraint::Structural(constraint) = constraint {
             constraint.constraint_id = "duplicate".into();

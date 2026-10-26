@@ -15,7 +15,7 @@ pub(crate) fn sample_prescribed_velocity(
 ) -> Result<ComplexVector3, RealizationError> {
     match value {
         PrescribedValue::Constant(value) => expect_vector3(SampledValue::Vector3(
-            ComplexVector3::real(value.map(|v| v.meters_per_second)),
+            ComplexVector3::real(value.map(|v| v.canonical_value())),
         )),
         PrescribedValue::Signal(_) => {
             let Some(PhysicalSignal::Velocity(signal)) = value.signal(signals) else {
@@ -28,7 +28,7 @@ pub(crate) fn sample_prescribed_velocity(
                     "prescribed velocity requires global frame",
                 ));
             }
-            expect_vector3(sample_signal(signal, sample, |v| v.meters_per_second)?)
+            expect_vector3(sample_signal(signal, sample, |v| v.canonical_value())?)
         }
     }
 }
@@ -46,7 +46,7 @@ pub(crate) fn sample_prescribed_potential(
             PhysicalSignal::ElectricPotential(signal) => Some(signal),
             _ => None,
         },
-        |value| value.volts,
+        |value| value.canonical_value(),
     )
 }
 
@@ -63,7 +63,7 @@ pub(crate) fn sample_prescribed_temperature(
             PhysicalSignal::Temperature(signal) => Some(signal),
             _ => None,
         },
-        |temperature| temperature.kelvin,
+        |temperature| temperature.canonical_value(),
     )
 }
 
@@ -80,7 +80,7 @@ pub(crate) fn sample_prescribed_heat_flux(
             PhysicalSignal::HeatFlux(signal) => Some(signal),
             _ => None,
         },
-        |heat_flux| heat_flux.watts_per_square_meter,
+        |heat_flux| heat_flux.canonical_value(),
     )
 }
 
@@ -97,7 +97,7 @@ pub(crate) fn sample_prescribed_pressure(
             PhysicalSignal::Pressure(signal) => Some(signal),
             _ => None,
         },
-        |pressure| pressure.pascals,
+        |pressure| pressure.canonical_value(),
     )
 }
 

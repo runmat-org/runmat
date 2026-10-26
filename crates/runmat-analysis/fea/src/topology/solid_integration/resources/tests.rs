@@ -33,7 +33,17 @@ fn malformed_raw_connectivity_is_counted_without_physical_preparation() {
     mesh.topology.volume_elements[0].node_ids.extend(1000..1100);
     assert!(CanonicalSolidIntegrationPlan::derive(&mesh, rule).is_err());
     assert!(derivation_resident_bytes_estimate(&mesh, rule).unwrap() > baseline);
-    mesh.topology.nodes[0].coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut mesh.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(derivation_resident_bytes_estimate(&mesh, rule).is_err());
 }
 

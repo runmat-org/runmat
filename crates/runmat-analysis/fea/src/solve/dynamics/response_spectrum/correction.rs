@@ -42,8 +42,10 @@ pub(super) fn rigid_coefficients(
                 .enumerate()
                 .filter(|(_, ordinate)| **ordinate == maximum)
                 .map(|(index, _)| match &spectrum.abscissa {
-                    SpectrumAbscissa::FrequencyHertz(values) => values[index],
-                    SpectrumAbscissa::PeriodSeconds(values) => 1.0 / values[index],
+                    SpectrumAbscissa::FrequencyHertz(values) => values.canonical_values()[index],
+                    SpectrumAbscissa::PeriodSeconds(values) => {
+                        1.0 / values.canonical_values()[index]
+                    }
                 })
                 .fold(f64::INFINITY, f64::min);
             modes

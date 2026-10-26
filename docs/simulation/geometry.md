@@ -11,9 +11,9 @@ regions = geometry.listRegions(part);
 mesh(part);
 ```
 
-Inspection answers which exact format, units, assemblies, products, parameters, materials, topology aliases, names, tags, and persistent identities the file actually contains. Do this before authoring region selectors.
+Inspection answers which exact format, units, assemblies, products, parameters, materials, names, tags, and canonical persistent identities the file actually contains. Do this before authoring region selectors.
 
-## Import In `.fea`
+## Generated CAD Binding Module
 
 ```fea
 geometry bracket {
@@ -21,7 +21,7 @@ geometry bracket {
     units = mm
 
     region body : solid {
-        select id "solid_000001"
+        select name "body"
         expect exactly_one
     }
     region mount : face {
@@ -46,6 +46,34 @@ Tetrahedral solver meshing requires an admitted closed exact solid. A format bei
 
 Official native CLI and Desktop builds use the OCCT backend for STEP, IGES, and BREP. Metadata-only builds can inspect supported STEP exchange facts without claiming exact face/solid topology. Browser execution remains unavailable until its configured geometry, meshing, and solver host can satisfy the same contracts.
 
+## Engineering source and CAD selections
+
+Keep the geometry declaration, named regions, and physics in one study source:
+
+```fea
+geometry bracket {
+    file = "./bracket.step"
+    units = mm
+    region load_face : face { select name "load_face"; expect exactly_one }
+}
+```
+
+Geometry selection tools save the exact `PersistentEntityId` selector behind `load_face`
+in machine-managed metadata owned by the CAD asset. It is not another study module or a
+second identity system. The normal tree and source show engineering names; inspection
+can reveal the exact binding and CAD provenance when needed.
+
+The hidden metadata lives beside the CAD asset: for `cad/bracket.step`, it is
+`cad/.runmat/geometry/bracket.step.json`. Moving or importing the containing folder
+therefore carries its selections without rewriting a central registry. It is included
+in checked snapshots, source revision invalidation, review, and project/example export.
+Do not create `<study>.geometry.fea` files for machine bindings. Ordinary imports remain
+available for deliberate engineering reuse.
+
+Replacing a CAD file invalidates its recorded source digest. Reattach selections through
+the existing admitted revision map, or review unresolved selections. Never infer identity
+from a display label, face ordinal, or geometric proximity.
+
 ## Regions And Selectors
 
 A region declaration has three independent facts:
@@ -58,14 +86,17 @@ Implemented selectors include:
 
 | Form | Meaning |
 | --- | --- |
-| `select id "..."` | role-scoped alias published by source inspection |
-| `select persistent_id "..."` | canonical persistent entity identity |
-| `select name "..."` | imported authored name |
+| `select persistent_id "persistent-entity:sha256:..."` | canonical occurrence-qualified `PersistentEntityId` key returned by inspection |
+| `select name "..."` | saved named selection on the imported CAD asset |
 | `select tag "..."` | imported semantic tag |
 | `select result` | final result of constructed geometry |
 | `select feature.<id>` | exact output of a feature |
 | `select boundary_introduced_by feature.<id>` | boundary introduced by one feature operation |
 | `select output.region.<id>` | region returned by generated geometry |
+
+CAD label entries, display face numbers, and unqualified topology names are metadata, not alternate identities. Inspection, picking, authored persistent selectors, and execution share the exact importer's `PersistentEntityId`; the string key is derived by that type alone. Copy the actual inspected key in place of the illustrative placeholder above.
+
+Re-importing an unchanged entity preserves its identity where the exact topology and occurrence remain unchanged. Editing a shape or re-exporting an assembly may change those facts. Reattachment uses an admitted `GeometryRevisionMap`, with explicit retain, replace, split, merge, and delete evidence. Region remapping is atomic: a deleted, split, unmapped, or absent target requires review; names, ordinal position, and proximity never choose a replacement. A fresh STEP file does not itself provide CAD feature history, so automatic correspondence after arbitrary edits is not assumed.
 
 Selectors are resolved at exact realization and then projected onto the solver mesh. Wrong topology, empty selection, cardinality mismatch, missing lineage, or changed source identity fails before assembly.
 

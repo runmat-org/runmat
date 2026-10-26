@@ -32,7 +32,10 @@ fn original_constraints() -> DelaunayConstraints {
             .map(|(identity, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes(identity),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: captured

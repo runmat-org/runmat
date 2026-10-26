@@ -126,11 +126,11 @@ impl TopologyMutation {
             .collect();
         let positions = nodes
             .iter()
-            .map(|node| node.coordinates_m.map(coordinate_bits))
+            .map(|node| node.coordinates_m.canonical_value().map(coordinate_bits))
             .collect();
         let coordinate_scale_m = nodes
             .iter()
-            .flat_map(|node| node.coordinates_m)
+            .flat_map(|node| node.coordinates_m.canonical_value())
             .map(f64::abs)
             .fold(1.0, f64::max);
         let mut result = Self {
@@ -164,12 +164,13 @@ impl TopologyMutation {
         if node.identity == runmat_meshing_core::StableDigest::ZERO
             || node
                 .coordinates_m
+                .canonical_value()
                 .iter()
                 .any(|coordinate| !coordinate.is_finite())
             || self.node_indices.contains_key(&node.identity)
             || self
                 .positions
-                .contains(&node.coordinates_m.map(coordinate_bits))
+                .contains(&node.coordinates_m.canonical_value().map(coordinate_bits))
         {
             return Err(error(
                 "mutable topology rejected an invalid or duplicate node",
@@ -179,13 +180,14 @@ impl TopologyMutation {
             .map_err(|_| error("mutable topology exhausted its node index space"))?;
         self.coordinate_scale_m = node
             .coordinates_m
+            .canonical_value()
             .into_iter()
             .map(f64::abs)
             .fold(self.coordinate_scale_m, f64::max);
         self.nodes.push(node);
         self.node_indices.insert(node.identity, index);
         self.positions
-            .insert(node.coordinates_m.map(coordinate_bits));
+            .insert(node.coordinates_m.canonical_value().map(coordinate_bits));
         self.vertex_stars.push(BTreeSet::new());
         if self.trace_enabled && !self.trial_journals.is_empty() {
             self.edit_trace

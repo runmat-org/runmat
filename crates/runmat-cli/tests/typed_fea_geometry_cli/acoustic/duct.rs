@@ -184,7 +184,7 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
             .iter()
             .copied()
             .eq(projection.elements.iter().map(|e| e.element_id)));
-        assert_eq!(result.frequency().hertz, 0.2);
+        assert_eq!(result.frequency().canonical_value(), 0.2);
         assert_eq!(result.source_evidence().len(), 1);
         assert!(result.source_evidence()[0].accepted);
         assert!(result.relative_residual() <= 1e-8);

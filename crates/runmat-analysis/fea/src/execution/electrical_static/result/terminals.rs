@@ -8,7 +8,7 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
         .ordered_node_ids
         .iter()
         .copied()
-        .zip(r.nodal_outward_flux.iter().copied())
+        .zip(r.nodal_outward_flux.canonical_values().iter().copied())
         .collect::<BTreeMap<_, _>>();
     let mut ids = BTreeSet::new();
     let mut owned = BTreeSet::new();
@@ -19,7 +19,7 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
         if terminal.constraint_id.trim().is_empty()
             || !ids.insert(&terminal.constraint_id)
             || !unique(&terminal.ordered_node_ids)
-            || !terminal.outward_flux.is_finite()
+            || !terminal.outward_flux.canonical_value().is_finite()
             || terminal
                 .ordered_node_ids
                 .iter()
@@ -35,7 +35,7 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
             .sum();
         if !sum.is_finite()
             || !scale.is_finite()
-            || (sum - terminal.outward_flux).abs()
+            || (sum - terminal.outward_flux.canonical_value()).abs()
                 > 64.0 * f64::EPSILON * scale.max(f64::MIN_POSITIVE)
         {
             return Err(invalid(
@@ -43,8 +43,16 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
             ));
         }
     }
-    let sum: f64 = r.terminals.iter().map(|t| t.outward_flux).sum();
-    let scale: f64 = r.terminals.iter().map(|t| t.outward_flux.abs()).sum();
+    let sum: f64 = r
+        .terminals
+        .iter()
+        .map(|t| t.outward_flux.canonical_value())
+        .sum();
+    let scale: f64 = r
+        .terminals
+        .iter()
+        .map(|t| t.outward_flux.canonical_value().abs())
+        .sum();
     if !sum.is_finite() || !scale.is_finite() {
         return Err(invalid("nonfinite electrical terminal accounting"));
     }
@@ -85,7 +93,7 @@ pub(super) fn validate_for(
         .ordered_node_ids
         .iter()
         .copied()
-        .zip(r.potential_v.iter().copied())
+        .zip(r.potential_v.canonical_values().iter().copied())
         .collect::<BTreeMap<_, _>>();
     let mut prescribed = Vec::new();
     for (terminal, constraint) in r.terminals.iter().zip(&workload.model.constraints) {
@@ -150,8 +158,8 @@ pub(super) fn validate_for(
             .find_map(|&node| prescribed_values.get(&projection.nodes[node].node_id))
             .ok_or_else(|| invalid("unanchored electrical component"))?;
         for node in component {
-            let expected = r.potential_increment_v[node] + reference;
-            if expected != r.potential_v[node] {
+            let expected = r.potential_increment_v.canonical_values()[node] + reference;
+            if expected != r.potential_v.canonical_values()[node] {
                 return Err(invalid(
                     "retained potential disagrees with gauge departure and prescribed reference",
                 ));

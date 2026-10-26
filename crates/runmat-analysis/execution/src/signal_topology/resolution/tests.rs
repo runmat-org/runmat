@@ -122,6 +122,16 @@ fn foreign_mesh_changed_selector_and_transported_substitution_reject() {
     forged.resolved = other.resolved.clone();
     assert!(forged.validate_for(&source, &mesh).is_err());
     let mut broken = mesh.clone();
-    broken.topology.nodes[0].coordinates_m[0] += 1.0;
+    {
+        let quantity_change = 1.0;
+        let quantity_index = 0;
+        let quantity_slot = &mut broken.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(SignalTopologyResolution::derive(&source, &broken).is_err());
 }

@@ -156,13 +156,23 @@ pub(super) fn cold_execution_on_mesh(
     // rejection must come from admitted identity, not missing constraint targets.
     let substituted_mesh = substitution.unwrap_or_else(|| {
         let mut substituted_mesh = cold_mesh.clone();
-        substituted_mesh
-            .topology
-            .nodes
-            .iter_mut()
-            .find(|node| node.coordinates_m == [0.5; 3])
-            .unwrap()
-            .coordinates_m[1] += 0.001;
+        {
+            let quantity_change = 0.001;
+            let quantity_index = 1;
+            let quantity_slot = &mut substituted_mesh
+                .topology
+                .nodes
+                .iter_mut()
+                .find(|node| node.coordinates_m.canonical_value() == [0.5; 3])
+                .unwrap()
+                .coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         substituted_mesh.canonical_digest = StableDigest::ZERO;
         substituted_mesh.seal_canonical_digest().unwrap();
         substituted_mesh

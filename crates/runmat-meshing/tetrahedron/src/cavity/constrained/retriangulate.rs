@@ -84,7 +84,10 @@ pub(crate) fn retriangulate_constrained_cavity_from_nodes_with_diagnostics(
     let tolerance = resolved_cavity_tolerance(&boundary_node_map, options.classification_tolerance);
     let mut node_map = BTreeMap::<u32, Point3>::new();
     for node in nodes {
-        if node_map.insert(node.node_id, node.coordinates_m).is_some() {
+        if node_map
+            .insert(node.node_id, node.coordinates_m.canonical_value())
+            .is_some()
+        {
             return Err(ConstrainedCavityRefillError::DuplicateInteriorNode {
                 node_id: node.node_id,
             });
@@ -99,7 +102,7 @@ pub(crate) fn retriangulate_constrained_cavity_from_nodes_with_diagnostics(
         if !candidate_respects_protected_boundary_distance(
             cavity,
             &boundary_node_map,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             options,
         ) {
             continue;
@@ -108,7 +111,7 @@ pub(crate) fn retriangulate_constrained_cavity_from_nodes_with_diagnostics(
             cavity,
             &boundary_node_map,
             &boundary_triangles,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             tolerance,
         ) == PointInClosedSurface::Inside
         {
@@ -308,7 +311,7 @@ fn result(
         sampled_accepted_nodes: accepted_nodes
             .iter()
             .take(64)
-            .map(|node| (node.node_id, node.coordinates_m))
+            .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
             .collect(),
     }
 }

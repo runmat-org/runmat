@@ -75,8 +75,11 @@ fn evaluate(
                 .binary_search_by_key(&node.identity, |old| old.identity)
                 .is_ok_and(|index| {
                     base.nodes[index] == *node
-                        && base.nodes[index].coordinates_m.map(f64::to_bits)
-                            == node.coordinates_m.map(f64::to_bits)
+                        && base.nodes[index]
+                            .coordinates_m
+                            .canonical_value()
+                            .map(f64::to_bits)
+                            == node.coordinates_m.canonical_value().map(f64::to_bits)
                 }))
         })
         .collect::<Result<Vec<_>, DelaunayVolumeQualityError>>()?;

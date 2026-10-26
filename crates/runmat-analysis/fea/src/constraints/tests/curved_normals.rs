@@ -8,7 +8,17 @@ fn curved_tri6_normal_displacement_uses_local_midside_tangent() {
     // yields the exact area vector (0, 2h, 1) at its midside node. The
     // outward normal is its negative; the corner plane alone remains z=0.
     let bow_m = 0.1;
-    mesh.topology.nodes[4].coordinates_m[2] = bow_m;
+    {
+        let quantity_change = bow_m;
+        let quantity_index = 2;
+        let quantity_slot = &mut mesh.topology.nodes[4].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
@@ -93,7 +103,17 @@ fn curved_tri6_normal_support_solves_tangential_traction_and_recovers_normal_rea
     let tangent = [0.0, 1.0 / length, -2.0 * warp_m / length];
     let normal = [0.0, -2.0 * warp_m / length, -1.0 / length];
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    mesh.topology.nodes[4].coordinates_m[2] = warp_m;
+    {
+        let quantity_change = warp_m;
+        let quantity_index = 2;
+        let quantity_slot = &mut mesh.topology.nodes[4].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -102,8 +122,8 @@ fn curved_tri6_normal_support_solves_tangential_traction_and_recovers_normal_rea
     else {
         panic!("fixture requires isotropic elasticity");
     };
-    elasticity.youngs_modulus_pa = youngs_pa;
-    elasticity.poisson_ratio = poisson;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(youngs_pa);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(poisson);
     model.constraints = mesh
         .topology
         .nodes
@@ -226,7 +246,17 @@ fn curved_tri6_foundation_adds_independent_normal_stiffness_and_recovered_energy
     let length = (1.0 + 4.0 * warp_m * warp_m).sqrt();
     let tangent = [0.0, 1.0 / length, -2.0 * warp_m / length];
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    mesh.topology.nodes[4].coordinates_m[2] = warp_m;
+    {
+        let quantity_change = warp_m;
+        let quantity_index = 2;
+        let quantity_slot = &mut mesh.topology.nodes[4].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -235,8 +265,8 @@ fn curved_tri6_foundation_adds_independent_normal_stiffness_and_recovered_energy
     else {
         panic!("fixture requires isotropic elasticity");
     };
-    elasticity.youngs_modulus_pa = youngs_pa;
-    elasticity.poisson_ratio = poisson;
+    elasticity.youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(youngs_pa);
+    elasticity.poisson_ratio = runmat_types::physical::PoissonRatio::new(poisson);
     model.constraints = mesh
         .topology
         .nodes

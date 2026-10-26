@@ -122,6 +122,15 @@ fn success_cannot_hide_nonzero_exit_or_a_different_observed_interval() {
         );
         snapshot.validate().unwrap();
         if corruption == 2 {
+            let original = snapshot.task_execution_evidence(request.task_id).unwrap();
+            let cold: runmat_execution_runner::TaskExecutionEvidence =
+                serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+            cold.validate().unwrap();
+            assert_eq!(cold, original);
+            assert_eq!(
+                cold.resource_aggregate(1).unwrap(),
+                original.resource_aggregate(1).unwrap()
+            );
             let mut invalid = snapshot;
             invalid
                 .attempts

@@ -34,8 +34,18 @@ fn curved_mesh_with_eta(cells: usize, eta: f64) -> SolverMeshArtifact {
             }
         }
         runmat_meshing_core::sort_solver_node_exact_parameters(&mut node.exact_parameters);
-        let z = node.coordinates_m[2];
-        node.coordinates_m[1] += eta * z * (1.0 - z);
+        let z = node.coordinates_m.canonical_value()[2];
+        {
+            let quantity_change = eta * z * (1.0 - z);
+            let quantity_index = 1;
+            let quantity_slot = &mut node.coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] += quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
     }
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();

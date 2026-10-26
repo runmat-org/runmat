@@ -977,14 +977,14 @@ mod tests {
             values.translations[0]
                 .value
                 .study_constant(&[])
-                .map(|value| value.meters),
+                .map(|value| value.canonical_value()),
             Some(0.0025)
         );
         assert_eq!(
             values.rotations[0]
                 .value
                 .study_constant(&[])
-                .map(|value| value.radians),
+                .map(|value| value.canonical_value()),
             Some(std::f64::consts::FRAC_PI_2)
         );
 
@@ -1027,7 +1027,7 @@ mod tests {
             StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
                 reference_point: runmat_analysis_core::ReferencePoint { position, .. },
                 ..
-            }) if position.meters == [0.1, 0.0, 0.025]
+            }) if position.canonical_value() == [0.1, 0.0, 0.025]
         ));
 
         let conditions = crate::make_cell_with_shape(vec![prescribed, coupling], vec![1, 2])
@@ -1118,8 +1118,8 @@ mod tests {
                 initial_velocity,
                 reconstruction: StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
             } if id == "support-acceleration"
-                && initial_displacement.meters == 0.25
-                && initial_velocity.meters_per_second == -0.5
+                && initial_displacement.canonical_value() == 0.25
+                && initial_velocity.canonical_value() == -0.5
         ));
         let duplicate = crate::make_cell_with_shape(vec![motion.clone(), motion], vec![1, 2])
             .expect("motion cell");

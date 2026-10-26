@@ -111,13 +111,6 @@ pub(super) fn token(field: &str, value: &str) -> Result<(), GeometryContractErro
     Ok(())
 }
 
-pub(super) fn finite(field: &str, value: f64) -> Result<(), GeometryContractError> {
-    if !value.is_finite() {
-        return Err(invalid(field, "must be finite"));
-    }
-    Ok(())
-}
-
 pub(super) fn invalid(field: &str, reason: &str) -> GeometryContractError {
     GeometryContractError::invalid(field, reason)
 }

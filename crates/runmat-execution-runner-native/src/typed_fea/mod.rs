@@ -17,9 +17,13 @@ mod maxwell_execution;
 mod nonlinear_execution;
 mod preparation;
 mod prepared_validation;
+mod duration;
+pub use duration::execute_checked_fea_locally_with_timing;
+mod planning;
 pub use execution::execute_prepared_fea_study_locally;
 use execution::execute_prepared_with_source;
 pub use nonlinear_execution::CompletedAuthoredNonlinearSolidStudy;
+pub use planning::{plan_checked_fea_locally, plan_checked_fea_locally_with_timing};
 mod thermal_execution;
 
 #[cfg(all(test, feature = "occt-native"))]
@@ -106,6 +110,9 @@ pub type LocalFeaMeshObserver =
 pub struct LocalFeaExecutionOptions {
     pub root: Option<FeaRootSelector>,
     pub workers: Option<u32>,
+    /// Explicit host allocation; independent of worker-slot count.
+    pub cpu_threads_per_worker: Option<runmat_analysis_fea::planning::resource::LocalThreadCount>,
+    pub max_concurrent_cases: Option<std::num::NonZeroU16>,
     pub backend: runmat_analysis_fea::ComputeBackend,
     pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
     /// Receives coarse, ordered pipeline progress directly from local execution.
@@ -120,6 +127,8 @@ impl Default for LocalFeaExecutionOptions {
         Self {
             root: None,
             workers: None,
+            cpu_threads_per_worker: None,
+            max_concurrent_cases: None,
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
             accelerators: Vec::new(),
             progress_observer: None,
@@ -134,6 +143,8 @@ impl std::fmt::Debug for LocalFeaExecutionOptions {
             .debug_struct("LocalFeaExecutionOptions")
             .field("root", &self.root)
             .field("workers", &self.workers)
+            .field("cpu_threads_per_worker", &self.cpu_threads_per_worker)
+            .field("max_concurrent_cases", &self.max_concurrent_cases)
             .field("backend", &self.backend)
             .field("accelerators", &self.accelerators)
             .field("progress_observer", &self.progress_observer.is_some())
@@ -253,16 +264,21 @@ fn sweep_concurrency(
     case_count: usize,
 ) -> usize {
     let available = std::thread::available_parallelism().map_or(1, usize::from);
-    let requested = sweep
-        .study
-        .execution_policy
-        .as_ref()
-        .map(|policy| policy.fanout.sweep_cases)
-        .and_then(|limit| match limit {
-            runmat_analysis_core::ParallelismLimit::Auto => None,
-            runmat_analysis_core::ParallelismLimit::Fixed(value) => Some(value as usize),
-        })
-        .unwrap_or(available);
+    let requested = options
+        .max_concurrent_cases
+        .map(|limit| usize::from(limit.get()))
+        .unwrap_or_else(|| {
+            sweep
+                .study
+                .execution_policy
+                .as_ref()
+                .map(|policy| policy.fanout.sweep_cases)
+                .and_then(|limit| match limit {
+                    runmat_analysis_core::ParallelismLimit::Auto => None,
+                    runmat_analysis_core::ParallelismLimit::Fixed(value) => Some(value as usize),
+                })
+                .unwrap_or(available)
+        });
     let workers_per_case = options
         .workers
         .or_else(|| {
@@ -275,12 +291,17 @@ fn sweep_concurrency(
         })
         .unwrap_or(1)
         .max(1) as usize;
-    let threads_per_worker = sweep
-        .study
-        .execution_policy
-        .as_ref()
-        .map_or(available, |policy| {
-            policy.resources.cpu_threads_per_worker as usize
+    let threads_per_worker = options
+        .cpu_threads_per_worker
+        .map(|count| usize::from(count.get()))
+        .unwrap_or_else(|| {
+            sweep
+                .study
+                .execution_policy
+                .as_ref()
+                .map_or(available, |policy| {
+                    policy.resources.cpu_threads_per_worker as usize
+                })
         });
     requested
         .min(available / workers_per_case.saturating_mul(threads_per_worker))

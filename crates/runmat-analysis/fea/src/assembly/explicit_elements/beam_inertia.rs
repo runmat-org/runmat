@@ -11,11 +11,11 @@ pub(super) fn lumped_beam_mass(
     length_m: f64,
     transform_global_to_local: &BeamTransform12,
 ) -> [f64; BEAM_ELEMENT_DOF_COUNT] {
-    let nodal_mass = density_kg_per_m3 * section.area_m2 * length_m / 2.0;
+    let nodal_mass = density_kg_per_m3 * section.area_m2.canonical_value() * length_m / 2.0;
     let local_rotational_inertia = [
-        density_kg_per_m3 * section.torsion_j_m4 * length_m / 2.0,
-        density_kg_per_m3 * section.iy_m4 * length_m / 2.0,
-        density_kg_per_m3 * section.iz_m4 * length_m / 2.0,
+        density_kg_per_m3 * section.torsion_j_m4.canonical_value() * length_m / 2.0,
+        density_kg_per_m3 * section.iy_m4.canonical_value() * length_m / 2.0,
+        density_kg_per_m3 * section.iz_m4.canonical_value() * length_m / 2.0,
     ];
     let mut element_mass = [0.0; BEAM_ELEMENT_DOF_COUNT];
     for node_offset in [0usize, 6] {
@@ -61,8 +61,8 @@ pub(super) fn add_rayleigh_element_damping<const D: usize>(
             damping.add(
                 global_row,
                 global_column,
-                mass_coefficient.per_second * mass
-                    + stiffness_coefficient.seconds * stiffness[local_row][local_column],
+                mass_coefficient.canonical_value() * mass
+                    + stiffness_coefficient.canonical_value() * stiffness[local_row][local_column],
             );
         }
     }

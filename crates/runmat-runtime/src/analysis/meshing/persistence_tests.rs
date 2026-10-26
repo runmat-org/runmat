@@ -1,5 +1,20 @@
 use super::*;
 #[test]
+fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let _provider = runmat_filesystem::replace_provider(provider);
+    let path = Path::new("/immutable-mesh.cbor");
+    persist_canonical(path, b"original").unwrap();
+    persist_canonical(path, b"original").unwrap();
+    assert!(persist_canonical(path, b"different")
+        .unwrap_err()
+        .contains("collision"));
+    assert_eq!(runmat_filesystem::read(path).unwrap(), b"original");
+}
+
+#[test]
 fn immutable_mesh_collision_comparison_handles_matches_changes_short_and_oversized_files() {
     let _guard = crate::analysis::tests::analysis_test_guard();
     let directory = tempfile::tempdir().unwrap();
@@ -24,9 +39,11 @@ fn immutable_mesh_collision_read_cancels_without_changing_original_or_later_repl
     let original = vec![7_u8; 16385];
     persist_canonical(&path, &original).unwrap();
     {
-        let _interrupt = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
-            std::sync::atomic::AtomicBool::new(true),
-        ))));
+        let _interrupt = crate::interrupt::replace_interrupt(Some(
+            runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
+                std::sync::atomic::AtomicBool::new(true),
+            )),
+        ));
         assert!(persist_canonical(&path, &original)
             .unwrap_err()
             .contains("cancelled"));
@@ -43,9 +60,11 @@ fn borrowed_mesh_encoding_observes_runtime_cancellation_and_preserves_original()
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let original = mesh.canonical_encode().unwrap();
         {
-            let _interrupt = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
-                std::sync::atomic::AtomicBool::new(true),
-            ))));
+            let _interrupt = crate::interrupt::replace_interrupt(Some(
+                runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
+                    std::sync::atomic::AtomicBool::new(true),
+                )),
+            ));
             assert!(mesh
                 .canonical_encode_with_cancellation(&MeshPersistenceCancellation)
                 .is_err());

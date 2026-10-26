@@ -60,9 +60,9 @@ fn boundary_surface(
             Ok((
                 node.node_id,
                 glam::Vec3::new(
-                    finite_f32(node.coordinates_m[0])?,
-                    finite_f32(node.coordinates_m[1])?,
-                    finite_f32(node.coordinates_m[2])?,
+                    finite_f32(node.coordinates_m.canonical_value()[0])?,
+                    finite_f32(node.coordinates_m.canonical_value()[1])?,
+                    finite_f32(node.coordinates_m.canonical_value()[2])?,
                 ),
             ))
         })
@@ -199,7 +199,7 @@ fn section_cap(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<HashMap<_, _>>();
     let mut vertices = Vec::new();
     let mut triangles = Vec::new();

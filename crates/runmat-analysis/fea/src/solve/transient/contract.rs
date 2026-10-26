@@ -82,23 +82,31 @@ pub struct TransientSolveResult {
     pub(crate) reaction_snapshots: Vec<Vec<f64>>,
     #[serde(skip)]
     pub(crate) integration_intervals: Vec<TransientIntegrationInterval>,
-    pub external_work_j: Vec<f64>,
-    pub support_work_j: Vec<f64>,
-    pub damping_dissipation_j: Vec<f64>,
-    pub energy_balance_residual_j: Vec<f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub external_work_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub support_work_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub damping_dissipation_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub energy_balance_residual_j:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, Vec<f64>>,
     pub relative_energy_balance_error: Vec<f64>,
     pub dynamic_balance_snapshots: Vec<crate::contracts::StructuralDynamicBalanceSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransientIntegrationInterval {
-    pub(crate) start_time_s: f64,
+    pub(crate) start_time_s: runmat_types::physical::Time,
     pub(crate) start_approach: SignalSampleApproach,
     pub(crate) start_summary: AssemblySummary,
     pub(crate) start_displacement: Vec<f64>,
     pub(crate) start_velocity: Vec<f64>,
     pub(crate) start_acceleration: Vec<f64>,
-    pub(crate) end_time_s: f64,
+    pub(crate) end_time_s: runmat_types::physical::Time,
     pub(crate) end_approach: SignalSampleApproach,
     pub(crate) end_summary: AssemblySummary,
     pub(crate) end_displacement: Vec<f64>,
@@ -116,13 +124,13 @@ impl TransientIntegrationInterval {
         end_summary: AssemblySummary,
     ) -> Self {
         Self {
-            start_time_s,
+            start_time_s: runmat_types::physical::Time::new(start_time_s),
             start_approach,
             start_summary,
             start_displacement: Vec::new(),
             start_velocity: Vec::new(),
             start_acceleration: Vec::new(),
-            end_time_s,
+            end_time_s: runmat_types::physical::Time::new(end_time_s),
             end_approach,
             end_summary,
             end_displacement: Vec::new(),
@@ -161,16 +169,22 @@ pub enum TransientSolveError<E> {
     #[error("initial structural acceleration could not be established: {detail}")]
     InitialAcceleration { detail: String },
     #[error(
-        "structural acceleration could not be re-established after a discontinuity at {time_s} s: {detail}"
+        "structural acceleration could not be re-established after a discontinuity at {time_s} s: {detail}", time_s = .time_s.canonical_value()
     )]
-    AccelerationRefresh { time_s: f64, detail: String },
-    #[error("structural transient step ending at {time_s} s failed: {detail}")]
-    Step { time_s: f64, detail: String },
+    AccelerationRefresh {
+        time_s: runmat_types::physical::Time,
+        detail: String,
+    },
+    #[error("structural transient step ending at {time_s} s failed: {detail}", time_s = .time_s.canonical_value())]
+    Step {
+        time_s: runmat_types::physical::Time,
+        detail: String,
+    },
     #[error(
-        "structural transient state at {time_s} s exceeded its projected residual target: {residual_norm} > {target}"
+        "structural transient state at {time_s} s exceeded its projected residual target: {residual_norm} > {target}", time_s = .time_s.canonical_value()
     )]
     ResidualTargetExceeded {
-        time_s: f64,
+        time_s: runmat_types::physical::Time,
         residual_norm: f64,
         target: f64,
     },
@@ -200,8 +214,8 @@ pub enum TransientSolveError<E> {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TransientTimeDomain<'a> {
-    pub(crate) start_time_s: f64,
-    pub(crate) end_time_s: f64,
+    pub(crate) start_time_s: runmat_types::physical::Time,
+    pub(crate) end_time_s: runmat_types::physical::Time,
     pub(crate) step_boundaries: &'a [TransientStepBoundary],
 }
 

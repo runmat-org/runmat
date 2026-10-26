@@ -99,7 +99,17 @@ fn plan_round_trips_and_rejects_substituted_topology() {
     decoded.validate_against(&model, &mesh).unwrap();
 
     let mut substituted = mesh.clone();
-    substituted.topology.nodes[0].coordinates_m[0] += 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut substituted.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     substituted.canonical_digest = StableDigest::ZERO;
     substituted.seal_canonical_digest().unwrap();
     assert_eq!(
@@ -388,7 +398,10 @@ fn rotated_periodic_relation_rotates_displacements_with_geometry() {
 #[test]
 fn geometric_tie_projects_secondary_node_to_primary_surface() {
     let (mut model, mut mesh) = model_and_mesh();
-    mesh.topology.nodes[3].coordinates_m = [0.2, 0.3, 0.01];
+    mesh.topology.nodes[3].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new([0.2, 0.3, 0.01]);
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let primary = mesh.topology.boundary_faces[0]

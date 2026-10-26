@@ -71,10 +71,11 @@ fn solved_nonuniform_initial_field_obeys_independent_heat_equation_and_power() {
         steady.model.excitation_cases.clear();
         steady.model.signals.clear();
         steady.model.initial_conditions.clear();
-        steady.model.materials[0].mass_density_kg_per_m3 = Some(2.0);
+        steady.model.materials[0].mass_density_kg_per_m3 =
+            (Some(2.0)).map(runmat_types::physical::MassDensity::new);
         let material = steady.model.materials[0].thermal.as_mut().unwrap();
-        material.conductivity_w_per_mk = 1.0;
-        material.specific_heat_j_per_kgk = 3.0;
+        material.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);
+        material.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(3.0);
         steady.model.constraints = vec![
             prescribed(
                 "left",
@@ -100,7 +101,9 @@ fn solved_nonuniform_initial_field_obeys_independent_heat_equation_and_power() {
             .iter()
             .zip(producer.temperature_snapshots[0].as_host_f64().unwrap())
         {
-            assert!((actual - (300.0 + 10.0 * node.coordinates_m[0])).abs() < 1e-8);
+            assert!(
+                (actual - (300.0 + 10.0 * node.coordinates_m.canonical_value()[0])).abs() < 1e-8
+            );
         }
         let binding = solved_temperature_binding(&producer, &mesh);
         for intervals in [2, 4] {
@@ -181,7 +184,10 @@ fn solved_nonuniform_initial_field_obeys_independent_heat_equation_and_power() {
             {
                 for (node, actual) in mesh.topology.nodes.iter().zip(field.as_host_f64().unwrap()) {
                     assert!(
-                        (actual - (300.0 + 10.0 * node.coordinates_m[0] + 2.0 * t)).abs() < 1e-8,
+                        (actual
+                            - (300.0 + 10.0 * node.coordinates_m.canonical_value()[0] + 2.0 * t))
+                            .abs()
+                            < 1e-8,
                         "quadratic={quadratic}, intervals={intervals}, t={t}, actual={actual}"
                     );
                 }
@@ -212,10 +218,10 @@ fn solved_nonuniform_initial_field_obeys_independent_heat_equation_and_power() {
                     .all(|value| (value - 12.0).abs() < 1e-8));
             }
             for balance in &result.energy_balances {
-                assert!((balance.storage_rate_w - 12.0).abs() < 1e-8);
-                assert!((balance.applied_power_w - 12.0).abs() < 1e-8);
-                assert!(balance.prescribed_boundary_power_w.abs() < 1e-8);
-                assert!(balance.boundary_loss_w.abs() < 1e-8);
+                assert!((balance.storage_rate_w.canonical_value() - 12.0).abs() < 1e-8);
+                assert!((balance.applied_power_w.canonical_value() - 12.0).abs() < 1e-8);
+                assert!(balance.prescribed_boundary_power_w.canonical_value().abs() < 1e-8);
+                assert!(balance.boundary_loss_w.canonical_value().abs() < 1e-8);
                 assert!(balance.relative_residual < 1e-10);
             }
         }

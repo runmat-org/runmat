@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::{
-    Ap242ExchangeInventory, Ap242Parameter, Ap242ParameterAccess, Ap242PhysicalDimension,
-    GeometryAuthoringValue, GeometryContractError, GeometryDigest, GeometryScalarExpression,
-    GeometrySourceFormat, UnitSystem,
+    Ap242ExchangeInventory, Ap242Parameter, Ap242ParameterAccess, GeometryAuthoringValue,
+    GeometryContractError, GeometryDigest, GeometryScalarExpression, GeometrySourceFormat,
+    LengthUnit, QuantityKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,9 +33,17 @@ pub enum GeometryDefinitionSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportedGeometryDefinition {
+    /// Derived inspection evidence for advisory planning, not authored geometry
+    /// or part of the exact-kernel materialization wire contract.
+    #[serde(skip)]
+    pub preview_extent_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named_selections: Option<super::GeometryNamedSelections>,
     pub logical_path: String,
     pub format: GeometrySourceFormat,
-    pub units: UnitSystem,
+    pub unit_fallback: Option<LengthUnit>,
+    #[serde(default)]
+    pub unit_evidence: runmat_types::physical::LengthUnitEvidence,
     pub content_digest: GeometryDigest,
     pub topology_digest: GeometryDigest,
     pub capabilities: GeometryAuthoringCapabilities,
@@ -135,6 +143,8 @@ pub enum GeometryParameterType {
     Length,
     Angle,
     Vector3,
+    /// Numeric vectors carry the declared component descriptor; directions remain Vector3.
+    QuantityVector3(runmat_types::physical::DynamicDimension),
     Text,
 }
 
@@ -270,7 +280,6 @@ pub enum GeometryRegionRole {
 pub enum GeometryRegionSelector {
     Name(String),
     Tag(String),
-    SourceAlias(String),
     PersistentId(String),
     Result,
     FeatureResult(GeometryFeatureRef),
@@ -400,15 +409,15 @@ impl CadParameterDefinition {
             ));
         }
         let dimension = match self.physical_type {
-            CadParameterPhysicalType::Dimensionless => Ap242PhysicalDimension::Dimensionless,
-            CadParameterPhysicalType::Length => Ap242PhysicalDimension::Length,
-            CadParameterPhysicalType::Angle => Ap242PhysicalDimension::PlaneAngle,
-            CadParameterPhysicalType::Area => Ap242PhysicalDimension::Area,
-            CadParameterPhysicalType::Volume => Ap242PhysicalDimension::Volume,
-            CadParameterPhysicalType::Mass => Ap242PhysicalDimension::Mass,
-            CadParameterPhysicalType::Temperature => Ap242PhysicalDimension::Temperature,
+            CadParameterPhysicalType::Dimensionless => QuantityKind::Dimensionless,
+            CadParameterPhysicalType::Length => QuantityKind::Length,
+            CadParameterPhysicalType::Angle => QuantityKind::Angle,
+            CadParameterPhysicalType::Area => QuantityKind::Area,
+            CadParameterPhysicalType::Volume => QuantityKind::Volume,
+            CadParameterPhysicalType::Mass => QuantityKind::Mass,
+            CadParameterPhysicalType::Temperature => QuantityKind::Temperature,
         };
-        if self.source.value.dimension != dimension {
+        if self.source.value.kind() != dimension {
             return Err(GeometryContractError::invalid(
                 "CAD parameter type",
                 "authored physical type does not match the normalized source measure",
@@ -428,17 +437,15 @@ impl CadParameterDefinition {
 
 impl ImportedGeometryDefinition {
     fn validate(&self) -> Result<(), GeometryContractError> {
+        if self.preview_extent_m.is_some_and(|extent| extent.iter().any(|x| !x.is_finite() || *x <= 0.0)) {
+            return Err(GeometryContractError::invalid("geometry preview extent", "expected finite positive metres"));
+        }
+        if let Some(selections) = &self.named_selections { selections.validate_source(self.content_digest)?; }
         token("geometry import path", &self.logical_path)?;
         if !self.format.is_exact() {
             return Err(GeometryContractError::invalid(
                 "geometry import format",
                 "analysis geometry must be exact",
-            ));
-        }
-        if self.units == UnitSystem::Unspecified {
-            return Err(GeometryContractError::invalid(
-                "geometry import units",
-                "units must be explicit",
             ));
         }
         self.content_digest
@@ -521,9 +528,8 @@ impl GeometryRegionSelector {
         match self {
             Self::Name(value)
             | Self::Tag(value)
-            | Self::SourceAlias(value)
-            | Self::PersistentId(value)
             | Self::GeneratedOutput(value) => token("region selector", value),
+            Self::PersistentId(value) => super::PersistentEntityId::validate_analysis_selection_id(value),
             Self::FeatureResult(reference) | Self::BoundaryIntroducedBy(reference) => {
                 token("region feature", &reference.0)
             }

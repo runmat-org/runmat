@@ -1401,7 +1401,11 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
         runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 3 };
     let spectrum = runmat_analysis_core::ResponseSpectrum {
         spectrum_id: runmat_analysis_core::ResponseSpectrumId("spectrum_x".into()),
-        abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(vec![0.1, 100.0]),
+        abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(
+                vec![0.1, 100.0],
+            ),
+        ),
         ordinates: runmat_analysis_core::NumericalDataSource::authored(
             vec![1.0, 1.0],
             "sha256:response-spectrum-intent",
@@ -1487,7 +1491,7 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
         runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 3 };
     let excitation = runmat_analysis_core::RandomExcitationSpectrum {
         excitation_id: runmat_analysis_core::RandomExcitationId("broadband_x".into()),
-        frequencies_hz: vec![0.1, 10.0, 100.0],
+        frequencies_hz: runmat_types::physical::Quantity::new(vec![0.1, 10.0, 100.0]),
         channels: vec![runmat_analysis_core::RandomExcitationChannel {
             channel_id: runmat_analysis_core::RandomExcitationChannelId("base_x".into()),
             quantity: runmat_analysis_core::RandomExcitationQuantity::BaseAcceleration,
@@ -1497,14 +1501,20 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
             },
         }],
         spectral_density: runmat_analysis_core::NumericalDataSource::authored(
-            vec![runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[1.0e-4]); 3],
+            vec![
+                runmat_analysis_core::CrossPowerSpectralDensity::diagonal(
+                    &runmat_types::physical::Quantity::new([1.0e-4])
+                );
+                3
+            ],
             "sha256:random-response-intent",
         ),
         convention: runmat_analysis_core::SpectralDensityConvention::OneSidedPerHertz,
         interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
         evidence: runmat_analysis_core::RandomSpectrumEvidence {
-            max_absolute_density_error: Some(0.0),
+            max_absolute_density_error: (Some(0.0))
+                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: None,
         },
     };
@@ -1903,10 +1913,9 @@ fn test_analysis_workload_identity(
 fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {
     let mut artifact =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    artifact.resolved_request = structural_study::resolve_intent_meshing_request(
-        UnitSystem::Meter,
-        Some(runmat_meshing_core::MeshingRequestSettings::default()),
-    )
+    artifact.resolved_request = structural_study::resolve_intent_meshing_request(Some(
+        runmat_meshing_core::MeshingRequestSettings::default(),
+    ))
     .unwrap()
     .unwrap();
     artifact.topology.boundary_faces[0]

@@ -32,7 +32,7 @@ impl CandidateQueries {
             .iter()
             .map(|node| {
                 checkpoint()?;
-                SpatialPoint::new(node.coordinates_m, ()).ok_or_else(|| {
+                SpatialPoint::new(node.coordinates_m.canonical_value(), ()).ok_or_else(|| {
                     error(
                         DelaunayVolumeRefinementCandidateErrorKind::InvalidTopology,
                         "candidate lookup requires finite admitted coordinates",
@@ -75,12 +75,13 @@ impl CandidateQueries {
         let mut updated = self.locations.clone();
         for node in nodes {
             checkpoint(cancellation)?;
-            let entry = SpatialPoint::new(node.coordinates_m, ()).ok_or_else(|| {
-                error(
-                    DelaunayVolumeRefinementCandidateErrorKind::InvalidTopology,
-                    "accepted candidate requires finite coordinates",
-                )
-            })?;
+            let entry =
+                SpatialPoint::new(node.coordinates_m.canonical_value(), ()).ok_or_else(|| {
+                    error(
+                        DelaunayVolumeRefinementCandidateErrorKind::InvalidTopology,
+                        "accepted candidate requires finite coordinates",
+                    )
+                })?;
             updated.insert_with_checkpoint(entry, &mut || checkpoint(cancellation))?;
         }
         self.locations = updated;

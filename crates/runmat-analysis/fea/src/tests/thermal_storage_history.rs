@@ -9,8 +9,16 @@ fn insulated_uniform_heating_publishes_storage_density_not_total_power() {
             reference_temperature: Temperature::new(293.15),
         });
         let material = &model.materials[0];
-        let capacity = material.mass_density_kg_per_m3.unwrap()
-            * material.thermal.as_ref().unwrap().specific_heat_j_per_kgk;
+        let capacity = material
+            .mass_density_kg_per_m3
+            .map(|quantity| quantity.canonical_value())
+            .unwrap()
+            * material
+                .thermal
+                .as_ref()
+                .unwrap()
+                .specific_heat_j_per_kgk
+                .canonical_value();
         // Analytic insulated uniform solution: dT/dt=q/(rho*c)=1 K/s,
         // hence stored energy rate per volume equals q independently of element volume.
         model.signals = vec![PhysicalSignal::HeatGenerationDensity(Signal {

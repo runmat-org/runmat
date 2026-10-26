@@ -62,6 +62,7 @@ members = [
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/fixtures",
     "crates/runmat-geometry/io",
+    "crates/runmat-geometry/wasm-host",
     "crates/runmat-geometry/ops",
     "crates/runmat-analysis/core",
     "crates/runmat-analysis/language",

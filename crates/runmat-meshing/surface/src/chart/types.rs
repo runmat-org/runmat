@@ -54,7 +54,7 @@ pub struct ExactFaceChartOptions {
     pub maximum_periodic_residual: f64,
     pub maximum_period_shifts: i32,
     pub maximum_charts_per_face: u16,
-    pub projection_tolerance_m: f64,
+    pub projection_tolerance_m: runmat_types::physical::Length,
 }
 
 impl Default for ExactFaceChartOptions {
@@ -63,7 +63,7 @@ impl Default for ExactFaceChartOptions {
             maximum_periodic_residual: 1.0e-12,
             maximum_period_shifts: 1_000_000,
             maximum_charts_per_face: 64,
-            projection_tolerance_m: 1.0e-10,
+            projection_tolerance_m: runmat_types::physical::Length::new(1.0e-10),
         }
     }
 }

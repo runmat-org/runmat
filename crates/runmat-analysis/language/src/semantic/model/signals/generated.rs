@@ -2,7 +2,7 @@ use super::{diagnostic, optional_frame, scalar, SignalWrapper};
 use crate::{
     semantic::expression::operation_pattern_matches, BoundFeaProgram, CheckedExpression,
     CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind,
-    FeaDiagnostic, FeaType, PhysicalDimension,
+    FeaDiagnostic, FeaType,
 };
 use runmat_analysis_core::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
@@ -19,7 +19,7 @@ mod topology;
 pub(super) struct LowerSignal<'a> {
     pub declaration: &'a CheckedFeaDeclaration,
     pub bound: &'a BoundFeaProgram,
-    pub quantity_dimension: PhysicalDimension,
+    pub quantity_kind: runmat_types::physical::QuantityKind,
     pub wrap: SignalWrapper,
     pub diagnostics: &'a mut Vec<FeaDiagnostic>,
 }
@@ -33,7 +33,7 @@ pub(super) fn lower(
     let LowerSignal {
         declaration,
         bound,
-        quantity_dimension,
+        quantity_kind,
         wrap,
         diagnostics,
     } = context;
@@ -103,13 +103,8 @@ pub(super) fn lower(
     };
     validate_callable(declaration, facts, "signal", diagnostics);
     let arguments = arguments(declaration, facts, statements, "signal", diagnostics)?;
-    let (sampling, tolerance) = sampled::sampling(
-        declaration,
-        domain,
-        quantity_dimension,
-        statements,
-        diagnostics,
-    )?;
+    let (sampling, tolerance) =
+        sampled::sampling(declaration, domain, quantity_kind, statements, diagnostics)?;
     let domain = generator_domain(declaration, domain, diagnostics)?;
     let interpolation = super::policy::interpolation(declaration, statements, diagnostics)?;
     let extrapolation = super::policy::extrapolation(declaration, statements, diagnostics)?;

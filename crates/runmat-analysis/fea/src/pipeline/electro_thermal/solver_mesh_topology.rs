@@ -8,7 +8,7 @@ use crate::topology::AnalysisProjection;
 pub(super) struct MeshConductanceEdge {
     pub(super) from: usize,
     pub(super) to: usize,
-    pub(super) length_m: f64,
+    pub(super) length_m: runmat_types::physical::Length,
     pub(super) direction: [f64; 3],
 }
 
@@ -26,7 +26,7 @@ impl MeshConductanceTopology {
         let coordinates = projection
             .nodes
             .iter()
-            .map(|node| node.coordinates_m)
+            .map(|node| node.coordinates_m.canonical_value())
             .collect::<Vec<_>>();
         if coordinates.len() < 2 {
             return None;
@@ -54,7 +54,7 @@ impl MeshConductanceTopology {
                 MeshConductanceEdge {
                     from,
                     to,
-                    length_m: length_m.max(1.0e-12),
+                    length_m: runmat_types::physical::Length::new(length_m.max(1.0e-12)),
                     direction: delta.map(|value| value / length_m.max(1.0e-12)),
                 }
             })
@@ -111,6 +111,9 @@ mod tests {
         assert_eq!(topology.edges.len(), 6);
         assert_eq!(topology.active_dimension_count, 3);
         assert_ne!(topology.source_node, topology.ground_node);
-        assert!(topology.edges.iter().all(|edge| edge.length_m > 0.0));
+        assert!(topology
+            .edges
+            .iter()
+            .all(|edge| edge.length_m.canonical_value() > 0.0));
     }
 }

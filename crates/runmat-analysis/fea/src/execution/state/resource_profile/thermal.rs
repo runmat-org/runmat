@@ -25,8 +25,10 @@ struct ThermalPayload<'a, T: Serialize> {
 struct ThermalState<'a, T: Serialize> {
     temperature: T,
     ordered_node_ids: &'a [u64],
-    reference_temperature_k: f64,
-    sample_time_s: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    reference_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    sample_time_s: runmat_types::physical::Time,
     maximum_relative_linear_residual: f64,
 }
 
@@ -56,12 +58,16 @@ pub(super) fn profile(
         state: ThermalState {
             temperature,
             ordered_node_ids: &manifest.ordered_node_ids,
-            reference_temperature_k: manifest.reference_temperature_k,
-            sample_time_s: *manifest.time_points_s.last().ok_or_else(|| {
-                AnalysisExecutionError::Invalid(
-                    "thermal state profile missing terminal time".into(),
-                )
-            })?,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                manifest.reference_temperature_k.canonical_value(),
+            ),
+            sample_time_s: runmat_types::physical::Time::new(
+                *manifest.time_points_s.last().ok_or_else(|| {
+                    AnalysisExecutionError::Invalid(
+                        "thermal state profile missing terminal time".into(),
+                    )
+                })?,
+            ),
             maximum_relative_linear_residual: manifest
                 .residual_norms
                 .iter()

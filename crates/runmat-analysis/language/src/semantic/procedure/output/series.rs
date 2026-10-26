@@ -6,7 +6,7 @@ use super::super::{lower, values};
 
 pub(super) fn interpolation_positions(value: &CheckedExpression) -> Option<Vec<Position>> {
     if let Some(meters) = values::canonical_vector3(value) {
-        return Some(vec![Position { meters }]);
+        return Some(vec![Position::new(meters)]);
     }
     let CheckedExpressionKind::List(values) = &value.kind else {
         return None;
@@ -16,9 +16,9 @@ pub(super) fn interpolation_positions(value: &CheckedExpression) -> Option<Vec<P
             values
                 .iter()
                 .map(|value| {
-                    Some(Position {
-                        meters: super::super::values::canonical_vector3(value)?,
-                    })
+                    Some(Position::new(super::super::values::canonical_vector3(
+                        value,
+                    )?))
                 })
                 .collect::<Option<Vec<_>>>()
         })

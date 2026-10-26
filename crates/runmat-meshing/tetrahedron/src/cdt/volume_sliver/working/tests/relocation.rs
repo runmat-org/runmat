@@ -50,7 +50,10 @@ fn local_relocation_replays_cached_geometry_and_matches_full_quality_reference()
             )
             .unwrap();
         assert_eq!(
-            query_identity(trial.topology(), replacement.coordinates_m),
+            query_identity(
+                trial.topology(),
+                replacement.coordinates_m.canonical_value()
+            ),
             vec![replacement.identity]
         );
         assert!(query_identity(trial.topology(), [0.3, 0.3, 1.0e-6]).is_empty());

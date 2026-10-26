@@ -101,9 +101,12 @@ pub(in crate::cdt) fn fixture_scaled(
                 .vertex_indices
                 .map(|i| topology.nodes[i as usize].identity);
             identities.sort_unstable();
-            let mut points = face
-                .vertex_indices
-                .map(|i| topology.nodes[i as usize].coordinates_m.map(f64::to_bits));
+            let mut points = face.vertex_indices.map(|i| {
+                topology.nodes[i as usize]
+                    .coordinates_m
+                    .canonical_value()
+                    .map(f64::to_bits)
+            });
             points.sort_unstable();
             let entity = PersistentEntityId {
                 kind: PersistentEntityKind::Face,

@@ -35,10 +35,10 @@ impl ThermalOperatorAssembly {
         for (node, &power) in storage_rate.iter().enumerate() {
             storage.add(power);
             storage_absolute.add(power.abs());
-            applied.add(self.applied_source[node]);
-            applied_absolute.add(self.applied_source[node].abs());
-            if self.prescribed_temperature_k[node].is_some() {
-                nodal_reaction[node] = self.applied_source[node] - power;
+            applied.add(self.applied_source.canonical_values()[node]);
+            applied_absolute.add(self.applied_source.canonical_values()[node].abs());
+            if self.prescribed_temperature_k.canonical_values()[node].is_some() {
+                nodal_reaction[node] = self.applied_source.canonical_values()[node] - power;
             }
         }
 
@@ -50,7 +50,7 @@ impl ThermalOperatorAssembly {
             if element
                 .node_indices
                 .iter()
-                .all(|&node| self.prescribed_temperature_k[node].is_none())
+                .all(|&node| self.prescribed_temperature_k.canonical_values()[node].is_none())
             {
                 continue;
             }
@@ -58,8 +58,10 @@ impl ThermalOperatorAssembly {
                 .visit_element_quadrature(element, |point| {
                     for (i, &left) in element.node_indices.iter().enumerate() {
                         for (j, &right) in element.node_indices.iter().enumerate().skip(i + 1) {
-                            let left_prescribed = self.prescribed_temperature_k[left].is_some();
-                            let right_prescribed = self.prescribed_temperature_k[right].is_some();
+                            let left_prescribed =
+                                self.prescribed_temperature_k.canonical_values()[left].is_some();
+                            let right_prescribed =
+                                self.prescribed_temperature_k.canonical_values()[right].is_some();
                             if !left_prescribed && !right_prescribed {
                                 continue;
                             }
@@ -68,7 +70,9 @@ impl ThermalOperatorAssembly {
                                 .zip(point.physical_shape_gradients()[j])
                                 .map(|(a, b)| a * b)
                                 .sum::<f64>();
-                            let off_diagonal = self.element_conductivity_w_per_mk[element_index]
+                            let off_diagonal = self
+                                .element_conductivity_w_per_mk
+                                .canonical_values()[element_index]
                                 * gradient_product
                                 * point.volume_weight_m3;
                             let left_reaction =
@@ -112,13 +116,13 @@ impl ThermalOperatorAssembly {
                                 shape * (temperature_k[node] - (ambient - reference_temperature_k))
                             })
                             .sum::<f64>();
-                        let power = coefficient.watts_per_square_meter_kelvin
+                        let power = coefficient.canonical_value()
                             * temperature_difference
                             * point.area_weight_m2;
                         boundary_loss.add(power);
                         boundary_absolute.add(power.abs());
                         for (&node, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                            if self.prescribed_temperature_k[node].is_some() {
+                            if self.prescribed_temperature_k.canonical_values()[node].is_some() {
                                 nodal_reaction[node] -= shape * power;
                             }
                         }
@@ -140,7 +144,7 @@ impl ThermalOperatorAssembly {
                     boundary_loss.add(form.outward_power_w);
                     boundary_absolute.add(form.absolute_transfer_w);
                     for (local, &node) in face.node_indices.iter().enumerate() {
-                        if self.prescribed_temperature_k[node].is_some() {
+                        if self.prescribed_temperature_k.canonical_values()[node].is_some() {
                             nodal_reaction[node] -= form.outward_nodal_power_w[local];
                         }
                     }
@@ -157,15 +161,15 @@ impl ThermalOperatorAssembly {
             reaction_absolute.add(value.abs());
         }
         Ok(ThermalEnergyBalance::from_power_transfers(
-            storage.total(),
-            boundary_loss.total(),
-            applied.total(),
-            reaction.total(),
+            runmat_types::physical::Power::new(storage.total()),
+            runmat_types::physical::Power::new(boundary_loss.total()),
+            runmat_types::physical::Power::new(applied.total()),
+            runmat_types::physical::Power::new(reaction.total()),
             ThermalPowerScale {
-                storage_w: storage_absolute.total(),
-                boundary_w: boundary_absolute.total(),
-                applied_w: applied_absolute.total(),
-                prescribed_w: reaction_absolute.total(),
+                storage_w: runmat_types::physical::Power::new(storage_absolute.total()),
+                boundary_w: runmat_types::physical::Power::new(boundary_absolute.total()),
+                applied_w: runmat_types::physical::Power::new(applied_absolute.total()),
+                prescribed_w: runmat_types::physical::Power::new(reaction_absolute.total()),
             },
         ))
     }

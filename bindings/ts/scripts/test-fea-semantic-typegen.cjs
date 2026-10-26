@@ -16,6 +16,10 @@ fs.writeFileSync(fixture, `
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Root {
     pub required_value: String,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub canonical_modulus: YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub canonical_position: runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted_when_none: Option<u32>,
     pub explicit_null: Option<bool>,
@@ -28,7 +32,26 @@ pub struct Root {
     pub binary: Vec<u8>,
     pub state: State,
     pub source: Source,
+    pub spectrum: Spectrum,
+    pub transparent_series: PhysicalSeries,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case", tag = "domain", content = "samples")]
+pub enum Spectrum {
+    FrequencyHertz(#[serde(with = "runmat_types::physical::canonical_storage")] Quantity<Frequency, Vec<f64>>),
+    ErrorAndSamples(
+        #[serde(with = "runmat_types::physical::canonical_scalar::optional")] Option<YoungsModulus>,
+        #[serde(with = "runmat_types::physical::canonical_storage")] Quantity<Frequency, [f64; 2]>,
+    ),
+}
+
+#[derive(Serialize)]
+#[serde(transparent)]
+pub struct PhysicalSeries(#[serde(with = "runmat_types::physical::canonical_storage")] pub Quantity<Frequency, Vec<f64>>);
+
+#[derive(Serialize)]
+pub struct YoungsModulus { pub pascals: f64 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -53,6 +76,11 @@ pub enum Source {
 const registry = parseDeclarations(rustFiles(directory));
 const output = renderReachable(registry, ["Root"]);
 assert.match(output, /requiredValue: string/);
+assert.match(output, /canonicalModulus: number/);
+assert.match(output, /canonicalPosition: \[number, number, number\]/);
+assert.match(output, /domain: "frequency_hertz"; samples: number\[\]/);
+assert.match(output, /domain: "error_and_samples"; samples: \[number \| null, \[number, number\]\]/);
+assert.match(output, /export type PhysicalSeries = number\[\]/);
 assert.match(output, /color: \[number, number, number\]/);
 assert.match(output, /binary: Uint8Array \| number\[\]/);
 assert.match(output, /omittedWhenNone\?: number/);
@@ -87,8 +115,12 @@ const omissionGuards = require("typescript").transpileModule(renderGuards(output
 }).outputText;
 const omissions = {};
 require("node:vm").runInNewContext(omissionGuards, { exports: omissions, Uint8Array });
-const root = { requiredValue: "checked", explicitNull: null, color: [1, 2, 3], binary: [], state: { kind: "ready" }, source: { source: "declaration", module_path: "project/main.fea", declaration_id: "main" } };
+const root = { spectrum: { domain: "frequency_hertz", samples: [1, 2] }, transparentSeries: [1, 2], requiredValue: "checked", canonicalModulus: 210e9, canonicalPosition: [0.0, 0.01, 0.02], explicitNull: null, color: [1, 2, 3], binary: [], state: { kind: "ready" }, source: { source: "declaration", module_path: "project/main.fea", declaration_id: "main" } };
 assert.equal(omissions.isRoot(root), true);
+assert.equal(omissions.isRoot({ ...root, spectrum: { domain: "error_and_samples", samples: [null, [1, 2]] } }), true);
+assert.equal(omissions.isRoot({ ...root, spectrum: { domain: "error_and_samples", samples: [0.1, [1]] } }), false);
+assert.equal(omissions.isRoot({ ...root, spectrum: { domain: "frequency_hertz", samples: [Infinity] } }), false);
+assert.equal(omissions.isRoot({ ...root, transparentSeries: ["1"] }), false);
 assert.equal(omissions.isRoot({ ...root, binary: new Uint8Array([1, 2, 3]) }), true);
 assert.equal(omissions.isRoot({ ...root, binary: "bytes" }), false);
 assert.equal(omissions.isRoot({ ...root, omittedWhenEmpty: ["body"], conditionallyOmitted: null }), true);

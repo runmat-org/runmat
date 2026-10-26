@@ -1,59 +1,6 @@
-use runmat_geometry_core::{GeometryContractError, GeometryEvaluationControl};
-use runmat_meshing_execution::{
-    ExactMeshingEvaluatorProvider, ExactMeshingGeometryEvaluation, MeshingKernelDispatcher,
-    PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
-};
-
-/// Selects the evaluator implementation declared by an admitted exact-geometry closure.
-///
-/// A kernel representation is an explicit OCCT capability requirement. Its absence denotes a
-/// fully portable evaluator registry; neither case is attempted as a fallback for the other.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NativeMeshingEvaluatorProvider;
-
-impl ExactMeshingEvaluatorProvider for NativeMeshingEvaluatorProvider {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-        control: &dyn GeometryEvaluationControl,
-    ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
-        match geometry.kernel_representation().map_err(|error| {
-            GeometryContractError::invalid("native exact geometry", error.to_string())
-        })? {
-            Some(representation) => kernel_evaluator(representation, geometry, control),
-            None => PortableMeshingEvaluatorProvider.evaluator(geometry, control),
-        }
-    }
-}
-
-#[cfg(feature = "occt-native")]
-fn kernel_evaluator<'a>(
-    representation: &[u8],
-    geometry: &'a PreparedExactGeometryObjects,
-    control: &dyn GeometryEvaluationControl,
-) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
-    runmat_geometry_io::OcctExactEvaluator::from_closure_controlled(
-        representation,
-        geometry.document.source.meters_per_source_unit,
-        &geometry.topology,
-        &geometry.evaluators,
-        control,
-    )
-    .map(|evaluator| Box::new(evaluator) as Box<dyn ExactMeshingGeometryEvaluation>)
-    .map_err(|error| GeometryContractError::invalid("native exact evaluator", error.to_string()))
-}
-
-#[cfg(not(feature = "occt-native"))]
-fn kernel_evaluator<'a>(
-    _representation: &[u8],
-    _geometry: &'a PreparedExactGeometryObjects,
-    _control: &dyn GeometryEvaluationControl,
-) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
-    Err(GeometryContractError::invalid(
-        "native exact evaluator",
-        "kernel-backed exact geometry requires an OCCT-capable native worker",
-    ))
-}
+//! Desktop uses the same exact evaluator composition as the browser sidecar.
+use runmat_meshing_execution::MeshingKernelDispatcher;
+pub use runmat_analysis_execution::OcctMeshingEvaluatorProvider as NativeMeshingEvaluatorProvider;
 
 pub fn native_meshing_kernel_dispatcher() -> MeshingKernelDispatcher<NativeMeshingEvaluatorProvider>
 {

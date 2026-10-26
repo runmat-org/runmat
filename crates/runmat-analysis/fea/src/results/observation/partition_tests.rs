@@ -119,7 +119,7 @@ fn prepared_on(
     let values = projection
         .nodes
         .iter()
-        .map(|node| node.coordinates_m.iter().sum())
+        .map(|node| node.coordinates_m.canonical_value().iter().sum())
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
         definition,
@@ -575,7 +575,7 @@ fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
             let values = projection
                 .nodes
                 .iter()
-                .map(|node| node.coordinates_m.iter().sum::<f64>() + time)
+                .map(|node| node.coordinates_m.canonical_value().iter().sum::<f64>() + time)
                 .collect::<Vec<_>>();
             let field = RecoveredField::new(
                 definition.clone(),
@@ -798,7 +798,7 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
     let values = projection
         .nodes
         .iter()
-        .map(|node| node.coordinates_m[0])
+        .map(|node| node.coordinates_m.canonical_value()[0])
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
         definition,
@@ -836,8 +836,8 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
     let expected_resultant = [volume, 0.0, 0.0];
     let expected_moment = [
         0.0,
-        (centroid[2] - about.meters[2]) * volume,
-        -(centroid[1] - about.meters[1]) * volume,
+        (centroid[2] - about.canonical_value()[2]) * volume,
+        -(centroid[1] - about.canonical_value()[1]) * volume,
     ];
     assert_eq!(resultant.value_shape, ObservationValueShape::Vector3);
     assert_eq!(moment.value_shape, ObservationValueShape::Vector3);
@@ -944,9 +944,9 @@ fn complex_volume_resultant_and_moment_preserve_the_complete_phasor() {
     let mut expected_moment = [0.0; 6];
     for element in &projection.elements {
         let arm = [
-            element.centroid_m[0] - about.meters[0],
-            element.centroid_m[1] - about.meters[1],
-            element.centroid_m[2] - about.meters[2],
+            element.centroid_m[0] - about.canonical_value()[0],
+            element.centroid_m[1] - about.canonical_value()[1],
+            element.centroid_m[2] - about.canonical_value()[2],
         ];
         for (offset, force) in [
             [phasor[0], phasor[2], phasor[4]],
@@ -1314,18 +1314,18 @@ fn nodal_reaction_resultant_and_moment_are_discrete_partition_equivalent_sums() 
     let mut expected_moment = [0.0; 3];
     for node in &projection.nodes {
         let force = [
-            node.coordinates_m[0] + 1.0,
-            2.0 * node.coordinates_m[1] - 0.5,
-            -node.coordinates_m[2] + 0.25,
+            node.coordinates_m.canonical_value()[0] + 1.0,
+            2.0 * node.coordinates_m.canonical_value()[1] - 0.5,
+            -node.coordinates_m.canonical_value()[2] + 0.25,
         ];
         values.extend(force);
         for axis in 0..3 {
             expected_resultant[axis] += force[axis];
         }
         let arm = [
-            node.coordinates_m[0] - about.meters[0],
-            node.coordinates_m[1] - about.meters[1],
-            node.coordinates_m[2] - about.meters[2],
+            node.coordinates_m.canonical_value()[0] - about.canonical_value()[0],
+            node.coordinates_m.canonical_value()[1] - about.canonical_value()[1],
+            node.coordinates_m.canonical_value()[2] - about.canonical_value()[2],
         ];
         expected_moment[0] += arm[1] * force[2] - arm[2] * force[1];
         expected_moment[1] += arm[2] * force[0] - arm[0] * force[2];
@@ -1505,7 +1505,7 @@ fn partitioned_event_evaluation_binds_exact_attribution_across_workers() {
     let values = projection
         .nodes
         .iter()
-        .map(|node| node.coordinates_m.iter().sum())
+        .map(|node| node.coordinates_m.canonical_value().iter().sum())
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
         definition,

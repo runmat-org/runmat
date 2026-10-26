@@ -121,20 +121,21 @@ pub(super) fn lower(
     };
     let excitation = RandomExcitationSpectrum {
         excitation_id: RandomExcitationId(name.to_string()),
-        frequencies_hz,
+        frequencies_hz: runmat_types::physical::Quantity::new(frequencies_hz),
         channels,
         spectral_density,
         convention,
         interpolation,
         extrapolation,
         evidence: RandomSpectrumEvidence {
-            max_absolute_density_error: optional_density(
+            max_absolute_density_error: (optional_density(
                 declaration,
                 statements,
                 "max_absolute_density_error",
                 density_dimension,
                 diagnostics,
-            )?,
+            )?)
+            .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
             equivalent_degrees_of_freedom: optional_scalar(
                 declaration,
                 statements,
@@ -235,12 +236,13 @@ fn matrices(
                 return unsupported(declaration, "spectral density matrix shape", diagnostics);
             }
             Some(CrossPowerSpectralDensity {
-                values: real
-                    .iter()
-                    .zip(imaginary)
-                    .flat_map(|(real, imaginary)| real.iter().zip(imaginary))
-                    .map(|(real, imaginary)| ComplexSpectralDensity::new(*real, *imaginary))
-                    .collect(),
+                values: runmat_types::physical::Quantity::new(
+                    real.iter()
+                        .zip(imaginary)
+                        .flat_map(|(real, imaginary)| real.iter().zip(imaginary))
+                        .map(|(real, imaginary)| ComplexSpectralDensity::new(*real, *imaginary))
+                        .collect(),
+                ),
             })
         })
         .collect()
@@ -255,7 +257,7 @@ fn optional_density(
 ) -> Option<Option<f64>> {
     match assignment(statements, name) {
         None => Some(None),
-        Some(value) if value.value_type == crate::FeaType::Quantity(dimension) => {
+        Some(value) if (value.value_type).is_quantity((dimension).into()) => {
             Some(Some(scalar(value)?))
         }
         Some(_) => unsupported(declaration, name, diagnostics),

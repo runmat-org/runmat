@@ -26,6 +26,7 @@ fn original_electrical_operators_have_verified_anchored_local_energy_bounds() {
                 .unwrap();
                 let scale = assembly
                     .coefficients
+                    .canonical_values()
                     .iter()
                     .copied()
                     .reduce(f64::max)

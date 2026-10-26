@@ -16,7 +16,7 @@ impl PreparedBlock {
         let mut samples = Vec::with_capacity(4 * self.cells.len());
         for cell in &self.cells {
             let positions = std::array::from_fn(|i| {
-                cell.slots[i].map_or(cell.nodes[i].coordinates_m, |p| points[p])
+                cell.slots[i].map_or(cell.nodes[i].coordinates_m.canonical_value(), |p| points[p])
             });
             for sample in cell.metric.corner_gradients(positions)? {
                 let mut gradient = vec![0.; 3 * points.len()];

@@ -32,7 +32,9 @@ pub(super) fn validate(
                     .binary_search_by_key(&node_id, |node| node.node_id)
                     .map(|index| &mesh.nodes[index])
                     .map_err(|_| invalid("shared boundary coordinate is absent from face mesh"))?;
-                if original.node_id != node_id || original.coordinates_m != actual.point_m {
+                if original.node_id != node_id
+                    || original.coordinates_m.canonical_value() != actual.point_m
+                {
                     return Err(invalid(
                         "realized shared boundary coordinate differs from the original curve state",
                     )

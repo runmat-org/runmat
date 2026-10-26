@@ -70,7 +70,7 @@ fn connected_tet4_affine_patch_balances_independent_boundary_tractions() {
         .nodes
         .iter()
         .flat_map(|node| {
-            let [x, y, z] = node.coordinates_m;
+            let [x, y, z] = node.coordinates_m.canonical_value();
             [0.1 * x, 0.2 * y, 0.3 * z]
         })
         .collect::<Vec<_>>();
@@ -105,7 +105,12 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
         .nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| (node.node_id, (node.coordinates_m, index * 3)))
+        .map(|(index, node)| {
+            (
+                node.node_id,
+                (node.coordinates_m.canonical_value(), index * 3),
+            )
+        })
         .collect::<NodeIndex>();
     // Repeated contributions deliberately target identical rows. This exercises summation
     // order and a second bounded wave without admitting a duplicate canonical mesh element.
@@ -202,7 +207,17 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
 
     let properties = inventory(&artifact, material(1.0e6, 1_000.0));
     let mut tampered = artifact;
-    tampered.topology.nodes[0].coordinates_m[0] = 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(matches!(
         assemble_solver_solid_operators(&tampered, &properties),
         Err(SolverSolidAssemblyError::InvalidArtifact(_))
@@ -299,7 +314,7 @@ fn tet4_and_tet10_mass_preserve_physical_total_and_rigid_translation() {
         let material = material(70.0e9, 2_700.0);
         let assembled =
             assemble_solver_solid_operators(&artifact, &inventory(&artifact, material)).unwrap();
-        let expected_mass = material.density_kg_per_m3 / 6.0;
+        let expected_mass = material.density_kg_per_m3.canonical_value() / 6.0;
         assert_relative(assembled.total_mass_kg, expected_mass, 2.0e-12);
         assert!(assembled.lumped_mass_diag.iter().all(|value| *value > 0.0));
         assert_relative(
@@ -384,9 +399,9 @@ pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
 
 fn material(youngs_modulus_pa: f64, density_kg_per_m3: f64) -> StructuralElementMaterial {
     StructuralElementMaterial {
-        youngs_modulus_pa,
-        poisson_ratio: 0.25,
-        density_kg_per_m3,
+        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(youngs_modulus_pa),
+        poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
+        density_kg_per_m3: runmat_types::physical::MassDensity::new(density_kg_per_m3),
         damping: MechanicalDampingModel::Undamped,
     }
 }
@@ -436,11 +451,14 @@ fn apply_structural_material(
         runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
             runmat_analysis_core::MaterialMechanicalModel {
                 youngs_modulus_pa: source.youngs_modulus_pa,
-                poisson_ratio: source.poisson_ratio,
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(
+                    source.poisson_ratio.canonical_value(),
+                ),
             },
         ),
     );
-    target.mass_density_kg_per_m3 = Some(source.density_kg_per_m3);
+    target.mass_density_kg_per_m3 = (Some(source.density_kg_per_m3.canonical_value()))
+        .map(runmat_types::physical::MassDensity::new);
     target.damping = Some(source.damping);
 }
 

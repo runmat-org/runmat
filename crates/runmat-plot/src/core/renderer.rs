@@ -130,6 +130,8 @@ pub struct Uniforms {
     pub view_proj: [[f32; 4]; 4],
     pub model: [[f32; 4]; 4],
     pub normal_matrix: [[f32; 4]; 3], // Use 4x3 for proper alignment instead of 3x3
+    pub cad_view_rotation: [[f32; 4]; 3],
+    pub cad_lighting: [u32; 4], // mode + padding; preserves 16-byte uniform alignment
 }
 
 /// Optimized uniform buffer for direct coordinate transformation rendering
@@ -181,6 +183,12 @@ impl Uniforms {
                 [0.0, 1.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0],
             ],
+            cad_view_rotation: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+            cad_lighting: [0; 4],
         }
     }
 
@@ -1040,6 +1048,16 @@ impl WgpuRenderer {
             })
     }
 
+    /// Camera-relative studio lighting is restricted to retained CAD scenes.
+    pub fn configure_cad_lighting(&mut self, view: Mat4, enabled: bool) {
+        self.uniforms.cad_lighting = [u32::from(enabled), 0, 0, 0];
+        self.uniforms.cad_view_rotation = [
+            [view.x_axis.x, view.x_axis.y, view.x_axis.z, 0.0],
+            [view.y_axis.x, view.y_axis.y, view.y_axis.z, 0.0],
+            [view.z_axis.x, view.z_axis.y, view.z_axis.z, 0.0],
+        ];
+    }
+
     /// Update uniform buffer with new matrices
     pub fn update_uniforms(
         &mut self,
@@ -1071,7 +1089,7 @@ impl WgpuRenderer {
         model: Mat4,
     ) {
         self.ensure_axes_uniform_capacity(emission, axes_index + 1);
-        let mut uniforms = Uniforms::new();
+        let mut uniforms = self.uniforms;
         uniforms.update_view_proj(view_proj);
         uniforms.update_model(model);
         emission.queue().write_buffer(

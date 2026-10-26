@@ -15,6 +15,7 @@ use std::{
 };
 
 mod rename;
+pub(crate) mod scope;
 mod mapped;
 mod handle_commit;
 mod staged;
@@ -22,6 +23,9 @@ mod bounded;
 
 #[derive(Clone, Debug)]
 pub struct MemoryFsProvider {
+    // Only an explicitly captured transaction can supply synchronous workspace
+    // scopes. Ordinary MemoryFS retains its existing asynchronous authority.
+    workspace_root: Option<PathBuf>,
     default_current_dir: PathBuf,
     inner: Arc<Mutex<MemoryTree>>,
 }
@@ -84,6 +88,7 @@ impl MemoryFsProvider {
         let mut entries = BTreeMap::new();
         entries.insert(PathBuf::from("/"), MemoryEntry::Directory);
         let provider = Self {
+            workspace_root: None,
             default_current_dir,
             inner: Arc::new(Mutex::new(MemoryTree { entries, publications: BTreeMap::new(), executions: Arc::new(BTreeMap::new()) })),
         };
@@ -99,6 +104,37 @@ impl MemoryFsProvider {
             .entries
             .insert(PathBuf::from("/"), MemoryEntry::Directory);
         ensure_dirs(&mut guard, &self.default_current_dir).expect("default cwd must be valid");
+    }
+
+    fn atomic_create_project_path(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let path = normalize_path(path)?;
+        let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
+        match guard.entries.get(&path) {
+            Some(MemoryEntry::File { bytes, .. }) => {
+                return Ok(AtomicCreateResult::Existing(bytes.as_ref().clone()));
+            }
+            Some(MemoryEntry::Directory) => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("not a file: {}", path.display()),
+                ));
+            }
+            None => {}
+        }
+        ensure_parent_dirs(&mut guard, &path)?;
+        let identity = successor_identity(guard.entries.get(&path))?;
+        guard.entries.insert(
+            path,
+            MemoryEntry::File {
+                bytes: Arc::new(bytes.to_vec()),
+                readonly: false,
+                revision: uuid::Uuid::new_v4().to_string(),
+                identity,
+            },
+        );
+        Ok(AtomicCreateResult::Published {
+            durability: PublicationDurability::AtomicVisibility,
+        })
     }
 
     pub fn read_project_path(&self, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
@@ -270,6 +306,10 @@ impl MemoryFsProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for MemoryFsProvider {
+    fn supports_workspace_transactions(&self) -> bool { true }
+    fn workspace_access(&self, root: &Path, writable: bool, maximum: u64) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
+        scope::open(self, root, writable, maximum)
+    }
     async fn transition_execution(
         &self,
         work: &crate::execution::ExecutionWorkId,
@@ -584,34 +624,7 @@ impl FsProvider for MemoryFsProvider {
     }
 
     async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
-        let path = normalize_path(path)?;
-        let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
-        match guard.entries.get(&path) {
-            Some(MemoryEntry::File { bytes, .. }) => {
-                return Ok(AtomicCreateResult::Existing(bytes.as_ref().clone()));
-            }
-            Some(MemoryEntry::Directory) => {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("not a file: {}", path.display()),
-                ));
-            }
-            None => {}
-        }
-        ensure_parent_dirs(&mut guard, &path)?;
-        let identity = successor_identity(guard.entries.get(&path))?;
-        guard.entries.insert(
-            path,
-            MemoryEntry::File {
-                bytes: Arc::new(bytes.to_vec()),
-                readonly: false,
-                revision: uuid::Uuid::new_v4().to_string(),
-                identity,
-            },
-        );
-        Ok(AtomicCreateResult::Published {
-            durability: PublicationDurability::AtomicVisibility,
-        })
+        self.atomic_create_project_path(path, bytes)
     }
 }
 

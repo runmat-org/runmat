@@ -86,7 +86,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                         let Some(first_node) = candidate_node(
                             &original,
                             CandidateInsertion {
-                                coordinates_m: first_coordinates,
+                                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(first_coordinates),
                                 construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
                                 facet,
                                 insertion_round,
@@ -121,7 +121,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                             let Some(second_node) = candidate_node(
                                 &original,
                                 CandidateInsertion {
-                                    coordinates_m: second_coordinates,
+                                    coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(second_coordinates),
                                     construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
                                     facet,
                                     insertion_round: insertion_round + 1,
@@ -188,7 +188,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     let Some(node) = candidate_node(
                         &current,
                         CandidateInsertion {
-                            coordinates_m,
+                            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(coordinates_m),
                             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
                             facet,
                             insertion_round,
@@ -255,7 +255,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     let Some(node) = candidate_node(
                         &current,
                         CandidateInsertion {
-                            coordinates_m,
+                            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(coordinates_m),
                             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
                             facet,
                             insertion_round,
@@ -339,7 +339,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                 let admitted_coordinates = admitted
                     .iter()
                     .take(8)
-                    .map(|(node, _)| node.coordinates_m)
+                    .map(|(node, _)| node.coordinates_m.canonical_value())
                     .collect::<Vec<_>>();
                 work.reject(format!(
                     "no valid Steiner candidate refilled the cavity: admitted_candidates={}, admitted_coordinates={admitted_coordinates:?}, atomic inventory rejected: {batch_rejection}; progressive candidates rejected: {progressive_rejection}",

@@ -14,7 +14,10 @@ fn two_tetrahedron_artifact() -> SolverMeshArtifact {
     artifact.topology.nodes.push(SolverMeshNode {
         node_id: 5,
         stable_identity: StableDigest::from_bytes([11; 32]),
-        coordinates_m: [1.0, 1.0, 1.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                1.0, 1.0, 1.0,
+            ]),
         provenance: vec![region.clone()],
         exact_parameters: Vec::new(),
     });
@@ -224,12 +227,22 @@ fn recovery_estimator_preserves_stress_jumps_across_region_sides() {
 #[test]
 fn tetrahedron10_volume_uses_curved_midside_geometry() {
     let mut artifact = artifact(ElementOrder::Tet10);
-    artifact.topology.nodes[4].coordinates_m[1] = 0.1;
+    {
+        let quantity_change = 0.1;
+        let quantity_index = 1;
+        let quantity_slot = &mut artifact.topology.nodes[4].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     let coordinates = artifact
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
 
     let volume = tetrahedron_volume(&artifact.topology.volume_elements[0], &coordinates).unwrap();

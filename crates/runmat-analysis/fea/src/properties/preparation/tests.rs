@@ -247,8 +247,8 @@ fn laminate_model() -> AnalysisModel {
             .map(|(ply_id, material_id)| LaminatePlyModel {
                 ply_id: ply_id.into(),
                 material_id: material_id.into(),
-                thickness_m: 0.001,
-                angle_rad: 0.0,
+                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.001),
+                angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(0.0),
             })
             .to_vec(),
             shear_correction: Some(5.0 / 6.0),
@@ -391,7 +391,17 @@ fn explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes() {
 #[test]
 fn explicit_budget_rejects_before_invalid_coordinate_validation_and_includes_selection() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    model.structural.as_mut().unwrap().nodes[0].coordinates_m[0] = f64::NAN;
+    {
+        let quantity_change = f64::NAN;
+        let quantity_index = 0;
+        let quantity_slot = &mut model.structural.as_mut().unwrap().nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     let structural = model.structural.as_ref().unwrap();
     let explicit_required = match PreparedExplicitTopology::prepare(structural, 0) {
         Err(PropertyCompilationError::ResourceCeiling {
@@ -422,7 +432,17 @@ fn changed_topology_gets_fresh_cache_and_cannot_use_another_models_identities() 
     let initial_digest = initial_explicit.topology_digest();
     let initial_identities = initial_explicit.element_identities().to_vec();
     let mut changed = model.clone();
-    changed.structural.as_mut().unwrap().nodes[0].coordinates_m[0] += 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut changed.structural.as_mut().unwrap().nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     let materials = material_inventory(&changed).unwrap();
     let mut emitted = 0;
     assert!(matches!(

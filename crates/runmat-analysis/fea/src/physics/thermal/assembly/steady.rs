@@ -16,17 +16,26 @@ impl ThermalOperatorAssembly {
         model: &AnalysisModel,
         sample: ExcitationSamplePoint<'_>,
         reference_temperature_k: &[f64],
-    ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+    ) -> Result<
+        crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>,
+        ThermalAssemblyError,
+    > {
         self.reject_radiation_in_linear_route(model)?;
         let stiffness = self.conductivity.clone();
         let mut rhs = self.relative_source(model, sample, reference_temperature_k)?;
-        for (node, value) in self.prescribed_temperature_k.iter().enumerate() {
+        for (node, value) in self
+            .prescribed_temperature_k
+            .canonical_values()
+            .iter()
+            .enumerate()
+        {
             if let Some(value) = value {
                 rhs[node] = value - reference_temperature_k[node];
             }
         }
         let constrained = self
             .prescribed_temperature_k
+            .canonical_values()
             .iter()
             .map(Option::is_some)
             .collect::<Vec<_>>();
@@ -43,7 +52,7 @@ impl ThermalOperatorAssembly {
             &self.projection,
             operators.stiffness(),
             &constrained,
-            &self.positive_robin_weight,
+            self.positive_robin_weight.canonical_values(),
         ) {
             Ok(evidence) => Some(evidence),
             Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
@@ -51,6 +60,17 @@ impl ThermalOperatorAssembly {
         };
         AssembledRealSystem::try_new_with_nullspace_evidence(operators, constrained, rhs, evidence)
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
+            .and_then(|numerical| {
+                crate::algebra::PhysicalScalarSystem::try_new(
+                    numerical,
+                    runmat_types::physical::DynamicDimension::quantity_type(
+                        runmat_types::physical::QuantityKind::Power,
+                    )
+                    .with_semantic_kind(Some(runmat_types::physical::QuantityKind::Power))
+                    .expect("thermal equation"),
+                )
+                .map_err(|error| ThermalAssemblyError::SparseOperator(error.into()))
+            })
     }
 
     /// Shared steady/transient forcing in component-constant temperature coordinates.
@@ -84,7 +104,7 @@ impl ThermalOperatorAssembly {
                 "thermal reference must be constant on every connected component".into(),
             ));
         }
-        let mut rhs = self.applied_source.clone();
+        let mut rhs = self.applied_source.canonical_values().clone();
         // Internal conduction annihilates a constant by partition of unity. Only Robin
         // terms need a reference correction; form ambient-reference before multiplication.
         for boundary in &model.boundaries {
@@ -104,7 +124,7 @@ impl ThermalOperatorAssembly {
             for face in self.projection.boundary_faces_for_target(&boundary.target) {
                 self.projection
                     .visit_boundary_quadrature(face, |point| {
-                        let power = coefficient.watts_per_square_meter_kelvin
+                        let power = coefficient.canonical_value()
                             * (ambient - reference_temperature_k[face.node_indices[0]])
                             * point.area_weight_m2;
                         for (&node, &shape) in face.node_indices.iter().zip(point.shape_values()) {

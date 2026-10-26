@@ -57,6 +57,14 @@ mod dynamic_cache;
 mod error_conversion;
 mod executable;
 mod fea_source;
+mod fea_duration;
+pub use fea_duration::{
+    FeaExecutionTimingKey, FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
+};
+mod fea_preflight;
+pub use fea_preflight::FeaExecutionPreflight;
+mod fea_execution;
+pub use fea_execution::{PreparedSerialFeaStudy,FeaGeometryExecutionHost,FeaStudyPreparationError};
 pub use fea_source::CheckedFeaSessionSource;
 mod fea_changes;
 mod fea_publication;

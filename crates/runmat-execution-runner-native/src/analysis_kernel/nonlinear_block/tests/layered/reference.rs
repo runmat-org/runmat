@@ -41,7 +41,7 @@ pub(crate) fn verify(mesh: &SolverMeshArtifact, block: &NonlinearSolidBlockArtif
         .iter()
         .zip(block.result.accepted_state.displacement().chunks_exact(3))
     {
-        let x = node.coordinates_m[0];
+        let x = node.coordinates_m.canonical_value()[0];
         let expected = references[0].0 * x.min(0.5) + references[1].0 * (x - 0.5).max(0.0);
         assert!((displacement[0] - expected).abs() < 2e-9);
         assert!(displacement[1].abs() < 2e-9 && displacement[2].abs() < 2e-9);
@@ -111,7 +111,7 @@ fn verify_sample(
     assert_eq!(alpha.len(), elements);
     assert_eq!(plastic.len(), elements * 6);
     for (node, values) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
-        let x = node.coordinates_m[0];
+        let x = node.coordinates_m.canonical_value()[0];
         let expected = references[0].0 * x.min(0.5) + references[1].0 * (x - 0.5).max(0.0);
         assert!((values[0] - expected).abs() < 2e-9);
         assert!(values[1].abs() < 2e-9 && values[2].abs() < 2e-9);

@@ -3,9 +3,12 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SolidMaterial {
-    pub youngs_modulus_pa: f64,
-    pub poisson_ratio: f64,
-    pub density_kg_per_m3: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub poisson_ratio: runmat_types::physical::PoissonRatio,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub density_kg_per_m3: runmat_types::physical::MassDensity,
 }
 
 pub(super) type ElasticityMatrix = [[f64; 6]; 6];
@@ -22,16 +25,20 @@ pub enum SolidMaterialError {
 
 impl SolidMaterial {
     pub fn validate(self) -> Result<(), SolidMaterialError> {
-        if !self.youngs_modulus_pa.is_finite() || self.youngs_modulus_pa <= 0.0 {
+        if !self.youngs_modulus_pa.canonical_value().is_finite()
+            || self.youngs_modulus_pa.canonical_value() <= 0.0
+        {
             return Err(SolidMaterialError::InvalidYoungsModulus);
         }
-        if !self.poisson_ratio.is_finite()
-            || self.poisson_ratio <= -1.0
-            || self.poisson_ratio >= 0.5
+        if !self.poisson_ratio.canonical_value().is_finite()
+            || self.poisson_ratio.canonical_value() <= -1.0
+            || self.poisson_ratio.canonical_value() >= 0.5
         {
             return Err(SolidMaterialError::InvalidPoissonRatio);
         }
-        if !self.density_kg_per_m3.is_finite() || self.density_kg_per_m3 <= 0.0 {
+        if !self.density_kg_per_m3.canonical_value().is_finite()
+            || self.density_kg_per_m3.canonical_value() <= 0.0
+        {
             return Err(SolidMaterialError::InvalidDensity);
         }
         Ok(())
@@ -39,13 +46,17 @@ impl SolidMaterial {
 
     pub fn lame_lambda_pa(self) -> Result<f64, SolidMaterialError> {
         self.validate()?;
-        Ok(self.youngs_modulus_pa * self.poisson_ratio
-            / ((1.0 + self.poisson_ratio) * (1.0 - 2.0 * self.poisson_ratio)))
+        Ok(
+            self.youngs_modulus_pa.canonical_value() * self.poisson_ratio.canonical_value()
+                / ((1.0 + self.poisson_ratio.canonical_value())
+                    * (1.0 - 2.0 * self.poisson_ratio.canonical_value())),
+        )
     }
 
     pub fn shear_modulus_pa(self) -> Result<f64, SolidMaterialError> {
         self.validate()?;
-        Ok(self.youngs_modulus_pa / (2.0 * (1.0 + self.poisson_ratio)))
+        Ok(self.youngs_modulus_pa.canonical_value()
+            / (2.0 * (1.0 + self.poisson_ratio.canonical_value())))
     }
 }
 

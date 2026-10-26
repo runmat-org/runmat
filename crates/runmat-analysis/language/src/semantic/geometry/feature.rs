@@ -303,13 +303,17 @@ fn argument_value(argument: &CheckedCallArgument) -> &CheckedExpression {
 }
 
 fn length(value: &CheckedExpression) -> Option<runmat_geometry_core::GeometryScalarExpression> {
-    (value.value_type == FeaType::Quantity(PhysicalDimension::LENGTH))
+    ((value.value_type).is_quantity((PhysicalDimension::LENGTH).into()))
         .then(|| value::scalar(value))?
 }
 
 fn angle(value: &CheckedExpression) -> Option<runmat_geometry_core::GeometryScalarExpression> {
-    (value.value_type == FeaType::Quantity(PhysicalDimension::DIMENSIONLESS))
-        .then(|| value::scalar(value))?
+    (value
+        .value_type
+        .is_quantity(runmat_types::physical::DynamicDimension::quantity_type(
+            runmat_types::physical::QuantityKind::Angle,
+        )))
+    .then(|| value::scalar(value))?
 }
 
 fn length_vector(
@@ -320,7 +324,7 @@ fn length_vector(
         FeaType::Vector {
             element,
             length: Some(3),
-        } if element.as_ref() == &FeaType::Quantity(PhysicalDimension::LENGTH)
+        } if element.is_quantity(PhysicalDimension::LENGTH.into())
     )
     .then(|| value::vector3(value))?
 }

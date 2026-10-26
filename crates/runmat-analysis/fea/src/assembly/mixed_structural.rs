@@ -156,7 +156,7 @@ pub(super) fn assemble_mixed_structural_system(
     let connector_coordinates_m = topology
         .nodes
         .iter()
-        .map(|node| node.coordinates_m)
+        .map(|node| node.coordinates_m.canonical_value())
         .collect::<Vec<_>>();
     let connector_node_identities = topology
         .nodes
@@ -168,7 +168,10 @@ pub(super) fn assemble_mixed_structural_system(
         ConnectorAssemblyContext {
             topology_identity: topology.identity,
             layout: &layout,
-            coordinates_m: &connector_coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(&connector_coordinates_m),
             node_identities: &connector_node_identities,
         },
         local_execution,
@@ -427,6 +430,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_solid_total_mass_kg: solid.total_mass_kg,
         structural_solid_recovery,
         structural_dof_layout: layout,
+        structural_reduced_basis: None,
         structural_beam_recovery: beam_recovery,
         structural_shell_recovery: shell_recovery,
         structural_formulations: formulations,
@@ -582,7 +586,10 @@ mod tests {
     ) -> CanonicalStructuralNode {
         CanonicalStructuralNode {
             identity: StableDigest::from_bytes([identity_byte; 32]),
-            coordinates_m: [f64::from(identity_byte), 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([f64::from(identity_byte), 0.0, 0.0]),
             owns_solid_translation,
             owns_explicit_rotation,
         }

@@ -42,6 +42,22 @@ impl FeaModuleGraph {
                 .into_iter()
                 .map(|request| request.module_path),
         );
+        for (module_path, module) in &self.modules {
+            for item in module.syntax.iter().flat_map(|s| &s.items) {
+                let FeaModuleItem::Declaration(decl) = item else { continue; };
+                if decl.kind != runmat_parser::fea::FeaDeclarationKind::Geometry { continue; }
+                for statement in &decl.body.statements {
+                    let runmat_parser::fea::FeaStatementKind::Assignment {target, value, ..} = &statement.kind else { continue; };
+                    if target.segments.len() != 1 || target.segments[0].text != "file" { continue; }
+                    let runmat_parser::fea::FeaExpressionKind::String(relative) = &value.kind else { continue; };
+                    let cad = resolve_logical_path(&self.source_root, module_path, relative)?;
+                    if let Ok(metadata) = runmat_geometry_core::geometry_selection_metadata_path(cad.as_str()) {
+                        paths.insert(LogicalSourcePath::file(metadata)?);
+                    }
+                    paths.insert(cad);
+                }
+            }
+        }
         Ok(paths)
     }
     pub fn is_valid(&self) -> bool {

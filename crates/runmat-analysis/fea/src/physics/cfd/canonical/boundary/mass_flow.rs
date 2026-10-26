@@ -55,7 +55,7 @@ pub(super) fn compile<'a>(
             ));
         }
         let sampled =
-            crate::excitation::sample_signal(signal, input.sample, |v| v.kilograms_per_second)
+            crate::excitation::sample_signal(signal, input.sample, |v| v.canonical_value())
                 .and_then(crate::excitation::expect_scalar)
                 .map_err(|e| Error::InputRealization(e.to_string()))?;
         if sampled.imaginary != 0.0 {
@@ -64,7 +64,7 @@ pub(super) fn compile<'a>(
         let faces = select_faces(input.source, input.topology, target)?;
         let area = faces
             .iter()
-            .map(|&i| input.topology.faces[i].area_m2)
+            .map(|&i| input.topology.faces[i].area_m2.canonical_value())
             .sum::<f64>();
         if !area.is_finite() || area <= 0.0 {
             return Err(Error::Invalid("mass-flow boundary area"));
@@ -77,7 +77,10 @@ pub(super) fn compile<'a>(
         let mut realized = 0.0;
         for &i in &faces {
             let face = &input.topology.faces[i];
-            let value = scale(face.owner_area_vector_m2, normal_speed / face.area_m2);
+            let value = scale(
+                face.owner_area_vector_m2,
+                normal_speed / face.area_m2.canonical_value(),
+            );
             if value.iter().any(|v| !v.is_finite()) {
                 return Err(Error::Invalid("mass-flow boundary velocity"));
             }

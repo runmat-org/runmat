@@ -76,7 +76,13 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     let (document, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();
     let host = TestHost::default().with_geometry_inspection(
         "project/geometry/tetrahedron.step",
-        GeometryInspection {
+        GeometryInspection {preview_extent_m: None, 
+            named_selections: Some({
+                let mut metadata: runmat_geometry_core::GeometryNamedSelections = serde_json::from_str(include_str!("../../../../../docs/simulation/examples/geometry/.runmat/geometry/box.brep.json")).unwrap();
+                metadata.source_digest = document.source.content_digest;
+                metadata
+            }),
+            unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
             capabilities: vec![

@@ -136,10 +136,12 @@ pub(super) fn boundary_facet(
     }
     let opposite_vertex = tetrahedron.vertex_indices[opposite];
     let points = [
-        nodes[oriented[0] as usize].coordinates_m,
-        nodes[oriented[1] as usize].coordinates_m,
-        nodes[oriented[2] as usize].coordinates_m,
-        nodes[opposite_vertex as usize].coordinates_m,
+        nodes[oriented[0] as usize].coordinates_m.canonical_value(),
+        nodes[oriented[1] as usize].coordinates_m.canonical_value(),
+        nodes[oriented[2] as usize].coordinates_m.canonical_value(),
+        nodes[opposite_vertex as usize]
+            .coordinates_m
+            .canonical_value(),
     ];
     match orient3d(points).map_err(|predicate| {
         error(

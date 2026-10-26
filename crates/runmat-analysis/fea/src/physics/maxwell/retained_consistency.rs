@@ -16,7 +16,7 @@ pub(crate) fn validate_retained_consistency(
     let volumes = input.ordered_volumes(mesh)?;
     let projection = AnalysisProjection::derive(mesh).map_err(topology)?;
     let (space, exterior) = geometry::spaces(&projection)?;
-    let edges = &response.edge_circulations_v;
+    let edges = response.edge_circulations_v.canonical_values();
     if edges.len() != space.edges().len()
         || !response
             .edge_node_identities
@@ -35,7 +35,10 @@ pub(crate) fn validate_retained_consistency(
     let mut action = vec![ComplexPhasor::ZERO; edges.len()];
     let mut rhs = action.clone();
     let mut rounding_scale = vec![0.0; edges.len()];
-    let omega = input.angular_frequency_rad_per_s;
+    let omega = input
+        .angular_frequency_rad_per_s
+        .phasor_derivative_rate()
+        .canonical_value();
     let mut continuity = ChargeContinuity::new(&projection, &space, &exterior);
     for (element, law) in volumes.iter().enumerate() {
         let indices = space
@@ -47,9 +50,12 @@ pub(crate) fn validate_retained_consistency(
         for (i, &edge) in indices.iter().enumerate() {
             for (j, &other) in indices.iter().enumerate() {
                 let coefficient = ComplexPhasor::new(
-                    moments.curl_curl[i][j] / law.permeability_h_per_m
-                        - omega * omega * law.permittivity_f_per_m * moments.mass[i][j],
-                    omega * law.conductivity_s_per_m * moments.mass[i][j],
+                    moments.curl_curl[i][j] / law.permeability_h_per_m.canonical_value()
+                        - omega
+                            * omega
+                            * law.permittivity_f_per_m.canonical_value()
+                            * moments.mass[i][j],
+                    omega * law.conductivity_s_per_m.canonical_value() * moments.mass[i][j],
                 );
                 let term = coefficient * edges[other];
                 action[edge] += term;
@@ -72,19 +78,23 @@ pub(crate) fn validate_retained_consistency(
                         sum + edges[indices[i]] * point.curls[i][axis]
                     })
                 });
-                mismatch |= sample.electric_field_v_per_m != electric
-                    || sample.flux_density_t != curl.map(|v| v.times_i() / omega);
+                mismatch |= sample.electric_field_v_per_m.canonical_value() != electric
+                    || sample.flux_density_t.canonical_value() != curl.map(|v| v.times_i() / omega);
                 continuity.accumulate(
                     &projection.elements[element].node_indices[..4],
                     &point,
-                    electric.map(|v| v * law.conductivity_s_per_m),
-                    electric.map(|v| v * law.permittivity_f_per_m),
-                    input.source_current[offset].current_density_a_per_m2,
+                    electric.map(|v| v * law.conductivity_s_per_m.canonical_value()),
+                    electric.map(|v| v * law.permittivity_f_per_m.canonical_value()),
+                    input.source_current[offset]
+                        .current_density_a_per_m2
+                        .canonical_value(),
                     omega,
                 );
                 for (i, &edge) in indices.iter().enumerate() {
                     for axis in 0..3 {
-                        let source = input.source_current[offset].current_density_a_per_m2[axis];
+                        let source = input.source_current[offset]
+                            .current_density_a_per_m2
+                            .canonical_value()[axis];
                         let factor = omega * point.values[i][axis] * point.volume_weight_m3;
                         rhs[edge] += -source.times_i() * factor;
                         rounding_scale[edge] += source.abs() * factor.abs();

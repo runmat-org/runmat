@@ -16,7 +16,7 @@ pub(super) fn lower(
     id: &str,
     domain: &str,
     body: &[CheckedFeaStatement],
-    quantity_dimension: PhysicalDimension,
+    quantity_kind: runmat_types::physical::QuantityKind,
     wrap: SignalWrapper,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
@@ -51,14 +51,18 @@ pub(super) fn lower(
     let amplitude = signal_value(
         declaration,
         amplitude_expression,
-        quantity_dimension,
+        if quantity_kind == runmat_types::physical::QuantityKind::Temperature {
+            runmat_types::physical::QuantityKind::TemperatureDifference
+        } else {
+            quantity_kind
+        },
         diagnostics,
     )?;
     let offset = match assignment(body, "offset") {
         Some(value) => Some(signal_value(
             declaration,
             value,
-            quantity_dimension,
+            quantity_kind,
             diagnostics,
         )?),
         None => None,
@@ -86,7 +90,7 @@ pub(super) fn lower(
         PhysicalDimension::FREQUENCY,
         diagnostics,
     )?;
-    let phase_radians = optional_dimensionless(declaration, body, "phase", diagnostics)?;
+    let phase_radians = optional_phase(declaration, body, diagnostics)?;
     let duty_cycle = optional_dimensionless(declaration, body, "duty_cycle", diagnostics)?;
     validate_kind_parameters(
         declaration,
@@ -109,10 +113,10 @@ pub(super) fn lower(
             kind,
             amplitude,
             offset,
-            start_seconds,
-            duration_seconds,
-            frequency_hz,
-            phase_radians: phase_radians.unwrap_or(0.0),
+            start_seconds: runmat_types::physical::Time::new(start_seconds),
+            duration_seconds: (duration_seconds).map(runmat_types::physical::Time::new),
+            frequency_hz: (frequency_hz).map(runmat_types::physical::Frequency::new),
+            phase_radians: runmat_types::physical::Angle::new(phase_radians.unwrap_or(0.0)),
             duty_cycle,
         }),
         precision: SignalPrecision::Real64,
@@ -211,7 +215,7 @@ fn optional_quantity(
     let Some(value) = assignment(body, name) else {
         return Some(None);
     };
-    if value.value_type != FeaType::Quantity(dimension) {
+    if !(value.value_type).is_quantity((dimension).into()) {
         diagnostic(
             declaration,
             value.span,
@@ -241,7 +245,7 @@ fn optional_dimensionless(
         return Some(None);
     };
     if !matches!(value.value_type, FeaType::Integer | FeaType::Real)
-        && value.value_type != FeaType::Quantity(PhysicalDimension::DIMENSIONLESS)
+        && !(value.value_type).is_quantity((PhysicalDimension::DIMENSIONLESS).into())
     {
         diagnostic(
             declaration,
@@ -263,4 +267,33 @@ fn assignment<'a>(body: &'a [CheckedFeaStatement], name: &str) -> Option<&'a Che
         }
         _ => None,
     })
+}
+
+/// Phase retains its nominal angle unit; a bare zero remains a harmless legacy
+/// zero-angle spelling, while nonzero numbers require rad/deg explicitly.
+fn optional_phase(
+    declaration: &CheckedFeaDeclaration,
+    body: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<Option<f64>> {
+    let Some(value) = assignment(body, "phase") else {
+        return Some(None);
+    };
+    let angle = runmat_types::physical::DynamicDimension::quantity_type(
+        runmat_types::physical::QuantityKind::Angle,
+    );
+    let number = scalar(value)?;
+    if value.value_type.is_quantity(angle)
+        || (matches!(value.value_type, FeaType::Integer | FeaType::Real) && number == 0.0)
+    {
+        Some(Some(number))
+    } else {
+        diagnostic(
+            declaration,
+            value.span,
+            "waveform phase requires an angle in rad or deg",
+            diagnostics,
+        );
+        None
+    }
 }

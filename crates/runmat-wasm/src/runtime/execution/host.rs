@@ -17,6 +17,7 @@ const BROWSER_EXECUTION_SUBMISSION_SCHEMA_V2: u16 = 2;
 pub(crate) struct BrowserExecutionHost {
     target: JsValue,
     capabilities: BrowserExecutionCapabilities,
+    worker_inventory: Option<super::selected::ProgramWorkerInventory>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,14 +41,89 @@ impl BrowserExecutionHost {
         if capabilities.owned_builtin_work {
             required_method(&target, "cancelOwned")?;
         }
+        let worker_inventory = if capabilities.selected_program_work {
+            required_method(&target, "launchProgram")?;
+            required_method(&target, "cancelProgram")?;
+            let inventory: super::selected::ProgramWorkerInventory =
+                serde_wasm_bindgen::from_value(Reflect::get(
+                    &target,
+                    &JsValue::from_str("workerInventory"),
+                )?)
+                .map_err(|e| {
+                    JsValue::from_str(&format!("invalid selected worker inventory: {e}"))
+                })?;
+            if inventory.schema_version != 1 || !inventory.accelerators.is_empty() {
+                return Err(JsValue::from_str(
+                    "selected CPU worker inventory has unsupported schema or accelerators",
+                ));
+            }
+            inventory
+                .host
+                .validate()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            Some(inventory)
+        } else {
+            None
+        };
         Ok(Self {
             target,
             capabilities,
+            worker_inventory,
         })
     }
 
     pub(crate) fn capabilities(&self) -> BrowserExecutionCapabilities {
         self.capabilities
+    }
+
+    pub(crate) fn worker_inventory(&self) -> Option<&super::selected::ProgramWorkerInventory> {
+        self.worker_inventory.as_ref()
+    }
+
+    pub(crate) async fn launch_selected(
+        &self,
+        task_id: &str,
+        worker_id: &str,
+        request: &BrowserWorkerRequest,
+    ) -> Result<super::selected::ProgramTaskTerminal, String> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Launch<'a> {
+            task_id: &'a str,
+            worker_id: &'a str,
+            program: &'a BrowserWorkerRequest,
+        }
+        let payload = super::selected::encode(&Launch {
+            task_id,
+            worker_id,
+            program: request,
+        })
+        .map_err(js_error)?;
+        let value = required_method(&self.target, "launchProgram")
+            .map_err(js_error)?
+            .call1(&self.target, &payload)
+            .map_err(js_error)?;
+        let value = JsFuture::from(Promise::resolve(&value))
+            .await
+            .map_err(js_error)?;
+        serde_wasm_bindgen::from_value(value)
+            .map_err(|e| format!("invalid selected program terminal: {e}"))
+    }
+
+    pub(crate) async fn cancel_selected(
+        &self,
+        request: &super::selected::ProgramTaskCancellation,
+    ) -> Result<super::selected::ProgramTaskTerminal, String> {
+        let payload = super::selected::encode(request).map_err(js_error)?;
+        let value = required_method(&self.target, "cancelProgram")
+            .map_err(js_error)?
+            .call1(&self.target, &payload)
+            .map_err(js_error)?;
+        let value = JsFuture::from(Promise::resolve(&value))
+            .await
+            .map_err(js_error)?;
+        serde_wasm_bindgen::from_value(value)
+            .map_err(|e| format!("invalid selected cancellation terminal: {e}"))
     }
 
     pub(crate) async fn launch(

@@ -20,9 +20,10 @@ use crate::properties::compile_structural_property_map;
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundThermalStateTransfer {
     pub transition: CanonicalStateTransition,
-    pub nodal_temperature_k: Vec<f64>,
-    pub reference_temperature_k: f64,
-    pub source_time_s: f64,
+    pub nodal_temperature_k:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, Vec<f64>>,
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    pub source_time_s: runmat_types::physical::Time,
 }
 
 impl BoundThermalStateTransfer {
@@ -66,11 +67,11 @@ impl BoundThermalStateTransfer {
                 )
             })?
             .reference_temperature
-            .kelvin;
+            .canonical_value();
         let source_payload = source.payload.thermal().ok_or_else(|| {
             AnalysisExecutionError::Invalid("thermal source has no typed temperature field".into())
         })?;
-        if reference_temperature_k != source_payload.reference_temperature_k {
+        if reference_temperature_k != source_payload.reference_temperature_k.canonical_value() {
             return Err(AnalysisExecutionError::Invalid(
                 "thermal producer and thermoelastic consumer use different reference temperatures"
                     .into(),
@@ -129,9 +130,13 @@ impl BoundThermalStateTransfer {
         // physical load integration and recovery data; never construct a second unused copy.
         Ok(Self {
             transition,
-            nodal_temperature_k,
-            reference_temperature_k,
-            source_time_s: source_payload.sample_time_s,
+            nodal_temperature_k: runmat_types::physical::Quantity::new(nodal_temperature_k),
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                reference_temperature_k,
+            ),
+            source_time_s: runmat_types::physical::Time::new(
+                source_payload.sample_time_s.canonical_value(),
+            ),
         })
     }
 }

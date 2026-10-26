@@ -9,23 +9,23 @@ const FORMULATION_DRILLING_SCALE: f64 = 1.0e-4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LaminaElasticity {
-    pub longitudinal_modulus_pa: f64,
-    pub transverse_modulus_pa: f64,
-    pub major_poisson_ratio: f64,
-    pub in_plane_shear_modulus_pa: f64,
-    pub transverse_shear_modulus_13_pa: f64,
-    pub transverse_shear_modulus_23_pa: f64,
+    pub longitudinal_modulus_pa: runmat_types::physical::YoungsModulus,
+    pub transverse_modulus_pa: runmat_types::physical::YoungsModulus,
+    pub major_poisson_ratio: runmat_types::physical::PoissonRatio,
+    pub in_plane_shear_modulus_pa: runmat_types::physical::ShearModulus,
+    pub transverse_shear_modulus_13_pa: runmat_types::physical::ShearModulus,
+    pub transverse_shear_modulus_23_pa: runmat_types::physical::ShearModulus,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaminateLayer {
     pub layer_id: String,
-    pub thickness_m: f64,
-    pub angle_rad: f64,
+    pub thickness_m: runmat_types::physical::Length,
+    pub angle_rad: runmat_types::physical::Angle,
     pub elasticity: LaminaElasticity,
-    pub density_kg_per_m3: f64,
-    pub mass_damping_per_second: f64,
-    pub stiffness_damping_seconds: f64,
+    pub density_kg_per_m3: runmat_types::physical::MassDensity,
+    pub mass_damping_per_second: runmat_types::physical::RayleighMassCoefficient,
+    pub stiffness_damping_seconds: runmat_types::physical::RayleighStiffnessCoefficient,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,7 +53,7 @@ pub struct LaminateDefinition {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LaminateMassProperties {
     pub inertia: ShellMassMoments,
-    pub mass_damping: ShellMassMoments,
+    pub mass_damping: ShellMassMoments<true>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,13 +74,15 @@ impl LaminateDefinition {
         let mut stiffness_damping = ShellConstitutiveMatrices::zero();
         let mut recovery_layers = Vec::with_capacity(self.layers.len());
         let mut mass = LaminateMassProperties {
-            inertia: ShellMassMoments::ZERO,
-            mass_damping: ShellMassMoments::ZERO,
+            inertia: ShellMassMoments::zero(),
+            mass_damping: ShellMassMoments::<true>::zero(),
         };
 
         for (layer, [bottom, top]) in self.layers.iter().zip(bounds) {
-            let plane_stress = transformed_plane_stress(layer.elasticity, layer.angle_rad);
-            let transverse_shear = transformed_transverse_shear(layer.elasticity, layer.angle_rad);
+            let plane_stress =
+                transformed_plane_stress(layer.elasticity, layer.angle_rad.canonical_value());
+            let transverse_shear =
+                transformed_transverse_shear(layer.elasticity, layer.angle_rad.canonical_value());
             integrate_layer(
                 &mut elastic,
                 plane_stress,
@@ -97,7 +99,7 @@ impl LaminateDefinition {
                 bottom,
                 top,
                 shear_correction,
-                layer.stiffness_damping_seconds,
+                layer.stiffness_damping_seconds.canonical_value(),
             );
             recovery_layers.push(ShellRecoveryLayer {
                 layer_id: layer.layer_id.clone(),
@@ -106,18 +108,14 @@ impl LaminateDefinition {
                 plane_stress,
             });
 
-            let thickness = top - bottom;
-            let first_moment = 0.5 * (top.powi(2) - bottom.powi(2));
-            let second_moment = (top.powi(3) - bottom.powi(3)) / 3.0;
-            mass.inertia.zeroth_kg_per_m2 += layer.density_kg_per_m3 * thickness;
-            mass.inertia.first_kg_per_m += layer.density_kg_per_m3 * first_moment;
-            mass.inertia.second_kg += layer.density_kg_per_m3 * second_moment;
-            mass.mass_damping.zeroth_kg_per_m2 +=
-                layer.mass_damping_per_second * layer.density_kg_per_m3 * thickness;
-            mass.mass_damping.first_kg_per_m +=
-                layer.mass_damping_per_second * layer.density_kg_per_m3 * first_moment;
-            mass.mass_damping.second_kg +=
-                layer.mass_damping_per_second * layer.density_kg_per_m3 * second_moment;
+            let layer_moments = ShellMassMoments::integrated_layer(
+                layer.density_kg_per_m3,
+                runmat_types::physical::Length::new(bottom),
+                runmat_types::physical::Length::new(top),
+            )?;
+            mass.inertia.accumulate(layer_moments)?;
+            mass.mass_damping
+                .accumulate(layer_moments.proportional_damping(layer.mass_damping_per_second)?)?;
         }
 
         elastic.drilling_stiffness_per_area =
@@ -146,11 +144,11 @@ impl LaminateDefinition {
                 .is_some_and(|value| !positive_finite(value))
             || self.layers.iter().any(|layer| {
                 layer.layer_id.trim().is_empty()
-                    || !positive_finite(layer.thickness_m)
+                    || !positive_finite(layer.thickness_m.canonical_value())
                     || !layer.angle_rad.is_finite()
-                    || !positive_finite(layer.density_kg_per_m3)
-                    || !nonnegative_finite(layer.mass_damping_per_second)
-                    || !nonnegative_finite(layer.stiffness_damping_seconds)
+                    || !positive_finite(layer.density_kg_per_m3.canonical_value())
+                    || !nonnegative_finite(layer.mass_damping_per_second.canonical_value())
+                    || !nonnegative_finite(layer.stiffness_damping_seconds.canonical_value())
                     || layer.elasticity.validate().is_err()
             })
         {
@@ -165,21 +163,25 @@ impl LaminateDefinition {
     }
 
     fn layer_bounds(&self) -> Vec<[f64; 2]> {
-        let total_thickness: f64 = self.layers.iter().map(|layer| layer.thickness_m).sum();
+        let total_thickness: f64 = self
+            .layers
+            .iter()
+            .map(|layer| layer.thickness_m.canonical_value())
+            .sum();
         let mut geometric = Vec::with_capacity(self.layers.len());
         match self.ply_order {
             LaminatePlyOrder::AlongSurfaceNormal => {
                 let mut cursor = -0.5 * total_thickness;
                 for layer in &self.layers {
-                    geometric.push([cursor, cursor + layer.thickness_m]);
-                    cursor += layer.thickness_m;
+                    geometric.push([cursor, cursor + layer.thickness_m.canonical_value()]);
+                    cursor += layer.thickness_m.canonical_value();
                 }
             }
             LaminatePlyOrder::OppositeSurfaceNormal => {
                 let mut cursor = 0.5 * total_thickness;
                 for layer in &self.layers {
-                    geometric.push([cursor - layer.thickness_m, cursor]);
-                    cursor -= layer.thickness_m;
+                    geometric.push([cursor - layer.thickness_m.canonical_value(), cursor]);
+                    cursor -= layer.thickness_m.canonical_value();
                 }
             }
         }
@@ -206,15 +208,16 @@ impl LaminateDefinition {
 
 impl LaminaElasticity {
     fn validate(self) -> Result<(), ShellElementError> {
-        let reciprocal_poisson =
-            self.major_poisson_ratio * self.transverse_modulus_pa / self.longitudinal_modulus_pa;
-        if positive_finite(self.longitudinal_modulus_pa)
-            && positive_finite(self.transverse_modulus_pa)
-            && positive_finite(self.in_plane_shear_modulus_pa)
-            && positive_finite(self.transverse_shear_modulus_13_pa)
-            && positive_finite(self.transverse_shear_modulus_23_pa)
-            && self.major_poisson_ratio.is_finite()
-            && 1.0 - self.major_poisson_ratio * reciprocal_poisson > 0.0
+        let reciprocal_poisson = self.major_poisson_ratio.canonical_value()
+            * self.transverse_modulus_pa.canonical_value()
+            / self.longitudinal_modulus_pa.canonical_value();
+        if positive_finite(self.longitudinal_modulus_pa.canonical_value())
+            && positive_finite(self.transverse_modulus_pa.canonical_value())
+            && positive_finite(self.in_plane_shear_modulus_pa.canonical_value())
+            && positive_finite(self.transverse_shear_modulus_13_pa.canonical_value())
+            && positive_finite(self.transverse_shear_modulus_23_pa.canonical_value())
+            && self.major_poisson_ratio.canonical_value().is_finite()
+            && 1.0 - self.major_poisson_ratio.canonical_value() * reciprocal_poisson > 0.0
         {
             Ok(())
         } else {
@@ -252,13 +255,16 @@ fn integrate_layer(
 }
 
 fn transformed_plane_stress(material: LaminaElasticity, angle: f64) -> ShellMatrix3 {
-    let reciprocal_poisson = material.major_poisson_ratio * material.transverse_modulus_pa
-        / material.longitudinal_modulus_pa;
-    let denominator = 1.0 - material.major_poisson_ratio * reciprocal_poisson;
-    let q11 = material.longitudinal_modulus_pa / denominator;
-    let q22 = material.transverse_modulus_pa / denominator;
-    let q12 = material.major_poisson_ratio * material.transverse_modulus_pa / denominator;
-    let q66 = material.in_plane_shear_modulus_pa;
+    let reciprocal_poisson = material.major_poisson_ratio.canonical_value()
+        * material.transverse_modulus_pa.canonical_value()
+        / material.longitudinal_modulus_pa.canonical_value();
+    let denominator = 1.0 - material.major_poisson_ratio.canonical_value() * reciprocal_poisson;
+    let q11 = material.longitudinal_modulus_pa.canonical_value() / denominator;
+    let q22 = material.transverse_modulus_pa.canonical_value() / denominator;
+    let q12 = material.major_poisson_ratio.canonical_value()
+        * material.transverse_modulus_pa.canonical_value()
+        / denominator;
+    let q66 = material.in_plane_shear_modulus_pa.canonical_value();
     let m = angle.cos();
     let n = angle.sin();
     let m2 = m * m;
@@ -290,8 +296,8 @@ fn transformed_plane_stress(material: LaminaElasticity, angle: f64) -> ShellMatr
 fn transformed_transverse_shear(material: LaminaElasticity, angle: f64) -> ShellMatrix2 {
     let cosine = angle.cos();
     let sine = angle.sin();
-    let g13 = material.transverse_shear_modulus_13_pa;
-    let g23 = material.transverse_shear_modulus_23_pa;
+    let g13 = material.transverse_shear_modulus_13_pa.canonical_value();
+    let g23 = material.transverse_shear_modulus_23_pa.canonical_value();
     [
         [
             g13 * cosine.powi(2) + g23 * sine.powi(2),
@@ -343,19 +349,21 @@ mod tests {
     fn carbon_epoxy(angle_rad: f64, thickness_m: f64) -> LaminateLayer {
         LaminateLayer {
             layer_id: format!("ply-{angle_rad}"),
-            thickness_m,
-            angle_rad,
+            thickness_m: runmat_types::physical::Length::new(thickness_m),
+            angle_rad: runmat_types::physical::Angle::new(angle_rad),
             elasticity: LaminaElasticity {
-                longitudinal_modulus_pa: 135.0e9,
-                transverse_modulus_pa: 10.0e9,
-                major_poisson_ratio: 0.3,
-                in_plane_shear_modulus_pa: 5.0e9,
-                transverse_shear_modulus_13_pa: 5.0e9,
-                transverse_shear_modulus_23_pa: 3.8e9,
+                longitudinal_modulus_pa: runmat_types::physical::YoungsModulus::new(135.0e9),
+                transverse_modulus_pa: runmat_types::physical::YoungsModulus::new(10.0e9),
+                major_poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
+                in_plane_shear_modulus_pa: runmat_types::physical::ShearModulus::new(5.0e9),
+                transverse_shear_modulus_13_pa: runmat_types::physical::ShearModulus::new(5.0e9),
+                transverse_shear_modulus_23_pa: runmat_types::physical::ShearModulus::new(3.8e9),
             },
-            density_kg_per_m3: 1_600.0,
-            mass_damping_per_second: 0.0,
-            stiffness_damping_seconds: 0.0,
+            density_kg_per_m3: runmat_types::physical::MassDensity::new(1_600.0),
+            mass_damping_per_second: runmat_types::physical::RayleighMassCoefficient::new(0.0),
+            stiffness_damping_seconds: runmat_types::physical::RayleighStiffnessCoefficient::new(
+                0.0,
+            ),
         }
     }
 
@@ -379,7 +387,9 @@ mod tests {
                 assert!(value.abs() < 1.0e-9);
             }
         }
-        assert!((response.mass.inertia.zeroth_kg_per_m2 - 0.8).abs() < 1.0e-12);
+        assert!(
+            (response.mass.inertia.with_coefficients(|values| values[0]) - 0.8).abs() < 1.0e-12
+        );
     }
 
     #[test]
@@ -409,8 +419,8 @@ mod tests {
             mid.elastic.matrices.coupling,
             first.elastic.matrices.coupling
         );
-        assert!(mid.mass.inertia.first_kg_per_m.abs() < 1.0e-12);
-        assert!(first.mass.inertia.first_kg_per_m > 0.0);
+        assert!(mid.mass.inertia.with_coefficients(|values| values[1]).abs() < 1.0e-12);
+        assert!(first.mass.inertia.with_coefficients(|values| values[1]) > 0.0);
     }
 
     #[test]
@@ -450,12 +460,15 @@ mod tests {
         }
         let recovered =
             recover_resultants_for_constitutive(&response.elastic, geometry, displacement).unwrap();
-        let reciprocal_poisson = material.major_poisson_ratio * material.transverse_modulus_pa
-            / material.longitudinal_modulus_pa;
-        let denominator = 1.0 - material.major_poisson_ratio * reciprocal_poisson;
-        let stress_x = material.longitudinal_modulus_pa * strain_x / denominator;
-        let stress_y =
-            material.major_poisson_ratio * material.transverse_modulus_pa * strain_x / denominator;
+        let reciprocal_poisson = material.major_poisson_ratio.canonical_value()
+            * material.transverse_modulus_pa.canonical_value()
+            / material.longitudinal_modulus_pa.canonical_value();
+        let denominator = 1.0 - material.major_poisson_ratio.canonical_value() * reciprocal_poisson;
+        let stress_x = material.longitudinal_modulus_pa.canonical_value() * strain_x / denominator;
+        let stress_y = material.major_poisson_ratio.canonical_value()
+            * material.transverse_modulus_pa.canonical_value()
+            * strain_x
+            / denominator;
         assert_close(recovered.membrane_force_n_per_m[0], stress_x * thickness);
         assert_close(recovered.membrane_force_n_per_m[1], stress_y * thickness);
         assert_close(recovered.membrane_force_n_per_m[2], 0.0);
@@ -473,8 +486,10 @@ mod tests {
         let beta = 1.7e-5;
         let mut layers = vec![carbon_epoxy(0.0, 0.000_2), carbon_epoxy(0.4, 0.000_3)];
         for layer in &mut layers {
-            layer.mass_damping_per_second = alpha;
-            layer.stiffness_damping_seconds = beta;
+            layer.mass_damping_per_second =
+                runmat_types::physical::RayleighMassCoefficient::new(alpha);
+            layer.stiffness_damping_seconds =
+                runmat_types::physical::RayleighStiffnessCoefficient::new(beta);
         }
         let response = LaminateDefinition {
             layers,
@@ -501,12 +516,18 @@ mod tests {
             }
         }
         assert_close(
-            response.mass.mass_damping.zeroth_kg_per_m2,
-            alpha * response.mass.inertia.zeroth_kg_per_m2,
+            response
+                .mass
+                .mass_damping
+                .with_coefficients(|values| values[0]),
+            alpha * response.mass.inertia.with_coefficients(|values| values[0]),
         );
         assert_close(
-            response.mass.mass_damping.second_kg,
-            alpha * response.mass.inertia.second_kg,
+            response
+                .mass
+                .mass_damping
+                .with_coefficients(|values| values[2]),
+            alpha * response.mass.inertia.with_coefficients(|values| values[2]),
         );
     }
 

@@ -18,3 +18,11 @@ pub use task::*;
 mod generator_tests;
 #[cfg(test)]
 mod source_tests;
+
+mod host;
+pub use host::{execute_geometry_materialization_program_request, occt_geometry_provider_profile, GeometryMaterializationLimits};
+
+mod occt_evaluator;
+pub use occt_evaluator::OcctMeshingEvaluatorProvider;
+mod serial_mesh;
+pub use serial_mesh::{materialize_and_mesh_serial, SerialGeometryMeshingResult,SerialGeometryMeshingError,PreparedFeaGeometry};

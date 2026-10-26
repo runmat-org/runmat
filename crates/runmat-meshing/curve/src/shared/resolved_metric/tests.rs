@@ -81,13 +81,14 @@ fn curve_boundary_trace_satisfies_every_adjacent_fine_face_before_surface_execut
             )
             .unwrap();
             let placement = topology.world_transform_for(&edge.id).unwrap();
-            let tangent = placement.transform_vector(raw.first_m);
+            let tangent = placement
+                .transform_vector(raw.first_m.with_canonical_storage(|values, _axes| *values));
             let norm = tangent[0].hypot(tangent[1]).hypot(tangent[2]);
             let unit = tangent.map(|x| x / norm);
             let query = CurveMetricQuery {
                 edge_id: &edge.id,
                 parameter,
-                point_m: placement.transform_point(raw.point_m),
+                point_m: placement.transform_point(*raw.point_m.canonical_values()),
                 unit_tangent: unit,
             };
             let evaluated = field.evaluate(query).unwrap();

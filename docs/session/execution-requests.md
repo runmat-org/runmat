@@ -94,3 +94,61 @@ After execution, `apply_requested_output_policy` adjusts `RuntimeFlow`:
 | exactly N | Single values become one-element output lists; longer lists are truncated to N. |
 
 This keeps host callers from reverse-engineering MATLAB output arity from display output.
+
+
+## Isolated browser program workers
+
+Browser program workers load the same SDK and WASM asset revision as the parent.
+The worker calls `workerProgramInventory()` to publish its own host inventory;
+the parent must not substitute its UI realm's devices. A host advertising
+`selectedProgramWork` supplies this inventory plus `launchProgram` and
+`cancelProgram`.
+
+Inside the physical worker, `createWorkerProgramInvocation(program)` admits the
+exact Direct or Graph request and its scheduler assignment. The controller owns
+one cancellation generation. `run()` returns the original program response and
+a separate Runtime retirement receipt after workspace cleanup and local-task
+drain. `cancel()` requires that same complete assignment, including its resource
+leases. A rejected transport, foreign assignment, or unverified cleanup cannot
+release the original grant or make the physical worker reusable. The caller may
+observe cancellation before the worker's retirement terminal arrives.
+
+This path reuses the existing VM selected-source execution, lifecycle host,
+local-task supervisor, cancellation source, and scheduler Graph retirement
+certificate. Owned numerical builtin work retains its existing distinct owned
+work protocol. No frontend timer or `Worker.terminate()` manufactures retirement.
+
+## Simulation execution choices before meshing
+
+`planFeaSource` checks the saved study and returns host choices without creating a
+solver mesh, assembling operators, or running the study. Existing preview extents
+in physical metres and the requested element size can supply a coarse boxed-grid
+workspace estimate. That estimate includes empty space in the bounding box and
+cannot predict all refinement or solver fill-in; it is advisory, not an allocation
+certificate. Missing geometry measurements remain unknown. A high rough estimate
+can recommend desktop without blocking a browser attempt.
+
+Only an explicit `runFeaSource` prepares the mesh. It rechecks the selected input
+revision, uses the existing geometry/meshing owner and exact resource planner,
+and checks current browser headroom before dispatching the numerical worker.
+Selecting a host never changes the study's mesh settings to make it fit.
+
+Browser timing observations use a distinct checked-source route including mesh
+preparation, execution and publication. Old prepared-solve observations cannot
+be reused as total-runtime estimates. Numeric parallel speedups are shown only
+when both choices have applicable measured evidence; core count alone is not a
+speedup estimate.
+
+
+Browser result storage uses the same canonical artifact publisher and readers.
+`storage::with_artifact_access` acquires a bounded, provider-captured transaction
+when synchronous coherent scopes are unavailable. Artifact operations run against
+its private view without awaiting or changing the process filesystem provider.
+The original provider's conditional workspace publication controls visibility,
+conflicts and recovery receipts. Failed operations discard the view; successful
+results reach the caller only after publication is confirmed. Read operations
+capture a fresh view, including after runtime reload. There is no second artifact
+format or persistent result store. Browser field and scene APIs await this access.
+The transaction inventory is bounded by the existing workspace publication limits;
+resource admission failures remain explicit, rather than attempting unbounded
+browser materialization. Native providers keep their existing coherent scopes.

@@ -29,7 +29,17 @@ impl CoupledFixture {
         let mut surface = ContactOperatorTestFixture::new(order, friction);
         for node in &mut surface.mesh.topology.nodes {
             if (100..200).contains(&node.node_id) {
-                node.coordinates_m[2] += 0.0499;
+                {
+                    let quantity_change = 0.0499;
+                    let quantity_index = 2;
+                    let quantity_slot = &mut node.coordinates_m;
+                    let mut quantity_coordinates = quantity_slot.canonical_value();
+                    quantity_coordinates[quantity_index] += quantity_change;
+                    *quantity_slot = runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(quantity_coordinates);
+                };
             }
         }
         surface.mesh.seal_canonical_digest().unwrap();
@@ -39,7 +49,7 @@ impl CoupledFixture {
             .projection
             .nodes
             .iter()
-            .map(|n| n.coordinates_m)
+            .map(|n| n.coordinates_m.canonical_value())
             .collect();
         let mut model = fixture_model(FixtureId::MultiMaterialAssembly);
         replace_fixture_excitations(&mut model, Vec::new());
@@ -47,8 +57,8 @@ impl CoupledFixture {
         for material in &mut model.materials {
             material.elasticity = Some(MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
-                    youngs_modulus_pa: 1200.,
-                    poisson_ratio: 0.,
+                    youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(1200.),
+                    poisson_ratio: runmat_types::physical::PoissonRatio::new(0.),
                 },
             ));
             material.plastic = None;
@@ -93,7 +103,8 @@ impl CoupledFixture {
             .nodes
             .iter()
             .position(|n| {
-                (100..200).contains(&n.node_id) && (n.coordinates_m[2] + 0.0001).abs() < 1e-12
+                (100..200).contains(&n.node_id)
+                    && (n.coordinates_m.canonical_value()[2] + 0.0001).abs() < 1e-12
             })
             .unwrap();
         let free = if friction {
@@ -104,7 +115,7 @@ impl CoupledFixture {
         let mut map = vec![None; summary.dof_count];
         for (n, rows) in surface.projection.nodes.iter().zip(&surface.rows) {
             if (100..200).contains(&n.node_id) {
-                let q = (n.coordinates_m[2] + 0.2001) / 0.2;
+                let q = (n.coordinates_m.canonical_value()[2] + 0.2001) / 0.2;
                 if q > 1e-12 {
                     map[rows[2]] = Some((free.len() - 1, q));
                     if friction {

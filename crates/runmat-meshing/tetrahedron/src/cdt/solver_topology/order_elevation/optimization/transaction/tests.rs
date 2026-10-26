@@ -23,7 +23,17 @@ fn rejected_edits_restore_original_buffers_without_cumulative_candidate_storage(
                 for slot in 0..3 {
                     let replacement = Storage(Some(control)).node(&topology.nodes[slot])?;
                     topology.nodes[slot] = replacement;
-                    topology.nodes[slot].coordinates_m[0] += 0.5;
+                    {
+                        let quantity_change = 0.5;
+                        let quantity_index = 0;
+                        let quantity_slot = &mut topology.nodes[slot].coordinates_m;
+                        let mut quantity_coordinates = quantity_slot.canonical_value();
+                        quantity_coordinates[quantity_index] += quantity_change;
+                        *quantity_slot = runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(quantity_coordinates);
+                    };
                 }
                 if attempt % 2 == 0 {
                     Ok(false)
@@ -46,8 +56,28 @@ fn rejected_edits_restore_original_buffers_without_cumulative_candidate_storage(
             assert_eq!(budget.live_bytes(), live);
         }
         let moved = edit_nodes(&mut topology, &[0, 1], &scope, |topology, _| {
-            topology.nodes[0].coordinates_m[0] += 0.25;
-            topology.nodes[1].coordinates_m[0] += 0.5;
+            {
+                let quantity_change = 0.25;
+                let quantity_index = 0;
+                let quantity_slot = &mut topology.nodes[0].coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
+            {
+                let quantity_change = 0.5;
+                let quantity_index = 0;
+                let quantity_slot = &mut topology.nodes[1].coordinates_m;
+                let mut quantity_coordinates = quantity_slot.canonical_value();
+                quantity_coordinates[quantity_index] += quantity_change;
+                *quantity_slot = runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(quantity_coordinates);
+            };
             Ok(true)
         })
         .unwrap();

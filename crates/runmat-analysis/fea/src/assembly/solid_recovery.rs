@@ -17,7 +17,9 @@ pub(crate) fn build(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     thermal_context: Option<&FeaThermoMechanicalContext>,
-    solved_nodal_temperature_k: Option<&[f64]>,
+    solved_nodal_temperature_k: Option<
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Temperature, &[f64]>,
+    >,
 ) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
     if thermal_context.is_some() && solved_nodal_temperature_k.is_some() {
         return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
@@ -25,6 +27,7 @@ pub(crate) fn build(
         ));
     }
     if let Some(temperature) = solved_nodal_temperature_k {
+        let temperature = temperature.canonical_value();
         if temperature.len() != mesh.topology.nodes.len()
             || temperature
                 .iter()
@@ -89,7 +92,10 @@ pub(crate) fn build(
                     )?;
                     SolidRecoveryGeometry::Tetrahedron4 {
                         node_indices,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                     }
                 }
                 ElementOrder::Tet10 => {
@@ -101,13 +107,21 @@ pub(crate) fn build(
                     )?;
                     SolidRecoveryGeometry::Tetrahedron10 {
                         node_indices,
-                        coordinates_m,
+                        coordinates_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(coordinates_m),
                     }
                 }
             };
             let solved_thermal_quadrature = solved_nodal_temperature_k
                 .map(|temperatures| {
-                    solved_thermal_quadrature(element, &node_indices, properties, temperatures)
+                    solved_thermal_quadrature(
+                        element,
+                        &node_indices,
+                        properties,
+                        temperatures.canonical_value(),
+                    )
                 })
                 .transpose()?;
             Ok(SolidRecoveryElementSummary {
@@ -115,11 +129,16 @@ pub(crate) fn build(
                 region_id: element.region_id.source_topology_id.clone(),
                 material: SolidMaterial {
                     youngs_modulus_pa: material.youngs_modulus_pa,
-                    poisson_ratio: material.poisson_ratio,
-                    density_kg_per_m3: material.density_kg_per_m3,
+                    poisson_ratio: runmat_types::physical::PoissonRatio::new(
+                        material.poisson_ratio.canonical_value(),
+                    ),
+                    density_kg_per_m3: runmat_types::physical::MassDensity::new(
+                        material.density_kg_per_m3.canonical_value(),
+                    ),
                 },
                 thermal_eigenstrain,
-                prescribed_temperature_k,
+                prescribed_temperature_k: prescribed_temperature_k
+                    .map(runmat_types::physical::Temperature::new),
                 solved_thermal_quadrature,
                 geometry,
             })
@@ -160,8 +179,8 @@ fn solved_thermal_quadrature(
                     })?;
             value += shape[local] * nodal_temperature_k[*index];
         }
-        let strain =
-            thermal.expansion_coefficient_per_k * (value - thermal.reference_temperature_k);
+        let strain = thermal.expansion_coefficient_per_k.canonical_value()
+            * (value - thermal.reference_temperature_k.canonical_value());
         if !value.is_finite() || value <= 0.0 || !strain.is_finite() {
             return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(format!(
                 "thermoelastic element {} has nonphysical solved temperature",
@@ -172,14 +191,18 @@ fn solved_thermal_quadrature(
         eigenstrain[point] = strain;
     }
     Ok(SolvedThermalRecoveryQuadrature {
-        nodal_temperature_k: element
-            .node_ids
-            .iter()
-            .map(|node_id| nodal_temperature_k[node_indices[node_id]])
-            .collect(),
+        nodal_temperature_k: runmat_types::physical::Quantity::new(
+            element
+                .node_ids
+                .iter()
+                .map(|node_id| nodal_temperature_k[node_indices[node_id]])
+                .collect::<Vec<_>>(),
+        ),
         expansion_coefficient_per_k: thermal.expansion_coefficient_per_k,
-        reference_temperature_k: thermal.reference_temperature_k,
-        temperature_k,
+        reference_temperature_k: runmat_types::physical::Temperature::new(
+            thermal.reference_temperature_k.canonical_value(),
+        ),
+        temperature_k: runmat_types::physical::Quantity::new(temperature_k),
         eigenstrain,
     })
 }
@@ -208,7 +231,9 @@ fn recovery_geometry<const N: usize>(
                     node_id,
                 })?;
         indices[local] = node_index;
-        coordinates_m[local] = mesh.topology.nodes[node_index].coordinates_m;
+        coordinates_m[local] = mesh.topology.nodes[node_index]
+            .coordinates_m
+            .canonical_value();
     }
     Ok((indices, coordinates_m))
 }
