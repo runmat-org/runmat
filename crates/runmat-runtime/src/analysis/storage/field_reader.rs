@@ -157,8 +157,8 @@ fn read_numerical_payload(
     for descriptor in &manifest.chunks {
         let bytes = read_chunk(descriptor.digest)?.ok_or_else(|| {
             format!(
-                "analysis numerical object is missing chunk {}",
-                descriptor.ordinal
+                "analysis numerical object ({:?}) is missing chunk {}",
+                manifest.kind, descriptor.ordinal
             )
         })?;
         validate_chunk(descriptor, &bytes)?;

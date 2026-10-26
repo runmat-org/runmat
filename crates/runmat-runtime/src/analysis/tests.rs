@@ -4449,6 +4449,58 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     let _ = fs::remove_dir_all(&root);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a thermal steady run with no observations, staged in a publication (its field
+//   chunks stream to the spill area), reads back through the staged-record reader with every
+//   temperature and heat-flux field unchanged; this is the read thermal observation binding uses.
+#[test]
+fn staged_thermal_steady_run_reads_back_its_streamed_fields() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("staged-thermal");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::thermal_steady("staged_thermal".to_string())];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    set_model_thermo_coupling(
+        &mut model,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 20.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            region_temperature_deltas: Vec::new(),
+        },
+    );
+    let run = analysis_run_thermal_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal steady run should succeed")
+    .data;
+    assert!(run.run.observations.is_empty() && run.run.series_reductions.is_empty());
+    let fields = crate::analysis::operations::collect_analysis_result_fields(&run);
+    assert!(!fields.is_empty(), "a thermal steady run carries temperature fields");
+
+    let (restored, spilled) = storage::publication::stage_and_read_back_for_tests(&run)
+        .expect("a staged thermal run reads back with its streamed field chunks");
+    assert!(spilled > 0, "staging streams the thermal field chunks to the spill area");
+    assert_eq!(
+        crate::analysis::operations::collect_analysis_result_fields(&restored),
+        fields
+    );
+    assert_eq!(restored.run.observations, run.run.observations);
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&mesh_root);
+}
+
 #[test]
 fn analysis_artifacts_record_family_specific_op_versions() {
     let _guard = analysis_test_guard();
