@@ -1060,8 +1060,11 @@ fn field_object(
 
 fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
     match &field.values {
-        AnalysisFieldValues::HostF64(values) => Tensor::new(values.clone(), field.shape.clone())
-            .map(Value::Tensor)
+        AnalysisFieldValues::HostF64(values) => Tensor::new(
+            row_major_to_column_major(values, &field.shape),
+            field.shape.clone(),
+        )
+        .map(Value::Tensor)
             .map_err(|err| {
                 builtin_error(
                     FIELD_NAME,
@@ -1077,6 +1080,35 @@ fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
             &["element_count"],
         ),
     }
+}
+
+/// Analysis fields store their values row-major: the last shape axis varies fastest, so one
+/// node's or element's components are contiguous. Runtime tensors are column-major, so the
+/// values are reordered so that `values(i, :)` is entity `i` and `values(:, k)` is component `k`.
+/// A length that disagrees with the shape is passed through for `Tensor::new` to reject.
+fn row_major_to_column_major(values: &[f64], shape: &[usize]) -> Vec<f64> {
+    if shape.len() < 2 || values.len() != shape.iter().product::<usize>() {
+        return values.to_vec();
+    }
+    let mut reordered = vec![0.0; values.len()];
+    let mut index = vec![0_usize; shape.len()];
+    for &value in values {
+        let mut position = 0;
+        let mut stride = 1;
+        for (axis, &extent) in shape.iter().enumerate() {
+            position += index[axis] * stride;
+            stride *= extent;
+        }
+        reordered[position] = value;
+        for axis in (0..shape.len()).rev() {
+            index[axis] += 1;
+            if index[axis] < shape[axis] {
+                break;
+            }
+            index[axis] = 0;
+        }
+    }
+    reordered
 }
 
 fn usize_slice_tensor(values: &[usize], rows: usize, cols: usize) -> BuiltinResult<Value> {
@@ -3214,6 +3246,47 @@ mod tests {
         assert!(error
             .message()
             .contains("duplicate thermo-mechanical FEA domain"));
+    }
+
+    #[test]
+    fn vector_field_values_have_one_row_per_node_and_one_column_per_component() {
+        // Three nodes with displacement u_i = (i, 10 i, 100 i), stored node-major as the
+        // analysis producers publish them.
+        let field = AnalysisField {
+            field_id: "structural.displacement".into(),
+            shape: vec![3, 3],
+            values: AnalysisFieldValues::HostF64(vec![
+                1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0,
+            ]),
+        };
+        let descriptor = AnalysisFieldDescriptor::from_field(&field);
+        let object = field_to_object(&field, &descriptor).expect("field object");
+        let Some(Value::Tensor(values)) = object.properties().get("values") else {
+            panic!("expected values tensor");
+        };
+        assert_eq!(values.shape(), vec![3, 3]);
+        let column_major = values.materialize_f64();
+        let column = |k: usize| column_major[3 * k..3 * (k + 1)].to_vec();
+        assert_eq!(column(0), vec![1.0, 2.0, 3.0], "u(:,1) is the x component");
+        assert_eq!(column(1), vec![10.0, 20.0, 30.0], "u(:,2) is the y component");
+        assert_eq!(column(2), vec![100.0, 200.0, 300.0], "u(:,3) is the z component");
+        let row = |i: usize| [0, 1, 2].map(|k| column_major[i + 3 * k]);
+        assert_eq!(row(1), [2.0, 20.0, 200.0], "u(2,:) is node 2's vector");
+
+        // A rank-3 tensor field keeps the same rule on every axis.
+        let tensor = AnalysisField {
+            field_id: "structural.stress_tensor".into(),
+            shape: vec![2, 2, 2],
+            values: AnalysisFieldValues::HostF64((0..8).map(f64::from).collect()),
+        };
+        let Value::Tensor(values) = field_values_value(&tensor).expect("tensor values") else {
+            panic!("expected values tensor");
+        };
+        // Row-major entry (i, j, k) = 4 i + 2 j + k sits at column-major i + 2 j + 4 k.
+        assert_eq!(
+            values.materialize_f64(),
+            vec![0.0, 4.0, 2.0, 6.0, 1.0, 5.0, 3.0, 7.0]
+        );
     }
 
     #[test]
