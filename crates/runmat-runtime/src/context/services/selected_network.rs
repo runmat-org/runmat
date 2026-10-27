@@ -29,9 +29,9 @@ impl RuntimeServicePorts {
         {
             return Err(mismatch("selected Network issuer/invocation is invalid"));
         }
-        self.http = Some(http.clone());
-        self.tcp = Some(tcp.clone());
-        self.selected_network = Some(RuntimeSelectedNetworkService {
+        Rc::make_mut(&mut self.shared).http = Some(http.clone());
+        Rc::make_mut(&mut self.shared).tcp = Some(tcp.clone());
+        Rc::make_mut(&mut self.shared).selected_network = Some(RuntimeSelectedNetworkService {
             issuer,
             invocation,
             http,
@@ -46,16 +46,19 @@ impl RuntimeServicePorts {
         invocation: Digest,
     ) -> Result<(), crate::RuntimeError> {
         let selected = self
+            .shared
             .selected_network
             .as_ref()
             .ok_or_else(|| mismatch("selected Network ports are absent"))?;
         if selected.issuer != *issuer
             || selected.invocation != invocation
             || self
+                .shared
                 .http
                 .as_ref()
                 .is_none_or(|port| !Rc::ptr_eq(port, &selected.http))
             || self
+                .shared
                 .tcp
                 .as_ref()
                 .is_none_or(|port| !Rc::ptr_eq(port, &selected.tcp))
@@ -68,21 +71,31 @@ impl RuntimeServicePorts {
     }
 
     pub(super) fn selected_http_matches(&self) -> bool {
-        self.selected_local.is_none()
-            || self.selected_network.as_ref().is_some_and(|selected| {
-                self.http
-                    .as_ref()
-                    .is_some_and(|port| Rc::ptr_eq(port, &selected.http))
-            })
+        self.shared.selected_local.is_none()
+            || self
+                .shared
+                .selected_network
+                .as_ref()
+                .is_some_and(|selected| {
+                    self.shared
+                        .http
+                        .as_ref()
+                        .is_some_and(|port| Rc::ptr_eq(port, &selected.http))
+                })
     }
 
     pub(super) fn selected_tcp_matches(&self) -> bool {
-        self.selected_local.is_none()
-            || self.selected_network.as_ref().is_some_and(|selected| {
-                self.tcp
-                    .as_ref()
-                    .is_some_and(|port| Rc::ptr_eq(port, &selected.tcp))
-            })
+        self.shared.selected_local.is_none()
+            || self
+                .shared
+                .selected_network
+                .as_ref()
+                .is_some_and(|selected| {
+                    self.shared
+                        .tcp
+                        .as_ref()
+                        .is_some_and(|port| Rc::ptr_eq(port, &selected.tcp))
+                })
     }
 }
 

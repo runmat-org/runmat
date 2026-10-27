@@ -142,10 +142,11 @@ impl RuntimeServicePorts {
             graphics: graphics.clone(),
             callbacks: callbacks.map(RuntimeGraphicsCallbackQueue::downgrade),
         };
-        self.selected_ui = Some(selected_port);
-        self.host = Some(host);
-        self.graphics_presentation = graphics;
-        self.graphics_callbacks = callbacks.map(RuntimeGraphicsCallbackQueue::downgrade);
+        Rc::make_mut(&mut self.shared).selected_ui = Some(selected_port);
+        Rc::make_mut(&mut self.shared).host = Some(host);
+        Rc::make_mut(&mut self.shared).graphics_presentation = graphics;
+        Rc::make_mut(&mut self.shared).graphics_callbacks =
+            callbacks.map(RuntimeGraphicsCallbackQueue::downgrade);
         Ok(self)
     }
 
@@ -155,6 +156,7 @@ impl RuntimeServicePorts {
         invocation: Digest,
     ) -> Result<(), crate::RuntimeError> {
         let selected = self
+            .shared
             .selected_ui
             .as_ref()
             .ok_or_else(|| mismatch("selected linked host port is absent"))?;
@@ -162,15 +164,16 @@ impl RuntimeServicePorts {
             || selected.invocation != invocation
             || !self.selected_local_matches(issuer.product(), invocation)
             || !self
+                .shared
                 .host
                 .as_ref()
                 .is_some_and(|host| Rc::ptr_eq(host, &selected.host))
             || !same_optional_owner(
-                self.graphics_presentation.as_ref(),
+                self.shared.graphics_presentation.as_ref(),
                 selected.graphics.as_ref(),
             )
             || !same_optional_queue(
-                self.graphics_callbacks.as_ref(),
+                self.shared.graphics_callbacks.as_ref(),
                 selected.callbacks.as_ref(),
             )
         {
@@ -196,8 +199,8 @@ impl RuntimeServicePorts {
                 "linked callable has the wrong issuer or invocation",
             ));
         }
-        self.call = Some(owner.call.clone());
-        self.selected_callback = Some(SelectedCallbackPort {
+        Rc::make_mut(&mut self.shared).call = Some(owner.call.clone());
+        Rc::make_mut(&mut self.shared).selected_callback = Some(SelectedCallbackPort {
             issuer,
             invocation,
             call: owner.call,
@@ -211,6 +214,7 @@ impl RuntimeServicePorts {
         invocation: Digest,
     ) -> Result<(), crate::RuntimeError> {
         let selected = self
+            .shared
             .selected_callback
             .as_ref()
             .ok_or_else(|| mismatch("selected callable port is absent"))?;
@@ -218,6 +222,7 @@ impl RuntimeServicePorts {
             || selected.invocation != invocation
             || !self.selected_local_matches(issuer.product(), invocation)
             || !self
+                .shared
                 .call
                 .as_ref()
                 .is_some_and(|call| Rc::ptr_eq(call, &selected.call))
@@ -241,8 +246,8 @@ impl RuntimeServicePorts {
         }
         let service: Rc<dyn RuntimeBuiltinService> =
             Rc::new(RevisionCheckedBindings(owner.into_service()));
-        self.builtin = Some(service.clone());
-        self.selected_dynamic = Some(SelectedDynamicPort {
+        Rc::make_mut(&mut self.shared).builtin = Some(service.clone());
+        Rc::make_mut(&mut self.shared).selected_dynamic = Some(SelectedDynamicPort {
             issuer,
             invocation,
             service,
@@ -256,6 +261,7 @@ impl RuntimeServicePorts {
         invocation: Digest,
     ) -> Result<(), crate::RuntimeError> {
         let selected = self
+            .shared
             .selected_dynamic
             .as_ref()
             .ok_or_else(|| mismatch("selected dynamic binding owner is absent"))?;
@@ -263,6 +269,7 @@ impl RuntimeServicePorts {
             || selected.invocation != invocation
             || !self.selected_local_matches(issuer.product(), invocation)
             || !self
+                .shared
                 .builtin
                 .as_ref()
                 .is_some_and(|builtin| Rc::ptr_eq(builtin, &selected.service))
